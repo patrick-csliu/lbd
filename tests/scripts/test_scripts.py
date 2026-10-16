@@ -309,8 +309,29 @@ def test_test_all_summary(load_module, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "skipped" in out and "PASSED, but" in out      # web type check skipped without npm
     monkeypatch.setattr(ta, "run", lambda cmd, cwd: R(1))
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     assert ta.main(["--fast"]) == 1
-    assert "SUITE(S) FAILED" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "SUITE(S) FAILED" in out and "::error" not in out
+
+
+def test_test_all_annotates_failures_on_github(load_module, monkeypatch, capsys):
+    ta = load_module("scripts/test_all.py")
+
+    class R:
+        returncode, stdout, stderr = 1, "line 1\n50% done, a: b\n", ""
+
+    monkeypatch.setattr(ta, "run", lambda cmd, cwd: R())
+    monkeypatch.setattr(ta.shutil, "which", lambda name: None)
+    langs = ta.discover()
+    for lang in langs:
+        monkeypatch.setattr(type(lang), "run", lambda self, cmd, **kw: R())
+    monkeypatch.setattr(type(langs[0]), "missing_tool", lambda self, section: None)
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    assert ta.main(["--fast"]) == 1
+    errors = [l for l in capsys.readouterr().out.splitlines() if l.startswith("::error")]
+    assert errors and all("%0A" in e for e in errors)                  # one line per annotation
+    assert "::error title=Viewer tests failed::line 1%0A50%25 done, a: b" in errors
 
 
 # ---- crosslang runner ----------------------------------------------------------------------------

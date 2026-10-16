@@ -11,6 +11,7 @@ A suite whose required program (e.g. matlab) is not on PATH is reported as skipp
 """
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -20,6 +21,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from languages import REPO, discover  # noqa: E402
+
+
+def _escape(text: str, title: bool = False) -> str:
+    """Escape text for a GitHub Actions workflow command (`::error title=...::message`)."""
+    text = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    return text.replace(":", "%3A").replace(",", "%2C") if title else text
 
 
 def run(cmd, cwd: Path):
@@ -116,8 +123,12 @@ def main(argv=None) -> int:
     failed = [r for r in results if r[1] == "FAILED"]
     skipped = [r for r in results if r[1] == "skipped"]
     for suite, _, _, out in failed:
+        tail = "\n".join(out.strip().splitlines()[-40:])
         print(f"\n===== {suite} output (last 40 lines) =====")
-        print("\n".join(out.strip().splitlines()[-40:]))
+        print(tail)
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            # A GitHub annotation: shown on the run's page and readable without signing in.
+            print(f"::error title={_escape(suite, title=True)} failed::{_escape(tail)}")
     if failed:
         print(f"\n{len(failed)} SUITE(S) FAILED")
     elif skipped:
