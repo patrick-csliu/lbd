@@ -21,9 +21,9 @@ def repo(tmp_path):
         shutil.copy2(REPO / rel, tmp_path / rel)
     shutil.copytree(REPO / "languages", tmp_path / "languages",
                     ignore=shutil.ignore_patterns("__pycache__", "tests", "test", "crosslang"))
-    changelog = tmp_path / "CHANGELOG.md"
-    head, _, rest = changelog.read_text(encoding="utf-8").partition("\n## ")
-    changelog.write_text(head + "\n## Unreleased\n\n- a change\n\n## " + rest, encoding="utf-8")
+    # A CHANGELOG of its own, so the tests don't depend on what the real one says right now.
+    (tmp_path / "CHANGELOG.md").write_text(
+        "# Changelog\n\n## Unreleased\n\n- a change\n\n## 0.9.0 (2026-01-01)\n\n- older\n", encoding="utf-8")
     return tmp_path
 
 
