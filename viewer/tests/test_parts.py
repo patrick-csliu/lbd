@@ -384,6 +384,15 @@ def test_show_in_file_manager_selects_the_file(tmp_path, monkeypatch):
     from lbd_viewer import files
     calls = []
     monkeypatch.setattr(files.subprocess, "Popen", lambda cmd, *a, **k: calls.append(cmd))
+
+    class Failed:          # what subprocess.run returns when dbus-send finds no file manager
+        returncode = 1
+
+    def run(cmd, *a, **k):
+        calls.append(cmd)
+        return Failed()
+
+    monkeypatch.setattr(files.subprocess, "run", run)
     monkeypatch.setattr(files, "open_folder", lambda p: calls.append(("folder", p)))
     f = tmp_path / "a b.lbd"
     f.write_bytes(b"x")
@@ -394,6 +403,11 @@ def test_show_in_file_manager_selects_the_file(tmp_path, monkeypatch):
         assert calls[-1] == f'explorer /select,"{f}"'
     elif sys.platform == "darwin":
         assert calls[-1] == ["open", "-R", str(f)]
+    else:
+        # Linux: ask the file manager over D-Bus to select the file; if that fails, open the folder.
+        assert calls[-1] == ("folder", str(tmp_path))
+        if files.shutil.which("dbus-send"):
+            assert calls[-2][0] == "dbus-send" and f.as_uri() in calls[-2][-2]
 
 
 def test_extension_kept_by_rename():
