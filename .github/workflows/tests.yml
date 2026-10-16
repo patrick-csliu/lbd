@@ -1,4 +1,4 @@
-# Run every test suite on each push and pull request, on Linux and Windows.
+# Run every test suite on each push and pull request, on Linux, Windows and macOS.
 #
 # The `test` job runs scripts/test_all.py, the same command as on a developer's computer:
 # Python, the viewer, Julia, the scripts and packaging, the web UI type check, the strict docs
@@ -27,7 +27,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]   # macOS includes Arial
     runs-on: ${{ matrix.os }}
     env:
       PYTHONUTF8: "1"   # test output contains θ, μ, …; Windows consoles default to another code page
