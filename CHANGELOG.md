@@ -104,7 +104,7 @@ The first release.
 - Releases: `scripts/bump_version.py` sets the version everywhere and dates the CHANGELOG; a
   version tag makes GitHub test, build and smoke-test the Windows installer, the Linux package
   and the MATLAB toolbox, then create a draft release to check and publish.
-- macOS: tests run on macOS too; the viewer installs as two Python wheels with pipx (with its
+- macOS: tests run on macOS too; the viewer installs as two Python wheels with `uv tool install` (with its
   Help and language modules inside); the folder and Save as dialogs use macOS's own dialogs.
 - macOS app: LBD Viewer.app in a disk image, for Apple Silicon and Intel, opens `.lbd` files by
   double-click (not signed by a registered developer: approve it once in System Settings).

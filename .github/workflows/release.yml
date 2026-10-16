@@ -6,7 +6,7 @@
 #
 # Jobs: check (tag = version, release notes) -> tests (the Tests workflow) + MATLAB toolbox
 #       -> Windows installer, Linux package, macOS app (Apple Silicon and Intel), Python wheels
-#       (installed with pipx on macOS), each smoke-tested -> draft release with the files.
+#       (installed with uv on macOS), each smoke-tested -> draft release with the files.
 # See docs/developers/releases.md.
 name: Release
 
@@ -215,9 +215,9 @@ jobs:
           if-no-files-found: error
 
   macos:
-    name: macOS install (pipx)
+    name: macOS install (uv)
     needs: [check, wheels]
-    runs-on: macos-latest
+    runs-on: macos-latest   # the newest macOS, where a too-new default Python shows up first
     env:
       VERSION: ${{ needs.check.outputs.version }}
     steps:
@@ -228,14 +228,18 @@ jobs:
           name: wheels
           path: wheels
       # Exactly the commands of docs/getting-started/install.md ("LBD Viewer on macOS").
-      - name: Install with pipx, as a Mac user would
+      - name: Install with uv, as a Mac user would
         working-directory: wheels
         run: |
-          command -v pipx || brew install pipx
-          pipx install "./lbd_viewer-$VERSION-py3-none-any.whl" --preinstall "$PWD/lbd-$VERSION-py3-none-any.whl"
-          pipx ensurepath
+          # On failure, show the last lines as an annotation (readable without signing in).
+          if ! uv tool install --python 3.12 "./lbd_viewer-$VERSION-py3-none-any.whl" \
+                 --with "./lbd-$VERSION-py3-none-any.whl" > "$RUNNER_TEMP/install.log" 2>&1; then
+            cat "$RUNNER_TEMP/install.log"
+            echo "::error title=uv tool install failed::$(tail -n 40 "$RUNNER_TEMP/install.log" | sed 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}')"
+            exit 1
+          fi
       - name: Smoke test the installed viewer
-        run: uv run --no-project python scripts/smoke_test_app.py --release --exe "$(command -v lbd-view || echo "$HOME/.local/bin/lbd-view")"
+        run: uv run --no-project python scripts/smoke_test_app.py --release --exe "$(uv tool dir --bin)/lbd-view"
 
   macos-app:
     name: macOS app (${{ matrix.arch }})

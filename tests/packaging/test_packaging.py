@@ -126,7 +126,7 @@ def test_entry_log_rotation(load_module, tmp_path, monkeypatch):
     ("darwin", True, ["LBD Viewer"], True),                       # double-clicked in Finder
     ("darwin", True, ["LBD Viewer", "-psn_0_12345"], True),       # older macOS adds this
     ("darwin", True, ["lbd-view", "--no-browser"], False),        # Terminal / smoke test: the CLI
-    ("darwin", False, ["lbd-view"], False),                       # pipx install: the CLI
+    ("darwin", False, ["lbd-view"], False),                       # uv tool install: the CLI
     ("win32", True, ["lbd-view.exe"], False),
 ])
 def test_entry_finder_launch(load_module, monkeypatch, platform, frozen, argv, expected):

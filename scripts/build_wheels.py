@@ -2,7 +2,7 @@
 
     uv run python scripts/build_wheels.py --out DIR [--prebuilt ID=DIR ...]
 
-Mac users (and anyone with Python) install the viewer from these, with pipx; see
+Mac users (and anyone with Python) install the viewer from these, with `uv tool install`; see
 docs/getting-started/install.md. Steps:
   1. check the versions;
   2. build the web UI (npm ci, npm run build);

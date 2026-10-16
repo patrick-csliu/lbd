@@ -18,7 +18,7 @@ lbd-view [paths...] [--port N] [--no-browser] [--idle-exit SECONDS] [--new] [--d
 
 On Windows, the installed program is `lbd-view.exe` in the install folder. On Linux,
 `install.sh` puts `lbd-view` in `~/.local/bin`. On macOS, it is
-`"/Applications/LBD Viewer.app/Contents/MacOS/lbd-view"`, or `lbd-view` after a pipx install.
+`"/Applications/LBD Viewer.app/Contents/MacOS/lbd-view"`, or `lbd-view` after a uv install.
 
 ## Where things are stored
 
@@ -26,7 +26,7 @@ On Windows, the installed program is `lbd-view.exe` in the install folder. On Li
 |---|---|---|---|
 | Settings: folder list, default preset (`settings.json`) | `%APPDATA%\lbd\` | `~/.config/lbd/` | `~/Library/Application Support/lbd/` |
 | Style presets (`styles/<name>.lbd.json`) | `%APPDATA%\lbd\styles\` | `~/.config/lbd/styles/` | `~/Library/Application Support/lbd/styles/` |
-| Log of the installed app (`viewer.log`) | `%LOCALAPPDATA%\lbd\Logs\` | none; messages go to the terminal or the desktop session log | `~/Library/Logs/lbd/` (the app); with pipx none, messages go to the terminal |
+| Log of the installed app (`viewer.log`) | `%LOCALAPPDATA%\lbd\Logs\` | none; messages go to the terminal or the desktop session log | `~/Library/Logs/lbd/` (the app); with uv none, messages go to the terminal |
 | Running-viewer lock (`server.json`) | `%LOCALAPPDATA%\Temp\lbd\` | `$XDG_RUNTIME_DIR/lbd/` | `~/Library/Caches/TemporaryItems/lbd/` |
 | Which folders are expanded in the folder panel | the browser's site storage | the browser's site storage | the browser's site storage |
 

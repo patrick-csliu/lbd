@@ -103,30 +103,33 @@ Requirements: macOS 14 (Sonoma) or newer, on an Apple Silicon or Intel Mac.
 
 ### Without the app: Python packages
 
-The viewer also installs as a Python package with [pipx](https://pipx.pypa.io/), which puts it in
-its own environment and adds the `lbd-view` command, without the app icon and double-clicking.
-macOS doesn't ask for approval then, because pipx installs aren't "downloaded apps". This works on
-Windows and Linux too, for anyone who prefers Python packages to the installer.
+The viewer also installs as a Python package with [uv](https://docs.astral.sh/uv/), which puts it
+in its own environment, with its own Python, and adds the `lbd-view` command, without the app
+icon and double-clicking. macOS doesn't ask for approval then, because it isn't a "downloaded
+app". This works on Windows and Linux too, for anyone who prefers Python packages to the
+installer.
 
-Requirements: Python 3.10 or newer (from [python.org](https://www.python.org/downloads/) or
-Homebrew) and pipx (`brew install pipx`, or `python3 -m pip install --user pipx`, then
-`pipx ensurepath`).
+Requirements: uv (`brew install uv`, or see its
+[installation page](https://docs.astral.sh/uv/getting-started/installation/)). You don't need to
+install Python: uv downloads the version the viewer is tested with.
 
 1. From the release on GitHub, download both wheels into one folder:
    `lbd_viewer-<version>-py3-none-any.whl` and `lbd-<version>-py3-none-any.whl`.
 2. In Terminal, in that folder:
    ```bash
-   pipx install ./lbd_viewer-<version>-py3-none-any.whl --preinstall "$PWD/lbd-<version>-py3-none-any.whl"
+   uv tool install --python 3.12 ./lbd_viewer-<version>-py3-none-any.whl --with ./lbd-<version>-py3-none-any.whl
    ```
-   The `lbd` module comes from the second file, not from the internet (the viewer needs exactly
-   this version). pipx needs its full path, which `$PWD` (this folder) fills in.
+   `--python 3.12` keeps the viewer on the Python it is tested with: the newest Python versions
+   can lack ready-made packages of its dependencies (h5py) for a while. The `lbd` module comes from
+   the second file, not from the internet (the viewer needs exactly this version).
 3. Start it with `lbd-view`, or `lbd-view ~/Data/measurements` to add a folder. It opens in your
-   browser, with Help and the Language modules page like the installed app.
+   browser, with Help and the Language modules page like the installed app. If the command isn't
+   found, run `uv tool update-shell` once and open a new Terminal window.
 
 | Task | Command |
 |---|---|
-| Upgrade | the same `pipx install` command with the new files, plus `--force` |
-| Uninstall | `pipx uninstall lbd-viewer`. Your presets and settings in `~/Library/Application Support/lbd` are kept; delete that folder to remove them too. |
+| Upgrade | the same `uv tool install` command with the new files, plus `--force` |
+| Uninstall | `uv tool uninstall lbd-viewer`. Your presets and settings in `~/Library/Application Support/lbd` are kept; delete that folder to remove them too. |
 
 
 ## Language modules
@@ -138,7 +141,7 @@ uninstall command.
 `<sdk>` below means the `sdk` folder of the installed viewer:
 - Windows: `%LOCALAPPDATA%\Programs\LBDViewer\sdk`
 - Linux: `~/.local/share/lbd-viewer/sdk`
-- macOS: `/Applications/LBD Viewer.app/Contents/Resources/sdk` (with pipx: inside the
+- macOS: `/Applications/LBD Viewer.app/Contents/Resources/sdk` (with uv: inside the
   installed package; the Language modules page shows the path)
 
 ### Python
