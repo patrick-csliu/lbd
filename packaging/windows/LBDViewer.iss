@@ -49,18 +49,23 @@ Type: filesandordirs; Name: "{app}\docs"
 [UninstallDelete]
 ; Remove the whole folder, also files made after installing, so no empty folder is left behind.
 Type: filesandordirs; Name: "{app}"
+; The "running viewer" record (server.json); the viewer is stopped before uninstalling.
+Type: filesandordirs; Name: "{localappdata}\Temp\lbd"
 
 [Icons]
 Name: "{autoprograms}\LBD Viewer"; Filename: "{app}\lbd-view.exe"; Comment: "View LBD data files"
 
 [Registry]
 ; .lbd -> LBDViewer.lbd (per user: HKA resolves to HKCU for a non-admin install)
-Root: HKA; Subkey: "Software\Classes\.lbd"; ValueType: string; ValueName: ""; ValueData: "LBDViewer.lbd"; Flags: uninsdeletevalue
-Root: HKA; Subkey: "Software\Classes\.lbd"; ValueType: string; ValueName: "Content Type"; ValueData: "application/x-lbd"; Flags: uninsdeletevalue
-Root: HKA; Subkey: "Software\Classes\.lbd\OpenWithProgids"; ValueType: string; ValueName: "LBDViewer.lbd"; ValueData: ""; Flags: uninsdeletevalue
+; .lbd may also be registered by other programs, so remove our values and the keys only if empty.
+Root: HKA; Subkey: "Software\Classes\.lbd"; ValueType: string; ValueName: ""; ValueData: "LBDViewer.lbd"; Flags: uninsdeletevalue uninsdeletekeyifempty
+Root: HKA; Subkey: "Software\Classes\.lbd"; ValueType: string; ValueName: "Content Type"; ValueData: "application/x-lbd"; Flags: uninsdeletevalue uninsdeletekeyifempty
+Root: HKA; Subkey: "Software\Classes\.lbd\OpenWithProgids"; ValueType: string; ValueName: "LBDViewer.lbd"; ValueData: ""; Flags: uninsdeletevalue uninsdeletekeyifempty
 Root: HKA; Subkey: "Software\Classes\LBDViewer.lbd"; ValueType: string; ValueName: ""; ValueData: "LBD data file"; Flags: uninsdeletekey
 Root: HKA; Subkey: "Software\Classes\LBDViewer.lbd\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\lbd-view.exe,0"
 Root: HKA; Subkey: "Software\Classes\LBDViewer.lbd\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\lbd-view.exe"" ""%1"""
+; Applications\lbd-view.exe is ours alone: remove the whole key, not only SupportedTypes.
+Root: HKA; Subkey: "Software\Classes\Applications\lbd-view.exe"; Flags: uninsdeletekey
 Root: HKA; Subkey: "Software\Classes\Applications\lbd-view.exe\SupportedTypes"; ValueType: string; ValueName: ".lbd"; ValueData: ""; Flags: uninsdeletekey
 
 [Run]

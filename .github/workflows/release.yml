@@ -138,7 +138,12 @@ jobs:
           for ($i = 0; ($i -lt 60) -and (Test-Path $app); $i++) { Start-Sleep 1 }
           if (Test-Path $app) { throw "the uninstaller left $app behind" }
           if (-not (Test-Path "$env:APPDATA\lbd\settings.json")) { throw "the uninstaller removed the settings" }
-          "installed, smoke-tested and uninstalled; settings kept"
+          # Nothing else may be left behind: registry keys of the .lbd file type, the lock file.
+          $left = @("HKCU:\Software\Classes\.lbd", "HKCU:\Software\Classes\LBDViewer.lbd",
+                    "HKCU:\Software\Classes\Applications\lbd-view.exe", "$env:LOCALAPPDATA\Temp\lbd") |
+                  Where-Object { Test-Path $_ }
+          if ($left) { throw "the uninstaller left behind: $($left -join ', ')" }
+          "installed, smoke-tested and uninstalled; settings kept, nothing else left behind"
 
       - uses: actions/upload-artifact@v7
         with:

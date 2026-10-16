@@ -3,6 +3,12 @@
 All components (the viewer and the Python, MATLAB and Julia modules) share one version number.
 The file format has its own version (`lbd_version`, currently 1.0).
 
+## Unreleased
+
+- Windows uninstaller: also removes the empty `.lbd` and `Applications\lbd-view.exe` registry
+  keys and the "running viewer" record (`%LOCALAPPDATA%\Temp\lbd`), so nothing is left behind.
+  The release workflow checks this after every test uninstall.
+
 ## 1.0.0 (2026-10-16)
 
 The first release.
