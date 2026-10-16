@@ -232,7 +232,7 @@ jobs:
         working-directory: wheels
         run: |
           command -v pipx || brew install pipx
-          pipx install "./lbd_viewer-$VERSION-py3-none-any.whl" --preinstall "./lbd-$VERSION-py3-none-any.whl"
+          pipx install "./lbd_viewer-$VERSION-py3-none-any.whl" --preinstall "$PWD/lbd-$VERSION-py3-none-any.whl"
           pipx ensurepath
       - name: Smoke test the installed viewer
         run: uv run --no-project python scripts/smoke_test_app.py --release --exe "$(command -v lbd-view || echo "$HOME/.local/bin/lbd-view")"

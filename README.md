@@ -190,7 +190,7 @@ The full test and release instructions are in the [developer guide](docs/develop
 
 | Part | Requirement |
 |---|---|
-| Viewer | 64-bit Windows 10/11, macOS 11+ (Apple Silicon or Intel), or a Linux desktop |
+| Viewer | 64-bit Windows 10/11, macOS 14+ (Apple Silicon or Intel), or a Linux desktop |
 | Python module | Python 3.9+ (numpy, h5py; `[plot]` adds matplotlib, pydantic, platformdirs) |
 | MATLAB module | MATLAB R2021b+ |
 | Julia module | Julia 1.9+ (HDF5.jl, JSON3.jl) |

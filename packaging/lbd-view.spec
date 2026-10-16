@@ -49,7 +49,7 @@ if sys.platform == "darwin":
     VERSION = release_version()
     # The oldest macOS the app runs on. scripts/build_macos.sh checks that no bundled library
     # needs a newer one.
-    MACOS_MIN = "11.0"
+    MACOS_MIN = "14.0"   # measured by the first release build (1.0.0): bundled libraries need 14
     LBD_TYPE = "io.github.patrick-csliu.lbd.data"
     app = BUNDLE(
         coll,

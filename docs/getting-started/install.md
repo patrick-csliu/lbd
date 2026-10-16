@@ -99,7 +99,7 @@ is closed.
 | Upgrade | Drag the new **LBD Viewer** onto **Applications** and replace the old one, then approve it once (step 3). |
 | Uninstall | Drag **LBD Viewer** from Applications to the Trash. Your presets and settings in `~/Library/Application Support/lbd` are kept; delete that folder to remove them too. |
 
-Requirements: macOS 11 (Big Sur) or newer.
+Requirements: macOS 14 (Sonoma) or newer, on an Apple Silicon or Intel Mac.
 
 ### Without the app: Python packages
 
@@ -116,10 +116,10 @@ Homebrew) and pipx (`brew install pipx`, or `python3 -m pip install --user pipx`
    `lbd_viewer-<version>-py3-none-any.whl` and `lbd-<version>-py3-none-any.whl`.
 2. In Terminal, in that folder:
    ```bash
-   pipx install ./lbd_viewer-<version>-py3-none-any.whl --preinstall ./lbd-<version>-py3-none-any.whl
+   pipx install ./lbd_viewer-<version>-py3-none-any.whl --preinstall "$PWD/lbd-<version>-py3-none-any.whl"
    ```
    The `lbd` module comes from the second file, not from the internet (the viewer needs exactly
-   this version).
+   this version). pipx needs its full path, which `$PWD` (this folder) fills in.
 3. Start it with `lbd-view`, or `lbd-view ~/Data/measurements` to add a folder. It opens in your
    browser, with Help and the Language modules page like the installed app.
 
