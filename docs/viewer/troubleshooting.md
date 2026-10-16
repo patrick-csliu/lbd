@@ -16,5 +16,7 @@
 | An image shows "can't be read" | The file is damaged or not really an image of that type. Very large images (above about 180 megapixels) are refused for safety. |
 | Error: the font '…' is not installed | The style's font isn't on this computer. The message lists fonts you can use. The default font, Arial, is on Windows and macOS; on Linux install it (e.g. the `ttf-mscorefonts-installer` package), or set the style's font to DejaVu Sans, which ships with matplotlib and gives identical figures everywhere. |
 | Nothing happens when double-clicking (Windows) | Check the log in `%LOCALAPPDATA%\lbd\Logs\viewer.log`. A startup failure also shows a message box. |
+| macOS: "Apple could not verify 'LBD Viewer'…", or nothing happens | The app isn't signed by a registered developer, so macOS asks for your approval once per version: System Settings → Privacy & Security → **Open Anyway** (see [Install](../getting-started/install.md#lbd-viewer-on-macos)). Otherwise, check the log in `~/Library/Logs/lbd/viewer.log`; a startup failure also shows an alert. |
+| macOS: "LBD Viewer is damaged and can't be opened" | The download was changed on its way, or the app was copied without its signature. Download the disk image again, then approve it as above. |
 | A file can't be opened | It may not be an LBD file, or it may be from a newer major format version. The message says which; update the viewer for newer files. |
 | Port already in use with `--port` | Choose another port, or leave `--port` out to pick a free one. |

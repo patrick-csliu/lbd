@@ -11,8 +11,8 @@ public before that click.
 | 2. Set the version | you | `uv run python scripts/bump_version.py 0.2.0`: writes the version into every place `check_versions.py` reads (the viewer, each language's `[[version]]` files, `uv.lock`, `package-lock.json`) and heads the CHANGELOG section `## 0.2.0 (<date>)`. Refuses a lower or malformed version and a missing or empty section. `--dry-run` shows the changes only. |
 | 3. Test | you | `uv run python scripts/test_all.py` |
 | 4. Tag and push | you | `git commit -am "Release 0.2.0"`, `git tag v0.2.0`, `git push --follow-tags` |
-| 5. Build and check | GitHub | The **Release** workflow (`.github/workflows/release.yml`) starts from the tag: it checks that the tag matches the files and that the CHANGELOG has the section, runs all tests, builds `LBD.mltbx` with MATLAB, then the Windows installer, the Linux package and the Python wheels (`scripts/build_wheels.py`). Each is checked with `scripts/smoke_test_app.py --release`: the Windows installer is installed silently, checked, and uninstalled (settings must stay); the Linux package is unpacked and checked; the wheels are installed on macOS with pipx, exactly as the install guide says, and checked. |
-| 6. Draft | GitHub | A **draft** release "LBD 0.2.0" with `LBDViewer-Setup-0.2.0.exe`, `lbd-viewer-0.2.0-linux-x86_64.tar.gz`, `LBD.mltbx`, and the two wheels `lbd-0.2.0-py3-none-any.whl` and `lbd_viewer-0.2.0-py3-none-any.whl` (the viewer with its Help and language modules, for macOS and anyone with Python); its text is the CHANGELOG section. Only people with write access see drafts. |
+| 5. Build and check | GitHub | The **Release** workflow (`.github/workflows/release.yml`) starts from the tag: it checks that the tag matches the files and that the CHANGELOG has the section, runs all tests, builds `LBD.mltbx` with MATLAB, then the Windows installer, the macOS app for Apple Silicon and Intel (`scripts/build_macos.sh`), the Linux package and the Python wheels (`scripts/build_wheels.py`). Each is checked with `scripts/smoke_test_app.py --release`: the Windows installer is installed silently, checked, and uninstalled (settings must stay); the macOS app is checked, its disk image opened, and a `.lbd` file opened the way Finder does (`open -a`) before the app is quit; the Linux package is unpacked and checked; the wheels are installed on macOS with pipx, exactly as the install guide says, and checked. |
+| 6. Draft | GitHub | A **draft** release "LBD 0.2.0" with `LBDViewer-Setup-0.2.0.exe`, `LBD-Viewer-0.2.0-macos-arm64.dmg` and `…-macos-x86_64.dmg`, `lbd-viewer-0.2.0-linux-x86_64.tar.gz`, `LBD.mltbx`, and the two wheels `lbd-0.2.0-py3-none-any.whl` and `lbd_viewer-0.2.0-py3-none-any.whl` (the viewer with its Help and language modules, for macOS and anyone with Python); its text is the CHANGELOG section. Only people with write access see drafts. |
 | 7. Check | you | GitHub → **Releases** → the draft: download the installer, try it, edit the text if needed. |
 | 8. Publish | you | **Publish release**. Now it's public and marked *Latest*. |
 
@@ -60,9 +60,20 @@ The same build steps as on GitHub, for trying a change to the packaging:
    ```
    `LBD_PREBUILT="matlab=<dir>"` does what `-Prebuilt` does on Windows.
    This produces `~/.cache/lbd-build/lbd-viewer-<version>-linux-<arch>.tar.gz`.
-   PyInstaller can't cross-compile, so each platform is built on itself.
+5. **macOS**, on a Mac with uv and Node.js:
+   ```bash
+   sh scripts/build_macos.sh [OUTDIR]
+   ```
+   This produces `~/Library/Caches/lbd-build/LBD-Viewer-<version>-macos-<arch>.dmg` for the
+   Mac's own processor (arm64 or x86_64). The app bundle (`packaging/lbd-view.spec`) declares the
+   `.lbd` file type; `lbd_viewer/macapp.py` receives the files Finder opens. After adding Help
+   and the language modules to `Contents/Resources`, the script signs the app again "ad-hoc"
+   (Apple Silicon refuses unsigned apps) and checks with `scripts/macos_min_version.py` that no
+   bundled library needs a newer macOS than the app declares (`MACOS_MIN` in the spec).
 
-Both scripts run the same steps:
+PyInstaller can't cross-compile, so each platform is built on itself.
+
+The scripts run the same steps:
 1. check versions;
 2. `uv sync --all-packages --group docs` into a build environment inside the output folder;
 3. build the web UI;

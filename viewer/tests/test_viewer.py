@@ -387,6 +387,23 @@ def test_docs_not_built(cfg, tmp_path, monkeypatch):
     assert r.status_code == 404 and "mkdocs build" in r.text
 
 
+def test_docs_and_sdk_inside_a_macos_app_bundle(tmp_path, monkeypatch):
+    """LBD Viewer.app: the program is in Contents/MacOS, Help and modules in Contents/Resources."""
+    from lbd_viewer import sdk, server
+
+    contents = tmp_path / "LBD Viewer.app" / "Contents"
+    (contents / "MacOS").mkdir(parents=True)
+    (contents / "Resources" / "docs").mkdir(parents=True)
+    (contents / "Resources" / "docs" / "index.html").write_text("help", encoding="utf-8")
+    (contents / "Resources" / "sdk").mkdir()
+    monkeypatch.delenv("LBD_DOCS_DIR", raising=False)
+    monkeypatch.delenv("LBD_SDK_DIR", raising=False)
+    monkeypatch.setattr(sdk.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sdk.sys, "executable", str(contents / "MacOS" / "lbd-view"))
+    assert server.docs_dir() == contents / "Resources" / "docs"
+    assert sdk.sdk_dir() == contents / "Resources" / "sdk"
+
+
 def test_docs_and_sdk_inside_the_installed_package(tmp_path, monkeypatch):
     """The release wheel carries docs/ and sdk/ in the package folder (scripts/build_wheels.py)."""
     from lbd_viewer import sdk, server

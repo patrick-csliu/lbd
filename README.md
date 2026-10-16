@@ -31,7 +31,7 @@ from last year and this year, never look alike and are hard to compare. LBD fixe
   - presets shared between the viewer and Python;
   - style files (`*.lbd.json`) to keep with a paper;
   - `.mplstyle` export for plain matplotlib users.
-- **LBD Viewer** (Windows, Linux, and macOS as a Python package):
+- **LBD Viewer** (Windows, macOS, Linux):
   - a folder panel with search and a right-click menu (show in Explorer, copy path, rename,
     move to the Recycle Bin);
   - curves, scatter plots (also value vs value, the complex I/Q plane, colour by a third
@@ -48,7 +48,8 @@ from last year and this year, never look alike and are hard to compare. LBD fixe
 
 - **Windows:** run `LBDViewer-Setup-<version>.exe`. No admin rights are needed.
 - **Linux:** unpack the archive and run `./install.sh`.
-- **macOS:** install the two Python wheels of the release with pipx (no Mac app yet).
+- **macOS:** open the disk image and drag LBD Viewer to Applications; approve it once in
+  System Settings → Privacy & Security (it isn't signed by a registered Apple developer).
 
 After that, double-click any `.lbd` file. See [Install](docs/getting-started/install.md).
 
@@ -189,7 +190,7 @@ The full test and release instructions are in the [developer guide](docs/develop
 
 | Part | Requirement |
 |---|---|
-| Viewer | 64-bit Windows 10/11 or Linux desktop; macOS with Python 3.10+ and pipx |
+| Viewer | 64-bit Windows 10/11, macOS 11+ (Apple Silicon or Intel), or a Linux desktop |
 | Python module | Python 3.9+ (numpy, h5py; `[plot]` adds matplotlib, pydantic, platformdirs) |
 | MATLAB module | MATLAB R2021b+ |
 | Julia module | Julia 1.9+ (HDF5.jl, JSON3.jl) |

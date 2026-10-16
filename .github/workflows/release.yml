@@ -5,8 +5,8 @@
 #                  the draft is titled "trial build": look at it, then delete it)
 #
 # Jobs: check (tag = version, release notes) -> tests (the Tests workflow) + MATLAB toolbox
-#       -> Windows installer, Linux package, Python wheels (installed with pipx on macOS), each
-#       smoke-tested -> draft release with the files.
+#       -> Windows installer, Linux package, macOS app (Apple Silicon and Intel), Python wheels
+#       (installed with pipx on macOS), each smoke-tested -> draft release with the files.
 # See docs/developers/releases.md.
 name: Release
 
@@ -237,9 +237,85 @@ jobs:
       - name: Smoke test the installed viewer
         run: uv run --no-project python scripts/smoke_test_app.py --release --exe "$(command -v lbd-view || echo "$HOME/.local/bin/lbd-view")"
 
+  macos-app:
+    name: macOS app (${{ matrix.arch }})
+    needs: [check, tests, matlab-toolbox]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15          # Apple Silicon
+            arch: arm64
+          - runner: macos-15-intel    # Intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: viewer/web/package-lock.json
+      - uses: actions/download-artifact@v8
+        with:
+          name: mltbx
+          path: mltbx
+
+      - name: Build (app, ad-hoc signature, minimum macOS, disk image)
+        run: LBD_PREBUILT="matlab=$GITHUB_WORKSPACE/mltbx" sh scripts/build_macos.sh "$RUNNER_TEMP/build"
+
+      - name: Smoke test the app's program
+        run: uv run --no-project python scripts/smoke_test_app.py --release --exe "$RUNNER_TEMP/build/dist/LBD Viewer.app/Contents/MacOS/lbd-view"
+
+      - name: The disk image holds the app and the Applications link
+        run: |
+          hdiutil attach -nobrowse -mountpoint "$RUNNER_TEMP/dmg" "$RUNNER_TEMP/build/LBD-Viewer-$VERSION-macos-${{ matrix.arch }}.dmg"
+          test -d "$RUNNER_TEMP/dmg/LBD Viewer.app" && test -L "$RUNNER_TEMP/dmg/Applications"
+          hdiutil detach "$RUNNER_TEMP/dmg"
+
+      # Like a double-click in Finder: macOS sends the app an "open documents" event.
+      - name: Open a .lbd file the way Finder does, then quit the app
+        run: |
+          app="$RUNNER_TEMP/build/dist/LBD Viewer.app"
+          lock="$HOME/Library/Caches/TemporaryItems/lbd/server.json"
+          rm -f "$lock"
+          open -a "$app" "$GITHUB_WORKSPACE/examples/data/rabi.lbd"
+          python3 - <<'EOF'
+          import json, os, time, urllib.parse, urllib.request
+          lock = os.path.expanduser("~/Library/Caches/TemporaryItems/lbd/server.json")
+          path = os.path.join(os.environ["GITHUB_WORKSPACE"], "examples", "data", "rabi.lbd")
+          last = "the app wrote no server.json"
+          for _ in range(90):
+              try:
+                  info = json.load(open(lock))
+                  url = f"http://127.0.0.1:{info['port']}/api/file?" + urllib.parse.urlencode({"path": path})
+                  req = urllib.request.Request(url, headers={"X-LBD-Token": info["token"]})
+                  with urllib.request.urlopen(req, timeout=5) as r:
+                      print(f"the app opened {path} (HTTP {r.status})")
+                      break
+              except Exception as e:   # not started yet, or the document not opened yet (403)
+                  last = e
+              time.sleep(1)
+          else:
+              raise SystemExit(f"::error::The app didn't open the document: {last}")
+          EOF
+          osascript -e 'quit app "LBD Viewer"'
+          for _ in $(seq 30); do pgrep -f "LBD Viewer.app/Contents/MacOS" >/dev/null || break; sleep 1; done
+          if pgrep -f "LBD Viewer.app/Contents/MacOS" >/dev/null; then echo "::error::The app didn't quit"; exit 1; fi
+          echo "the app quit"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: macos-${{ matrix.arch }}
+          path: ${{ runner.temp }}/build/LBD-Viewer-${{ needs.check.outputs.version }}-macos-${{ matrix.arch }}.dmg
+          if-no-files-found: error
+
   publish:
     name: Draft release
-    needs: [check, windows, linux, wheels, macos]
+    needs: [check, windows, linux, wheels, macos, macos-app]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -266,5 +342,6 @@ jobs:
           fi
           gh release create "$tag" --repo "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" \
             --title "$title" --notes-file artifacts/notes/notes.md \
-            artifacts/windows/*.exe artifacts/linux/*.tar.gz artifacts/mltbx/LBD.mltbx artifacts/wheels/*.whl
+            artifacts/windows/*.exe artifacts/linux/*.tar.gz artifacts/macos-*/*.dmg \
+            artifacts/mltbx/LBD.mltbx artifacts/wheels/*.whl
           echo "Draft created: https://github.com/$GITHUB_REPOSITORY/releases (check it, then Publish)" >> "$GITHUB_STEP_SUMMARY"

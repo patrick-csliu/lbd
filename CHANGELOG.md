@@ -106,6 +106,8 @@ Nothing has been released yet, so everything is listed under the version in deve
   and the MATLAB toolbox, then create a draft release to check and publish.
 - macOS: tests run on macOS too; the viewer installs as two Python wheels with pipx (with its
   Help and language modules inside); the folder and Save as dialogs use macOS's own dialogs.
+- macOS app: LBD Viewer.app in a disk image, for Apple Silicon and Intel, opens `.lbd` files by
+  double-click (not signed by a registered developer: approve it once in System Settings).
 - Repository organised into `languages/<id>/` with a `language.toml` manifest per language;
   tests, version checks, packaging and the viewer discover languages automatically.
 - Installers for Windows (Inno Setup, per user, no admin rights) and Linux (tarball with

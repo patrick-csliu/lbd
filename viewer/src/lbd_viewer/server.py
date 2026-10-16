@@ -58,14 +58,13 @@ NO_DOCS_HTML = (
 
 
 def docs_dir() -> Optional[Path]:
-    """The built documentation site: $LBD_DOCS_DIR, <app>/docs (installed app), the docs inside
-    the release wheel (scripts/build_wheels.py), or <repo>/site."""
+    """The built documentation site: $LBD_DOCS_DIR, the installed app's docs (sdk.app_folders),
+    the docs inside the release wheel (scripts/build_wheels.py), or <repo>/site."""
     candidates = []
     env = os.environ.get("LBD_DOCS_DIR")
     if env:
         candidates.append(Path(env))
-    if getattr(sys, "frozen", False):
-        candidates.append(Path(sys.executable).resolve().parent / "docs")
+    candidates += sdk.app_folders("docs")
     candidates.append(sdk.PACKAGE_DIR / "docs")
     candidates.append(sdk.REPO_ROOT / "site")
     for c in candidates:

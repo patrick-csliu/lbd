@@ -349,6 +349,24 @@ def test_cli_starts_a_server(tmp_path, fake_server, capsys):
     assert str(tmp_path.resolve()) in Config().settings()["roots"]
 
 
+def test_cli_start_then_run_in_a_thread(tmp_path, fake_server):
+    """The macOS app starts the server like this: start(), then run() in a background thread."""
+    import threading
+
+    lock, seen = fake_server
+    f = tmp_path / "a.lbd"
+    f.write_bytes(b"x")
+    started = []
+    args = cli.build_parser().parse_args(["--port", "8124"])
+    running = cli.start(args, [str(f)], [str(tmp_path)], on_started=started.append)
+    assert running.port == 8124 and running.url().startswith("http://127.0.0.1:8124/?token=")
+    running.state.check_allowed(str(f))                       # the file was opened
+    thread = threading.Thread(target=running.run)
+    thread.start()
+    thread.join(5)
+    assert started == [running] and running.stopped and not lock.exists()
+
+
 def test_cli_dev_mode(fake_server, capsys):
     lock, seen = fake_server
     assert cli.main(["--dev"]) == 0
@@ -415,3 +433,54 @@ def test_extension_kept_by_rename():
     assert extension("paper.lbd.json") == ".lbd.json"
     assert extension("run.LBD") == ".LBD"
     assert extension("fig.tiff") == ".tiff"
+
+
+# ---- macOS app: what it does with Finder's events (no Tk; runs on every system) -----------------
+
+
+@pytest.fixture
+def mac_app(tmp_path):
+    from lbd_viewer import macapp
+    from lbd_viewer.server import AppState
+
+    class Server:
+        started = False
+        should_exit = False
+
+    running = cli.Running(AppState(Config(tmp_path / "cfg"), token="tok"), Server(), 8125, lock=None)
+    opened, alerts = [], []
+    return macapp.MacApp(running, open_url=opened.append, alert=alerts.append), opened, alerts
+
+
+def test_mac_app_waits_for_the_server_then_opens_documents(mac_app, tmp_path):
+    app, opened, alerts = mac_app
+    f = tmp_path / "a.lbd"
+    f.write_bytes(b"x")
+    app.open_documents(str(f))                 # Finder's document arrives before the server answers
+    assert app.tick(0.0) and opened == []
+    app.running.server.started = True
+    assert app.tick(0.2)
+    assert len(opened) == 1 and "open=" in opened[0] and "a.lbd" in opened[0]
+    app.running.state.check_allowed(str(f))    # the file may be read now
+    assert app.tick(5.0) and len(opened) == 1  # no extra main tab: a document was shown
+
+
+def test_mac_app_opens_the_main_tab_when_started_without_a_document(mac_app):
+    app, opened, _ = mac_app
+    app.running.server.started = True
+    assert app.tick(10.0) and opened == []      # waits a moment for a document from Finder
+    assert app.tick(10.0 + 1.5) and opened == [app.running.url()]
+
+
+def test_mac_app_folders_missing_files_reopen_and_quit(mac_app, tmp_path):
+    app, opened, alerts = mac_app
+    app.running.server.started = True
+    app.open_documents(str(tmp_path), str(tmp_path / "gone.lbd"))
+    app.tick(0.0)
+    assert str(tmp_path.resolve()) in app.running.state.config.settings()["roots"]
+    assert opened == [app.running.url()]
+    assert alerts and "gone.lbd: not found" in alerts[0]
+    app.reopen()                                # Dock icon clicked
+    assert len(opened) == 2
+    app.quit()                                  # ⌘Q
+    assert app.running.stopped and app.tick(1.0) is False

@@ -225,3 +225,30 @@ def test_build_wheels_checks_the_viewer_wheel(load_module, tmp_path, monkeypatch
     monkeypatch.setattr(bw, "run", run)
     with pytest.raises(SystemExit, match="lacks.*docs/index.html"):
         bw.build(out, [])
+
+
+# ---- macos_min_version.py -----------------------------------------------------------------------
+
+OTOOL = """Load command 9
+      cmd LC_BUILD_VERSION
+  cmdsize 32
+ platform 1
+    minos 11.0
+      sdk 14.2
+Load command 10
+      cmd LC_VERSION_MIN_MACOSX
+  cmdsize 16
+  version 10.13
+      sdk 10.15
+Load command 11
+      cmd LC_BUILD_VERSION
+ platform 1
+    minos 13.3
+"""
+
+
+def test_macos_min_version_reads_both_load_commands(load_module):
+    mm = load_module("scripts/macos_min_version.py")
+    assert sorted(mm.parse_versions(OTOOL)) == [(10, 13), (11, 0), (13, 3)]
+    assert mm.as_text(max(mm.parse_versions(OTOOL))) == "13.3"
+    assert mm.parse_versions("not an object file") == []

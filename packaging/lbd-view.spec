@@ -1,6 +1,6 @@
-# PyInstaller spec for LBD Viewer (one-folder build, Windows and Linux).
+# PyInstaller spec for LBD Viewer (one-folder build; on macOS also the app bundle).
 #   pyinstaller packaging/lbd-view.spec --distpath <out>/dist --workpath <out>/work
-# Output: <out>/dist/LBDViewer/  (lbd-view[.exe] + _internal/)
+# Output: <out>/dist/LBDViewer/  (lbd-view[.exe] + _internal/); macOS also <out>/dist/LBD Viewer.app
 
 import sys
 from pathlib import Path
@@ -40,3 +40,46 @@ exe = EXE(
     icon=str(ICON) if sys.platform == "win32" and ICON.is_file() else None,
 )
 coll = COLLECT(exe, a.binaries, a.datas, name="LBDViewer")
+
+if sys.platform == "darwin":
+    # macOS: an app bundle that opens .lbd files from Finder (lbd_viewer/macapp.py handles them).
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from check_versions import release_version
+
+    VERSION = release_version()
+    # The oldest macOS the app runs on. scripts/build_macos.sh checks that no bundled library
+    # needs a newer one.
+    MACOS_MIN = "11.0"
+    LBD_TYPE = "io.github.patrick-csliu.lbd.data"
+    app = BUNDLE(
+        coll,
+        name="LBD Viewer.app",
+        icon=str(ROOT / "packaging" / "icons" / "lbd.icns"),
+        bundle_identifier="io.github.patrick-csliu.lbd",
+        version=VERSION,
+        info_plist={
+            "CFBundleName": "LBD Viewer",
+            "CFBundleDisplayName": "LBD Viewer",
+            "CFBundleShortVersionString": VERSION,
+            "LSMinimumSystemVersion": MACOS_MIN,
+            "NSHighResolutionCapable": True,
+            # LBD Viewer opens .lbd files (double-click, "Open With")...
+            "CFBundleDocumentTypes": [{
+                "CFBundleTypeName": "LBD data file",
+                "CFBundleTypeRole": "Viewer",
+                "LSHandlerRank": "Owner",
+                "LSItemContentTypes": [LBD_TYPE],
+            }],
+            # ...and tells macOS what a .lbd file is.
+            "UTExportedTypeDeclarations": [{
+                "UTTypeIdentifier": LBD_TYPE,
+                "UTTypeDescription": "LBD data file",
+                "UTTypeConformsTo": ["public.data"],
+                "UTTypeIconFile": "lbd.icns",
+                "UTTypeTagSpecification": {
+                    "public.filename-extension": ["lbd"],
+                    "public.mime-type": ["application/x-lbd"],
+                },
+            }],
+        },
+    )

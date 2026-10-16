@@ -27,14 +27,22 @@ _PLACEHOLDER_RE = re.compile(r"\{(path|match|version)\}")
 PACKAGE_DIR = Path(__file__).resolve().parent
 
 
+def app_folders(name: str) -> List[Path]:
+    """Where an installed app keeps a folder such as `sdk` or `docs`: next to the program, and in
+    a macOS app bundle in Contents/Resources (the program is in Contents/MacOS)."""
+    if not getattr(sys, "frozen", False):
+        return []
+    exe_dir = Path(sys.executable).resolve().parent
+    return [exe_dir / name, exe_dir.parent / "Resources" / name]
+
+
 def sdk_dir() -> Optional[Path]:
     """The bundled SDK folder of an installed app or wheel, or None when running from source."""
     candidates = []
     env = os.environ.get("LBD_SDK_DIR")
     if env:
         candidates.append(Path(env))
-    if getattr(sys, "frozen", False):
-        candidates.append(Path(sys.executable).resolve().parent / "sdk")
+    candidates += app_folders("sdk")
     candidates.append(PACKAGE_DIR / "sdk")   # the release wheel (scripts/build_wheels.py)
     for c in candidates:
         if c.is_dir():

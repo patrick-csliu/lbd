@@ -1,4 +1,4 @@
-"""Generate the app/file icons in packaging/icons/ (ICO for Windows, PNG + SVG for Linux)."""
+"""Generate the app/file icons in packaging/icons/ (ICO for Windows, ICNS for macOS, PNG + SVG for Linux)."""
 
 from pathlib import Path
 
@@ -31,6 +31,7 @@ def main() -> None:
     big = draw()
     big.resize((256, 256), Image.LANCZOS).save(OUT / "lbd.png")
     big.save(OUT / "lbd.ico", sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
+    big.save(OUT / "lbd.icns")   # Pillow writes every size macOS uses, 16 to 1024 pixels
     (OUT / "lbd.svg").write_text(SVG, encoding="utf-8")
     print(f"icons written to {OUT}")
 

@@ -2,8 +2,8 @@
 
 There are two separate parts:
 
-1. **LBD Viewer**, the app that lists and plots files. On Windows and Linux it brings its own
-   Python and needs no other software; on macOS it's installed as a Python package.
+1. **LBD Viewer**, the app that lists and plots files. It brings its own Python and needs no
+   other software.
 2. **Language modules** for Python, MATLAB and Julia, which let your own programs write and
    read `.lbd` files. You install these yourself, into the environments you use.
 
@@ -76,10 +76,37 @@ distributions include.
 
 ## LBD Viewer on macOS
 
-There is no Mac app yet. On a Mac, install the viewer as a Python package with
-[pipx](https://pipx.pypa.io/), which puts it in its own environment and adds the `lbd-view`
-command. This works on Windows and Linux too, for anyone who prefers Python packages to the
-installer.
+1. **Download** the disk image for your Mac from the release on GitHub. Apple menu → **About This
+   Mac**: "Chip: Apple M…" needs `LBD-Viewer-<version>-macos-arm64.dmg`, "Processor: Intel" needs
+   `LBD-Viewer-<version>-macos-x86_64.dmg`.
+2. **Install:** open the disk image and drag **LBD Viewer** onto **Applications**.
+3. **The first start needs your approval once.** LBD Viewer isn't signed by an Apple-registered
+   developer (that costs a yearly fee), so macOS first blocks it: *"Apple could not verify 'LBD
+   Viewer' is free of malware…"*. Click **Done**, then open **System Settings → Privacy &
+   Security**, scroll down to *"LBD Viewer was blocked…"*, click **Open Anyway** and enter your
+   password. In Terminal, this does the same:
+   ```bash
+   xattr -dr com.apple.quarantine "/Applications/LBD Viewer.app"
+   ```
+   After each update, approve the new version the same way.
+
+After that, double-clicking a `.lbd` file opens it in LBD Viewer, in your browser. The app shows
+in the Dock while it runs; it quits with ⌘Q, or by itself 90 seconds after the last viewer tab
+is closed.
+
+| Task | How |
+|---|---|
+| Upgrade | Drag the new **LBD Viewer** onto **Applications** and replace the old one, then approve it once (step 3). |
+| Uninstall | Drag **LBD Viewer** from Applications to the Trash. Your presets and settings in `~/Library/Application Support/lbd` are kept; delete that folder to remove them too. |
+
+Requirements: macOS 11 (Big Sur) or newer.
+
+### Without the app: Python packages
+
+The viewer also installs as a Python package with [pipx](https://pipx.pypa.io/), which puts it in
+its own environment and adds the `lbd-view` command, without the app icon and double-clicking.
+macOS doesn't ask for approval then, because pipx installs aren't "downloaded apps". This works on
+Windows and Linux too, for anyone who prefers Python packages to the installer.
 
 Requirements: Python 3.10 or newer (from [python.org](https://www.python.org/downloads/) or
 Homebrew) and pipx (`brew install pipx`, or `python3 -m pip install --user pipx`, then
@@ -101,8 +128,6 @@ Homebrew) and pipx (`brew install pipx`, or `python3 -m pip install --user pipx`
 | Upgrade | the same `pipx install` command with the new files, plus `--force` |
 | Uninstall | `pipx uninstall lbd-viewer`. Your presets and settings in `~/Library/Application Support/lbd` are kept; delete that folder to remove them too. |
 
-Not yet on macOS: an app icon in Applications and opening `.lbd` files by double-clicking.
-macOS doesn't ask for permission to run it, because it isn't an app downloaded from the internet.
 
 ## Language modules
 
@@ -113,7 +138,8 @@ uninstall command.
 `<sdk>` below means the `sdk` folder of the installed viewer:
 - Windows: `%LOCALAPPDATA%\Programs\LBDViewer\sdk`
 - Linux: `~/.local/share/lbd-viewer/sdk`
-- macOS (pipx): inside the installed package; the Language modules page shows the path
+- macOS: `/Applications/LBD Viewer.app/Contents/Resources/sdk` (with pipx: inside the
+  installed package; the Language modules page shows the path)
 
 ### Python
 

@@ -11,6 +11,7 @@
 *.lbd   binary
 *.h5    binary
 *.ico   binary
+*.icns  binary
 *.png   binary
 *.mltbx binary
 *.whl   binary

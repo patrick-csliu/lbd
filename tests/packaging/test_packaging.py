@@ -104,7 +104,7 @@ def test_icon_drawing(load_module, tmp_path, monkeypatch):
     assert img.size == (64, 64) and img.mode == "RGBA"
     monkeypatch.setattr(icons, "OUT", tmp_path)
     icons.main()
-    assert {p.suffix for p in tmp_path.iterdir()} >= {".png", ".ico", ".svg"}
+    assert {p.suffix for p in tmp_path.iterdir()} >= {".png", ".ico", ".icns", ".svg"}
 
 
 # ---- entry.py ---------------------------------------------------------------------------------------
@@ -120,6 +120,21 @@ def test_entry_log_rotation(load_module, tmp_path, monkeypatch):
     rotated = entry._log_file()
     assert rotated == log
     assert any(p.name != log.name for p in tmp_path.iterdir())     # the old log was kept aside
+
+
+@pytest.mark.parametrize("platform, frozen, argv, expected", [
+    ("darwin", True, ["LBD Viewer"], True),                       # double-clicked in Finder
+    ("darwin", True, ["LBD Viewer", "-psn_0_12345"], True),       # older macOS adds this
+    ("darwin", True, ["lbd-view", "--no-browser"], False),        # Terminal / smoke test: the CLI
+    ("darwin", False, ["lbd-view"], False),                       # pipx install: the CLI
+    ("win32", True, ["lbd-view.exe"], False),
+])
+def test_entry_finder_launch(load_module, monkeypatch, platform, frozen, argv, expected):
+    entry = load_module("packaging/entry.py")
+    monkeypatch.setattr(entry.sys, "platform", platform)
+    monkeypatch.setattr(entry.sys, "argv", argv)
+    monkeypatch.setattr(entry.sys, "frozen", frozen, raising=False)
+    assert entry.finder_launch() is expected
 
 
 # ---- examples/make_examples.py -----------------------------------------------------------------------
@@ -173,6 +188,16 @@ def test_every_language_has_the_same_license(load_module):
         copy = lang.dir / "LICENSE"
         assert copy.is_file(), f"copy LICENSE into {lang.dir.relative_to(root)}"
         assert copy.read_text(encoding="utf-8") == top, f"{copy.relative_to(root)} differs from the top LICENSE"
+
+
+def test_macos_app_opens_lbd_files():
+    """The app bundle declares the .lbd file type and opens it (packaging/lbd-view.spec)."""
+    from pathlib import Path
+
+    spec = (Path(__file__).resolve().parents[2] / "packaging" / "lbd-view.spec").read_text(encoding="utf-8")
+    assert 'name="LBD Viewer.app"' in spec and "lbd.icns" in spec
+    assert '"CFBundleDocumentTypes"' in spec and '"UTExportedTypeDeclarations"' in spec
+    assert '"public.filename-extension": ["lbd"]' in spec and '"LSMinimumSystemVersion"' in spec
 
 
 def test_shell_scripts_have_unix_line_endings():
