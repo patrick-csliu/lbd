@@ -1,21 +1,24 @@
 """Build the language modules into the app's sdk/ folder, one subfolder per language.
 
-    python packaging/stage_sdk.py --dest <dist>/LBDViewer/sdk [--skip ID ...]
+    python packaging/stage_sdk.py --dest <dist>/LBDViewer/sdk [--skip ID ...] [--prebuilt ID=DIR ...]
 
 For every languages/<id>/language.toml, [sdk] says what goes into sdk/<id>/:
     build          command that writes into {dest} (e.g. a wheel, a .mltbx)
     fallback_copy  files copied instead when the build tool is missing or --skip <id> is given
     copy           files always copied
-language.toml, LICENSE, the example file and README.md are always copied, so the installed viewer can
-show install instructions for every language.
+--prebuilt ID=DIR uses the files in DIR instead of running that language's build: GitHub's
+release workflow builds LBD.mltbx in a MATLAB job and hands it to the Windows and Linux builds.
+language.toml, LICENSE, the example file and README.md are always copied, so the installed viewer
+can show install instructions for every language.
 """
 
 import argparse
 import shutil
 import sys
 from pathlib import Path
+from typing import Dict
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT =Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from check_versions import VersionError, release_version  # noqa: E402
@@ -33,20 +36,43 @@ def copy_items(lang, names, dest: Path) -> None:
             raise SystemExit(f"{lang.id}: '{name}' listed in language.toml does not exist")
 
 
+def parse_prebuilt(items, known) -> Dict[str, Path]:
+    """--prebuilt ID=DIR values -> {id: folder}; every id must exist and every folder hold files."""
+    result = {}
+    for item in items:
+        lang_id, sep, folder = item.partition("=")
+        if not sep or not folder:
+            raise SystemExit(f"--prebuilt {item!r}: write ID=DIR, e.g. matlab=build/mltbx")
+        if lang_id not in known:
+            raise SystemExit(f"--prebuilt: unknown language id {lang_id!r}; known: {known}")
+        path = Path(folder)
+        if not path.is_dir() or not any(path.iterdir()):
+            raise SystemExit(f"--prebuilt {lang_id}: {path} is missing or empty")
+        result[lang_id] = path
+    return result
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dest", type=Path, required=True)
     ap.add_argument("--skip", nargs="*", default=[], metavar="ID",
                     help="don't run the build step of these languages; use fallback_copy")
+    ap.add_argument("--prebuilt", nargs="*", default=[], metavar="ID=DIR",
+                    help="use the files in DIR instead of running that language's build step")
     args = ap.parse_args(argv)
     try:
         version = release_version()
     except VersionError as e:
         raise SystemExit(f"{e}\nSet one version everywhere before building (see scripts/check_versions.py).")
     langs = discover()
-    unknown = set(args.skip) - {lang.id for lang in langs}
+    known = [lang.id for lang in langs]
+    unknown = set(args.skip) - set(known)
     if unknown:
-        raise SystemExit(f"--skip: unknown language id(s) {sorted(unknown)}; known: {[lang.id for lang in langs]}")
+        raise SystemExit(f"--skip: unknown language id(s) {sorted(unknown)}; known: {known}")
+    prebuilt = parse_prebuilt(args.prebuilt, known)
+    both = set(args.skip) & set(prebuilt)
+    if both:
+        raise SystemExit(f"{sorted(both)}: given in both --skip and --prebuilt; choose one")
 
     dest: Path = args.dest
     if dest.exists():
@@ -57,7 +83,11 @@ def main(argv=None) -> int:
         sdk = lang.section("sdk")
         out = dest / lang.id
         out.mkdir()
-        if sdk.get("build"):
+        if lang.id in prebuilt:
+            print(f"{lang.name}: using the prebuilt files in {prebuilt[lang.id]}")
+            for item in prebuilt[lang.id].iterdir():
+                (shutil.copytree if item.is_dir() else shutil.copy2)(item, out / item.name)
+        elif sdk.get("build"):
             missing = lang.missing_tool("sdk")
             if lang.id in args.skip or missing:
                 why = "skipped" if lang.id in args.skip else f"{missing} not on PATH"

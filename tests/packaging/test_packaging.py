@@ -42,6 +42,41 @@ def test_stage_sdk_unknown_skip(load_module, tmp_path):
         stage.main(["--dest", str(tmp_path / "sdk"), "--skip", "cobol"])
 
 
+def test_stage_sdk_prebuilt(load_module, tmp_path, monkeypatch):
+    stage = load_module("packaging/stage_sdk.py")
+    built = tmp_path / "mltbx"
+    built.mkdir()
+    (built / "LBD.mltbx").write_bytes(b"toolbox")
+    for lang in stage.discover():   # no real builds: python would build a wheel
+        monkeypatch.setattr(type(lang), "run", lambda self, cmd, **kw: type("R", (), {"returncode": 0})())
+    dest = tmp_path / "sdk"
+    assert stage.main(["--dest", str(dest), "--prebuilt", f"matlab={built}"]) == 0
+    assert (dest / "matlab" / "LBD.mltbx").read_bytes() == b"toolbox"
+    assert (dest / "matlab" / "LICENSE").is_file()          # the extras are still copied
+    assert not (dest / "matlab" / "+lbd").exists()           # not the fallback
+
+
+@pytest.mark.parametrize("arg, message", [
+    ("matlab", "write ID=DIR"),
+    ("cobol={tmp}", "unknown language"),
+    ("matlab={tmp}/missing", "missing or empty"),
+    ("matlab={tmp}/empty", "missing or empty"),
+])
+def test_stage_sdk_prebuilt_errors(load_module, tmp_path, arg, message):
+    stage = load_module("packaging/stage_sdk.py")
+    (tmp_path / "empty").mkdir()
+    with pytest.raises(SystemExit, match=message):
+        stage.main(["--dest", str(tmp_path / "sdk"), "--prebuilt", arg.format(tmp=tmp_path)])
+
+
+def test_stage_sdk_prebuilt_and_skip(load_module, tmp_path):
+    stage = load_module("packaging/stage_sdk.py")
+    (tmp_path / "m").mkdir()
+    (tmp_path / "m" / "LBD.mltbx").write_bytes(b"x")
+    with pytest.raises(SystemExit, match="both --skip and --prebuilt"):
+        stage.main(["--dest", str(tmp_path / "sdk"), "--skip", "matlab", "--prebuilt", f"matlab={tmp_path / 'm'}"])
+
+
 def test_stage_sdk_version_mismatch(load_module, tmp_path, monkeypatch):
     stage = load_module("packaging/stage_sdk.py")
 

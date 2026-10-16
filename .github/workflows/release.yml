@@ -1,0 +1,220 @@
+# Build, test and draft a release. Nothing becomes public until you click "Publish" on GitHub.
+#
+#   Real release:  scripts/bump_version.py X.Y.Z, commit, `git tag vX.Y.Z`, `git push --follow-tags`
+#   Trial run:     Actions > Release > Run workflow (builds the version in the files, no tag;
+#                  the draft is titled "trial build": look at it, then delete it)
+#
+# Jobs: check (tag = version, release notes) -> tests (the Tests workflow) + MATLAB toolbox
+#       -> Windows installer and Linux package, each smoke-tested -> draft release with the files.
+# See docs/developers/releases.md.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Version and release notes
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+
+      - name: Version
+        id: version
+        run: |
+          version=$(uv run --no-project python scripts/check_versions.py)
+          if [ "${{ github.event_name }}" = "push" ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::The tag $GITHUB_REF_NAME doesn't match the version in the files ($version). Run scripts/bump_version.py first."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Release notes (from CHANGELOG.md)
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            uv run --no-project python scripts/release_notes.py "${{ steps.version.outputs.version }}" > notes.md
+          else
+            {
+              echo "> **Trial build** of ${GITHUB_SHA::7}, made by hand with *Run workflow*. Not a release: delete this draft after looking at it."
+              echo
+              uv run --no-project python scripts/release_notes.py "${{ steps.version.outputs.version }}" --allow-unreleased
+            } > notes.md
+          fi
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: notes
+          path: notes.md
+
+  tests:
+    name: Tests
+    needs: check
+    uses: ./.github/workflows/tests.yml
+
+  matlab-toolbox:
+    name: MATLAB toolbox
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: matlab-actions/setup-matlab@v3
+      # The same call as [sdk].build in languages/matlab/language.toml.
+      - uses: matlab-actions/run-command@v3
+        with:
+          command: >-
+            addpath(fullfile(pwd, 'languages', 'matlab')); mkdir('mltbx');
+            build_mltbx(fullfile(pwd, 'languages', 'matlab'), fullfile(pwd, 'mltbx', 'LBD.mltbx'),
+            '${{ needs.check.outputs.version }}')
+      - uses: actions/upload-artifact@v7
+        with:
+          name: mltbx
+          path: mltbx/LBD.mltbx
+          if-no-files-found: error
+
+  windows:
+    name: Windows installer
+    needs: [check, tests, matlab-toolbox]
+    runs-on: windows-latest
+    env:
+      PYTHONUTF8: "1"
+      VERSION: ${{ needs.check.outputs.version }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: viewer/web/package-lock.json
+      - uses: actions/download-artifact@v8
+        with:
+          name: mltbx
+          path: mltbx
+
+      - name: Inno Setup (if the runner lacks it)
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc) -and -not (Get-Command ISCC.exe -ErrorAction SilentlyContinue)) {
+            choco install innosetup -y --no-progress
+          }
+
+      - name: Build
+        run: >-
+          powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1
+          -OutDir "$env:RUNNER_TEMP\build" -Prebuilt "matlab=$env:GITHUB_WORKSPACE\mltbx"
+
+      - name: Smoke test the built app
+        run: uv run --no-project python scripts/smoke_test_app.py --release --exe "$env:RUNNER_TEMP\build\dist\LBDViewer\lbd-view.exe"
+
+      - name: Install, smoke test the installed app, uninstall
+        run: |
+          # Settings that the uninstaller must keep (a silent uninstall never removes them).
+          New-Item -ItemType Directory -Force "$env:APPDATA\lbd" | Out-Null
+          Set-Content "$env:APPDATA\lbd\settings.json" '{"roots": [], "default_style": "default"}'
+          $setup = "$env:RUNNER_TEMP\build\LBDViewer-Setup-$env:VERSION.exe"
+          Start-Process -Wait -FilePath $setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
+          $app = "$env:LOCALAPPDATA\Programs\LBDViewer"
+          if (-not (Test-Path "$app\lbd-view.exe")) { throw "the installer didn't install $app\lbd-view.exe" }
+          uv run --no-project python scripts/smoke_test_app.py --release --exe "$app\lbd-view.exe"
+          if ($LASTEXITCODE -ne 0) { throw "the installed app failed its smoke test" }
+          Start-Process -Wait -FilePath "$app\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
+          # The uninstaller hands over to a copy of itself, so wait for the folder to go.
+          for ($i = 0; ($i -lt 60) -and (Test-Path $app); $i++) { Start-Sleep 1 }
+          if (Test-Path $app) { throw "the uninstaller left $app behind" }
+          if (-not (Test-Path "$env:APPDATA\lbd\settings.json")) { throw "the uninstaller removed the settings" }
+          "installed, smoke-tested and uninstalled; settings kept"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows
+          path: ${{ runner.temp }}/build/LBDViewer-Setup-${{ needs.check.outputs.version }}.exe
+          if-no-files-found: error
+
+  linux:
+    name: Linux package
+    needs: [check, tests, matlab-toolbox]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: viewer/web/package-lock.json
+      - uses: actions/download-artifact@v8
+        with:
+          name: mltbx
+          path: mltbx
+
+      - name: Install Arial (the default style's font, for the smoke test)
+        run: |
+          echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | sudo debconf-set-selections
+          sudo apt-get update -q
+          sudo apt-get install -y -q ttf-mscorefonts-installer
+          fc-cache -f
+
+      - name: Build
+        run: LBD_PREBUILT="matlab=$GITHUB_WORKSPACE/mltbx" sh scripts/build_linux.sh "$RUNNER_TEMP/build"
+
+      - name: Smoke test the unpacked package
+        run: |
+          name="lbd-viewer-$VERSION-linux-$(uname -m)"
+          mkdir -p "$RUNNER_TEMP/unpacked"
+          tar -xzf "$RUNNER_TEMP/build/$name.tar.gz" -C "$RUNNER_TEMP/unpacked"
+          uv run --no-project python scripts/smoke_test_app.py --release --exe "$RUNNER_TEMP/unpacked/$name/LBDViewer/lbd-view"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux
+          path: ${{ runner.temp }}/build/lbd-viewer-${{ needs.check.outputs.version }}-linux-*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    name: Draft release
+    needs: [check, windows, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts      # one folder per artifact: notes, mltbx, windows, linux
+
+      - name: Create the draft (replaces an earlier draft of this version)
+        run: |
+          tag="v$VERSION"
+          title="LBD $VERSION"
+          [ "${{ github.event_name }}" = "workflow_dispatch" ] && title="$title (trial build)"
+          state=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null || echo none)
+          if [ "$state" = "false" ]; then
+            echo "::error::$tag is already published. Releases are never replaced; bump the version for a new one."
+            exit 1
+          fi
+          if [ "$state" = "true" ]; then
+            gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes
+          fi
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" \
+            --title "$title" --notes-file artifacts/notes/notes.md \
+            artifacts/windows/*.exe artifacts/linux/*.tar.gz artifacts/mltbx/LBD.mltbx
+          echo "Draft created: https://github.com/$GITHUB_REPOSITORY/releases (check it, then Publish)" >> "$GITHUB_STEP_SUMMARY"

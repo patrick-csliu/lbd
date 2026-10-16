@@ -6,13 +6,15 @@ Build the Windows installer of LBD Viewer.
 Needs: uv, Node.js (npm) and Inno Setup 6 (ISCC.exe). The documentation site (mkdocs) is built
 into <app>\docs, which the viewer serves as its Help. Each language in languages/ builds its SDK
 files with the tools its language.toml names (e.g. MATLAB for LBD.mltbx); without them, or with
--Skip <id>, its fallback files are shipped instead.
+-Skip <id>, its fallback files are shipped instead. -Prebuilt matlab=<dir> uses files built
+elsewhere (GitHub's release workflow builds LBD.mltbx in a MATLAB job).
 Everything is built outside the repository (default %LOCALAPPDATA%\lbd-build), so nothing
 large lands in a synced folder. Result: <OutDir>\LBDViewer-Setup-<version>.exe
 #>
 param(
     [string]$OutDir = (Join-Path $env:LOCALAPPDATA "lbd-build"),
     [string[]]$Skip = @(),
+    [string[]]$Prebuilt = @(),   # ID=DIR: use DIR's files instead of building that language
     [switch]$SkipInstaller
 )
 $ErrorActionPreference = "Stop"
@@ -55,6 +57,7 @@ $App = Join-Path $Dist "LBDViewer"
 Step "Language modules (sdk)"
 $StageArgs = @("run", "python", "packaging/stage_sdk.py", "--dest", (Join-Path $App "sdk"))
 if ($Skip.Count -gt 0) { $StageArgs += "--skip"; $StageArgs += $Skip }
+if ($Prebuilt.Count -gt 0) { $StageArgs += "--prebuilt"; $StageArgs += $Prebuilt }
 & uv @StageArgs
 Check "stage_sdk"
 

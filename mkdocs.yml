@@ -172,5 +172,5 @@ nav:
       - HTTP API: developers/http-api.md
       - Extending LBD: developers/extending.md
       - Adding a language: developers/adding-a-language.md
-      - Building releases: developers/releases.md
+      - Releases: developers/releases.md
       - Changelog: changelog.md

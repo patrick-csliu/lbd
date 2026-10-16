@@ -12,12 +12,13 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  workflow_call:   # release.yml runs these same tests before building
 
 permissions:
   contents: read
 
-concurrency:   # a newer push to the same branch cancels the older run
-  group: ${{ github.workflow }}-${{ github.ref }}
+concurrency:   # a newer push to the same branch cancels the older run (a release run has its own group)
+  group: tests-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

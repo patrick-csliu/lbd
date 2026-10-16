@@ -114,7 +114,7 @@ def _open_tabs(port: int, token: str, files: List[str], no_browser: bool) -> Non
     urls = [viewer_url(port, token, f) for f in files] or [viewer_url(port, token)]
     for u in urls:
         if no_browser:
-            print(u)
+            print(u, flush=True)  # at once, also when the output goes to a pipe or a log
         else:
             webbrowser.open(u)
 

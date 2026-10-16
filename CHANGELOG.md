@@ -101,10 +101,13 @@ Nothing has been released yet, so everything is listed under the version in deve
 **Project and installers**
 
 - MIT License. Tests run on GitHub on every push (Linux and Windows; MATLAB in its own job).
+- Releases: `scripts/bump_version.py` sets the version everywhere and dates the CHANGELOG; a
+  version tag makes GitHub test, build and smoke-test the Windows installer, the Linux package
+  and the MATLAB toolbox, then create a draft release to check and publish.
 - Repository organised into `languages/<id>/` with a `language.toml` manifest per language;
   tests, version checks, packaging and the viewer discover languages automatically.
 - Installers for Windows (Inno Setup, per user, no admin rights) and Linux (tarball with
   `install.sh`). The Windows installer stops a running viewer before installing or
   uninstalling, and removes its whole folder on uninstall. Uninstalling asks whether to remove
-  the presets and settings too (default: keep them; removed ones go to the Recycle Bin). The Linux installer checks for Arial, the
-  default style's font, and offers to install it.
+  the presets and settings too (default: keep them; removed ones go to the Recycle Bin). The
+  Linux installer checks for Arial, the default style's font, and offers to install it.

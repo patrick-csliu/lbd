@@ -22,6 +22,9 @@ because MATLAB isn't on `PATH` there; the cross-language matrix and the document
 examples run without MATLAB on GitHub, so run them locally before a release. The Linux machine
 gets Arial (the default style's font) from Microsoft's core fonts package.
 
+A failed suite's last 40 lines of output show as an annotation on the run's page, which can be
+read without signing in (`test_all.py` prints them as GitHub `::error` lines).
+
 To run single suites:
 
 | Suite | Command |

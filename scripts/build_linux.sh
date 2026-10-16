@@ -5,6 +5,7 @@
 #
 # Needs: uv, Node.js (npm). Language build tools are optional (e.g. MATLAB builds LBD.mltbx;
 # without it the sources are shipped). Run on Linux or WSL2; PyInstaller can not cross-compile.
+# LBD_PREBUILT="matlab=DIR" uses DIR's files instead of building that language (as on GitHub).
 # Result: OUTDIR/lbd-viewer-<version>-linux-<arch>.tar.gz
 set -eu
 
@@ -33,7 +34,8 @@ uv run pyinstaller packaging/lbd-view.spec --noconfirm --log-level WARN \
     --distpath "$OUT/dist" --workpath "$OUT/work"
 
 step "Language modules (sdk)"
-uv run python packaging/stage_sdk.py --dest "$OUT/dist/LBDViewer/sdk"
+# shellcheck disable=SC2086  # LBD_PREBUILT may hold several ID=DIR words
+uv run python packaging/stage_sdk.py --dest "$OUT/dist/LBDViewer/sdk" ${LBD_PREBUILT:+--prebuilt $LBD_PREBUILT}
 
 step "Documentation (Help)"
 uv run mkdocs build --strict --quiet --site-dir "$OUT/site"

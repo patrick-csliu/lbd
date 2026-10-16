@@ -1,7 +1,7 @@
 function build_mltbx(srcDir, outFile, version)
 %BUILD_MLTBX  Package matlab/+lbd as LBD.mltbx (needs MATLAB R2023a or newer to build;
 %   the resulting toolbox installs on R2021b and newer).
-%   matlab -batch "addpath('packaging/matlab'); build_mltbx('matlab', 'out/LBD.mltbx', '0.1.0')"
+%   matlab -batch "addpath('languages/matlab'); build_mltbx('languages/matlab', 'out/LBD.mltbx', '0.1.0')"
 srcDir = char(java.io.File(srcDir).getCanonicalPath());
 % Fixed identifier: MATLAB uses it to recognise upgrades of the same toolbox.
 opts = matlab.addons.toolbox.ToolboxOptions(srcDir, "3f0b6f64-6a0e-4f43-9c3e-7d2f5f8b1a21");
