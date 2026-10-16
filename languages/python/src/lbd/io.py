@@ -20,7 +20,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Union
 import h5py
 import numpy as np
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"
 FORMAT_VERSION = "1.0"
 _FORMAT_MAJOR, _FORMAT_MINOR = (int(p) for p in FORMAT_VERSION.split("."))
 
@@ -90,7 +90,7 @@ def version() -> Dict[str, str]:
     Returns
     -------
     dict
-        `{"package": "0.1.0", "lbd_version": "1.0"}`: the version of this module and of the
+        `{"package": "1.0.0", "lbd_version": "1.0"}`: the version of this module and of the
         file format it writes and fully reads.
 
     Examples

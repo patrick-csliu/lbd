@@ -37,7 +37,7 @@ that implement this spec, see [Python](../docs/python/files.md), [MATLAB](../doc
 | `title` | string | must (may be `""`) | Short human-readable title. |
 | `description` | string | must (may be `""`) | Free text. |
 | `created` | string, ISO-8601 with UTC offset | must | Time the file was written, e.g. `2026-10-13T16:09:00+08:00`. |
-| `writer` | string | must | Writer and its version, e.g. `"python lbd 0.1.0"`, `"matlab lbd 0.1.0"`, `"julia LBD 0.1.0"`. |
+| `writer` | string | must | Writer and its version, e.g. `"python lbd 1.0.0"`, `"matlab lbd 1.0.0"`, `"julia LBD 1.0.0"`. |
 
 ### 1.2 Axes — `/axes/<name>`
 
@@ -148,7 +148,7 @@ Writers may store datasets chunked and gzip-compressed. Readers must handle this
 
 ```
 /                         lbd_format="LBD" lbd_version="1.0" title="Resonator power sweep"
-                          description="" created="2026-10-13T16:09:00+08:00" writer="python lbd 0.1.0"
+                          description="" created="2026-10-13T16:09:00+08:00" writer="python lbd 1.0.0"
 /axes/power   float64[11]       unit="dBm" label="Power"
 /axes/freq    float64[401]      unit="Hz"  label="Frequency"
 /values/S21   {r,i}float64[11,401]  unit="" label="S21" axes="power,freq"

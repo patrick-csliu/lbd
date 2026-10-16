@@ -15,7 +15,7 @@ An `.lbd` file holds one **dataset**:
 | **Values** | N-D arrays of measured or computed data. Each dimension is tied to one axis. | `S21` with axes `(power, freq)` → shape 11 × 401 |
 | **Meta** | Free key/value information about how the data was taken, which can be nested. | `T_mK = 12`, `vna.ifbw_Hz = 1000` |
 | **Plot** (optional) | How the viewer should plot this file by default, and per-file style changes. | heat map of `S21` in dB, 120 mm wide |
-| **Created, writer** | Written automatically: when, and by which program and version. | `2026-10-13T16:09:00+08:00`, `python lbd 0.1.0` |
+| **Created, writer** | Written automatically: when, and by which program and version. | `2026-10-13T16:09:00+08:00`, `python lbd 1.0.0` |
 
 A value with no axes is a single number (a *scalar*), for example a fitted quality factor.
 

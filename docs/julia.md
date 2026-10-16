@@ -55,7 +55,7 @@ A mutable struct with these fields:
 | `style_name` | `String` or `nothing` | Viewer style preset for this file. |
 | `matplotlib` | `String` or `nothing` | matplotlib version that last wrote the saved view (set by Python and the viewer). Julia keeps it when saving. |
 | `created` | `String` or `nothing` | ISO-8601 time the file was written. Set by `save`. |
-| `writer` | `String` or `nothing` | Program that wrote the file, e.g. `"julia LBD 0.1.0"`. |
+| `writer` | `String` or `nothing` | Program that wrote the file, e.g. `"julia LBD 1.0.0"`. |
 | `lbd_version` | `String` | Format version of the file. |
 | `path` | `String` or `nothing` | Last loaded or saved path. |
 
@@ -165,7 +165,7 @@ Reads everything except value data. It is the same as `LBD.load(path; values=Str
 ## `LBD.version`
 
 ```julia
-LBD.version()    # (package = "0.1.0", lbd_version = "1.0")
+LBD.version()    # (package = "1.0.0", lbd_version = "1.0")
 ```
 
 ## `Axis` and `Value`

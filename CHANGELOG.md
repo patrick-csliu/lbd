@@ -3,9 +3,9 @@
 All components (the viewer and the Python, MATLAB and Julia modules) share one version number.
 The file format has its own version (`lbd_version`, currently 1.0).
 
-## 0.1.0 (in development)
+## 1.0.0 (2026-10-16)
 
-Nothing has been released yet, so everything is listed under the version in development.
+The first release.
 
 **File format and languages**
 

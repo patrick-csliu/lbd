@@ -59,7 +59,7 @@ These properties are read-only; they are set by the methods and by `lbd.load`:
 | `Axes` | struct | `Axes.<name>` is a struct with fields `Name`, `Data` (column vector), `Unit`, `Label`. |
 | `Values` | struct | `Values.<name>` is a struct with fields `Name`, `Data`, `Axes` (string row), `Unit`, `Label`, `Shape` (row vector), `Dtype` (LBD type name). |
 | `Created` | string | ISO-8601 time the file was written. |
-| `Writer` | string | Program that wrote the file, e.g. `"matlab lbd 0.1.0"`. |
+| `Writer` | string | Program that wrote the file, e.g. `"matlab lbd 1.0.0"`. |
 | `LbdVersion` | string | Format version of the file. |
 | `Path` | string | Where it was last loaded from or saved to. |
 
@@ -211,7 +211,7 @@ end
 ## `lbd.version`
 
 ```matlab
-v = lbd.version()      % struct with fields package = "0.1.0", lbd_version = "1.0"
+v = lbd.version()      % struct with fields package = "1.0.0", lbd_version = "1.0"
 ```
 
 ---
