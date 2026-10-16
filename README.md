@@ -1,5 +1,8 @@
 # LBD — Lab Data format and viewer
 
+[![Tests](https://github.com/patrick-csliu/lbd/actions/workflows/tests.yml/badge.svg)](https://github.com/patrick-csliu/lbd/actions/workflows/tests.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 **One data format for every program, and one viewer for every figure.**
 
 Lab data comes from many programs: MATLAB scripts, Python notebooks, Julia simulations,
@@ -189,3 +192,8 @@ The full test and release instructions are in the [developer guide](docs/develop
 | Python module | Python 3.9+ (numpy, h5py; `[plot]` adds matplotlib, pydantic, platformdirs) |
 | MATLAB module | MATLAB R2021b+ |
 | Julia module | Julia 1.9+ (HDF5.jl, JSON3.jl) |
+
+## License
+
+MIT, see [LICENSE](LICENSE). Each language folder carries a copy, since a module can be
+installed from its folder alone.

@@ -4,7 +4,10 @@
 #   uv run mkdocs build --strict   build into site/ (shipped inside LBD Viewer as its Help)
 site_name: LBD
 site_description: One data format and one viewer for consistent scientific figures
-copyright: LBD — Lab Data format and viewer
+copyright: LBD — Lab Data format and viewer · MIT License
+repo_url: https://github.com/patrick-csliu/lbd
+repo_name: patrick-csliu/lbd
+edit_uri: edit/main/docs/        # MkDocs would guess the "master" branch
 docs_dir: docs
 site_dir: site
 use_directory_urls: false        # plain .html files: works from the viewer and from disk (file://)

@@ -128,7 +128,7 @@ first element is looked up on `PATH`. These placeholders are replaced:
 Prefer the environment variables when a path ends up inside the language's own string syntax
 (as MATLAB code passed to `matlab -batch` does), because then nothing needs quoting.
 
-`language.toml`, the `example` file and `README.md` are always copied into the SDK, so the
+`language.toml`, `LICENSE`, the `example` file and `README.md` are always copied into the SDK, so the
 installed viewer can show instructions for every language.
 
 ### `[[install]]`: the Language modules page

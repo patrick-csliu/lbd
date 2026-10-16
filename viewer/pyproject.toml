@@ -3,6 +3,7 @@ name = "lbd-viewer"
 version = "0.1.0"
 description = "LBD Viewer: list and plot LBD (.lbd) files in the browser"
 requires-python = ">=3.10"
+license = "MIT"
 dependencies = [
     "lbd[plot]",          # styles and the plotting engine live in lbd.plot
     "fastapi>=0.110",
@@ -17,8 +18,13 @@ lbd-view = "lbd_viewer.cli:main"
 [tool.uv.sources]
 lbd = { workspace = true }
 
+[project.urls]
+Source = "https://github.com/patrick-csliu/lbd"
+Issues = "https://github.com/patrick-csliu/lbd/issues"
+Changelog = "https://github.com/patrick-csliu/lbd/blob/main/CHANGELOG.md"
+
 [build-system]
-requires = ["hatchling>=1.24"]
+requires = ["hatchling>=1.27"]   # 1.27: SPDX `license`
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]

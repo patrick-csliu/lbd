@@ -39,6 +39,7 @@ step "Documentation (Help)"
 uv run mkdocs build --strict --quiet --site-dir "$OUT/site"
 rm -rf "$OUT/dist/LBDViewer/docs"
 cp -a "$OUT/site" "$OUT/dist/LBDViewer/docs"
+cp LICENSE "$OUT/dist/LBDViewer/LICENSE"   # MIT: the notice ships with every copy
 
 step "Tarball"
 ARCH=$(uname -m)

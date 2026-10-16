@@ -35,8 +35,8 @@ requires = "mylang"
 write = ["mylang", "crosslang/write.ml", "{out}"]
 check = ["mylang", "crosslang/check.ml", "{root}"]
 
-# What goes into the installed viewer's sdk/<id>/ folder (language.toml, the example file and
-# README.md are always copied).
+# What goes into the installed viewer's sdk/<id>/ folder (language.toml, LICENSE, the example
+# file and README.md are always copied).
 #   build          writes into {dest} (env LBD_DEST); {version} = release version
 #   fallback_copy  copied instead when `requires` is missing or --skip <id> is used
 #   copy           always copied

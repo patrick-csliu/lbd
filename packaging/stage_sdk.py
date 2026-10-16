@@ -6,7 +6,7 @@ For every languages/<id>/language.toml, [sdk] says what goes into sdk/<id>/:
     build          command that writes into {dest} (e.g. a wheel, a .mltbx)
     fallback_copy  files copied instead when the build tool is missing or --skip <id> is given
     copy           files always copied
-language.toml, the example file and README.md are always copied, so the installed viewer can
+language.toml, LICENSE, the example file and README.md are always copied, so the installed viewer can
 show install instructions for every language.
 """
 
@@ -72,11 +72,12 @@ def main(argv=None) -> int:
                     raise SystemExit(f"{lang.name}: SDK build failed (exit code {r.returncode})")
                 (out / ".gitignore").unlink(missing_ok=True)  # uv build drops one into its output folder
         copy_items(lang, sdk.get("copy", []), out)
-        extras = ["language.toml"] + [n for n in (lang.data.get("example"), "README.md") if n]
+        extras = ["language.toml", "LICENSE"] + [n for n in (lang.data.get("example"), "README.md") if n]
         copy_items(lang, [n for n in extras if (lang.dir / n).exists()], out)
         print(f"{lang.name}: {sorted(p.name for p in out.iterdir())}")
 
     shutil.copy2(ROOT / "spec" / "LBD-v1.md", dest / "LBD-v1.md")
+    shutil.copy2(ROOT / "LICENSE", dest / "LICENSE")
     (dest / "README.txt").write_text(
         f"LBD language modules, version {version}\n\n"
         "Open LBD Viewer > Language modules for install instructions.\n"

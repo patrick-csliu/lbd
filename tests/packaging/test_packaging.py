@@ -27,8 +27,10 @@ def test_stage_sdk_with_fallbacks(load_module, tmp_path, monkeypatch, capsys):
     assert stage.main(["--dest", str(dest), "--skip", "matlab"]) == 0
     assert not (dest / "stale").exists()
     assert (dest / "LBD-v1.md").is_file() and "Language modules" in (dest / "README.txt").read_text()
+    assert (dest / "LICENSE").is_file()
     for lang in langs:
         assert (dest / lang.id / "language.toml").is_file()
+        assert (dest / lang.id / "LICENSE").is_file()
     assert (dest / "matlab" / "+lbd").is_dir()                # fallback_copy
     assert ("python", ) == tuple(c[0] for c in calls if c[0] == "python")[:1]
     assert all(kw.get("version") for _, kw in calls)
@@ -124,6 +126,18 @@ def test_linux_scripts_parse(script):
     path = Path(__file__).resolve().parents[2] / "packaging" / "linux" / script
     r = subprocess.run([sh, "-n", str(path)], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
+
+
+def test_every_language_has_the_same_license(load_module):
+    """Each language folder can be installed on its own, so each carries the top LICENSE."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    top = (root / "LICENSE").read_text(encoding="utf-8")
+    for lang in load_module("scripts/languages.py").discover():
+        copy = lang.dir / "LICENSE"
+        assert copy.is_file(), f"copy LICENSE into {lang.dir.relative_to(root)}"
+        assert copy.read_text(encoding="utf-8") == top, f"{copy.relative_to(root)} differs from the top LICENSE"
 
 
 def test_shell_scripts_have_unix_line_endings():

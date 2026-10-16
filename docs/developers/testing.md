@@ -16,6 +16,12 @@ uv run python scripts/test_all.py --fast   # without the cross-language matrix
 
 A suite whose program (e.g. `matlab`) isn't on `PATH` is reported as skipped, not failed.
 
+**On GitHub** (`.github/workflows/tests.yml`), every push to `main` and every pull request runs
+`test_all.py` on Linux and Windows. MATLAB runs as a separate job with MathWorks' GitHub actions,
+because MATLAB isn't on `PATH` there; the cross-language matrix and the documentation's MATLAB
+examples run without MATLAB on GitHub, so run them locally before a release. The Linux machine
+gets Arial (the default style's font) from Microsoft's core fonts package.
+
 To run single suites:
 
 | Suite | Command |

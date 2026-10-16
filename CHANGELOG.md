@@ -100,6 +100,7 @@ Nothing has been released yet, so everything is listed under the version in deve
 
 **Project and installers**
 
+- MIT License. Tests run on GitHub on every push (Linux and Windows; MATLAB in its own job).
 - Repository organised into `languages/<id>/` with a `language.toml` manifest per language;
   tests, version checks, packaging and the viewer discover languages automatically.
 - Installers for Windows (Inno Setup, per user, no admin rights) and Linux (tarball with

@@ -65,6 +65,7 @@ Check "mkdocs build"
 $Docs = Join-Path $App "docs"
 if (Test-Path $Docs) { Remove-Item -Recurse -Force $Docs }
 Copy-Item -Recurse $Site $Docs
+Copy-Item (Join-Path $Repo "LICENSE") $App   # MIT: the notice ships with every copy
 
 if ($SkipInstaller) {
     Write-Host "Skipped the installer. App folder: $App" -ForegroundColor Yellow

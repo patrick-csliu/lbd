@@ -1,0 +1,84 @@
+# Run every test suite on each push and pull request, on Linux and Windows.
+#
+# The `test` job runs scripts/test_all.py, the same command as on a developer's computer:
+# Python, the viewer, Julia, the scripts and packaging, the web UI type check, the strict docs
+# build, the documentation's code examples and the cross-language matrix. MATLAB isn't on PATH
+# there, so test_all reports its suites as skipped; the `matlab` job runs the MATLAB tests with
+# MathWorks' actions instead (free for public repositories).
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:   # a newer push to the same branch cancels the older run
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: All suites (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      PYTHONUTF8: "1"   # test output contains θ, μ, …; Windows consoles default to another code page
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: viewer/web/package-lock.json
+
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: "1"
+
+      # The default style uses Arial. Windows has it; Ubuntu gets Microsoft's core fonts
+      # (accepting their licence non-interactively), as packaging/linux/install.sh offers users.
+      - name: Install Arial (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | sudo debconf-set-selections
+          sudo apt-get update -q
+          sudo apt-get install -y -q ttf-mscorefonts-installer
+          fc-cache -f
+          fc-list : family | grep -qix arial
+
+      - name: Install Python packages
+        run: uv sync --all-packages --group docs
+
+      - name: Build the web UI
+        working-directory: viewer/web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Run all test suites
+        run: uv run python scripts/test_all.py
+
+  matlab:
+    name: MATLAB tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: matlab-actions/setup-matlab@v3
+
+      # The same check as [test].command in languages/matlab/language.toml.
+      - uses: matlab-actions/run-command@v3
+        with:
+          command: cd languages/matlab; r = runtests('tests'); assert(~any([r.Failed]))
