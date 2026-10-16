@@ -381,6 +381,22 @@ def test_docs_not_built(cfg, tmp_path, monkeypatch):
 
     monkeypatch.setenv("LBD_DOCS_DIR", str(tmp_path / "missing"))
     monkeypatch.setattr(server.sdk, "REPO_ROOT", tmp_path)          # no <repo>/site either
+    monkeypatch.setattr(server.sdk, "PACKAGE_DIR", tmp_path)        # nor docs inside the package
     c = TestClient(create_app(AppState(cfg, token="t")), base_url="http://127.0.0.1:8000")
     r = c.get("/docs/")
     assert r.status_code == 404 and "mkdocs build" in r.text
+
+
+def test_docs_and_sdk_inside_the_installed_package(tmp_path, monkeypatch):
+    """The release wheel carries docs/ and sdk/ in the package folder (scripts/build_wheels.py)."""
+    from lbd_viewer import sdk, server
+
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "index.html").write_text("help", encoding="utf-8")
+    (tmp_path / "sdk").mkdir()
+    monkeypatch.delenv("LBD_DOCS_DIR", raising=False)
+    monkeypatch.delenv("LBD_SDK_DIR", raising=False)
+    monkeypatch.setattr(sdk, "PACKAGE_DIR", tmp_path)
+    assert server.docs_dir() == tmp_path / "docs"
+    assert sdk.sdk_dir() == tmp_path / "sdk"
+    assert sdk.languages_dir() == (tmp_path / "sdk", "sdk")

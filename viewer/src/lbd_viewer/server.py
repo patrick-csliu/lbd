@@ -14,6 +14,7 @@ import json
 import math
 import os
 import secrets
+import subprocess
 import sys
 import threading
 import time
@@ -57,13 +58,15 @@ NO_DOCS_HTML = (
 
 
 def docs_dir() -> Optional[Path]:
-    """The built documentation site: $LBD_DOCS_DIR, <app>/docs (installed app) or <repo>/site."""
+    """The built documentation site: $LBD_DOCS_DIR, <app>/docs (installed app), the docs inside
+    the release wheel (scripts/build_wheels.py), or <repo>/site."""
     candidates = []
     env = os.environ.get("LBD_DOCS_DIR")
     if env:
         candidates.append(Path(env))
     if getattr(sys, "frozen", False):
         candidates.append(Path(sys.executable).resolve().parent / "docs")
+    candidates.append(sdk.PACKAGE_DIR / "docs")
     candidates.append(sdk.REPO_ROOT / "site")
     for c in candidates:
         if (c / "index.html").is_file():
@@ -252,9 +255,44 @@ def file_summary(d: "lbd.Dataset") -> Dict[str, Any]:
 
 
 _DIALOG_LOCK = threading.Lock()
+_DIALOG_BUSY = "a file dialog of LBD Viewer is already open; finish or cancel it first"
 
 
-def _native_dialog(ask, what: str, fallback: str) -> Optional[str]:
+def _dialog_backend() -> str:
+    """"osascript" on macOS, "tk" elsewhere.
+
+    macOS only allows windows on a program's main thread, and a server request runs on a worker
+    thread, so there AppleScript shows the dialog in its own process instead of tkinter.
+    """
+    return "osascript" if sys.platform == "darwin" else "tk"
+
+
+def _applescript_string(text: str) -> str:
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _mac_dialog(script: str, what: str, fallback: str) -> Optional[str]:
+    """Run an AppleScript `choose …` dialog and return the chosen POSIX path, or None if cancelled.
+
+    Raises HTTP 501 if it can't be shown (the UI then uses `fallback`), 409 if one is already open.
+    """
+    if not _DIALOG_LOCK.acquire(blocking=False):
+        raise HTTPException(409, _DIALOG_BUSY)
+    try:
+        r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
+    except FileNotFoundError:
+        raise HTTPException(501, f"no {what} dialog on this system (osascript is missing); {fallback}")
+    finally:
+        _DIALOG_LOCK.release()
+    if r.returncode == 0:
+        path = r.stdout.strip()
+        return path[:-1] if len(path) > 1 and path.endswith("/") else path   # folders end in "/"
+    if "-128" in r.stderr:  # AppleScript's "User canceled."
+        return None
+    raise HTTPException(501, f"no {what} dialog available ({r.stderr.strip()}); {fallback}")
+
+
+def _tk_dialog(ask, what: str, fallback: str) -> Optional[str]:
     """Run one tkinter file dialog, on top of other windows. `ask(filedialog, root)` shows it.
 
     Raises HTTP 501 where tkinter or a display is unavailable (the UI then uses `fallback`),
@@ -266,7 +304,7 @@ def _native_dialog(ask, what: str, fallback: str) -> Optional[str]:
     except ImportError:
         raise HTTPException(501, f"no {what} dialog on this system; {fallback}")
     if not _DIALOG_LOCK.acquire(blocking=False):
-        raise HTTPException(409, "a file dialog of LBD Viewer is already open; finish or cancel it first")
+        raise HTTPException(409, _DIALOG_BUSY)
     try:
         root = tkinter.Tk()
         root.withdraw()
@@ -282,9 +320,13 @@ def _native_dialog(ask, what: str, fallback: str) -> Optional[str]:
 
 def native_folder_dialog() -> Optional[str]:
     """Native "choose folder" dialog. Returns None if cancelled."""
-    return _native_dialog(
+    fallback = "type or paste the folder path"
+    if _dialog_backend() == "osascript":
+        return _mac_dialog('POSIX path of (choose folder with prompt "Add folder to LBD Viewer")',
+                           "folder", fallback)
+    return _tk_dialog(
         lambda fd, root: fd.askdirectory(parent=root, title="Add folder to LBD Viewer", mustexist=True),
-        "folder", "type or paste the folder path")
+        "folder", fallback)
 
 
 def native_save_dialog(folder: Path, name: str, fmt: str) -> Optional[str]:
@@ -292,12 +334,19 @@ def native_save_dialog(folder: Path, name: str, fmt: str) -> Optional[str]:
 
     The system dialog asks before replacing an existing file.
     """
+    fallback = "the figure is saved to your browser's download folder instead"
+    if _dialog_backend() == "osascript":
+        return _mac_dialog(
+            f'POSIX path of (choose file name with prompt "Export figure" '
+            f'default name {_applescript_string(name)} '
+            f'default location (POSIX file {_applescript_string(str(folder))}))',
+            "save", fallback)
     ext = f".{fmt}"
-    return _native_dialog(
+    return _tk_dialog(
         lambda fd, root: fd.asksaveasfilename(
             parent=root, title="Export figure", initialdir=str(folder), initialfile=name,
             defaultextension=ext, filetypes=[(f"{fmt.upper()} file", f"*{ext}")], confirmoverwrite=True),
-        "save", "the figure is saved to your browser's download folder instead")
+        "save", fallback)
 
 
 # ---- app ---------------------------------------------------------------------------------
@@ -484,6 +533,8 @@ def create_app(state: AppState) -> FastAPI:
         if chosen is None:
             return {"path": None, "warnings": warns}
         target = Path(chosen)
+        if not target.suffix:  # macOS's dialog doesn't add the extension itself
+            target = target.with_name(f"{target.name}.{fmt}")
         suffix = target.suffix.lower().lstrip(".")
         if {"jpeg": "jpg", "tif": "tiff"}.get(suffix, suffix) != fmt:
             raise HTTPException(400, f"{target.name}: this is a {fmt.upper()} figure, so the name must end in .{fmt}; nothing was saved")

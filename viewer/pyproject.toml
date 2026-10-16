@@ -5,7 +5,7 @@ description = "LBD Viewer: list and plot LBD (.lbd) files in the browser"
 requires-python = ">=3.10"
 license = "MIT"
 dependencies = [
-    "lbd[plot]",          # styles and the plotting engine live in lbd.plot
+    "lbd[plot]==0.1.0",   # styles and the plotting engine; exact: the viewer ships with its own lbd
     "fastapi>=0.110",
     "uvicorn>=0.29",
     "pillow>=10.0",       # image metadata (also a matplotlib dependency)
@@ -29,5 +29,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/lbd_viewer"]
-# The built web UI is git-ignored, but belongs in the package.
-artifacts = ["src/lbd_viewer/static"]
+# Git-ignored but part of the package: the built web UI, and in the release wheel the Help
+# (docs) and the language modules (sdk), staged by scripts/build_wheels.py.
+artifacts = ["src/lbd_viewer/static", "src/lbd_viewer/docs", "src/lbd_viewer/sdk"]

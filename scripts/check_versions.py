@@ -18,6 +18,7 @@ from languages import REPO, discover, read_pattern  # noqa: E402
 # (where, file relative to the repository, regex whose group 1 is the version; multiline)
 FIXED = [
     ("viewer/pyproject.toml", "viewer/pyproject.toml", r'^version\s*=\s*"([^"]+)"'),
+    ("viewer/pyproject.toml (lbd dependency)", "viewer/pyproject.toml", r'"lbd\[plot\]==([^"]+)"'),
     ("viewer/src/lbd_viewer/__init__.py", "viewer/src/lbd_viewer/__init__.py", r'^__version__\s*=\s*"([^"]+)"'),
     ("viewer/web/package.json", "viewer/web/package.json", r'^  "version":\s*"([^"]+)"'),
     ("viewer/web/package-lock.json (top)", "viewer/web/package-lock.json",

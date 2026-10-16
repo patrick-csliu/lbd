@@ -1,4 +1,4 @@
-"""Release scripts: bump_version.py, release_notes.py and smoke_test_app.py."""
+"""Release scripts: bump_version, release_notes, smoke_test_app and build_wheels."""
 
 import shutil
 import sys
@@ -184,3 +184,44 @@ def test_smoke_test_reports_a_viewer_that_does_not_start(load_module, capsys):
     smoke = load_module("scripts/smoke_test_app.py")
     assert smoke.run([sys.executable, "-c", "raise SystemExit(3)"], REPO / "examples" / "data", release=False) == 1
     assert "exited with code 3" in capsys.readouterr().out
+
+
+# ---- build_wheels.py ----------------------------------------------------------------------------
+
+
+def test_build_wheels_always_removes_the_staged_folders(load_module, tmp_path, monkeypatch):
+    bw = load_module("scripts/build_wheels.py")
+    package = tmp_path / "lbd_viewer"
+    monkeypatch.setattr(bw, "PACKAGE", package)
+    monkeypatch.setattr(bw, "STAGED", [package / "docs", package / "sdk"])
+    steps = []
+
+    def run(cmd, cwd=None):
+        steps.append(cmd[:2])
+        (package / "docs").mkdir(parents=True, exist_ok=True)   # as if mkdocs had written it
+        if "stage_sdk.py" in " ".join(cmd):
+            raise SystemExit("stage_sdk failed")
+
+    monkeypatch.setattr(bw, "run", run)
+    with pytest.raises(SystemExit, match="stage_sdk failed"):
+        bw.build(tmp_path / "out", [])
+    assert not (package / "docs").exists() and not (package / "sdk").exists()
+    assert ["npm", "ci"] in steps
+
+
+def test_build_wheels_checks_the_viewer_wheel(load_module, tmp_path, monkeypatch, current):
+    import zipfile
+
+    bw = load_module("scripts/build_wheels.py")
+    monkeypatch.setattr(bw, "STAGED", [])
+    out = tmp_path / "out"
+
+    def run(cmd, cwd=None):           # "build" wheels without the Help inside
+        if cmd[:2] == ["uv", "build"]:
+            name = "lbd" if cmd[3] == "lbd" else "lbd_viewer"
+            with zipfile.ZipFile(out / f"{name}-{current}-py3-none-any.whl", "w") as z:
+                z.writestr("lbd_viewer/static/index.html", "ui")
+
+    monkeypatch.setattr(bw, "run", run)
+    with pytest.raises(SystemExit, match="lacks.*docs/index.html"):
+        bw.build(out, [])

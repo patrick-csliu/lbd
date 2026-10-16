@@ -5,7 +5,8 @@
 #                  the draft is titled "trial build": look at it, then delete it)
 #
 # Jobs: check (tag = version, release notes) -> tests (the Tests workflow) + MATLAB toolbox
-#       -> Windows installer and Linux package, each smoke-tested -> draft release with the files.
+#       -> Windows installer, Linux package, Python wheels (installed with pipx on macOS), each
+#       smoke-tested -> draft release with the files.
 # See docs/developers/releases.md.
 name: Release
 
@@ -187,9 +188,58 @@ jobs:
           path: ${{ runner.temp }}/build/lbd-viewer-${{ needs.check.outputs.version }}-linux-*.tar.gz
           if-no-files-found: error
 
+  wheels:
+    name: Python wheels (lbd, LBD Viewer)
+    needs: [check, tests, matlab-toolbox]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: viewer/web/package-lock.json
+      - uses: actions/download-artifact@v8
+        with:
+          name: mltbx
+          path: mltbx
+      - name: Build
+        run: |
+          uv sync --all-packages --group docs
+          uv run python scripts/build_wheels.py --out "$RUNNER_TEMP/wheels" --prebuilt "matlab=$GITHUB_WORKSPACE/mltbx"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheels
+          path: ${{ runner.temp }}/wheels/*.whl
+          if-no-files-found: error
+
+  macos:
+    name: macOS install (pipx)
+    needs: [check, wheels]
+    runs-on: macos-latest
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: actions/download-artifact@v8
+        with:
+          name: wheels
+          path: wheels
+      # Exactly the commands of docs/getting-started/install.md ("LBD Viewer on macOS").
+      - name: Install with pipx, as a Mac user would
+        working-directory: wheels
+        run: |
+          command -v pipx || brew install pipx
+          pipx install "./lbd_viewer-$VERSION-py3-none-any.whl" --preinstall "./lbd-$VERSION-py3-none-any.whl"
+          pipx ensurepath
+      - name: Smoke test the installed viewer
+        run: uv run --no-project python scripts/smoke_test_app.py --release --exe "$(command -v lbd-view || echo "$HOME/.local/bin/lbd-view")"
+
   publish:
     name: Draft release
-    needs: [check, windows, linux]
+    needs: [check, windows, linux, wheels, macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -216,5 +266,5 @@ jobs:
           fi
           gh release create "$tag" --repo "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" \
             --title "$title" --notes-file artifacts/notes/notes.md \
-            artifacts/windows/*.exe artifacts/linux/*.tar.gz artifacts/mltbx/LBD.mltbx
+            artifacts/windows/*.exe artifacts/linux/*.tar.gz artifacts/mltbx/LBD.mltbx artifacts/wheels/*.whl
           echo "Draft created: https://github.com/$GITHUB_REPOSITORY/releases (check it, then Publish)" >> "$GITHUB_STEP_SUMMARY"

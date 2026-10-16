@@ -2,8 +2,8 @@
 
 There are two separate parts:
 
-1. **LBD Viewer**, the app that lists and plots files. It brings its own Python and needs no
-   other software.
+1. **LBD Viewer**, the app that lists and plots files. On Windows and Linux it brings its own
+   Python and needs no other software; on macOS it's installed as a Python package.
 2. **Language modules** for Python, MATLAB and Julia, which let your own programs write and
    read `.lbd` files. You install these yourself, into the environments you use.
 
@@ -74,6 +74,36 @@ Requirements: a 64-bit Linux desktop with a web browser. The file association an
 use the standard freedesktop tools (`xdg-mime`, `update-mime-database`), which desktop
 distributions include.
 
+## LBD Viewer on macOS
+
+There is no Mac app yet. On a Mac, install the viewer as a Python package with
+[pipx](https://pipx.pypa.io/), which puts it in its own environment and adds the `lbd-view`
+command. This works on Windows and Linux too, for anyone who prefers Python packages to the
+installer.
+
+Requirements: Python 3.10 or newer (from [python.org](https://www.python.org/downloads/) or
+Homebrew) and pipx (`brew install pipx`, or `python3 -m pip install --user pipx`, then
+`pipx ensurepath`).
+
+1. From the release on GitHub, download both wheels into one folder:
+   `lbd_viewer-<version>-py3-none-any.whl` and `lbd-<version>-py3-none-any.whl`.
+2. In Terminal, in that folder:
+   ```bash
+   pipx install ./lbd_viewer-<version>-py3-none-any.whl --preinstall ./lbd-<version>-py3-none-any.whl
+   ```
+   The `lbd` module comes from the second file, not from the internet (the viewer needs exactly
+   this version).
+3. Start it with `lbd-view`, or `lbd-view ~/Data/measurements` to add a folder. It opens in your
+   browser, with Help and the Language modules page like the installed app.
+
+| Task | Command |
+|---|---|
+| Upgrade | the same `pipx install` command with the new files, plus `--force` |
+| Uninstall | `pipx uninstall lbd-viewer`. Your presets and settings in `~/Library/Application Support/lbd` are kept; delete that folder to remove them too. |
+
+Not yet on macOS: an app icon in Applications and opening `.lbd` files by double-clicking.
+macOS doesn't ask for permission to run it, because it isn't an app downloaded from the internet.
+
 ## Language modules
 
 The easiest way is the viewer's **Language modules** page. It shows these commands with the
@@ -83,6 +113,7 @@ uninstall command.
 `<sdk>` below means the `sdk` folder of the installed viewer:
 - Windows: `%LOCALAPPDATA%\Programs\LBDViewer\sdk`
 - Linux: `~/.local/share/lbd-viewer/sdk`
+- macOS (pipx): inside the installed package; the Language modules page shows the path
 
 ### Python
 

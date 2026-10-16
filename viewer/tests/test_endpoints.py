@@ -82,7 +82,9 @@ def test_list_and_search_errors(client, data_dir):
     assert body["truncated"] is False and body["errors"] == [] and len(body["results"]) == 3
 
 
-def test_pick_folder_without_tkinter(client, monkeypatch):
+@pytest.fixture()
+def no_tkinter(monkeypatch):
+    """The tkinter dialogs (Windows, Linux) on a system without tkinter."""
     import builtins
 
     real_import = builtins.__import__
@@ -92,7 +94,11 @@ def test_pick_folder_without_tkinter(client, monkeypatch):
             raise ImportError("no tk")
         return real_import(name, *a, **k)
 
+    monkeypatch.setattr(server, "_dialog_backend", lambda: "tk")
     monkeypatch.setattr(builtins, "__import__", no_tk)
+
+
+def test_pick_folder_without_tkinter(client, no_tkinter):
     assert client.post("/api/pick-folder").status_code == 501
 
 
@@ -411,19 +417,73 @@ def test_export_save_render_errors_come_before_the_dialog(client, data_dir, monk
     assert r.status_code == 400
 
 
-def test_export_save_without_a_dialog(client, data_dir, monkeypatch):
-    import builtins
-
-    real_import = builtins.__import__
-
-    def no_tk(name, *a, **k):
-        if name == "tkinter":
-            raise ImportError("no tk")
-        return real_import(name, *a, **k)
-
-    monkeypatch.setattr(builtins, "__import__", no_tk)
+def test_export_save_without_a_dialog(client, data_dir, no_tkinter):
     r = client.post("/api/export/save", json={"path": str(data_dir / "curve.lbd"), "format": "pdf"})
     assert r.status_code == 501 and "download folder" in r.json()["detail"]
+
+
+# ---- macOS dialogs (AppleScript; tested with a stand-in for osascript) -------------------------
+
+
+@pytest.fixture()
+def osascript(monkeypatch):
+    """Use the macOS dialogs; `osascript.answer` is what the stand-in returns, `.scripts` what it got."""
+
+    class Fake:
+        answer = (0, "", "")
+        scripts = []
+
+        def __call__(self, cmd, **kwargs):
+            assert cmd[:2] == ["osascript", "-e"]
+            self.scripts.append(cmd[2])
+            code, out, err = self.answer
+            return type("Result", (), {"returncode": code, "stdout": out, "stderr": err})()
+
+    fake = Fake()
+    monkeypatch.setattr(server, "_dialog_backend", lambda: "osascript")
+    monkeypatch.setattr(server.subprocess, "run", fake)
+    return fake
+
+
+def test_mac_folder_dialog(client, osascript):
+    osascript.answer = (0, "/Users/me/data/\n", "")
+    assert client.post("/api/pick-folder").json() == {"path": "/Users/me/data"}
+    assert "choose folder" in osascript.scripts[-1]
+
+
+def test_mac_save_dialog_adds_the_extension(client, data_dir, tmp_path, osascript):
+    osascript.answer = (0, f"{tmp_path / 'figure'}\n", "")
+    r = client.post("/api/export/save", json={"path": str(data_dir / "curve.lbd"), "format": "pdf"})
+    assert r.json()["path"] == str(tmp_path / "figure.pdf")
+    assert (tmp_path / "figure.pdf").read_bytes()[:4] == b"%PDF"
+    script = osascript.scripts[-1]
+    # starts in the data file's folder, with the default name filled in
+    assert 'default name "curve_a.pdf"' in script
+    assert f"POSIX file {server._applescript_string(str(data_dir))}" in script
+
+
+def test_mac_dialog_cancel_and_failure(client, data_dir, osascript):
+    osascript.answer = (1, "", "execution error: User canceled. (-128)")
+    assert client.post("/api/pick-folder").json() == {"path": None}
+    osascript.answer = (1, "", "execution error: something broke (-1700)")
+    r = client.post("/api/export/save", json={"path": str(data_dir / "curve.lbd"), "format": "png"})
+    assert r.status_code == 501 and "something broke" in r.json()["detail"] and "download folder" in r.json()["detail"]
+
+
+def test_mac_dialog_without_osascript(client, monkeypatch):
+    def missing(cmd, **kwargs):
+        raise FileNotFoundError(cmd[0])
+
+    monkeypatch.setattr(server, "_dialog_backend", lambda: "osascript")
+    monkeypatch.setattr(server.subprocess, "run", missing)
+    r = client.post("/api/pick-folder")
+    assert r.status_code == 501 and "osascript" in r.json()["detail"]
+    assert server._DIALOG_LOCK.acquire(blocking=False)   # released again after the failure
+    server._DIALOG_LOCK.release()
+
+
+def test_applescript_strings_are_escaped():
+    assert server._applescript_string(r'a "b" \c') == r'"a \"b\" \\c"'
 
 
 def test_file_summary_has_the_matplotlib_version(client, data_dir):

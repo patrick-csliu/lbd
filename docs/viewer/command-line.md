@@ -17,17 +17,17 @@ lbd-view [paths...] [--port N] [--no-browser] [--idle-exit SECONDS] [--new] [--d
 | `--version` | Print the version. |
 
 On Windows, the installed program is `lbd-view.exe` in the install folder. On Linux,
-`install.sh` puts `lbd-view` in `~/.local/bin`.
+`install.sh` puts `lbd-view` in `~/.local/bin`. On macOS, pipx puts it there too.
 
 ## Where things are stored
 
-| What | Windows | Linux |
-|---|---|---|
-| Settings: folder list, default preset (`settings.json`) | `%APPDATA%\lbd\` | `~/.config/lbd/` |
-| Style presets (`styles/<name>.json`) | `%APPDATA%\lbd\styles\` | `~/.config/lbd/styles/` |
-| Log of the installed app (`viewer.log`) | `%LOCALAPPDATA%\lbd\Logs\` | none; messages go to the terminal or the desktop session log |
-| Running-viewer lock (`server.json`) | `%LOCALAPPDATA%\Temp\lbd\` | `$XDG_RUNTIME_DIR/lbd/` |
-| Which folders are expanded in the folder panel | the browser's site storage | the browser's site storage |
+| What | Windows | Linux | macOS |
+|---|---|---|---|
+| Settings: folder list, default preset (`settings.json`) | `%APPDATA%\lbd\` | `~/.config/lbd/` | `~/Library/Application Support/lbd/` |
+| Style presets (`styles/<name>.lbd.json`) | `%APPDATA%\lbd\styles\` | `~/.config/lbd/styles/` | `~/Library/Application Support/lbd/styles/` |
+| Log of the installed app (`viewer.log`) | `%LOCALAPPDATA%\lbd\Logs\` | none; messages go to the terminal or the desktop session log | none; messages go to the terminal |
+| Running-viewer lock (`server.json`) | `%LOCALAPPDATA%\Temp\lbd\` | `$XDG_RUNTIME_DIR/lbd/` | `~/Library/Caches/TemporaryItems/lbd/` |
+| Which folders are expanded in the folder panel | the browser's site storage | the browser's site storage | the browser's site storage |
 
 Uninstalling the viewer keeps settings and presets. Delete the settings folder yourself to
 remove them. Set the environment variable `LBD_CONFIG_DIR` to use a different settings folder.

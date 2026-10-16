@@ -24,14 +24,18 @@ REPO_ROOT = Path(__file__).resolve().parents[3]  # viewer/src/lbd_viewer -> repo
 _PLACEHOLDER_RE = re.compile(r"\{(path|match|version)\}")
 
 
+PACKAGE_DIR = Path(__file__).resolve().parent
+
+
 def sdk_dir() -> Optional[Path]:
-    """The bundled SDK folder of an installed app, or None when running from source."""
+    """The bundled SDK folder of an installed app or wheel, or None when running from source."""
     candidates = []
     env = os.environ.get("LBD_SDK_DIR")
     if env:
         candidates.append(Path(env))
     if getattr(sys, "frozen", False):
         candidates.append(Path(sys.executable).resolve().parent / "sdk")
+    candidates.append(PACKAGE_DIR / "sdk")   # the release wheel (scripts/build_wheels.py)
     for c in candidates:
         if c.is_dir():
             return c
