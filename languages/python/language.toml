@@ -1,0 +1,58 @@
+# LBD language manifest. Read by the test runners, the version check, the SDK packaging and
+# the viewer's Language modules page. Reference: languages/README.md
+
+id = "python"
+name = "Python"
+order = 1
+requirements = "Python 3.9 or newer. Installs numpy and h5py if missing."
+example = "example.py"
+check = 'python -c "import lbd; print(lbd.version())"'
+notes = [
+    "Install into every Python environment that should read or write .lbd files.",
+    "With [plot] you also get lbd.plot: make figures in Python with the same styles as the viewer (presets and .lbd.json files), including your own matplotlib figures. It adds matplotlib and pydantic.",
+    "The viewer app has its own Python and never uses or changes yours.",
+]
+
+[[version]]
+file = "pyproject.toml"
+pattern = '^version\s*=\s*"([^"]+)"'
+
+[[version]]
+file = "src/lbd/io.py"
+pattern = '^__version__\s*=\s*"([^"]+)"'
+
+[format_version]
+file = "src/lbd/io.py"
+pattern = '^FORMAT_VERSION\s*=\s*"([^"]+)"'
+
+[test]
+command = ["{python}", "-m", "pytest", "-q", "tests"]
+
+[crosslang]
+write = ["{python}", "crosslang/write.py", "{out}"]
+check = ["{python}", "crosslang/check.py", "{root}"]
+
+[sdk]
+requires = "uv"
+build = ["uv", "build", "--package", "lbd", "--wheel", "--out-dir", "{dest}"]
+
+[[install]]
+where = "sdk"
+if_exists = "lbd-*.whl"
+steps = [
+    { label = "In a terminal, inside the environment you use (venv / conda env). With plotting (lbd.plot, recommended):", code = 'pip install "{path}/{match}[plot]"' },
+    { label = "Or only reading and writing files (numpy + h5py):", code = 'pip install "{path}/{match}"' },
+    { label = "In a Jupyter notebook cell:", code = '%pip install "{path}/{match}[plot]"' },
+]
+upgrade = 'pip install --upgrade "{path}/{match}[plot]"'
+uninstall = "pip uninstall lbd"
+
+[[install]]
+where = "source"
+steps = [
+    { label = "In a terminal, inside the environment you use (venv / conda env). With plotting (lbd.plot, recommended):", code = 'pip install "{path}[plot]"' },
+    { label = "Or only reading and writing files (numpy + h5py):", code = 'pip install "{path}"' },
+    { label = "In a Jupyter notebook cell:", code = '%pip install "{path}[plot]"' },
+]
+upgrade = 'pip install --upgrade "{path}[plot]"'
+uninstall = "pip uninstall lbd"

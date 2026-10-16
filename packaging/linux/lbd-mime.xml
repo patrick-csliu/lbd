@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-lbd">
+    <comment>LBD data file</comment>
+    <sub-class-of type="application/x-hdf5"/>
+    <icon name="application-x-lbd"/>
+    <!-- .lbd files are HDF5 inside; the extension decides, not the HDF5 magic bytes. -->
+    <glob pattern="*.lbd" weight="90"/>
+    <glob pattern="*.LBD" weight="90"/>
+  </mime-type>
+</mime-info>

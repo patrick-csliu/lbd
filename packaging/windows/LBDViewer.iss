@@ -1,0 +1,141 @@
+; Inno Setup script for LBD Viewer (per-user install, no admin rights needed).
+; Built by scripts/build_windows.ps1:
+;   ISCC /DAppVersion=0.1.0 /DDistDir=<out>\dist\LBDViewer /O<out> packaging\windows\LBDViewer.iss
+
+#ifndef AppVersion
+  #error Pass /DAppVersion=x.y.z
+#endif
+#ifndef DistDir
+  #error Pass /DDistDir=<folder containing lbd-view.exe>
+#endif
+
+[Setup]
+; Fixed AppId: Windows uses it to recognise upgrades. Never change it.
+AppId={{99E94BF7-613F-40EE-9E44-A0E148634E8E}
+AppName=LBD Viewer
+AppVersion={#AppVersion}
+AppPublisher=Patrick Liu
+DefaultDirName={localappdata}\Programs\LBDViewer
+DisableDirPage=auto
+; The default folder is ours: don't ask "folder exists, install anyway?" when it is left over
+; (e.g. an empty folder after an uninstall while the viewer was running).
+DirExistsWarning=no
+DisableProgramGroupPage=yes
+PrivilegesRequired=lowest
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
+OutputBaseFilename=LBDViewer-Setup-{#AppVersion}
+SetupIconFile=..\icons\lbd.ico
+UninstallDisplayIcon={app}\lbd-view.exe
+UninstallDisplayName=LBD Viewer
+ChangesAssociations=yes
+; The viewer has no window, so Windows' Restart Manager can't close it. Setup and the
+; uninstaller stop it themselves (StopViewer below), and never restart it.
+CloseApplications=no
+RestartApplications=no
+Compression=lzma2/max
+SolidCompression=yes
+WizardStyle=modern
+
+[Files]
+; Replace the whole app folder on upgrade so no stale files remain.
+Source: "{#DistDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[InstallDelete]
+Type: filesandordirs; Name: "{app}\_internal"
+Type: filesandordirs; Name: "{app}\sdk"
+Type: filesandordirs; Name: "{app}\docs"
+
+[UninstallDelete]
+; Remove the whole folder, also files made after installing, so no empty folder is left behind.
+Type: filesandordirs; Name: "{app}"
+
+[Icons]
+Name: "{autoprograms}\LBD Viewer"; Filename: "{app}\lbd-view.exe"; Comment: "View LBD data files"
+
+[Registry]
+; .lbd -> LBDViewer.lbd (per user: HKA resolves to HKCU for a non-admin install)
+Root: HKA; Subkey: "Software\Classes\.lbd"; ValueType: string; ValueName: ""; ValueData: "LBDViewer.lbd"; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.lbd"; ValueType: string; ValueName: "Content Type"; ValueData: "application/x-lbd"; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.lbd\OpenWithProgids"; ValueType: string; ValueName: "LBDViewer.lbd"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\LBDViewer.lbd"; ValueType: string; ValueName: ""; ValueData: "LBD data file"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\LBDViewer.lbd\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\lbd-view.exe,0"
+Root: HKA; Subkey: "Software\Classes\LBDViewer.lbd\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\lbd-view.exe"" ""%1"""
+Root: HKA; Subkey: "Software\Classes\Applications\lbd-view.exe\SupportedTypes"; ValueType: string; ValueName: ".lbd"; ValueData: ""; Flags: uninsdeletekey
+
+[Run]
+Filename: "{app}\lbd-view.exe"; Description: "Open LBD Viewer now"; Flags: nowait postinstall skipifsilent
+
+[Messages]
+FinishedLabel=LBD Viewer is installed. Double-click any .lbd file to open it, or start LBD Viewer from the Start menu.%n%nTo write .lbd files from Python, MATLAB or Julia, open LBD Viewer and go to "Language modules".
+
+[Code]
+// Stop a running viewer from this installation (only lbd-view.exe processes whose program file
+// is inside the install folder; other copies, e.g. a development one, are left alone).
+procedure StopViewer(Dir: String);
+var
+  ResultCode: Integer;
+begin
+  Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -NonInteractive -Command "Get-Process lbd-view -ErrorAction SilentlyContinue | ' +
+    'Where-Object { $_.Path -like ''' + Dir + '\*'' } | Stop-Process -Force"',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Sleep(500);  // let Windows release the files
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  StopViewer(ExpandConstant('{app}'));
+  Result := '';
+end;
+
+function InitializeUninstall(): Boolean;
+begin
+  StopViewer(ExpandConstant('{app}'));
+  Result := True;
+end;
+
+// The default style uses Arial. Windows always has it, unless it was removed by hand.
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if (CurStep = ssPostInstall) and not WizardSilent and not FileExists(ExpandConstant('{fonts}\arial.ttf')) then
+    MsgBox('LBD''s default style uses the font Arial, which is not installed on this computer.' + #13#10#13#10 +
+           'Figures in the default style need it: reinstall Arial (Windows Settings > Personalization > Fonts), ' +
+           'or choose another font for the default style on LBD Viewer''s Styles page.',
+           mbInformation, MB_OK);
+end;
+
+// Move a folder to the Recycle Bin (never delete it permanently), so a wrong answer can be undone.
+procedure RecycleFolder(Dir: String);
+var
+  ResultCode: Integer;
+begin
+  if not DirExists(Dir) then
+    exit;
+  StringChangeEx(Dir, '''', '''''', True);  // quote for PowerShell
+  Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -NonInteractive -Command "Add-Type -AssemblyName Microsoft.VisualBasic; ' +
+    '[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory(''' + Dir + ''', ''OnlyErrorDialogs'', ''SendToRecycleBin'')"',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+// Also remove the presets and settings (folder list)? Asked when the uninstall starts, before
+// anything is removed, so the question is in front of the uninstall window. No is the default,
+// and a silent uninstall always keeps them (they are shared with the Python module lbd.plot).
+var
+  RemoveSettings: Boolean;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if (CurUninstallStep = usUninstall) and not UninstallSilent then
+    RemoveSettings := MsgBox('Also remove your LBD presets and settings (the list of folders)?' + #13#10 +
+                             '(' + ExpandConstant('{userappdata}\lbd') + ')' + #13#10#13#10 +
+                             'Yes: they are moved to the Recycle Bin.' + #13#10 +
+                             'No: they are kept for a later installation.',
+                             mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
+  if (CurUninstallStep = usPostUninstall) and RemoveSettings then
+  begin
+    RecycleFolder(ExpandConstant('{userappdata}\lbd'));    // presets, settings.json
+    RecycleFolder(ExpandConstant('{localappdata}\lbd'));   // logs
+  end;
+end;

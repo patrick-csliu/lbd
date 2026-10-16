@@ -1,0 +1,56 @@
+# Template for a new language. Copy this folder to languages/<id>/ and fill it in.
+# Folders whose name starts with "_" (like this one) are ignored by all tools.
+# Full reference: languages/README.md
+
+id = "mylang"              # must equal the folder name
+name = "MyLang"            # shown on the viewer's Language modules page
+order = 10                 # position of the tab (python = 1, matlab = 2, julia = 3)
+requirements = "MyLang 1.0 or newer. Installs the HDF5 library if missing."
+example = "example.txt"    # file shown on the Language modules page ("3. Try it")
+check = "lbd_version()"    # command users run to check the install
+notes = []                 # extra remarks shown on the page
+
+# Every place the release version is written. check_versions.py requires them all to match.
+[[version]]
+file = "VERSION_FILE"
+pattern = 'version\s*=\s*"([^"]+)"'
+
+# Where the module states which LBD format version it implements (must equal the spec).
+[format_version]
+file = "VERSION_FILE"
+pattern = 'format_version\s*=\s*"([^"]+)"'
+
+# Unit tests, run with this folder as working directory.
+# Placeholders: {python} {repo} {lang_dir}; the same values are in env vars LBD_PYTHON,
+# LBD_REPO, LBD_LANG_DIR. `requires`: program that must be on PATH, else the suite is skipped.
+[test]
+requires = "mylang"
+command = ["mylang", "run-tests"]
+
+# Cross-language round trip (see tests/crosslang/README.md for the fixture).
+#   write: create {out}/fixture.lbd                         (env LBD_OUT)
+#   check: read every {root}/*/fixture.lbd, print one line per file, exit non-zero on mismatch (env LBD_ROOT)
+[crosslang]
+requires = "mylang"
+write = ["mylang", "crosslang/write.ml", "{out}"]
+check = ["mylang", "crosslang/check.ml", "{root}"]
+
+# What goes into the installed viewer's sdk/<id>/ folder (language.toml, the example file and
+# README.md are always copied).
+#   build          writes into {dest} (env LBD_DEST); {version} = release version
+#   fallback_copy  copied instead when `requires` is missing or --skip <id> is used
+#   copy           always copied
+[sdk]
+copy = ["src", "README.md"]
+
+# Install instructions on the viewer's Language modules page. The first entry whose `where`
+# matches ("sdk" = installed viewer, "source" = running from the repository, "any") and whose
+# `if_exists` glob matches a file in the folder is shown.
+# Placeholders: {path} = the language folder, {match} = file matched by if_exists, {version}.
+[[install]]
+where = "any"
+steps = [
+    { label = "Run once in MyLang:", code = 'install_package("{path}")' },
+]
+upgrade = "Install the new version the same way."
+uninstall = 'remove_package("lbd")'

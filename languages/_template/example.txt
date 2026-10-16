@@ -1,0 +1,6 @@
+// Replace this file with a short example in your language that:
+//  1. builds a dataset with two axes (power in dBm, freq in Hz) and a complex 2-D value S21,
+//  2. adds meta T_mK = 12 and a nested group vna (ifbw_Hz = 1000, averages = 4),
+//  3. saves it as example.lbd,
+//  4. loads it back and prints the shape of S21 (11 x 401).
+// See languages/python/example.py for the reference version.

@@ -1,0 +1,51 @@
+# LBD language manifest. Reference: languages/README.md
+
+id = "matlab"
+name = "MATLAB"
+order = 2
+requirements = "MATLAB R2021b or newer. No extra toolboxes."
+example = "example.m"
+check = "lbd.version()"
+notes = ["Integers written by Python or Julia (e.g. averages = 4) are read as int64."]
+
+[[version]]
+file = "+lbd/version.m"
+pattern = "'package',\\s*\"([^\"]+)\""
+
+[format_version]
+file = "+lbd/version.m"
+pattern = "'lbd_version',\\s*\"([^\"]+)\""
+
+# MATLAB reads paths from environment variables (LBD_*), so no path is quoted inside MATLAB code.
+[test]
+requires = "matlab"
+command = ["matlab", "-batch", "r = runtests('tests'); assert(~any([r.Failed]))"]
+
+[crosslang]
+requires = "matlab"
+write = ["matlab", "-batch", "addpath(getenv('LBD_LANG_DIR')); addpath(fullfile(getenv('LBD_LANG_DIR'), 'crosslang')); write_fixture(getenv('LBD_OUT'))"]
+check = ["matlab", "-batch", "addpath(getenv('LBD_LANG_DIR')); addpath(fullfile(getenv('LBD_LANG_DIR'), 'crosslang')); check_fixture(getenv('LBD_ROOT'))"]
+
+[sdk]
+requires = "matlab"
+build = ["matlab", "-batch", "addpath(getenv('LBD_LANG_DIR')); build_mltbx(getenv('LBD_LANG_DIR'), fullfile(getenv('LBD_DEST'), 'LBD.mltbx'), getenv('LBD_VERSION'))"]
+# Without MATLAB, ship the sources instead of the toolbox file.
+fallback_copy = ["+lbd"]
+
+[[install]]
+where = "sdk"
+if_exists = "LBD.mltbx"
+steps = [
+    { label = "Double-click LBD.mltbx in the folder, or run in MATLAB:", code = 'matlab.addons.toolbox.installToolbox("{path}/LBD.mltbx")' },
+]
+upgrade = "Install the LBD.mltbx of the new version; it replaces the old one."
+uninstall = """Use the Add-On Manager (Home > Add-Ons > Manage Add-Ons), or:
+t = matlab.addons.toolbox.installedToolboxes; matlab.addons.toolbox.uninstallToolbox(t(strcmp({t.Name}, "LBD")))"""
+
+[[install]]
+where = "any"
+steps = [
+    { label = "Add the folder to the MATLAB path (run once):", code = 'addpath("{path}"); savepath' },
+]
+upgrade = "The path points at the folder, so updating the folder updates the module."
+uninstall = 'rmpath("{path}"); savepath'

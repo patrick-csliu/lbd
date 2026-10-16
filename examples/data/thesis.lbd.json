@@ -1,0 +1,109 @@
+{
+  "lbd_style": 2,
+  "name": "thesis",
+  "description": "Example: thesis figures, serif text, 120 mm wide",
+  "figure": {
+    "width_mm": 120.0,
+    "height_mm": 80.0,
+    "dpi": 300,
+    "facecolor": "white",
+    "font": {
+      "family": "DejaVu Serif",
+      "size_pt": 10.0,
+      "math": "dejavuserif"
+    },
+    "axes": {
+      "facecolor": "white",
+      "frame": {
+        "linewidth_pt": 0.6,
+        "color": "black",
+        "top": true,
+        "right": true,
+        "bottom": true,
+        "left": true
+      },
+      "title": {
+        "size_pt": null,
+        "weight": "normal",
+        "pad_pt": 6.0
+      },
+      "axis": {
+        "label": {
+          "size_pt": null,
+          "pad_pt": 4.0,
+          "unit_format": "bracket",
+          "auto_prefix": true
+        },
+        "ticks": {
+          "direction": "in",
+          "length_pt": 3.5,
+          "width_pt": null,
+          "label_size_pt": null,
+          "mirror": true
+        },
+        "minor": {
+          "visible": true,
+          "length_pt": 2.0,
+          "width_pt": null
+        }
+      },
+      "xaxis": {},
+      "yaxis": {},
+      "grid": {
+        "visible": false,
+        "which": "major",
+        "linewidth_pt": null,
+        "color": "#b0b0b0",
+        "alpha": 0.5,
+        "linestyle": "-"
+      },
+      "legend": {
+        "visible": true,
+        "frame": false,
+        "location": "best",
+        "size_pt": null,
+        "max_entries": 10
+      },
+      "colors": [
+        "#0072B2",
+        "#D55E00",
+        "#009E73",
+        "#CC79A7",
+        "#E69F00",
+        "#56B4E9",
+        "#F0E442",
+        "#000000"
+      ],
+      "lines": {
+        "width_pt": 1.0,
+        "style": "-",
+        "marker": "",
+        "marker_size_pt": 3.0
+      },
+      "scatter": {
+        "marker": "o",
+        "size_pt": 3.0,
+        "alpha": 0.8,
+        "edgecolor": "none",
+        "edgewidth_pt": 0.0
+      },
+      "image": {
+        "cmap": "viridis",
+        "colorbar": {
+          "visible": true,
+          "size_pct": 15.0,
+          "pad_pct": 5.0
+        }
+      }
+    }
+  },
+  "quantities": {
+    "S21.db": {
+      "vmin": -15.0,
+      "vmax": 0.0,
+      "cmap": null,
+      "scale": "linear",
+      "prefix": null
+    }
+  }
+}

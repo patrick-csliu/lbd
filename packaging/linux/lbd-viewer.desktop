@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=LBD Viewer
+Comment=View and plot LBD lab data files
+Exec=@EXEC@ %f
+Icon=lbd-viewer
+MimeType=application/x-lbd;
+Categories=Science;Education;DataVisualization;
+Terminal=false
+StartupNotify=false

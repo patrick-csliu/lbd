@@ -1,0 +1,4 @@
+Resonator R7 power sweep
+values: ['S21']  axes: ['freq', 'power']
+VNA settings: {'averages': 4, 'ifbw_Hz': 1000.0, 'model': 'ZNB20', 'ports': array([1, 2])}
+S21 shape: (4, 441)

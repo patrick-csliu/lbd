@@ -1,0 +1,2 @@
+styles: ['default']
+stored: {'lbd_style': 2, 'description': 'Slides and talks: 120 × 80 mm, 14 pt text, 2 pt lines', 'figure': {'width_mm': 120.0, 'height_mm': 80.0, 'font': {'size_pt': 14.0}, 'axes': {'lines': {'width_pt': 2.0}}}}

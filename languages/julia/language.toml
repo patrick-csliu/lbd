@@ -1,0 +1,42 @@
+# LBD language manifest. Reference: languages/README.md
+
+id = "julia"
+name = "Julia"
+order = 3
+requirements = "Julia 1.9 or newer. Installs HDF5.jl and JSON3.jl if missing."
+example = "example.jl"
+check = "using LBD; LBD.version()"
+notes = ["Run the install once per Julia environment (project) that should use LBD."]
+
+[[version]]
+file = "Project.toml"
+pattern = '^version\s*=\s*"([^"]+)"'
+
+[[version]]
+file = "src/LBD.jl"
+pattern = '^const PACKAGE_VERSION\s*=\s*"([^"]+)"'
+
+[format_version]
+file = "src/LBD.jl"
+pattern = '^const FORMAT_VERSION\s*=\s*"([^"]+)"'
+
+[test]
+requires = "julia"
+command = ["julia", "--project=.", "--startup-file=no", "-e", "using Pkg; Pkg.instantiate(); Pkg.test()"]
+
+[crosslang]
+requires = "julia"
+write = ["julia", "--project=.", "--startup-file=no", "crosslang/write.jl", "{out}"]
+check = ["julia", "--project=.", "--startup-file=no", "crosslang/check.jl", "{root}"]
+
+[sdk]
+# Julia packages ship as source; nothing to build.
+copy = ["Project.toml", "src", "README.md"]
+
+[[install]]
+where = "any"
+steps = [
+    { label = "In the Julia REPL, in the environment you use:", code = 'using Pkg; Pkg.develop(path="{path}")' },
+]
+upgrade = "Pkg.develop links to the folder, so updating it updates the module. Restart Julia to load the new version."
+uninstall = 'using Pkg; Pkg.rm("LBD")'

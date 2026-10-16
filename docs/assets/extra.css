@@ -1,0 +1,2 @@
+/* Keep setting names on one line in the settings tables. */
+.md-typeset table:not([class]) td:first-child code { white-space: nowrap; }

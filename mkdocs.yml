@@ -1,0 +1,173 @@
+# LBD documentation site.
+#   uv sync --all-packages --group docs
+#   uv run mkdocs serve            live preview at http://127.0.0.1:8000
+#   uv run mkdocs build --strict   build into site/ (shipped inside LBD Viewer as its Help)
+site_name: LBD
+site_description: One data format and one viewer for consistent scientific figures
+copyright: LBD — Lab Data format and viewer
+docs_dir: docs
+site_dir: site
+use_directory_urls: false        # plain .html files: works from the viewer and from disk (file://)
+strict: true
+
+extra:
+  polyfills:                     # local copy: the offline plugin would load it from unpkg.com
+    - assets/vendor/iframe-worker-shim.js
+
+extra_css:
+  - assets/extra.css
+
+hooks:
+  - scripts/mkdocs_hooks.py
+
+theme:
+  name: material
+  logo: assets/lbd.svg
+  favicon: assets/lbd.svg
+  font: false                    # no Google Fonts: the site must work offline
+  icon:
+    repo: fontawesome/brands/git-alt
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.footer
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+    - content.tabs.link
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: blue
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: blue
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Light mode
+
+plugins:
+  - search
+  - offline                      # search also works when opened from disk
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          paths: [languages/python/src]
+          inventories: []
+          options:
+            docstring_style: numpy
+            docstring_section_style: table
+            show_source: false
+            show_root_heading: true
+            show_root_full_path: false
+            show_bases: false
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            members_order: source
+            separate_signature: true
+            show_signature_annotations: true
+            signature_crossrefs: true
+            merge_init_into_class: true
+            filters: ["!^_"]
+            heading_level: 2
+            extensions:
+              - griffe_pydantic:
+                  schema: false
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.emoji:              # icons are inlined as SVG: works offline
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true
+
+validation:
+  nav:
+    omitted_files: warn
+    not_found: warn
+  links:
+    not_found: warn
+    anchors: warn
+    unrecognized_links: warn
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - Install: getting-started/install.md
+      - Quick start: getting-started/quickstart.md
+      - Concepts: getting-started/concepts.md
+  - Examples:
+      - examples/index.md
+      # gallery:start  (written by scripts/make_gallery.py)
+      - "Curves": examples/curves_resonator.md
+      - "Heat map": examples/heatmap_single_shot.md
+      - "Scatter": examples/scatter_iq_readout.md
+      - "Two panels with a shared axis": examples/subplots_wigner.md
+      - "A box around a region, saved with the file": examples/box_power_sweep.md
+      - "Log scale": examples/logscale_noise.md
+      - "Quick look": examples/quick_look.md
+      - "Styles": examples/styles_and_presets.md
+      # gallery:end
+  - LBD Viewer:
+      - viewer/index.md
+      - Folders and files: viewer/folders-and-files.md
+      - Plotting: viewer/plotting.md
+      - Saving views and exporting: viewer/saving-and-exporting.md
+      - Images and style files: viewer/images-and-style-files.md
+      - Styles page: viewer/styles-page.md
+      - Language modules page: viewer/language-modules.md
+      - Command line and settings: viewer/command-line.md
+      - Troubleshooting: viewer/troubleshooting.md
+  - Styles and figures:
+      - styles/index.md
+      - Style settings: styles/settings.md
+      - Fixed scales and unit prefixes: styles/scales-and-units.md
+      - Style files and export: styles/files-and-export.md
+      - Plot settings: styles/plot-settings.md
+      - Consistent figures in your own code: styles/consistent-figures.md
+      - Style examples: styles/examples.md
+  - Python:
+      - Reading and writing files: python/files.md
+      - Plotting with lbd.plot: python/plotting.md
+      - Which function do I need?: python/which-function.md
+      - API reference:
+          - lbd: reference/python/lbd.md
+          - lbd.plot: reference/python/lbd-plot.md
+          - Style settings: reference/python/style.md
+  - MATLAB: matlab.md
+  - Julia: julia.md
+  - File format: format.md
+  - Developers:
+      - developers/index.md
+      - Testing: developers/testing.md
+      - HTTP API: developers/http-api.md
+      - Extending LBD: developers/extending.md
+      - Adding a language: developers/adding-a-language.md
+      - Building releases: developers/releases.md
+      - Changelog: changelog.md
