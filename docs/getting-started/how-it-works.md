@@ -4,10 +4,10 @@
 
 ## The problem
 
-Lab data comes from many programs: MATLAB scripts, Python notebooks, Julia simulations,
-instrument software. Each one plots in its own way, with its own sizes, fonts, colours and
-colour ranges. So figures from two programs, or from last year and this year, never quite
-match. Comparing them means plotting everything again by hand, and a thesis or paper with dozens
+Lab data comes from many programs, written in many programming languages: measurement
+scripts, notebooks, simulations, instrument software. Each one plots in its own way, with its
+own sizes, fonts, colours and colour ranges. So figures from two programs, or from last year and
+this year, never quite match. Comparing them means plotting everything again by hand, and a thesis or paper with dozens
 of figures takes a lot of fiddling to look consistent.
 
 ## The idea: keep the data and the look apart
@@ -21,8 +21,9 @@ LBD keeps two things separate, and puts them together only when a figure is draw
 - Metadata: anything else worth keeping, such as the temperature or instrument settings.
 - Optionally, a saved **view**: *what* to plot by default (which value, curves or heat map, in
   dB or not). It says nothing about how the figure looks.
-- Your program writes it with the small module for [Python, MATLAB or Julia](install.md). The
-  same file reads back the same in all three. Inside it is plain HDF5.
+- Your program writes it with the small LBD module for its programming language
+  ([supported languages](install.md#language-modules)). The same file reads back the same in
+  every language. Inside it is plain HDF5.
 
 **The style: how figures look.**
 

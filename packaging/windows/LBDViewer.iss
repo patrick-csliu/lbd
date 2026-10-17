@@ -79,7 +79,7 @@ Root: HKA; Subkey: "Software\Classes\Applications\lbd-view.exe\SupportedTypes"; 
 Filename: "{app}\lbd-view.exe"; Description: "Open LBD Viewer now"; Flags: nowait postinstall skipifsilent
 
 [Messages]
-FinishedLabel=LBD Viewer is installed. Double-click any .lbd file to open it, or start LBD Viewer from its shortcut.%n%nTo write .lbd files from Python, MATLAB or Julia, open LBD Viewer and go to "Language modules".
+FinishedLabel=LBD Viewer is installed. Double-click any .lbd file to open it, or start LBD Viewer from its shortcut.%n%nTo write .lbd files from your own programs, open LBD Viewer and go to "Language modules".
 
 [Code]
 // Stop a running viewer from this installation (only lbd-view.exe processes whose program file

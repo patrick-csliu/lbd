@@ -1,7 +1,7 @@
 # lbd
 
 Read and write **LBD** (`.lbd`) lab data files from Python. The same files read and write
-identically in MATLAB and Julia, and open in LBD Viewer.
+identically in every language LBD supports, and open in LBD Viewer.
 
 ```python
 import numpy as np

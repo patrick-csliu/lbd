@@ -64,6 +64,17 @@ Folders whose names start with `_` (like `languages/_template/`) are ignored.
    ```
 8. **Document the API** in `docs/<id>.md`, following the MATLAB and Julia pages. Add it to
    the navigation in `mkdocs.yml`.
+9. **Add it to the lists of supported languages.** General text (the README's introduction, the
+   home page, How LBD works, the Quick start, the viewer pages, the format specification)
+   never names the languages: it says "every supported language" and links to the list. So
+   only these places name them:
+    - `docs/getting-started/install.md`: the sentence listing the modules, and a section with
+      the install steps;
+    - `README.md`: the *Language modules* feature line, the install table and *Requirements*;
+    - `docs/index.md`: a link in the *Other languages* card;
+    - the Quick start and other pages with code tabs, if you add a tab for it.
+
+    The viewer's Language modules page needs nothing: it is built from `language.toml`.
 
 ## `language.toml` reference
 

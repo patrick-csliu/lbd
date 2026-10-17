@@ -9,7 +9,7 @@ Nothing is uploaded anywhere.
 ![LBD Viewer with a data file open: numbered parts](img/overview.png)
 
 1. **Pages of the viewer:** **Data** (your files and plots), **Styles** (how figures look) and
-   **Language modules** (installing the Python, MATLAB and Julia modules). See
+   **Language modules** (installing the module for each programming language you use). See
    [The viewer's pages](#the-viewers-pages) below.
 2. **Page number:** this browser tab's number. You can open the viewer in several browser tabs.
    Each is a numbered *page*, and you can move open files between them. See
@@ -68,7 +68,7 @@ the next start:
 |---|---|
 | **Data** | The folder panel and the open files: [Folders and files](folders-and-files.md), [Plotting](plotting.md), [Saving views and exporting](saving-and-exporting.md). |
 | **Styles** | Create and edit style presets, and choose the default one: [Styles page](styles-page.md). |
-| **Language modules** | How to install the Python, MATLAB and Julia modules on this computer: [Language modules page](language-modules.md). |
+| **Language modules** | How to install the module for each programming language on this computer: [Language modules page](language-modules.md). |
 | **Help** | Opens this documentation in a new tab. |
 
 Small **?** buttons next to the plot controls, on the Styles page and on the Language modules

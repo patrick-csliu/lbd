@@ -8,7 +8,8 @@ hide:
 
 **One data format and one viewer for consistent scientific figures.**
 
-Save measurements from Python, MATLAB or Julia as `.lbd` files. Look at any of them by
+Save measurements from your own programs, in any supported programming language, as `.lbd`
+files. Look at any of them by
 double-clicking, and get figures that look the same for every dataset, every program and every
 year: the same size, fonts, line widths, colours and colour scales.
 
@@ -59,14 +60,15 @@ and LBD puts them together when it draws. Keep one style, and every figure match
     [Plotting](python/plotting.md) ·
     [API reference](reference/python/lbd.md)
 
--   :material-math-integral-box:{ .lg .middle } **MATLAB and Julia**
+-   :material-math-integral-box:{ .lg .middle } **Other languages**
 
     ---
 
-    The same files, with the same dimension order, from MATLAB and Julia.
+    The same files, with the same dimension order, in every supported language.
 
     [:octicons-arrow-right-24: MATLAB](matlab.md) ·
-    [Julia](julia.md)
+    [Julia](julia.md) ·
+    [Adding a language](developers/adding-a-language.md)
 
 -   :material-file-tree:{ .lg .middle } **File format**
 

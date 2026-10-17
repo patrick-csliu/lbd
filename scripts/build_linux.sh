@@ -62,7 +62,7 @@ Uninstall:
     ./uninstall.sh
 
 After installing, open "LBD Viewer" from the applications menu, run lbd-view, or
-double-click an .lbd file. The language modules (Python, MATLAB, Julia, ...) are in
+double-click an .lbd file. The language modules (one per programming language) are in
 ~/.local/share/lbd-viewer/sdk; see "Language modules" in the viewer.
 EOF
 tar -C "$OUT" -czf "$OUT/$NAME.tar.gz" "$NAME"

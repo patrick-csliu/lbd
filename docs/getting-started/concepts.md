@@ -25,9 +25,9 @@ file, all using the same `power` axis.
 
 ## Dimension order is the same in every language
 
-Python stores arrays row by row, while MATLAB and Julia store them column by column. LBD hides
-this difference: **the same file gives the same array shape and the same indexing in all three
-languages**.
+Some languages store arrays row by row (Python/NumPy, C), others column by column (MATLAB,
+Julia, Fortran, R). LBD hides this difference: **the same file gives the same array shape and
+the same indexing in every language**.
 
 For a value saved with `axes = ["power", "freq"]`, 11 powers and 401 frequencies:
 
@@ -82,7 +82,7 @@ Axis and value names must:
 - contain only letters, digits and `_`,
 - be at most 63 characters long.
 
-These rules make every name a valid identifier in Python, MATLAB and Julia, for example
+These rules make every name a valid identifier in common programming languages, for example
 `d.Values.S21` in MATLAB. Names are case-sensitive, and an axis and a value cannot share a name.
 
 The display text belongs in the **label** (`"Frequency"`, `"|S21|"`, `"P(1), amp 0.2"`), which

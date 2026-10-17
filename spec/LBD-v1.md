@@ -1,6 +1,6 @@
 # LBD file format — version 1.0
 
-LBD ("Lab Data", extension `.lbd`) is a file format for measurement and simulation data that can be written and read identically from Python, MATLAB and Julia, and viewed with the LBD viewer.
+LBD ("Lab Data", extension `.lbd`) is a file format for measurement and simulation data that can be written and read identically from any programming language, and viewed with the LBD viewer. Any language with HDF5 support can implement it; this repository provides implementations for Python, MATLAB and Julia.
 
 An `.lbd` file **is a plain HDF5 file**. Every HDF5 tool (HDFView, `h5dump`, h5py, MATLAB `h5info`, HDF5.jl) can open it. LBD only adds a fixed layout and a few conventions on top.
 
@@ -89,12 +89,12 @@ Any additional HDF5 content. LBD readers ignore it. Use it for data that does no
 
 ## 2. Dimension order
 
-HDF5 stores N-D arrays in row-major (C) order. Python/NumPy is row-major, MATLAB and Julia are column-major. To make the same logical array look the same in all three languages:
+HDF5 stores N-D arrays in row-major (C) order. Some languages are row-major (Python/NumPy, C), others column-major (MATLAB, Julia, Fortran, R). To make the same logical array look the same in every language:
 
 - The **logical order** of dimensions is the order in which they appear in the HDF5 dataspace (= NumPy `shape`).
 - The `axes` attribute lists axes in logical order.
-- **Python** writes and reads arrays as-is.
-- **MATLAB and Julia** writers reverse the dimension order (`permutedims(A, ndims:-1:1)`) before writing, and their readers reverse it back after reading.
+- **Row-major** implementations (e.g. Python) write and read arrays as-is.
+- **Column-major** implementations (e.g. MATLAB, Julia) reverse the dimension order (`permutedims(A, ndims:-1:1)`) before writing, and reverse it back after reading.
 
 Result: a 2-D value with `axes = "power,freq"`, 11 powers and 401 frequencies, is `(11, 401)` in Python, `11×401` in MATLAB and `11×401` in Julia, with `A[i, j]` / `A(i, j)` meaning power *i*, frequency *j* everywhere.
 
@@ -121,7 +121,7 @@ Writers choose the type automatically from the input ("auto"): the input's numer
 
 ## 4. Names
 
-- Axis and value names must match `^[A-Za-z][A-Za-z0-9_]{0,62}$`, so they are valid identifiers in all three languages.
+- Axis and value names must match `^[A-Za-z][A-Za-z0-9_]{0,62}$`, so they are valid identifiers in common programming languages.
 - Names are case-sensitive.
 - The order of axes and values inside `/axes` and `/values` has no meaning. Most HDF5 libraries list them alphabetically. The dimension order of a value is defined only by its `axes` attribute.
 - An axis and a value must not share a name.

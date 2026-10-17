@@ -4,8 +4,10 @@ There are two separate parts:
 
 1. **LBD Viewer**, the app that lists and plots files. It brings its own Python and needs no
    other software.
-2. **Language modules** for Python, MATLAB and Julia, which let your own programs write and
-   read `.lbd` files. You install these yourself, into the environments you use.
+2. **Language modules**, one per programming language, which let your own programs write and
+   read `.lbd` files. You install these yourself, into the environments you use. LBD has
+   modules for **Python, MATLAB and Julia** ([below](#language-modules)); more can be added
+   ([Adding a language](../developers/adding-a-language.md)).
 
 ## LBD Viewer on Windows
 

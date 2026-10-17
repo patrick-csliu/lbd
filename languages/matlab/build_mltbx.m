@@ -9,7 +9,7 @@ opts.ToolboxName = "LBD";
 opts.ToolboxVersion = char(version);
 opts.Summary = "Read and write LBD (.lbd) lab data files";
 opts.Description = "LBD is an HDF5-based file format for measurement and simulation data that " + ...
-    "reads and writes identically from MATLAB, Python and Julia. Use lbd.Dataset, lbd.load and lbd.info.";
+    "reads and writes identically from every language LBD supports. Use lbd.Dataset, lbd.load and lbd.info.";
 opts.AuthorName = "Patrick Liu";
 opts.MinimumMatlabRelease = "R2021b";
 files = dir(fullfile(srcDir, '+lbd', '**', '*.m'));

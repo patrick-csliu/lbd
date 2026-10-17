@@ -104,7 +104,8 @@ that the pages match the scripts (`make_gallery.py --check`).
 
 ## Documentation examples
 
-`scripts/check_doc_examples.py` runs every Python, MATLAB and Julia code block in `README.md`,
+`scripts/check_doc_examples.py` runs every code block of each language (`python`, `matlab`,
+`julia`) in `README.md`,
 `languages/*/README.md` and `docs/`, including the ones inside content tabs. Each block runs in
 a fresh temporary folder after a short prelude (`scripts/doc_examples/`) that defines the sample
 data examples may use: `f`, `p`, `s21`, `t`, `v`, a dataset `d`, files such as `sweep.lbd`,

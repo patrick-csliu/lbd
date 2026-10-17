@@ -2,7 +2,7 @@
 
 In ten minutes you will:
 
-1. **write** a measurement to an `.lbd` file from Python, MATLAB or Julia;
+1. **write** a measurement to an `.lbd` file from your own program;
 2. **look at it** in LBD Viewer and change how it's plotted;
 3. **save** that view in the file and **export** a figure for a paper;
 4. make the **same figure from Python**.
@@ -73,7 +73,7 @@ Pick your language. The tabs on every page switch together.
     ```
 
 The axes are listed in the order of your array's dimensions, so the same file reads back with
-the same shape in all three languages. `meta` holds anything else worth keeping, here the
+the same shape in every language. `meta` holds anything else worth keeping, here the
 temperature. See [Concepts](concepts.md) for types, names and units.
 
 ## 2. Open it

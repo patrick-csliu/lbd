@@ -5,12 +5,14 @@
 
 **One data format for every program, and one viewer for every figure.**
 
-Lab data comes from many programs: MATLAB scripts, Python notebooks, Julia simulations,
-instrument software. Each plots with its own library, so figures from different programs, or
-from last year and this year, never look alike and are hard to compare. LBD fixes this:
+Lab data comes from many programs, written in many programming languages: measurement
+scripts, notebooks, simulations, instrument software. Each plots with its own library, so
+figures from different programs, or from last year and this year, never look alike and are hard
+to compare. LBD fixes this:
 
-- Every program saves its data as an **`.lbd` file**, using a small module for **Python,
-  MATLAB or Julia**. The same file reads back identically in all three languages.
+- Every program saves its data as an **`.lbd` file**, using the small LBD module for its
+  programming language. The same file reads back identically in every
+  [supported language](#2-install-the-module-for-your-language).
 - **LBD Viewer** opens every `.lbd` file and draws it with **one** matplotlib style system. A
   figure looks the same whichever program made the data, and what you see is exactly what
   exports to PDF for your paper.
@@ -23,8 +25,8 @@ LBD keeps **what you measured** and **how figures look** apart, and puts them to
 when it draws:
 
 - **Data file (`.lbd`):** the axes you swept, the values you measured, units, labels and
-  metadata. Optionally a saved *view*: what to plot by default. Written from Python, MATLAB or
-  Julia.
+  metadata. Optionally a saved *view*: what to plot by default. Written by your own programs, in
+  any supported language.
 - **Style:** size, fonts, line widths, ticks, colours, colour maps, and fixed scales per
   quantity. A named *preset* on your computer, or a `.lbd.json` style file to share.
 - **Figure:** LBD Viewer and Python's `lbd.plot` draw the data file with the style, with the
@@ -40,8 +42,9 @@ once, and every figure follows; the data is never touched. More in
   - Axes with units and labels; N-D values; complex and boolean data; nested metadata.
   - The same array shape in every language: no transposing.
   - Version checks, so old tools never misread new files.
-- **Language modules:** the same API in Python (`lbd`), MATLAB (`lbd.*`) and Julia (`LBD`),
-  verified by a cross-language test matrix.
+- **Language modules:** the same API in every supported language, today Python (`lbd`),
+  MATLAB (`lbd.*`) and Julia (`LBD`), verified by a cross-language test matrix. More languages
+  can be added ([Adding a language](docs/developers/adding-a-language.md)).
 - **`lbd.plot` for Python:** the viewer's styles and plot types in your own scripts:
   - plot data straight from memory, without saving it first;
   - make your own matplotlib figures with the same size, fonts, colours and line widths;
@@ -156,7 +159,7 @@ docstrings, so they always match the code. Good starting points (Markdown source
 
 | | |
 |---|---|
-| [Quick start](docs/getting-started/quickstart.md) | Write a file, look at it, make matching figures: Python, MATLAB, Julia. |
+| [Quick start](docs/getting-started/quickstart.md) | Write a file, look at it, make matching figures, in each supported language. |
 | [Concepts](docs/getting-started/concepts.md) | What a file contains, dimension order, types, names, versions. |
 | [Install](docs/getting-started/install.md) | Viewer and modules: install, upgrade, uninstall. |
 | [Examples](docs/examples/index.md) | Short scripts with their figures, explained step by step, and a "find an example by task" table. |

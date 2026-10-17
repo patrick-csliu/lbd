@@ -9,8 +9,8 @@ settings control a figure:
 - A **plot spec** controls what is drawn: which values, curve / scatter / heat map, which axis
   is horizontal, how complex data is shown, labels, and so on.
 
-Both are JSON objects. You can edit them in the viewer, write them from code (`d.plot` /
-`d.style` in Python and Julia, `d.Plot` / `d.Style` in MATLAB), or pass them to
+Both are JSON objects. You can edit them in the viewer, write them from code (the dataset's plot
+and style fields, e.g. `d.plot` / `d.style` in Python), or pass them to
 [`lbd.plot`](../python/plotting.md).
 
 ## Structure
