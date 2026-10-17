@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, ApiError, FileInfo, formatBytes, Json, JsonObject, lastDownloadWarnings, PlotSpec, RenderResult } from "./api";
+import { api, ApiError, baseName, FileInfo, formatBytes, Json, JsonObject, lastDownloadWarnings, PlotSpec, RenderResult, TabState } from "./api";
 import { deepMerge, isEmptyObject } from "./util";
+import { ConfirmDialog, ConfirmRequest } from "./menu";
 import { useToast } from "./toast";
 import { HelpLink } from "./help";
 
@@ -12,6 +13,12 @@ interface Props {
   defaultStyle: string;
   styleRevision: number;
   onError: (msg: string) => void;
+  /** Unsaved settings this tab starts with (it was moved here from another page). */
+  initialState?: TabState;
+  /** Reports the unsaved settings, so they can travel when the tab moves to another page. */
+  onStateChange?: (state: TabState) => void;
+  /** Why this tab can't be saved right now (being moved, or open in another page), or null. */
+  locked?: string | null;
 }
 
 const COMPLEX_MODES: [string, string][] = [
@@ -33,13 +40,22 @@ const ZOOMS: [string, string][] = [
 
 const MM_TO_PX = 96 / 25.4;
 
-export default function FileView({ path, plotted, onPlot, styles, defaultStyle, styleRevision, onError }: Props) {
+export default function FileView(props: Props) {
+  const { path, plotted, onPlot, styles, defaultStyle, styleRevision, onError, initialState, onStateChange, locked } = props;
   const toast = useToast();
   const [info, setInfo] = useState<FileInfo | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [spec, setSpec] = useState<PlotSpec>({});
-  const [preset, setPreset] = useState<string | null>(null);
-  const [override, setOverride] = useState<JsonObject>({});
+  const [spec, setSpec] = useState<PlotSpec>(initialState?.spec ?? {});
+  const [preset, setPreset] = useState<string | null>(initialState?.preset ?? null);
+  const [override, setOverride] = useState<JsonObject>(initialState?.override ?? {});
+  const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
+
+  // Keep the App informed of the unsaved settings (they move along with the tab).
+  const onStateChangeRef = useRef(onStateChange);
+  onStateChangeRef.current = onStateChange;
+  useEffect(() => {
+    onStateChangeRef.current?.({ spec, preset, override });
+  }, [spec, preset, override]);
   const [result, setResult] = useState<RenderResult | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -118,7 +134,8 @@ export default function FileView({ path, plotted, onPlot, styles, defaultStyle, 
     }
   };
 
-  const saveToFile = async () => {
+  // Save the view into the file. `overwrite`: even if the file changed since this tab loaded it.
+  const saveToFile = async (overwrite = false) => {
     if (!result || !info) return;
     const { slices: _slices, ...savedSpec } = result.spec;
     void _slices;
@@ -128,13 +145,36 @@ export default function FileView({ path, plotted, onPlot, styles, defaultStyle, 
         spec: savedSpec,
         style: isEmptyObject(newStyle) ? null : newStyle,
         style_name: preset ?? info.style_name ?? null,
+        if_version: overwrite ? null : info.version,
       });
       setInfo(updated);
       setOverride({});
       setSpec({});
       toast("Saved this view into the file. It opens like this from now on, on any computer.");
     } catch (e) {
-      onError((e as Error).message);
+      if (e instanceof ApiError && e.status === 409 && e.message.includes("changed since you opened it")) {
+        setConfirm({
+          title: "The file was changed",
+          text:
+            `${baseName(path)} was changed since this tab opened it, in another page or another program. ` +
+            "Overwrite replaces its saved view with yours. Reload shows the file as it is now (your unsaved " +
+            "changes here are dropped). Cancel keeps your changes here, unsaved.",
+          action: "Overwrite",
+          danger: true,
+          onConfirm: () => saveToFile(true),
+          secondary: {
+            label: "Reload",
+            onClick: async () => {
+              setSpec({});
+              setPreset(null);
+              setOverride({});
+              await loadInfo();
+            },
+          },
+        });
+      } else {
+        onError((e as Error).message);
+      }
     }
   };
 
@@ -166,6 +206,11 @@ export default function FileView({ path, plotted, onPlot, styles, defaultStyle, 
 
   return (
     <div className="file-view">
+      {locked && (
+        <div className="warn-box" role="status">
+          🔒 {locked}
+        </div>
+      )}
       <div className="file-head">
         <div>
           <h1>{info.title || info.name}</h1>
@@ -242,7 +287,11 @@ export default function FileView({ path, plotted, onPlot, styles, defaultStyle, 
               )}
             </div>
             <div className="save-row">
-              <button onClick={saveToFile} disabled={!result} title="Store the plot settings and style changes inside the .lbd file">
+              <button
+                onClick={() => saveToFile()}
+                disabled={!result || !!locked}
+                title={locked ?? "Store the plot settings and style changes inside the .lbd file"}
+              >
                 Save this view to the file
               </button>
               <button
@@ -271,6 +320,7 @@ export default function FileView({ path, plotted, onPlot, styles, defaultStyle, 
         </button>
       </div>
       {showInfo && <FileDetails info={info} />}
+      {confirm && <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />}
     </div>
   );
 }

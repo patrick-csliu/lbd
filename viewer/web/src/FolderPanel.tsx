@@ -10,6 +10,8 @@ interface Props {
   onRootsChanged: (roots: string[]) => void;
   onSelect: (path: string) => void;
   onOpen: (path: string) => void;
+  /** Open the file in a new browser tab (menu, Ctrl/⌘+click, middle-click). */
+  onOpenInNewBrowserTab: (path: string) => void;
   onRenamed: (oldPath: string, newPath: string) => void;
   onDeleted: (path: string) => void;
 }
@@ -76,7 +78,8 @@ function checkNewName(oldName: string, name: string): string | null {
   return null;
 }
 
-export default function FolderPanel({ roots, activePath, platform, onRootsChanged, onSelect, onOpen, onRenamed, onDeleted }: Props) {
+export default function FolderPanel(props: Props) {
+  const { roots, activePath, platform, onRootsChanged, onSelect, onOpen, onOpenInNewBrowserTab, onRenamed, onDeleted } = props;
   const toast = useToast();
   const names = systemNames(platform);
   const [expanded, setExpanded] = useState<Set<string>>(() => {
@@ -189,6 +192,7 @@ export default function FolderPanel({ roots, activePath, platform, onRootsChange
     if (kind === "root") items.push("-", { label: "Remove from list", onClick: () => removeRoot(path) });
     if (kind === "file")
       items.push(
+        { label: "Open in new browser tab", onClick: () => onOpenInNewBrowserTab(path) },
         "-",
         { label: "Rename…", onClick: () => askRename(path) },
         { label: `Move to ${names.trash}…`, onClick: () => askTrash(path), danger: true },
@@ -284,7 +288,7 @@ export default function FolderPanel({ roots, activePath, platform, onRootsChange
                 </div>
                 {r.results.length === 0 && <div className="muted small pad">No matches</div>}
                 {r.results.map((f) => (
-                  <FileRow key={f.path} path={f.path} label={f.rel} kind={f.type} active={f.path === activePath} onSelect={onSelect} onOpen={onOpen} onMenu={openMenu} depth={0} />
+                  <FileRow key={f.path} path={f.path} label={f.rel} kind={f.type} active={f.path === activePath} onSelect={onSelect} onOpen={onOpen} onOpenNew={onOpenInNewBrowserTab} onMenu={openMenu} depth={0} />
                 ))}
                 {r.truncated && <div className="muted small pad">More matches not shown; refine the filter.</div>}
               </div>
@@ -303,7 +307,7 @@ export default function FolderPanel({ roots, activePath, platform, onRootsChange
                   </button>
                 </div>
                 {expanded.has(root) && (
-                  <DirNode path={root} depth={1} expanded={expanded} toggle={toggle} refreshKey={refreshKey} activePath={activePath} onSelect={onSelect} onOpen={onOpen} onMenu={openMenu} />
+                  <DirNode path={root} depth={1} expanded={expanded} toggle={toggle} refreshKey={refreshKey} activePath={activePath} onSelect={onSelect} onOpen={onOpen} onOpenNew={onOpenInNewBrowserTab} onMenu={openMenu} />
                 )}
               </div>
             ))}
@@ -323,10 +327,11 @@ interface DirProps {
   activePath: string | null;
   onSelect: (p: string) => void;
   onOpen: (p: string) => void;
+  onOpenNew: (p: string) => void;
   onMenu: OnMenu;
 }
 
-function DirNode({ path, depth, expanded, toggle, refreshKey, activePath, onSelect, onOpen, onMenu }: DirProps) {
+function DirNode({ path, depth, expanded, toggle, refreshKey, activePath, onSelect, onOpen, onOpenNew, onMenu }: DirProps) {
   const [listing, setListing] = useState<DirListing | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -373,13 +378,13 @@ function DirNode({ path, depth, expanded, toggle, refreshKey, activePath, onSele
               <span className="twisty">{open ? "▾" : "▸"}</span>
               <span className="dir-name row-label">{name}</span>
             </div>
-            {open && <DirNode path={p} depth={depth + 1} expanded={expanded} toggle={toggle} refreshKey={refreshKey} activePath={activePath} onSelect={onSelect} onOpen={onOpen} onMenu={onMenu} />}
+            {open && <DirNode path={p} depth={depth + 1} expanded={expanded} toggle={toggle} refreshKey={refreshKey} activePath={activePath} onSelect={onSelect} onOpen={onOpen} onOpenNew={onOpenNew} onMenu={onMenu} />}
           </div>
         );
       })}
       {listing.files.map((f) => {
         const p = joinPath(path, f.name);
-        return <FileRow key={p} path={p} label={f.name} kind={f.type} active={p === activePath} onSelect={onSelect} onOpen={onOpen} onMenu={onMenu} depth={depth} />;
+        return <FileRow key={p} path={p} label={f.name} kind={f.type} active={p === activePath} onSelect={onSelect} onOpen={onOpen} onOpenNew={onOpenNew} onMenu={onMenu} depth={depth} />;
       })}
       {listing.errors.map((e) => (
         <div key={`err-${e.name}`} className="file-row unreadable" style={{ paddingLeft: depth * 14 + 16 }} title={`${e.name}: ${e.error}`}>
@@ -397,7 +402,7 @@ function DirNode({ path, depth, expanded, toggle, refreshKey, activePath, onSele
 
 const KIND_ICON: Record<FileKind, string> = { lbd: "◧", style: "✎", image: "▣" };
 const KIND_HINT: Record<FileKind, string> = {
-  lbd: "Click: details · Double-click: plot",
+  lbd: "Click: details · Double-click: plot · Ctrl+click: new browser tab",
   style: "Style file · Click: preview",
   image: "Image · Click: view",
 };
@@ -410,9 +415,10 @@ function FileRow(props: {
   depth: number;
   onSelect: (p: string) => void;
   onOpen: (p: string) => void;
+  onOpenNew: (p: string) => void;
   onMenu: OnMenu;
 }) {
-  const { path, label, active, depth, onSelect, onOpen, onMenu } = props;
+  const { path, label, active, depth, onSelect, onOpen, onOpenNew, onMenu } = props;
   const kind = props.kind ?? fileKind(path);
   return (
     <div
@@ -422,7 +428,9 @@ function FileRow(props: {
       tabIndex={0}
       title={`${path}
 ${KIND_HINT[kind]} · Right-click: more`}
-      onClick={() => onSelect(path)}
+      onClick={(e) => (e.ctrlKey || e.metaKey ? onOpenNew(path) : onSelect(path))}
+      onAuxClick={(e) => e.button === 1 && (e.preventDefault(), onOpenNew(path))}
+      onMouseDown={(e) => e.button === 1 && e.preventDefault() /* no autoscroll on middle-click */}
       onDoubleClick={() => onOpen(path)}
       onContextMenu={(e) => onMenu(e, path, "file")}
       onKeyDown={(e) => {

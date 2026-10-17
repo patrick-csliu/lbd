@@ -806,6 +806,12 @@ def create_app(state: AppState) -> FastAPI:
         page = state.pages.register()
         return {"page": page.id, "number": page.number}
 
+    @app.get("/api/pages")
+    def list_pages():
+        """The open pages and their files, for "Move to ▸ Page N"."""
+        return {"pages": [{"page": p.id, "number": p.number, "files": sorted(p.files)}
+                          for p in state.pages.live_pages()]}
+
     @app.post("/api/pages/{page_id}/focus")
     def page_focus(page_id: str):
         page_call(state.pages.focus, page_id)

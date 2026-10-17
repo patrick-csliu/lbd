@@ -9,6 +9,36 @@ export interface AppState {
   platform: string;
   config_dir: string;
   warnings: string[];
+  /** where files opened from Explorer / Finder appear: the open viewer page, or a new browser tab */
+  open_files_in: OpenFilesIn;
+}
+
+export type OpenFilesIn = "viewer" | "browser-tab";
+
+/** A command for this page from the viewer (lbd_viewer/pages.py). */
+export interface PageCommand {
+  id: number;
+  kind: "open" | "show" | "transfer" | "transfer_done" | "transfer_cancelled" | "event";
+  data: { [k: string]: Json };
+}
+
+export interface AckResult {
+  granted: string[];
+  elsewhere: { [path: string]: number }; // opened by another page meanwhile: path -> page number
+  busy: string[]; // being moved between pages
+}
+
+export interface PageEntry {
+  page: string;
+  number: number;
+  files: string[];
+}
+
+/** A tab's unsaved view settings; they travel with the tab when it moves to another page. */
+export interface TabState {
+  spec: PlotSpec;
+  preset: string | null;
+  override: JsonObject;
 }
 
 export interface DirListing {
@@ -66,6 +96,8 @@ export interface FileInfo {
   style_name: string | null;
   /** matplotlib version that last wrote the saved view, if any */
   matplotlib: string | null;
+  /** changes when the file is written; sent back when saving, so a changed file isn't overwritten */
+  version: string | null;
   warnings: string[];
 }
 
@@ -259,7 +291,8 @@ export const api = {
   styleFile: (path: string) => call<StyleFileInfo>("GET", "/api/stylefile", undefined, { path }),
   importStyle: (name: string, content: unknown, overwrite = false) =>
     call<StyleDetail>("POST", "/api/styles/import", { name, content, overwrite }),
-  saveFilePlot: (path: string, changes: { spec?: PlotSpec | null; style?: JsonObject | null; style_name?: string | null }) =>
+  /** Save the view into the file. With `if_version`, a file changed since then gives 409. */
+  saveFilePlot: (path: string, changes: { spec?: PlotSpec | null; style?: JsonObject | null; style_name?: string | null; if_version?: string | null }) =>
     call<FileInfo>("PUT", "/api/file/plot", { path, ...changes }),
   styles: () => call<StyleEntry[]>("GET", "/api/styles"),
   style: (name: string) => call<StyleDetail>("GET", `/api/styles/${encodeURIComponent(name)}`),
@@ -279,6 +312,32 @@ export const api = {
   fonts: () => call<{ installed: string[]; generic: string[] }>("GET", "/api/fonts"),
   styleDefaults: () => call<{ defaults: JsonObject; schema: JsonObject }>("GET", "/api/style-defaults"),
   setDefaultStyle: (name: string) => call<AppState>("PUT", "/api/settings", { default_style: name }),
+  setOpenFilesIn: (where: OpenFilesIn) => call<AppState>("PUT", "/api/settings", { open_files_in: where }),
+
+  // ---- pages: this browser tab among the viewer's open pages (lbd_viewer/pages.py)
+  registerPage: () => call<{ page: string; number: number }>("POST", "/api/pages"),
+  pages: () => call<{ pages: PageEntry[] }>("GET", "/api/pages"),
+  pageFocus: (page: string) => call<{ ok: boolean }>("POST", `/api/pages/${page}/focus`),
+  /** The long poll: the next command, or null after `wait` seconds. */
+  pageNext: async (page: string, wait = 25) => {
+    const r = await call<PageCommand | Record<string, never>>("GET", `/api/pages/${page}/next`, undefined, { wait: String(wait) });
+    return "kind" in r ? (r as PageCommand) : null;
+  },
+  pageAck: (page: string, command: number) => call<AckResult>("POST", `/api/pages/${page}/ack/${command}`),
+  /** Open a file in this page: `owner` is set if another page has it open (then don't open it). */
+  acquire: (page: string, path: string) => call<{ path: string; owner?: number }>("POST", `/api/pages/${page}/acquire`, { path }),
+  release: (page: string, path: string) => call<{ ok: boolean }>("POST", `/api/pages/${page}/release`, { path }),
+  showElsewhere: (path: string) => call<{ page: number }>("POST", "/api/pages/show", { path }),
+  startTransfer: (page: string, paths: string[], states: { [path: string]: TabState }, to: string | null) =>
+    call<{ id: string; timeout: number }>("POST", "/api/transfers", { page, paths, states, to }),
+  claimTransfer: (id: string, page: string) =>
+    call<{ paths: string[]; states: { [path: string]: TabState }; from: number | null }>("POST", `/api/transfers/${id}/claim`, { page }),
+  completeTransfer: (id: string, page: string) => call<{ paths: string[] }>("POST", `/api/transfers/${id}/complete`, { page }),
+  cancelTransfer: (id: string) => call<{ ok: boolean }>("POST", `/api/transfers/${id}/cancel`),
+  /** The page is closing: tell the viewer, even while the page unloads (keepalive). */
+  pageBye: (page: string) => {
+    fetch(`/api/pages/${page}/bye`, { method: "POST", keepalive: true, headers: { "X-LBD-Token": token } }).catch(() => undefined);
+  },
   sdk: () => call<SdkInfo>("GET", "/api/sdk"),
   revealSdk: (lang: string) => call<{ folder: string }>("POST", "/api/sdk/reveal", undefined, { lang }),
   reveal: (path: string) => call<{ ok: boolean }>("POST", "/api/reveal", { path }),
@@ -341,6 +400,14 @@ async function download(url: string, method: string, body: unknown, fallbackName
   a.remove();
   setTimeout(() => URL.revokeObjectURL(href), 10_000);
   return name;
+}
+
+/** The address of a new viewer browser tab: with a file to open, or a move to claim. */
+export function viewerUrl(params: { open?: string; claim?: string } = {}): string {
+  const q = new URLSearchParams({ token });
+  if (params.open) q.set("open", params.open);
+  if (params.claim) q.set("claim", params.claim);
+  return `${window.location.origin}/?${q}`;
 }
 
 export function baseName(p: string): string {

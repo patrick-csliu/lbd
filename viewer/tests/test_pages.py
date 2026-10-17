@@ -191,7 +191,7 @@ def test_a_move_not_completed_in_time_is_cancelled_and_the_source_keeps_its_tabs
     pages.expire()
     assert pages.owner("1.lbd").id == one.id
     pages.check_unlocked("1.lbd")                  # unlocked again
-    assert ("transfer_cancelled", {"id": transfer.id, "reason": "the other page didn't take the files in time"}) in drain(pages, one)
+    assert ("transfer_cancelled", {"id": transfer.id, "paths": ["1.lbd"], "reason": "the other page didn't take the files in time"}) in drain(pages, one)
     with pytest.raises(PageError, match="over"):
         pages.claim(transfer.id, two.id)
 

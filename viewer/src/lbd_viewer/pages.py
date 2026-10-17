@@ -447,7 +447,8 @@ class Pages:
                 del self.owner_of[path]
         for page_id in {transfer.source, transfer.claimed_by} - {None}:
             if page_id in self.pages:
-                self._send(self.pages[page_id], "transfer_cancelled", {"id": transfer.id, "reason": reason})
+                self._send(self.pages[page_id], "transfer_cancelled",
+                           {"id": transfer.id, "paths": transfer.paths, "reason": reason})
 
     def _remove(self, page: Page) -> None:
         del self.pages[page.id]

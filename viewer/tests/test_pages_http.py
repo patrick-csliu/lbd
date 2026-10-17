@@ -46,6 +46,17 @@ def test_pages_register_and_unknown_pages_are_404(api):
     assert api.post("/api/pages/nope/focus").status_code == 404
 
 
+def test_list_pages_with_their_files(api, data_dir):
+    one, _ = new_page(api)
+    two, _ = new_page(api)
+    path = str(data_dir / "curve.lbd")
+    api.post(f"/api/pages/{two}/acquire", json={"path": path}).raise_for_status()
+    assert api.get("/api/pages").json() == {"pages": [
+        {"page": one, "number": 1, "files": []},
+        {"page": two, "number": 2, "files": [path]},
+    ]}
+
+
 def test_acquire_is_refused_for_a_file_open_in_another_page(api, data_dir):
     one, _ = new_page(api)
     two, _ = new_page(api)

@@ -99,6 +99,8 @@ export interface ConfirmRequest {
   input?: { value: string; selectEnd?: number; check: (value: string) => string | null };
   /** Do the change. If it throws, the message is shown in the dialog and it stays open. */
   onConfirm: (value: string) => Promise<void> | void;
+  /** An optional third choice next to Cancel, e.g. "Reload" beside "Overwrite". */
+  secondary?: { label: string; onClick: () => Promise<void> | void };
 }
 
 /** A modal dialog that asks before a change is applied. Cancel is the default button. */
@@ -155,6 +157,18 @@ export function ConfirmDialog({ request, onClose }: { request: ConfirmRequest; o
           <button type="button" onClick={onClose} autoFocus={!request.input}>
             Cancel
           </button>
+          {request.secondary && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={async () => {
+                await request.secondary!.onClick();
+                onClose();
+              }}
+            >
+              {request.secondary.label}
+            </button>
+          )}
           <button type="submit" className={request.danger ? "danger" : "primary"} disabled={!!problem || busy}>
             {request.action}
           </button>
