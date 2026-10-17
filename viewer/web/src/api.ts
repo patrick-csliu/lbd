@@ -159,7 +159,7 @@ export interface StyleFileInfo {
 }
 
 export interface PlotSpec {
-  kind?: "auto" | "curve" | "heatmap" | "scatter" | "scalar";
+  kind?: "auto" | "curve" | "heatmap" | "scatter";
   values?: string[];
   complex?: string;
   x?: string;

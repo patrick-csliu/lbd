@@ -2,7 +2,18 @@
 
 ## Folders
 
-The folder panel lists folders you choose, and inside them every subfolder and these files:
+The folder panel lists folders you choose, and inside them every subfolder and these files.
+
+![The folder panel with a file's right-click menu](img/folders.png){ width="560" }
+
+1. **Filter files in all folders…:** type part of a file name to find it in every listed folder.
+2. **⊟** closes all folders, **⟳** rereads them (to see new files), **+ Add folder** adds one.
+3. **A folder you added.** Its **×** removes it from the list (no files are deleted).
+4. **A subfolder:** click to open or close it.
+5. **A file.** The icon shows its kind (below). Click to look at it, double-click to plot it.
+6. **The right-click menu** of a file: show it in Explorer, copy its path, open it in a new
+   browser tab, rename it, move it to the Recycle Bin.
+
 
 | Icon | Files | Clicking opens |
 |---|---|---|
@@ -99,6 +110,13 @@ opens. To get a new browser tab every time instead, choose it under **⚙** at t
 **A file is open in one page at a time.** So two pages can never hold different unsaved
 settings for the same file. Opening a file that another page has asks **Show it in Page N**,
 and a file from Explorer that is already open is shown in its page.
+
+![A tab's right-click menu with Move to Page 2](img/tabs-menu.png)
+
+1. **This page's number**, also in the browser tab's title.
+2. **The tab** that was right-clicked (or the selected tabs).
+3. **Move to Page 2:** the other open pages are listed with the files they already have.
+4. **Move to a new browser tab** opens a new page with the tab in it.
 
 **Moving tabs.** Right-click a tab → **Move to Page N** or **Move to a new browser tab**. The
 tabs move with their unsaved settings. While they are moving, they show ⇢ and can't be closed,

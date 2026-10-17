@@ -1,5 +1,19 @@
 # Styles page
 
+A **preset** is a named look for figures: size, fonts, frame, ticks, colours. Every figure uses
+one, so changing a preset changes every figure that uses it. Presets are shared with Python's
+`lbd.plot`.
+
+![The Styles page: preset list, settings, preview](img/styles-page.png)
+
+1. **The presets.** **default** marks the default preset; **built-in** marks the presets that
+   come with the viewer. Click one to edit it.
+2. **+ New** creates a preset, **Import…** adds one from a `.lbd.json` style file.
+3. **Save** or **Discard changes**, **Duplicate**, and **Export** as a `.lbd.json` style file or
+   a matplotlib `.mplstyle` file.
+4. **The settings**, in sections. Click a section title to open or close it.
+5. **The preview:** the file open on the Data page, drawn with this preset as you edit it.
+
 Presets decide how every figure looks. The settings are grouped like matplotlib's objects:
 **Figure** (size, resolution, font) → **Axes** → **Frame**, **Title**, **Axis** (label, major and
 minor ticks), **x axis only / y axis only**, **Grid**, **Legend**, **Lines**, **Scatter

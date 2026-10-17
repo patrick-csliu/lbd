@@ -7,7 +7,7 @@ public before that click.
 
 | Step | Who | What |
 |---|---|---|
-| 1. Write the notes | you | Every change has a line in `CHANGELOG.md` under the top heading, `## Unreleased` (or `## <version> (in development)`). |
+| 1. Write the notes | you | Every change has a line in `CHANGELOG.md` under the top heading, `## Unreleased` (or `## <version> (in development)`). If the viewer's look changed, redo the documentation's screenshots: `uv run python scripts/make_screenshots.py` (on Windows, with Chromium for Playwright), look at them, and commit them. `tests/scripts/test_screenshots.py` checks that every shot is used and every image exists. |
 | 2. Set the version | you | `uv run python scripts/bump_version.py 0.2.0`: writes the version into every place `check_versions.py` reads (the viewer, each language's `[[version]]` files, `uv.lock`, `package-lock.json`) and heads the CHANGELOG section `## 0.2.0 (<date>)`. Refuses a lower or malformed version and a missing or empty section. `--dry-run` shows the changes only. |
 | 3. Test | you | `uv run python scripts/test_all.py` |
 | 4. Tag and push | you | `git commit -am "Release 0.2.0"`, `git tag v0.2.0`, `git push --follow-tags` |

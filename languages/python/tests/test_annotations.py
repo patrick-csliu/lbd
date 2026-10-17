@@ -112,12 +112,6 @@ def test_patches_on_every_kind(kind, values):
     assert Rectangle in kinds and Ellipse in kinds
 
 
-def test_scalar_gets_annotations_too():
-    fig = lp.plot(sweep(), "scalar", "Q", annotations=[
-        {"method": "text", "args": [0.5, 0.2, "fitted"], "kwargs": {"ha": "center"}}])
-    assert "fitted" in [t.get_text() for t in fig.axes[0].texts]
-
-
 def test_matplotlib_errors_name_the_entry():
     with pytest.raises(RenderError, match=r"annotations\[1\] \(axvline\): AttributeError"):
         lp.plot(sweep(), "curve", "trace", style=MHZ, annotations=[

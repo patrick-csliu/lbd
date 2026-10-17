@@ -77,7 +77,6 @@ def test_file_summary(client, data_dir):
     ("sub/sweep.lbd", {"kind": "curve"}, "curve"),
     ("sub/sweep.lbd", {"kind": "curve", "series": "none", "index": {"power": 3}}, "curve"),
     ("sub/deeper/cube.lbd", {"values": ["T"]}, "heatmap"),
-    ("sub/deeper/cube.lbd", {"values": ["q"]}, "scalar"),
 ])
 def test_render_kinds(client, data_dir, name, spec, kind):
     r = client.post("/api/render", json={"path": str(data_dir / name), "spec": spec})

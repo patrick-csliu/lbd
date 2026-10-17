@@ -31,7 +31,7 @@ from lbd.io import PLOT_SPEC_KEYS, _warn
 from .style import QuantityStyle, Style
 from .units import AUTO_UNITS, UnitWarning, axis_label, mathsafe, prefix_scale
 
-KINDS = ("auto", "curve", "heatmap", "scatter", "scalar")
+KINDS = ("auto", "curve", "heatmap", "scatter")
 COMPLEX_MODES = ("abs", "db", "phase", "phase_deg", "real", "imag", "iq")
 SCALES = ("linear", "log")
 FORMATS = {"svg": "image/svg+xml", "pdf": "application/pdf", "png": "image/png", "jpg": "image/jpeg"}
@@ -43,7 +43,6 @@ _APPLIES = {
     "curve": {"x", "series", "index", "x_scale", "y_scale", "x_label", "y_label", "annotations"},
     "heatmap": {"x", "y", "index", "x_scale", "y_scale", "x_label", "y_label", "z_label", "annotations"},
     "scatter": {"x", "color", "index", "x_scale", "y_scale", "x_label", "y_label", "z_label", "annotations"},
-    "scalar": {"annotations"},
 }
 # Saved-view settings that mean the same for every plot type: kept when another type is chosen
 # (resolve_spec). Axes, series, colours, slices, axis labels and annotations belong to the plot
@@ -134,16 +133,22 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
         missing = [x for x in items if x not in d.values]
         if missing:
             raise RenderError(f"no value named {', '.join(map(repr, missing))}; this file has {names}")
+        single = [x for x in items if len(d.values[x].shape) == 0]
+        if single:
+            raise RenderError(f"{_single_number(d.values[single[0]])} is a single number; it can't be plotted "
+                              f"(plot one of {plottable})")
         return list(items)
 
-    default_value = next((n for n in names if len(d.values[n].shape) > 0), names[0])
-    values = pick("values", check_values, [default_value])
+    # Single numbers (values without axes) aren't plotted; the viewer lists them with the values.
+    plottable = [n for n in names if len(d.values[n].shape) > 0]
+    if not plottable:
+        numbers_ = ", ".join(_single_number(v) for v in d.values.values())
+        raise RenderError(f"this file has only single numbers ({numbers_}); there is nothing to plot")
+    values = pick("values", check_values, [plottable[0]])
 
     def fits(name: str, k: str) -> bool:
         """Whether this value can be drawn as plot kind k."""
         v = d.values[name]
-        if k == "scalar":
-            return len(v.shape) == 0
         if k == "heatmap":
             return len(_swept(v)) >= 2
         return k == "auto" or len(v.shape) > 0
@@ -157,15 +162,12 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
 
     # kind
     def check_kind(k: Any) -> str:
+        if k == "scalar":
+            raise RenderError(f"single numbers aren't plotted (kind='scalar' was removed); use one of {KINDS}")
         if k not in KINDS:
             raise RenderError(f"unknown plot kind {k!r}; use one of {KINDS}")
         if k == "auto":
-            return "scalar" if nd == 0 else ("heatmap" if len(swept) >= 2 else "curve")
-        if nd == 0 and k != "scalar":
-            raise RenderError(f"'{first.name}' is a single number; it can only be shown as a number "
-                              "(kind='auto' or 'scalar')")
-        if k == "scalar" and nd != 0:
-            raise RenderError(f"'{first.name}' is {nd}-D; kind='scalar' is only for single numbers")
+            return "heatmap" if len(swept) >= 2 else "curve"
         if k == "heatmap" and nd < 2:
             raise RenderError(f"'{first.name}' is {nd}-D; a heat map needs 2 dimensions")
         if k == "heatmap" and len(swept) < 2:
@@ -229,12 +231,6 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
         if unused:
             _warn(f"{unused} {'is' if len(unused) == 1 else 'are'} not used by a {kind} plot; ignored", RenderWarning)
 
-    if kind == "scalar":
-        if len(values) > 1 and warn_unused:
-            _warn(f"a single number is shown; {values[1:]} ignored", RenderWarning)
-        out["values"] = values[:1]
-        out["index"], out["slices"] = {}, []
-        return out
     if kind == "scatter":
         return _resolve_scatter(d, out, values, pick, spec, index_in, warn_unused)
 
@@ -468,6 +464,17 @@ def _resolve_scatter(d, out, values, pick, spec, index_in, warn_unused) -> Dict[
     return out
 
 
+def _single_number(v) -> str:
+    """A single number (0-D value) for messages: "'T1' (21 µs)", or "'T1'" if it wasn't read."""
+    if v.data is None:
+        return repr(v.name)
+    x = np.asarray(v.data)
+    if np.iscomplexobj(x):
+        return f"{v.name!r} ({complex(x):.6g} {v.unit})".replace(" )", ")")
+    factor, unit = prefix_scale(x, v.unit, "auto", warn=False)
+    return f"{v.name!r} ({float(x) * factor:.6g} {unit})".replace(" )", ")")
+
+
 def _swept(value) -> List[str]:
     """The value's axes with more than one point; the others are fixed parameters."""
     return [a for a, n in zip(value.axes, value.shape) if n > 1]
@@ -640,9 +647,7 @@ def build_figure(d: "lbd.Dataset", spec: Dict[str, Any], style: Style,
     else:
         fig = ax.figure
     kind = spec["kind"]
-    if kind == "scalar":
-        _draw_scalar(ax, d, spec, style)
-    elif kind == "curve":
+    if kind == "curve":
         _draw_curves(fig, ax, d, spec, style)
     elif kind == "scatter":
         _draw_scatter(fig, ax, d, spec, style)
@@ -691,17 +696,6 @@ def _colorbar(fig, mappable, ax, style: Style, label: str):
     cb.ax.tick_params(which="minor", length=s.minor.length_pt, width=rc["ytick.minor.width"], **common)
     if s.label.size_pt:
         cb.ax.yaxis.label.set_size(s.label.size_pt)
-
-
-def _draw_scalar(ax, d, spec, style: Style) -> None:
-    v = d.values[spec["values"][0]]
-    arr, label, unit = apply_complex(np.asarray(v.data), v.label, v.unit, spec["complex"])
-    q = find_quantity(style, v.name, v.label, spec["complex"] if np.iscomplexobj(v.data) else None)
-    factor, unit = _unit_scale(np.atleast_1d(arr), unit, q, style.axis_style("y").label.auto_prefix)
-    ax.set_axis_off()
-    ax.text(0.5, 0.5, f"{mathsafe(label)} = {float(arr) * factor:.6g} {unit}".strip(), ha="center", va="center",
-            transform=ax.transAxes, fontsize="large")
-    _annotate(ax, d, spec, [])
 
 
 def _axis_quantity(style: Style, d, name: str) -> QuantityStyle:

@@ -17,7 +17,8 @@ An `.lbd` file holds one **dataset**:
 | **Plot** (optional) | How the viewer should plot this file by default, and per-file style changes. | heat map of `S21` in dB, 120 mm wide |
 | **Created, writer** | Written automatically: when, and by which program and version. | `2026-10-13T16:09:00+08:00`, `python lbd 1.0.0` |
 
-A value with no axes is a single number (a *scalar*), for example a fitted quality factor.
+A value with no axes is a single number (a *scalar*), for example a fitted quality factor. It
+is not plotted: the viewer lists it with its value, e.g. *Q = 12346*.
 
 Several values can share axes. A sweep can store `S21`, `S11` and a fitted `f0(power)` in one
 file, all using the same `power` axis.

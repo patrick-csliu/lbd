@@ -1,7 +1,8 @@
 """The plot controls in a real browser, on the cases found while watching a session.
 
 - Changing the plot type away from a saved view gives no "saved view" note.
-- A value on another axis can be chosen (it replaces the plot), and a single number is shown.
+- A value on another axis can be chosen (it replaces the plot); single numbers are listed, not
+  plotted, and a file with only single numbers lists them.
 - An axis with one point is a fixed parameter: no slider.
 - The position on an axis that isn't drawn can be typed: it goes to the nearest point.
 - DPI next to Width/Height is sent as the style's figure.dpi.
@@ -79,7 +80,7 @@ def test_changing_the_plot_type_never_blames_the_saved_view(files, new_page):
         expect(notes(page)).to_have_count(0)
 
 
-def test_a_value_on_another_axis_replaces_the_plot_and_a_number_is_shown(files, new_page):
+def test_a_value_on_another_axis_replaces_the_plot_and_numbers_are_listed(files, new_page):
     page = new_page()
     open_file(page, "t1_noise.lbd")
     switch = body(page).get_by_role("button", name=re.compile(r"^S_V \(Frequency\)"))
@@ -89,12 +90,22 @@ def test_a_value_on_another_axis_replaces_the_plot_and_a_number_is_shown(files, 
     expect(notes(page)).to_have_count(0)
     expect(page.locator(".toast")).to_have_count(0)
 
-    number = body(page).get_by_role("button", name="T1 = 21 µs")
-    wait_for_render(page, number.click, lambda sent: sent["spec"].get("kind") == "scalar" and sent["spec"].get("values") == ["T1"])
-    expect(plot_type(page)).to_have_value("scalar")
-    wait_for_render(page, lambda: plot_type(page).select_option("curve"))   # back: a value that fits
-    expect(notes(page)).to_have_count(0)
-    expect(page.locator(".toast")).to_have_count(0)
+    expect(body(page).locator(".value-number")).to_have_text("T1 = 21 µs")   # listed, not a button
+    expect(body(page).get_by_role("button", name=re.compile("T1"))).to_have_count(0)
+    expect(plot_type(page).locator("option")).to_have_text(["Curves", "Scatter", "Heat map"])
+
+
+def test_a_file_with_only_single_numbers_lists_them(viewer, new_page):
+    d = lbd.Dataset(title="Fit results")
+    d.add_value("T1", 21e-6, unit="s", label="T1")
+    d.add_value("f_q", 5.123e9, unit="Hz", label="f_q")
+    d.save(viewer.data / "fit.lbd")
+    page = new_page()
+    open_file(page, "fit.lbd")
+    box = body(page).locator(".numbers-only")
+    expect(box).to_contain_text("nothing to plot")
+    expect(box.locator("li")).to_have_text(["T1 = 21 µs", "f_q = 5.123 GHz"])
+    expect(body(page).locator(".error-box")).to_have_count(0)
 
 
 def test_an_axis_with_one_point_is_a_fixed_parameter(files, new_page):

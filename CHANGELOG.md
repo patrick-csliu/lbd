@@ -5,6 +5,11 @@ The file format has its own version (`lbd_version`, currently 1.0).
 
 ## Unreleased
 
+- Plotting: the "single number" plot type is gone (viewer and `lbd.plot`, `kind="scalar"`).
+  Single numbers are listed with their value in the viewer; a file with only single numbers
+  shows that list. An old saved view with `kind: "scalar"` falls back to the default, with a
+  note.
+
 - Viewer, plotting: changing the plot type (e.g. a saved scatter view to Curves) showed a
   misleading note "saved view: 'I' can't be used as horizontal axis". Settings that belong to
   the saved plot type are no longer borrowed by another type (`lbd.plot` too).

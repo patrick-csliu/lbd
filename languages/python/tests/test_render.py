@@ -62,8 +62,9 @@ def quiet():
     ({"kind": "curve", "series": "none", "index": {"power": 1.5}}, "whole number"),
     ({"kind": "curve", "series": "none", "index": {"power": "2"}}, "whole number"),
     ({"kind": "curve", "series": "none", "index": {"power": True}}, "whole number"),
-    ({"kind": "scalar"}, "only for single numbers"),
-    ({"values": "Q", "kind": "curve"}, "single number"),
+    ({"kind": "scalar"}, "kind='scalar' was removed"),
+    ({"values": "Q", "kind": "curve"}, r"'Q' \(7\) is a single number; it can't be plotted"),
+    ({"values": ["S21", "Q"]}, "single number"),
     ({"title": 5}, "title must be text"),
 ])
 def test_invalid_specs_raise(spec, match):
@@ -92,8 +93,7 @@ def test_heatmap_needs_two_dimensions():
 def test_auto_kinds():
     d = sweep()
     assert resolve_spec(d, {})["kind"] == "heatmap"
-    assert resolve_spec(d, {"values": "Q"})["kind"] == "scalar"
-    assert resolve_spec(d, {"values": "Q", "kind": "scalar"})["kind"] == "scalar"
+    assert resolve_spec(d, {"kind": "curve"})["values"] == ["S21"]      # never the single number Q
 
 
 def test_negative_index_counts_from_the_end():
@@ -119,7 +119,6 @@ def test_resolved_slices_describe_the_fixed_axes():
     ({"kind": "scatter", "values": ["T"], "z_label": "x"}, "colour bar label"),
     ({"kind": "scatter", "values": ["S21"], "complex": "iq", "x": "power"}, "I/Q plane"),
     ({"values": ["T"], "complex": "db"}, "has no effect"),
-    ({"values": "Q", "x": "freq"}, "not used by a scalar"),
 ])
 def test_unused_settings_warn(spec, match):
     with pytest.warns(RenderWarning, match=match):
@@ -290,7 +289,6 @@ def draw(d, spec, style=None):
     {"kind": "scatter", "values": ["S21"], "complex": "iq", "color": "power"},
     {"kind": "scatter", "values": ["T"], "x": "S21", "complex": "abs"},
     {"kind": "scatter", "values": ["T"], "color": "T", "x_scale": "log"},
-    {"values": "Q"},
     {"kind": "curve", "values": ["T"], "series": "none", "index": {"power": 2}, "y_scale": "log"},
 ])
 def test_every_kind_draws(spec):
@@ -439,14 +437,24 @@ def test_metadata_and_safe_filename(tmp_path):
     assert rnd.safe_filename("///") == "figure"
 
 
-def test_scalar_gets_a_unit_prefix():
+def test_single_numbers_are_not_plotted():
     import lbd.plot as lp
 
     d = lbd.Dataset()
     d.add_value("T1", 21e-6, unit="s", label="T1")
-    assert [t.get_text() for t in lp.plot(d).axes[0].texts] == ["T1 = 21 µs"]
-    fixed = lp.plot(d, style={"quantities": {"T1": {"prefix": "m"}}})
-    assert [t.get_text() for t in fixed.axes[0].texts] == ["T1 = 0.021 ms"]
+    with pytest.raises(RenderError, match=r"only single numbers \('T1' \(21 µs\)\); there is nothing to plot"):
+        lp.plot(d)
+    with pytest.raises(RenderError, match="kind='scalar' was removed"):
+        lp.plot(sweep(), "scalar")
+
+
+def test_an_old_saved_single_number_view_falls_back_with_a_warning():
+    d = sweep()
+    d.plot = {"kind": "scalar", "values": ["Q"]}
+    with pytest.warns(RenderWarning, match="saved view") as rec:
+        r = resolve_spec(d, {})
+    assert r["kind"] == "heatmap" and r["values"] == ["S21"]
+    assert any("kind='scalar' was removed" in str(w.message) for w in rec)
 
 
 def _readout():

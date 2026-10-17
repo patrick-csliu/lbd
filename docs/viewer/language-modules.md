@@ -1,7 +1,15 @@
 # Language modules page
 
 Shows how to install the Python, MATLAB and Julia modules for writing and reading `.lbd` files
-in your own programs. Each tab lists:
+in your own programs.
+
+![The Language modules page](img/language-modules.png)
+
+1. **One tab per language:** Python, MATLAB, Julia.
+2. **The install command**, with the real path on this computer filled in.
+3. **Copy** puts it on the clipboard; paste it in a terminal (or MATLAB / Julia).
+
+Each tab lists:
 
 - the requirements;
 - the install command, with the real path on this computer filled in, and a **Copy** button;

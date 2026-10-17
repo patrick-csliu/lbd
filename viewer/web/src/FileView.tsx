@@ -77,8 +77,11 @@ export default function FileView(props: Props) {
   }, [loadInfo]);
 
   // Re-render whenever the view settings change (debounced; stale responses are dropped).
+  // Single numbers (values without axes) aren't plotted; a file with nothing else shows a list.
+  const onlyNumbers = !!info && info.values.every((v) => v.axes.length === 0);
+
   useEffect(() => {
-    if (!plotted || !info) return;
+    if (!plotted || !info || onlyNumbers) return;
     const seq = ++renderSeq.current;
     const id = window.setTimeout(async () => {
       setBusy(true);
@@ -95,7 +98,7 @@ export default function FileView(props: Props) {
       }
     }, 120);
     return () => window.clearTimeout(id);
-  }, [plotted, info, path, spec, preset, override, styleRevision]);
+  }, [plotted, info, onlyNumbers, path, spec, preset, override, styleRevision]);
 
   const imgUrl = useMemo(() => {
     if (!result) return null;
@@ -228,7 +231,20 @@ export default function FileView(props: Props) {
         </div>
       </div>
 
-      {plotted && (
+      {plotted && onlyNumbers && (
+        <div className="numbers-only" role="status">
+          <p>This file has only single numbers, so there is nothing to plot:</p>
+          <ul>
+            {info.values.map((v) => (
+              <li key={v.name}>
+                {v.label || v.name} = {v.text ?? "?"}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {plotted && !onlyNumbers && (
         <div className="plot-area">
           <PlotControls
             info={info}
@@ -381,8 +397,7 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
   const lengthOf = (axis: string) => info.axes.find((a) => a.name === axis)?.length ?? 0;
   const sweptAxes = (v: ValueInfo) => v.axes.filter((a) => lengthOf(a) > 1);
   /** Whether a value can be drawn as plot kind k (the same rule as the renderer). */
-  const fits = (v: ValueInfo, k: string) =>
-    k === "scalar" ? v.axes.length === 0 : k === "heatmap" ? sweptAxes(v).length >= 2 : v.axes.length > 0;
+  const fits = (v: ValueInfo, k: string) => (k === "heatmap" ? sweptAxes(v).length >= 2 : v.axes.length > 0);
   const numbers = info.values.filter((v) => v.axes.length === 0);
   const withAxes = info.values.filter((v) => v.axes.length > 0);
   // Values that can join the plot: they share its horizontal axis (scatter: or its exact axes).
@@ -394,7 +409,6 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
   // Another value on its own: it brings its own axes, so the axis choices start afresh.
   const fresh: PlotSpec = { x: undefined, y: undefined, series: undefined, color: undefined, index: {} };
   const switchTo = (name: string) => update({ ...fresh, values: [name] });
-  const showNumber = (name: string) => update({ ...fresh, kind: "scalar", values: [name] });
   const chooseKind = (k: string) => {
     const now = valuesByName[selected[0]];
     const value = now && fits(now, k) ? undefined : info.values.find((v) => fits(v, k));
@@ -454,7 +468,6 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
         <label className="field">
           <span>Plot type</span>
           <select value={kind} onChange={(e) => chooseKind(e.target.value)}>
-            {(kind === "scalar" || numbers.length > 0) && <option value="scalar">Single number</option>}
             <option value="curve">Curves</option>
             <option value="scatter">Scatter</option>
             <option value="heatmap">Heat map</option>
@@ -487,9 +500,9 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
               <div className="value-group" aria-label="Single numbers">
                 <span className="muted small">Numbers:</span>
                 {numbers.map((v) => (
-                  <button key={v.name} className="link value-switch" onClick={() => showNumber(v.name)} title={`Show ${v.label}`}>
-                    {v.label} = {v.text ?? "?"}
-                  </button>
+                  <span key={v.name} className="value-number">
+                    {v.label || v.name} = {v.text ?? "?"}
+                  </span>
                 ))}
               </div>
             )}
@@ -499,10 +512,10 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
             <span>Value</span>
             <select value={selected[0] ?? ""} onChange={(e) => update({ values: [e.target.value] })}>
               {info.values
-                .filter((v) => (kind === "heatmap" ? fits(v, "heatmap") : kind === "scatter" ? v.complex : kind === "scalar" ? fits(v, "scalar") : true))
+                .filter((v) => (kind === "heatmap" ? fits(v, "heatmap") : kind === "scatter" ? v.complex : fits(v, kind)))
                 .map((v) => (
                   <option key={v.name} value={v.name}>
-                    {v.label} ({v.text ?? (v.axes.join(", ") || "single number")})
+                    {v.label} ({v.axes.join(", ")})
                   </option>
                 ))}
             </select>
@@ -569,7 +582,7 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
             </select>
           </label>
         )}
-        {kind !== "scalar" && kind !== "scatter" && firstAxes.length > 0 && (
+        {kind !== "scatter" && firstAxes.length > 0 && (
           <label className="field">
             <span>Horizontal axis</span>
             <select value={resolved.x ?? ""} onChange={(e) => update({ x: e.target.value, y: undefined, series: undefined, index: {} })}>
@@ -629,18 +642,16 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
           ),
         )}
 
-        {kind !== "scalar" && (
-          <div className="field inline">
-            <label className="check">
-              <input type="checkbox" checked={resolved.x_scale === "log"} onChange={(e) => update({ x_scale: e.target.checked ? "log" : "linear" })} />
-              Log x
-            </label>
-            <label className="check">
-              <input type="checkbox" checked={resolved.y_scale === "log"} onChange={(e) => update({ y_scale: e.target.checked ? "log" : "linear" })} />
-              Log y
-            </label>
-          </div>
-        )}
+        <div className="field inline">
+          <label className="check">
+            <input type="checkbox" checked={resolved.x_scale === "log"} onChange={(e) => update({ x_scale: e.target.checked ? "log" : "linear" })} />
+            Log x
+          </label>
+          <label className="check">
+            <input type="checkbox" checked={resolved.y_scale === "log"} onChange={(e) => update({ y_scale: e.target.checked ? "log" : "linear" })} />
+            Log y
+          </label>
+        </div>
       </fieldset>
 
       <fieldset>
@@ -872,7 +883,7 @@ function FileDetails({ info }: { info: FileInfo }) {
               <td>{v.label}</td>
               <td>{v.unit}</td>
               <td>{v.axes.join(", ") || "—"}</td>
-              <td className="num">{v.shape.length ? v.shape.join(" × ") : "scalar"}</td>
+              <td className="num">{v.shape.length ? v.shape.join(" × ") : `single number: ${v.text ?? "?"}`}</td>
               <td>{v.dtype}</td>
             </tr>
           ))}
