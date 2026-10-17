@@ -23,9 +23,9 @@ The installer:
 viewer first if needed.
 
 **Uninstall:** Windows Settings → Apps → **LBD Viewer** → Uninstall. This removes the program
-and the `.lbd` file association. When it starts, it asks whether to also remove your presets and
-settings (including the list of folders) in `%APPDATA%\lbd`. The default is **No**, so they are
-kept for a later installation; **Yes** moves them to the Recycle Bin, where you can restore them.
+and the `.lbd` file association. When it starts, it asks whether to keep your presets and
+settings (including the list of folders) in `%APPDATA%\lbd` for a later installation. The default
+is **Yes**, keep them; **No** moves them to the Recycle Bin, where you can restore them.
 
 Requirements: 64-bit Windows 10 or 11.
 
@@ -67,8 +67,8 @@ the default style on the Styles page, e.g. DejaVu Sans, which is always availabl
 `./install.sh --no-fonts` skips the check.
 
 **Upgrade:** run `install.sh` of the new version. **Uninstall:** run `./uninstall.sh` from the
-unpacked folder. It asks whether to also remove your presets and settings in `~/.config/lbd`;
-the default is to keep them, and removed ones go to the desktop's trash when there is one.
+unpacked folder. It asks whether to keep your presets and settings in `~/.config/lbd`; the
+default is to keep them, and otherwise they go to the desktop's trash when there is one.
 
 Requirements: a 64-bit Linux desktop with a web browser. The file association and menu entry
 use the standard freedesktop tools (`xdg-mime`, `update-mime-database`), which desktop

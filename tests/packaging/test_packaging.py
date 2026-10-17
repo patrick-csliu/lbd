@@ -216,9 +216,10 @@ def test_uninstaller_keeps_settings_by_default():
 
     root = Path(__file__).resolve().parents[2] / "packaging"
     iss = (root / "windows" / "LBDViewer.iss").read_text(encoding="utf-8")
-    assert "MB_DEFBUTTON2" in iss and "not UninstallSilent" in iss       # "No" is the default
+    # The question is "Keep…?" with Yes (= keep) the default; a silent uninstall never asks.
+    assert "Keep your LBD presets" in iss and "MB_DEFBUTTON1) = IDNO" in iss and "not UninstallSilent" in iss
     # asked before anything is removed, and never deleted permanently: to the Recycle Bin
     assert "CurUninstallStep = usUninstall" in iss and "SendToRecycleBin" in iss
     assert "DelTree(ExpandConstant('{userappdata}" not in iss
     sh = (root / "linux" / "uninstall.sh").read_text(encoding="utf-8")
-    assert "answer=n" in sh and "[y/N]" in sh
+    assert "keep=y" in sh and "[Y/n]" in sh

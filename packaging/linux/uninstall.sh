@@ -1,6 +1,6 @@
 #!/bin/sh
-# Remove LBD Viewer installed by install.sh. At the end it asks whether to delete your LBD
-# presets and settings too (default: keep them). Without a terminal they are always kept.
+# Remove LBD Viewer installed by install.sh. At the end it asks whether to keep your LBD
+# presets and settings (default: keep them). Without a terminal they are always kept.
 set -eu
 
 DATA="${XDG_DATA_HOME:-$HOME/.local/share}"
@@ -27,13 +27,13 @@ command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$
 echo "LBD Viewer removed."
 
 # Presets and settings (also used by the Python module lbd.plot): keep them unless asked.
-answer=n
+keep=y
 if [ -t 0 ] && [ -d "$CONF/lbd" ]; then
-    printf "Also remove your LBD presets and settings (the list of folders) in %s? [y/N] " "$CONF/lbd"
-    read -r answer || answer=n
+    printf "Keep your LBD presets and settings (the list of folders) in %s for a later installation? [Y/n] " "$CONF/lbd"
+    read -r keep || keep=y
 fi
-case "$answer" in
-    y|Y|yes|YES)
+case "$keep" in
+    n|N|no|NO)
         # To the desktop's trash when there is one, so it can be undone.
         if command -v gio >/dev/null 2>&1 && gio trash "$CONF/lbd" 2>/dev/null; then
             [ -d "$STATE/lbd" ] && gio trash "$STATE/lbd" 2>/dev/null

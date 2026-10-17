@@ -100,9 +100,9 @@ The Windows installer (`packaging/windows/LBDViewer.iss`):
 - doesn't ask "folder exists, install anyway?" (`DirExistsWarning=no`): the folder is its own;
 - removes the whole install folder on uninstall, so no empty folder is left behind;
 - asks when an uninstall starts (step `usUninstall`, before anything is removed) whether to
-  remove the presets and settings (`%APPDATA%\lbd`) and the logs (`%LOCALAPPDATA%\lbd`);
-  **No** is the default, **Yes** moves them to the Recycle Bin (never a permanent delete), and a
-  silent uninstall keeps them;
+  keep the presets and settings (`%APPDATA%\lbd`) and the logs (`%LOCALAPPDATA%\lbd`);
+  **Yes** (keep) is the default, **No** moves them to the Recycle Bin (never a permanent
+  delete), and a silent uninstall keeps them;
 - shows a note after installing if Arial, the default style's font, is missing.
 
 The Linux `install.sh` checks for Arial too and offers to install it with the system's core

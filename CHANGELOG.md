@@ -8,6 +8,8 @@ The file format has its own version (`lbd_version`, currently 1.0).
 - Windows uninstaller: also removes the empty `.lbd` and `Applications\lbd-view.exe` registry
   keys and the "running viewer" record (`%LOCALAPPDATA%\Temp\lbd`), so nothing is left behind.
   The release workflow checks this after every test uninstall.
+- The uninstall question is now "Keep your LBD presets and settings…?" (Yes, the default, keeps
+  them). "Also remove…? No" was easy to read as "don't keep". The same on Linux (`[Y/n]`).
 
 ## 1.0.0 (2026-10-16)
 

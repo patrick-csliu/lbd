@@ -124,20 +124,21 @@ begin
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
-// Also remove the presets and settings (folder list)? Asked when the uninstall starts, before
-// anything is removed, so the question is in front of the uninstall window. No is the default,
-// and a silent uninstall always keeps them (they are shared with the Python module lbd.plot).
+// Keep the presets and settings (folder list)? Asked when the uninstall starts, before anything
+// is removed, so the question is in front of the uninstall window. "Keep" is the question (users
+// read "Also remove…? No" as "don't keep"), Yes = keep is the default, and a silent uninstall
+// always keeps them (they are shared with the Python module lbd.plot).
 var
   RemoveSettings: Boolean;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if (CurUninstallStep = usUninstall) and not UninstallSilent then
-    RemoveSettings := MsgBox('Also remove your LBD presets and settings (the list of folders)?' + #13#10 +
+    RemoveSettings := MsgBox('Keep your LBD presets and settings (the list of folders) for a later installation?' + #13#10 +
                              '(' + ExpandConstant('{userappdata}\lbd') + ')' + #13#10#13#10 +
-                             'Yes: they are moved to the Recycle Bin.' + #13#10 +
-                             'No: they are kept for a later installation.',
-                             mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
+                             'Yes: keep them.' + #13#10 +
+                             'No: move them to the Recycle Bin.',
+                             mbConfirmation, MB_YESNO or MB_DEFBUTTON1) = IDNO;
   if (CurUninstallStep = usPostUninstall) and RemoveSettings then
   begin
     RecycleFolder(ExpandConstant('{userappdata}\lbd'));    // presets, settings.json
