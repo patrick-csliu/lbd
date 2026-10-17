@@ -77,6 +77,15 @@ export interface ValueInfo {
   shape: number[];
   dtype: string;
   complex: boolean;
+  /** a single number (no axes), as text with a unit prefix: "21 µs" */
+  text?: string;
+}
+
+export interface AxisValues {
+  name: string;
+  label: string;
+  unit: string;
+  values: (number | null)[];
 }
 
 export type Json = null | boolean | number | string | Json[] | { [k: string]: Json };
@@ -290,6 +299,8 @@ export const api = {
   file: (path: string) => call<FileInfo>("GET", "/api/file", undefined, { path }),
   render: (path: string, spec: PlotSpec | null, preset: string | null, style: JsonObject | null, styleFile?: string | null) =>
     call<RenderResult>("POST", "/api/render", { path, spec, preset, style, style_file: styleFile ?? null }),
+  /** An axis' values in full, e.g. to jump to the point nearest a typed value. */
+  axis: (path: string, name: string) => call<AxisValues>("GET", "/api/axis", undefined, { path, name }),
   imageInfo: (path: string) => call<ImageInfo>("GET", "/api/image/info", undefined, { path }),
   styleFile: (path: string) => call<StyleFileInfo>("GET", "/api/stylefile", undefined, { path }),
   importStyle: (name: string, content: unknown, overwrite = false) =>

@@ -171,6 +171,11 @@ legend { padding: 0 4px; font-weight: 600; font-size: 12px; color: var(--muted);
 .field.inline { flex-direction: row; gap: 12px; flex-wrap: wrap; }
 .field.check, .check { flex-direction: row; display: flex; align-items: center; gap: 6px; }
 .checks { display: flex; flex-direction: column; gap: 2px; }
+.value-group { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; margin-top: 6px; }
+.value-switch { text-align: left; }
+.slice-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.slice-value { display: flex; align-items: center; gap: 4px; font-size: 12px; }
+.slice-value input { width: 90px; }
 .mini { display: flex; flex-direction: column; font-size: 12px; color: var(--muted); }
 .mini input { width: 90px; }
 .json-edit { margin-top: 6px; display: flex; flex-direction: column; gap: 6px; }

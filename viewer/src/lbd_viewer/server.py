@@ -37,6 +37,7 @@ from pydantic import BaseModel, ConfigDict  # noqa: E402
 import lbd  # noqa: E402
 from lbd.plot import render as rnd  # noqa: E402
 from lbd.plot.style import STYLE_SUFFIX, read_style_file  # noqa: E402
+from lbd.plot.units import prefix_scale  # noqa: E402
 
 from . import __version__  # noqa: E402
 from . import files, images, scan, sdk  # noqa: E402
@@ -285,6 +286,10 @@ def file_summary(d: "lbd.Dataset") -> Dict[str, Any]:
         })
     values = [{"name": v.name, "unit": v.unit, "label": v.label, "axes": v.axes, "shape": list(v.shape),
                "dtype": v.dtype, "complex": v.dtype.startswith("complex")} for v in d.values.values()]
+    numbers = _single_numbers(d)
+    for v in values:
+        if v["name"] in numbers:
+            v["text"] = numbers[v["name"]]             # e.g. "21 µs": shown in the values list
     stat = d.path.stat() if d.path else None
     return {
         "path": str(d.path), "name": d.path.name if d.path else "",
@@ -294,6 +299,25 @@ def file_summary(d: "lbd.Dataset") -> Dict[str, Any]:
         "plot": d.plot, "style": d.style, "style_name": d.style_name, "matplotlib": d.matplotlib,
         "version": file_version(d.path) if d.path else None,
     }
+
+
+def _single_numbers(d: "lbd.Dataset") -> Dict[str, str]:
+    """The single-number (0-D) values as text with a unit prefix, as a plot shows them: "21 µs".
+    `d` may be header-only (lbd.info); then these small values are read from its file."""
+    names = [n for n, v in d.values.items() if len(v.shape) == 0]
+    if not names:
+        return {}
+    full = lbd.load(d.path, values=names) if d.path and any(d.values[n].data is None for n in names) else d
+    out = {}
+    for n in names:
+        v = full.values[n]
+        x = np.asarray(v.data)
+        if np.iscomplexobj(x):
+            out[n] = f"{complex(x):.6g} {v.unit}".strip()
+            continue
+        factor, unit = prefix_scale(x, v.unit, "auto", warn=False)
+        out[n] = f"{float(x) * factor:.6g} {unit}".strip()
+    return out
 
 
 _DIALOG_LOCK = threading.Lock()
@@ -536,6 +560,23 @@ def create_app(state: AppState) -> FastAPI:
         with collect_warnings() as warns:
             summary = file_summary(lbd.info(p))
         return {**summary, "warnings": warns}
+
+    @app.get("/api/axis")
+    def get_axis(path: str = Query(...), name: str = Query(...)):
+        """An axis' values, e.g. to jump to the point nearest a typed value."""
+        p = state.check_allowed(path)
+        if not p.is_file():
+            raise HTTPException(404, f"not a file: {path}")
+        d = lbd.info(p)
+        if name not in d.axes:
+            raise HTTPException(404, f"{p.name} has no axis {name!r}; its axes: {list(d.axes)}")
+        a = d.axes[name]
+        data = np.asarray(a.data)
+        if data.dtype.kind not in "biuf":
+            raise HTTPException(400, f"axis {name!r} holds {data.dtype} values, not numbers")
+        # every point, in full (JSON has no NaN: a missing point is null)
+        values = [float(v) if np.isfinite(v) else None for v in data.astype(float).ravel()]
+        return {"name": a.name, "label": a.label, "unit": a.unit, "values": values}
 
     @app.put("/api/file/plot")
     def put_file_plot(body: FilePlotBody):

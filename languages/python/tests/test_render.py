@@ -161,6 +161,91 @@ def test_explicit_settings_win_over_saved_view():
     assert resolve_spec(d, {})["complex"] == "phase"
 
 
+def test_another_plot_kind_takes_only_the_kind_free_settings_of_the_saved_view():
+    """Found while watching a session: a saved scatter view (Q against I) made every switch to
+    Curves warn "saved view: 'I' can't be used as horizontal axis". The view isn't wrong; it
+    was made for a scatter plot."""
+    d = lbd.Dataset()
+    d.add_axis("prep", [0.0, 1.0])
+    d.add_axis("shot", np.arange(50.0))
+    for name in ("I", "Q"):
+        d.add_value(name, np.ones((2, 50)), axes=["prep", "shot"], unit="V")
+    d.plot = {"kind": "scatter", "values": ["Q"], "x": "I", "color": "prep", "complex": "abs",
+              "y_scale": "log", "title": "Readout", "x_label": "I (V)", "index": {"shot": 3}}
+    w = quiet()
+    try:
+        curve = resolve_spec(d, {"kind": "curve"})
+        heat = resolve_spec(d, {"kind": "heatmap"})
+    finally:
+        w.__exit__(None, None, None)
+    # kept: values, scales, title; dropped: x, colour, slice, axis label (they belong to the scatter)
+    assert curve["values"] == ["Q"] and curve["y_scale"] == "log" and curve["title"] == "Readout"
+    assert curve["x"] == "shot" and curve["series"] == "prep" and "x_label" not in curve
+    assert heat["x"] == "shot" and heat["y"] == "prep"
+    # the same kind still uses the whole saved view
+    assert resolve_spec(d, {"kind": "scatter"})["x"] == "I"
+
+
+def test_a_saved_value_that_cant_make_the_new_kind_is_left_out_quietly():
+    d = sweep()
+    d.plot = {"kind": "scalar", "values": ["Q"]}
+    w = quiet()
+    try:
+        r = resolve_spec(d, {"kind": "heatmap"})
+    finally:
+        w.__exit__(None, None, None)
+    assert r["values"] == ["S21"]
+
+
+def test_other_values_drop_a_saved_axis_that_doesnt_fit_quietly():
+    """t1_noise.lbd: the saved view draws P1 over delay; choosing S_V (over frequency) must not
+    complain that the saved horizontal axis 'delay' doesn't fit S_V."""
+    d = lbd.Dataset()
+    d.add_axis("delay", np.linspace(0, 1e-4, 5), unit="s")
+    d.add_axis("f", np.logspace(0, 5, 6), unit="Hz")
+    d.add_value("P1", np.ones(5), axes="delay")
+    d.add_value("S_V", np.ones(6), axes="f", unit="V²/Hz")
+    d.plot = {"kind": "curve", "values": ["P1"], "x": "delay", "x_scale": "log"}
+    w = quiet()
+    try:
+        r = resolve_spec(d, {"values": ["S_V"]})
+    finally:
+        w.__exit__(None, None, None)
+    assert r["x"] == "f" and r["x_scale"] == "log"          # the scale still applies
+    d.plot = {"kind": "curve", "values": ["P1"], "x": "gone"}
+    with pytest.warns(RenderWarning, match="saved view"):       # the view's own plot: still told
+        resolve_spec(d, {})
+
+
+# ---- axes with a single point are fixed parameters ---------------------------------------------
+
+
+def one_power(order):
+    """S21 over freq at one fixed power: power is an axis of length 1 (not swept)."""
+    d = lbd.Dataset()
+    d.add_axis("power", [-40.0], unit="dBm", label="Power")
+    d.add_axis("freq", np.linspace(7e9, 7.01e9, 11), unit="Hz", label="Frequency")
+    data = np.ones((1, 11)) if order[0] == "power" else np.ones((11, 1))
+    d.add_value("S21", data, axes=order)
+    return d
+
+
+@pytest.mark.parametrize("order", [["power", "freq"], ["freq", "power"]])
+def test_a_single_point_axis_is_a_fixed_parameter(order):
+    for spec in ({}, {"kind": "curve"}):
+        r = resolve_spec(one_power(order), spec)
+        assert r["kind"] == "curve" and r["x"] == "freq" and "series" not in r
+        assert r["slices"] == [{"axis": "power", "index": 0, "length": 1, "label": "Power", "unit": "dBm",
+                                "value": -40.0}]
+    with pytest.raises(RenderError, match=r"2 axes with more than one point.*\['power'\] is a single point"):
+        resolve_spec(one_power(order), {"kind": "heatmap"})
+
+
+def test_a_single_point_axis_can_still_be_chosen():
+    r = resolve_spec(one_power(["power", "freq"]), {"kind": "curve", "x": "power", "series": "freq"})
+    assert r["x"] == "power" and r["series"] == "freq"
+
+
 # ---- scatter ------------------------------------------------------------------------------------
 
 

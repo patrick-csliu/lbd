@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, ApiError, baseName, FileInfo, formatBytes, Json, JsonObject, lastDownloadWarnings, PlotSpec, RenderResult, TabState } from "./api";
+import { api, ApiError, AxisValues, baseName, FileInfo, formatBytes, Json, JsonObject, lastDownloadWarnings, PlotSpec, RenderResult, Slice, TabState, ValueInfo } from "./api";
 import { deepMerge, isEmptyObject } from "./util";
 import { ConfirmDialog, ConfirmRequest } from "./menu";
 import { useToast } from "./toast";
@@ -377,6 +377,31 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
     if (next.length) update({ values: next });
   };
 
+  // Axes with one point are fixed parameters (not swept): they don't count as dimensions.
+  const lengthOf = (axis: string) => info.axes.find((a) => a.name === axis)?.length ?? 0;
+  const sweptAxes = (v: ValueInfo) => v.axes.filter((a) => lengthOf(a) > 1);
+  /** Whether a value can be drawn as plot kind k (the same rule as the renderer). */
+  const fits = (v: ValueInfo, k: string) =>
+    k === "scalar" ? v.axes.length === 0 : k === "heatmap" ? sweptAxes(v).length >= 2 : v.axes.length > 0;
+  const numbers = info.values.filter((v) => v.axes.length === 0);
+  const withAxes = info.values.filter((v) => v.axes.length > 0);
+  // Values that can join the plot: they share its horizontal axis (scatter: or its exact axes).
+  const x = resolved.x;
+  const joins = (v: ValueInfo) =>
+    kind === "scatter" && !(x && firstAxes.includes(x)) ? v.axes.join(",") === firstAxes.join(",") : !!x && v.axes.includes(x);
+  const here = withAxes.filter(joins);
+  const elsewhere = withAxes.filter((v) => !joins(v));
+  // Another value on its own: it brings its own axes, so the axis choices start afresh.
+  const fresh: PlotSpec = { x: undefined, y: undefined, series: undefined, color: undefined, index: {} };
+  const switchTo = (name: string) => update({ ...fresh, values: [name] });
+  const showNumber = (name: string) => update({ ...fresh, kind: "scalar", values: [name] });
+  const chooseKind = (k: string) => {
+    const now = valuesByName[selected[0]];
+    const value = now && fits(now, k) ? undefined : info.values.find((v) => fits(v, k));
+    update(value ? { ...fresh, kind: k as PlotSpec["kind"], values: [value.name] } : { kind: k as PlotSpec["kind"] });
+  };
+  const axisName = (v: ValueInfo) => v.axes.filter((a) => lengthOf(a) > 1).map((a) => info.axes.find((x) => x.name === a)?.label || a).join(" × ") || v.axes.join(", ");
+
   const figure = (override.figure ?? {}) as JsonObject;
   const setFigure = (key: string, val: string) => {
     const f = { ...figure };
@@ -428,8 +453,8 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
         </legend>
         <label className="field">
           <span>Plot type</span>
-          <select value={kind} onChange={(e) => update({ kind: e.target.value as PlotSpec["kind"] })}>
-            {kind === "scalar" && <option value="scalar">Single number</option>}
+          <select value={kind} onChange={(e) => chooseKind(e.target.value)}>
+            {(kind === "scalar" || numbers.length > 0) && <option value="scalar">Single number</option>}
             <option value="curve">Curves</option>
             <option value="scatter">Scatter</option>
             <option value="heatmap">Heat map</option>
@@ -440,26 +465,44 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
           <div className="field">
             <span>Values</span>
             <div className="checks">
-              {info.values
-                .filter((v) => v.axes.length > 0)
-                .map((v) => (
-                  <label key={v.name} className="check">
-                    <input type="checkbox" checked={selected.includes(v.name)} onChange={(e) => toggleValue(v.name, e.target.checked)} />
-                    {v.label}
-                    <span className="muted small"> ({v.axes.join(", ")})</span>
-                  </label>
-                ))}
+              {here.map((v) => (
+                <label key={v.name} className="check">
+                  <input type="checkbox" checked={selected.includes(v.name)} onChange={(e) => toggleValue(v.name, e.target.checked)} />
+                  {v.label}
+                  <span className="muted small"> ({v.axes.join(", ")})</span>
+                </label>
+              ))}
             </div>
+            {elsewhere.length > 0 && (
+              <div className="value-group" aria-label="Values on other axes">
+                <span className="muted small">On other axes (shown on their own):</span>
+                {elsewhere.map((v) => (
+                  <button key={v.name} className="link value-switch" onClick={() => switchTo(v.name)} title={`Plot ${v.label} instead`}>
+                    {v.label} <span className="muted small">({axisName(v)})</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {numbers.length > 0 && (
+              <div className="value-group" aria-label="Single numbers">
+                <span className="muted small">Numbers:</span>
+                {numbers.map((v) => (
+                  <button key={v.name} className="link value-switch" onClick={() => showNumber(v.name)} title={`Show ${v.label}`}>
+                    {v.label} = {v.text ?? "?"}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         ) : (
           <label className="field">
             <span>Value</span>
             <select value={selected[0] ?? ""} onChange={(e) => update({ values: [e.target.value] })}>
               {info.values
-                .filter((v) => (kind === "heatmap" ? v.axes.length >= 2 : kind === "scatter" ? v.complex : true))
+                .filter((v) => (kind === "heatmap" ? fits(v, "heatmap") : kind === "scatter" ? v.complex : kind === "scalar" ? fits(v, "scalar") : true))
                 .map((v) => (
                   <option key={v.name} value={v.name}>
-                    {v.label} ({v.axes.join(", ") || "scalar"})
+                    {v.label} ({v.text ?? (v.axes.join(", ") || "single number")})
                   </option>
                 ))}
             </select>
@@ -552,13 +595,13 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
             </select>
           </label>
         )}
-        {kind === "curve" && selected.length === 1 && firstAxes.length >= 2 && (
+        {kind === "curve" && selected.length === 1 && firstAxes.some((a) => a !== resolved.x && lengthOf(a) > 1) && (
           <label className="field">
             <span>One curve per</span>
             <select value={resolved.series ?? "none"} onChange={(e) => update({ series: e.target.value, index: {} })}>
               <option value="none">— (single curve)</option>
               {firstAxes
-                .filter((a) => a !== resolved.x)
+                .filter((a) => a !== resolved.x && lengthOf(a) > 1) // a single-point axis would give one curve
                 .map((a) => (
                   <option key={a} value={a}>
                     {axisLabel(a)}
@@ -568,21 +611,23 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
           </label>
         )}
 
-        {(resolved.slices ?? []).map((s) => (
-          <label key={s.axis} className="field">
-            <span>
-              {s.label} = {s.value ?? "?"} {s.unit}
-              <span className="muted small"> ({s.index + 1}/{s.length})</span>
-            </span>
-            <input
-              type="range"
-              min={0}
-              max={s.length - 1}
-              value={s.index}
-              onChange={(e) => update({ index: { ...(resolved.index ?? {}), [s.axis]: Number(e.target.value) } })}
+        {(resolved.slices ?? []).map((s) =>
+          s.length === 1 ? (
+            // a parameter that wasn't swept: nothing to choose
+            <div key={s.axis} className="field">
+              <span>
+                {s.label} = {s.value ?? "?"} {s.unit} <span className="muted small">(fixed)</span>
+              </span>
+            </div>
+          ) : (
+            <SliceControl
+              key={s.axis}
+              path={info.path}
+              slice={s}
+              onIndex={(i) => update({ index: { ...(resolved.index ?? {}), [s.axis]: i } })}
             />
-          </label>
-        ))}
+          ),
+        )}
 
         {kind !== "scalar" && (
           <div className="field inline">
@@ -655,6 +700,10 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
             Height mm
             <input type="number" min={10} max={1000} value={(figure.height_mm as number | undefined) ?? ""} placeholder="preset" onChange={(e) => setFigure("height_mm", e.target.value)} />
           </label>
+          <label className="mini" title="Resolution of PNG and JPG exports (the preview is unaffected)">
+            DPI (PNG/JPG)
+            <input type="number" min={50} max={2400} step={50} value={(figure.dpi as number | undefined) ?? ""} placeholder="preset" onChange={(e) => setFigure("dpi", e.target.value)} />
+          </label>
         </div>
         <button className="link" onClick={() => setShowStyle((s) => !s)} aria-expanded={showStyle}>
           {showStyle ? "▾" : "▸"} Style changes for this file (JSON)
@@ -702,6 +751,86 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
 }
 
 // ---- file details ---------------------------------------------------------------------------
+
+// Axis values, fetched once per file and axis (to find the point nearest a typed value).
+const axisCache = new Map<string, Promise<AxisValues>>();
+function axisValues(path: string, axis: string): Promise<AxisValues> {
+  const key = `${path}\n${axis}`;
+  if (!axisCache.has(key)) {
+    const p = api.axis(path, axis);
+    p.catch(() => axisCache.delete(key)); // a failure is retried next time
+    axisCache.set(key, p);
+  }
+  return axisCache.get(key)!;
+}
+
+/** The position on an axis that isn't drawn: a slider, and a box to type the axis value. A typed
+ *  value goes to the nearest measured point; the box then shows that point's exact value. */
+function SliceControl({ path, slice: s, onIndex }: { path: string; slice: Slice; onIndex: (i: number) => void }) {
+  const shown = s.value === null ? "" : String(s.value);
+  const [text, setText] = useState(shown);
+  const [note, setNote] = useState<string | null>(null);
+  useEffect(() => setText(shown), [shown]);
+
+  const commit = async () => {
+    if (text.trim() === shown) return;
+    const wanted = Number(text.trim());
+    if (text.trim() === "" || !Number.isFinite(wanted)) {
+      setNote("Type a number");
+      setText(shown);
+      return;
+    }
+    try {
+      const { values } = await axisValues(path, s.axis);
+      let best = -1;
+      values.forEach((v, i) => {
+        if (v !== null && (best < 0 || Math.abs(v - wanted) < Math.abs((values[best] as number) - wanted))) best = i;
+      });
+      if (best < 0) return setNote("This axis has no numbers");
+      const finite = values.filter((v): v is number => v !== null);
+      const outside = wanted < Math.min(...finite) || wanted > Math.max(...finite);
+      setNote(outside ? `${wanted} is outside the axis (${Math.min(...finite)} … ${Math.max(...finite)}): nearest end` : null);
+      setText(String(values[best]));
+      if (best !== s.index) onIndex(best);
+    } catch (e) {
+      setNote((e as Error).message);
+      setText(shown);
+    }
+  };
+
+  return (
+    <div className="field">
+      <label className="slice-head">
+        <span>
+          {s.label}
+          <span className="muted small"> (point {s.index + 1} of {s.length})</span>
+        </span>
+        <span className="slice-value">
+          <input
+            aria-label={`${s.label} value`}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+          />
+          {s.unit}
+        </span>
+      </label>
+      <input
+        type="range"
+        aria-label={`${s.label} position`}
+        min={0}
+        max={s.length - 1}
+        value={s.index}
+        onChange={(e) => {
+          setNote(null);
+          onIndex(Number(e.target.value));
+        }}
+      />
+      {note && <span className="muted small">{note}</span>}
+    </div>
+  );
+}
 
 function FileDetails({ info }: { info: FileInfo }) {
   return (

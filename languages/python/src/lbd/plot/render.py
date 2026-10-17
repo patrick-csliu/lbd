@@ -45,6 +45,10 @@ _APPLIES = {
     "scatter": {"x", "color", "index", "x_scale", "y_scale", "x_label", "y_label", "z_label", "annotations"},
     "scalar": {"annotations"},
 }
+# Saved-view settings that mean the same for every plot type: kept when another type is chosen
+# (resolve_spec). Axes, series, colours, slices, axis labels and annotations belong to the plot
+# they were made for.
+KIND_FREE_KEYS = frozenset({"values", "complex", "x_scale", "y_scale", "title"})
 
 # rcParams are global in matplotlib, so renders are serialized.
 RENDER_LOCK = threading.RLock()
@@ -72,6 +76,17 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
     Keys in `spec` win over the dataset's saved view (d.plot). Invalid explicit settings raise
     RenderError; invalid saved settings are ignored with a RenderWarning. With `warn_unused`,
     explicit settings that the chosen plot type doesn't use give a RenderWarning.
+
+    When `spec` asks for another plot kind than the saved view's, only the settings that mean the
+    same for every kind are taken from the saved view (KIND_FREE_KEYS: the values, complex mode,
+    scales, title); its axes, series, colours, slices, axis labels and annotations belong to that
+    plot and are not used. When `spec` asks for another kind or other values, a saved setting
+    that doesn't fit is left out quietly: the saved view isn't wrong, it was made for another
+    plot.
+
+    Axes with a single point are fixed parameters (a setting that wasn't swept): they don't count
+    as dimensions for the automatic kind or a heat map, and are not chosen as the horizontal
+    axis, vertical axis or series unless asked for.
     """
     if spec is None:
         spec = {}
@@ -81,6 +96,15 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
     if unknown:
         raise RenderError(f"unknown plot setting(s) {unknown}; allowed: {sorted(SPEC_KEYS)}")
     file_spec = d.plot if isinstance(d.plot, dict) else {}
+    saved_kind = file_spec.get("kind")
+    other_kind = (spec.get("kind") not in (None, "") and saved_kind not in (None, "", "auto")
+                  and spec.get("kind") != saved_kind)
+    if other_kind:
+        file_spec = {k: v for k, v in file_spec.items() if k in KIND_FREE_KEYS}
+    # The saved view was made for its own kind and values: a saved setting that doesn't fit the
+    # kind or values chosen now is left out quietly (it isn't an error of the view).
+    other_values = spec.get("values") not in (None, "", []) and spec.get("values") != file_spec.get("values")
+    quiet = other_kind or other_values
     names = list(d.values)
     if not names:
         raise RenderError("this dataset has no values to plot")
@@ -98,7 +122,8 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
         try:
             return check(raw)
         except RenderError as e:
-            _warn(f"{_where(d)}saved view: {e}; using the default instead", RenderWarning)
+            if not quiet:               # made for another plot: not an error of the view
+                _warn(f"{_where(d)}saved view: {e}; using the default instead", RenderWarning)
             return default
 
     # values
@@ -113,15 +138,29 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
 
     default_value = next((n for n in names if len(d.values[n].shape) > 0), names[0])
     values = pick("values", check_values, [default_value])
+
+    def fits(name: str, k: str) -> bool:
+        """Whether this value can be drawn as plot kind k."""
+        v = d.values[name]
+        if k == "scalar":
+            return len(v.shape) == 0
+        if k == "heatmap":
+            return len(_swept(v)) >= 2
+        return k == "auto" or len(v.shape) > 0
+
+    if other_kind and not explicit("values") and not fits(values[0], spec["kind"]):
+        # the saved values were for another kind of plot: the first value this kind can show
+        values = [next((n for n in names if fits(n, spec["kind"])), default_value)]
     first = d.values[values[0]]
     nd = len(first.shape)
+    swept = _swept(first)                  # its axes with more than one point
 
     # kind
     def check_kind(k: Any) -> str:
         if k not in KINDS:
             raise RenderError(f"unknown plot kind {k!r}; use one of {KINDS}")
         if k == "auto":
-            return "scalar" if nd == 0 else ("curve" if nd == 1 else "heatmap")
+            return "scalar" if nd == 0 else ("heatmap" if len(swept) >= 2 else "curve")
         if nd == 0 and k != "scalar":
             raise RenderError(f"'{first.name}' is a single number; it can only be shown as a number "
                               "(kind='auto' or 'scalar')")
@@ -129,6 +168,10 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
             raise RenderError(f"'{first.name}' is {nd}-D; kind='scalar' is only for single numbers")
         if k == "heatmap" and nd < 2:
             raise RenderError(f"'{first.name}' is {nd}-D; a heat map needs 2 dimensions")
+        if k == "heatmap" and len(swept) < 2:
+            fixed = [a for a in first.axes if a not in swept]
+            raise RenderError(f"a heat map needs 2 axes with more than one point; '{first.name}' has "
+                              f"{len(swept)} ({fixed} {'is' if len(fixed) == 1 else 'are'} a single point)")
         return k
 
     kind = pick("kind", check_kind, check_kind("auto"))
@@ -200,7 +243,7 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
     def check_x(v: Any) -> str:
         return _pick(v, axes, role="horizontal axis")
 
-    x = pick("x", check_x, axes[-1])
+    x = pick("x", check_x, (swept or axes)[-1])
     out["x"] = x
     keep = [x]
     if kind == "heatmap":
@@ -208,7 +251,7 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
             _warn(f"a heat map shows one value; {values[1:]} ignored", RenderWarning)
         out["values"] = values[:1]
         rest = [a for a in axes if a != x]
-        y = pick("y", lambda v: _pick(v, rest, role="vertical axis"), rest[-1])
+        y = pick("y", lambda v: _pick(v, rest, role="vertical axis"), ([a for a in rest if a in swept] or rest)[-1])
         out["y"] = y
         keep.append(y)
     else:
@@ -219,9 +262,12 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
         if len(values) == 1 and others:
             series = spec.get("series") if explicit("series") else file_spec.get("series")
             if series != "none":
-                series = pick("series", lambda v: _pick(v, others, role="series"), others[0])
-                out["series"] = series
-                keep.append(series)
+                # by default one curve per swept axis; a single-point axis is a fixed parameter
+                default = next((a for a in others if a in swept), None)
+                series = pick("series", lambda v: _pick(v, others, role="series"), default)
+                if series is not None:
+                    out["series"] = series
+                    keep.append(series)
         elif explicit("series") and spec["series"] != "none" and warn_unused:
             why = "several values are plotted" if len(values) > 1 else f"'{first.name}' is 1-D"
             _warn(f"series={spec['series']!r} is ignored: {why}", RenderWarning)
@@ -383,7 +429,7 @@ def _resolve_scatter(d, out, values, pick, spec, index_in, warn_unused) -> Dict[
                                   f"or a value with the same axes ({[n for n in same_shape if n not in values]})")
             return x
 
-        x = pick("x", check_x, axes[-1])
+        x = pick("x", check_x, (_swept(first) or axes)[-1])
         out["x"] = x
         for name in values[1:]:
             v = d.values[name]
@@ -420,6 +466,11 @@ def _resolve_scatter(d, out, values, pick, spec, index_in, warn_unused) -> Dict[
             _warn(f"index for {unused_idx} is ignored: '{first.name}' has no such axes", RenderWarning)
     out["index"], out["slices"] = _slices(d, fixed, index_in, spec)
     return out
+
+
+def _swept(value) -> List[str]:
+    """The value's axes with more than one point; the others are fixed parameters."""
+    return [a for a, n in zip(value.axes, value.shape) if n > 1]
 
 
 def _slices(d, axes: List[str], index_in: Dict[str, Any], spec: Dict[str, Any]):

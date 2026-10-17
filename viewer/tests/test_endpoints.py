@@ -136,6 +136,27 @@ def test_file_summary_details(client, data_dir):
     assert t["min"] == 0.0 and t["max"] == pytest.approx(1e-6)
 
 
+def test_file_summary_shows_single_numbers_with_a_prefix(client, data_dir):
+    d = lbd.load(data_dir / "curve.lbd")
+    d.add_value("T1", 21e-6, unit="s", label="$T_1$")
+    d.save(data_dir / "curve.lbd")
+    body = client.get("/api/file", params={"path": str(data_dir / "curve.lbd")}).json()
+    values = {v["name"]: v for v in body["values"]}
+    assert values["T1"]["text"] == "21 µs"
+    assert "text" not in values["a"]                       # only single numbers have one
+    cube = client.get("/api/file", params={"path": str(data_dir / "sub" / "deeper" / "cube.lbd")}).json()
+    assert {v["name"]: v.get("text") for v in cube["values"]}["q"] == "3.5"
+
+
+def test_axis_values_in_full(client, data_dir):
+    body = client.get("/api/axis", params={"path": str(data_dir / "sub" / "sweep.lbd"), "name": "power"}).json()
+    sweep = lbd.load(data_dir / "sub" / "sweep.lbd")
+    assert body["unit"] == "dBm" and body["values"] == pytest.approx(list(sweep.axes["power"].data))
+    r = client.get("/api/axis", params={"path": str(data_dir / "sub" / "sweep.lbd"), "name": "nope"})
+    assert r.status_code == 404 and "its axes" in r.json()["detail"]
+    assert client.get("/api/axis", params={"path": str(data_dir / "gone.lbd"), "name": "t"}).status_code == 404
+
+
 def test_put_file_plot_checks(client, data_dir):
     p = str(data_dir / "curve.lbd")
     assert client.put("/api/file/plot", json={"path": p}).status_code == 400
@@ -198,6 +219,17 @@ def test_render_with_preset_and_ui_style(client, data_dir):
     body = client.post("/api/render", json={"path": str(data_dir / "curve.lbd"), "preset": "talk",
                                             "style": {"figure": {"height_mm": 70}}}).json()
     assert body["preset"] == "talk" and body["size_mm"] == [160, 70]
+
+
+def test_png_export_uses_the_dpi_set_next_to_width_and_height(client, data_dir):
+    import io
+
+    from PIL import Image
+
+    style = {"figure": {"width_mm": 50.8, "height_mm": 25.4, "dpi": 150}}     # 2 × 1 inch
+    r = client.post("/api/export", json={"path": str(data_dir / "curve.lbd"), "format": "png", "style": style})
+    img = Image.open(io.BytesIO(r.content))
+    assert img.size == (300, 150) and round(img.info["dpi"][0]) == 150
 
 
 def test_export_errors_and_warning_header(client, data_dir):

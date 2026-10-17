@@ -5,6 +5,19 @@ The file format has its own version (`lbd_version`, currently 1.0).
 
 ## Unreleased
 
+- Viewer, plotting: changing the plot type (e.g. a saved scatter view to Curves) showed a
+  misleading note "saved view: 'I' can't be used as horizontal axis". Settings that belong to
+  the saved plot type are no longer borrowed by another type (`lbd.plot` too).
+- Viewer, plotting: a value on another axis (e.g. a noise spectrum next to a decay) can be
+  chosen: **On other axes** switches the plot to it, instead of the error "can't share the x
+  axis". Single numbers are listed with their value (`T1 = 21 µs`) and can be shown.
+- Plotting: an axis with a single point is a fixed parameter. A 1 × N value is drawn as curves
+  (it was a heat map one row high, or N one-point curves), and the viewer shows `Power = -40 dBm
+  (fixed)` instead of a slider.
+- Viewer, plotting: type the axis value next to a slider (e.g. Power `-42`): it goes to the
+  nearest measured point.
+- Viewer, plotting: **DPI (PNG/JPG)** next to Width/Height, for this file's raster exports.
+
 - Viewer: a **Theme** choice under **⚙**: System (follows the light or dark mode of Windows,
   macOS or Linux), Light or Dark. Saved, and every open viewer tab follows at once. Changing a
   ⚙ setting now also updates the other tabs' ⚙ menu.
