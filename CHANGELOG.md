@@ -1,9 +1,9 @@
 # Changelog
 
-All components (the viewer and the Python, MATLAB and Julia modules) share one version number.
+All components (the viewer and every language module) share one version number.
 The file format has its own version (`lbd_version`, currently 1.0).
 
-## Unreleased
+## 1.1.0 (2026-10-17)
 
 **Changes to how things behave** (read these when upgrading)
 
