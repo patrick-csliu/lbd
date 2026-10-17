@@ -15,6 +15,10 @@ The file format has its own version (`lbd_version`, currently 1.0).
   [Several browser tabs](docs/viewer/folders-and-files.md#several-browser-tabs).
 - Viewer: **Open in new browser tab** for files in the Folders panel (also Ctrl/⌘+click or
   middle-click), and a **◧ Folders** button to hide the panel.
+- Viewer: a new page takes the lowest free number, so closing Page 2 and opening a tab gives
+  Page 2 again, not Page 7.
+- The Windows installer is now named `LBD-Viewer-<version>-windows-x64-setup.exe`, like the
+  macOS and Linux files, so the system shows in the name.
 - Viewer: saving a view into a file that changed since you opened it asks first: Overwrite or
   Reload.
 - Windows uninstaller: also removes the empty `.lbd` and `Applications\lbd-view.exe` registry

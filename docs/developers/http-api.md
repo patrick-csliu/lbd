@@ -67,7 +67,7 @@ unknown or expired page or transfer is a 404 (a page then registers again); a re
 
 | Method and path | Body / query | Response |
 |---|---|---|
-| `POST /api/pages` | | `{page, number}`: a new page, numbered 1, 2, …; numbers are never reused. |
+| `POST /api/pages` | | `{page, number}`: a new page, with the lowest number no live page has (closed and expired pages free theirs). |
 | `GET /api/pages` | | `{pages: [{page, number, files}]}`: the live pages and the files each has open. |
 | `GET /api/pages/{id}/next` | `?wait=` (0–30 s, default 25) | The long poll, which also keeps the page alive: the next command `{id, kind, data}`, or `{}` after `wait` seconds. A page that hasn't polled for 40 s is dropped. |
 | `POST /api/pages/{id}/ack/{command}` | | `{granted, elsewhere, busy}`: the page takes the files of an `open` command. It opens `granted`; `elsewhere` (`{path: page number}`) are open in another page; `busy` ones are being moved. |

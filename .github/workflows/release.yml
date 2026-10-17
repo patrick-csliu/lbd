@@ -129,7 +129,7 @@ jobs:
           # Settings that the uninstaller must keep (a silent uninstall never removes them).
           New-Item -ItemType Directory -Force "$env:APPDATA\lbd" | Out-Null
           Set-Content "$env:APPDATA\lbd\settings.json" '{"roots": [], "default_style": "default"}'
-          $setup = "$env:RUNNER_TEMP\build\LBDViewer-Setup-$env:VERSION.exe"
+          $setup = "$env:RUNNER_TEMP\build\LBD-Viewer-$env:VERSION-windows-x64-setup.exe"
           Start-Process -Wait -FilePath $setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
           $app = "$env:LOCALAPPDATA\Programs\LBDViewer"
           if (-not (Test-Path "$app\lbd-view.exe")) { throw "the installer didn't install $app\lbd-view.exe" }
@@ -150,7 +150,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: windows
-          path: ${{ runner.temp }}/build/LBDViewer-Setup-${{ needs.check.outputs.version }}.exe
+          path: ${{ runner.temp }}/build/LBD-Viewer-${{ needs.check.outputs.version }}-windows-x64-setup.exe
           if-no-files-found: error
 
   linux:

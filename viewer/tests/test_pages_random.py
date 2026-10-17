@@ -330,6 +330,9 @@ class Sim:
                 owned = server.pages[s.id].files
                 assert s.tabs <= owned, f"Page {s.number} shows {s.tabs - owned} it doesn't own"
                 assert owned <= s.tabs | set(s.moving), f"Page {s.number} owns {owned - s.tabs} it doesn't show"
+        # 4. numbers are reused, but never two live pages with the same number
+        numbers = [p.number for p in server.pages.values()]
+        assert len(numbers) == len(set(numbers)), f"two pages share a number: {sorted(numbers)}"
 
 
 def run(seed, steps=250):

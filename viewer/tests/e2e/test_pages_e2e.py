@@ -79,6 +79,15 @@ def test_a_double_clicked_file_goes_to_the_page_used_last(viewer, new_page):
     assert tab_names(one) == ["a.lbd"] and tab_names(two) == ["b.lbd"]
 
 
+def test_a_closed_page_frees_its_number(viewer, new_page):
+    one = new_page()
+    two = new_page()
+    expect(one).to_have_title(re.compile(r"Page 1$"))
+    expect(two).to_have_title(re.compile(r"Page 2$"))
+    one.close(run_before_unload=True)                  # the tab says goodbye as it closes
+    expect(new_page()).to_have_title(re.compile(r"Page 1$"))
+
+
 def test_move_two_tabs_with_unsaved_changes_to_another_page(viewer, new_page):
     one = new_page()
     two = new_page()

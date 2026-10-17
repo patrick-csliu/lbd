@@ -34,11 +34,23 @@ def drain(pages, page):
 # ---- pages -------------------------------------------------------------------------------------
 
 
-def test_pages_are_numbered_and_numbers_are_never_reused(pages):
-    one, two = pages.register(), pages.register()
-    assert (one.number, two.number) == (1, 2)
+def test_pages_are_numbered_and_a_closed_page_frees_its_number(pages):
+    one, two, three = pages.register(), pages.register(), pages.register()
+    assert (one.number, two.number, three.number) == (1, 2, 3)
+    pages.bye(one.id)
     pages.bye(two.id)
-    assert pages.register().number == 3          # "Page 2" never means a different window
+    assert pages.register().number == 1          # the lowest free number
+    assert pages.register().number == 2
+    assert pages.register().number == 4         # 1, 2 and 3 are taken
+
+
+def test_a_page_gone_without_goodbye_frees_its_number_only_when_it_expires(pages, clock):
+    one, two = pages.register(), pages.register()
+    clock.now = 30
+    pages.poll(two.id)                           # two keeps polling, one doesn't
+    assert pages.register().number == 3          # one may only be asleep: its number is kept
+    clock.now = 41
+    assert pages.register().number == 1          # one is gone now
 
 
 def test_a_page_that_stops_polling_is_gone_and_releases_its_files(pages, clock):

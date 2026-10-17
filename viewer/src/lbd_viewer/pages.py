@@ -7,8 +7,9 @@ files side by side), so these rules decide who may do what (docs/viewer/folders-
 1. One owner per open file. A file is open in at most one page, so two pages never hold competing
    unsaved edits of it. `acquire` refuses a file another page owns and names that page.
 2. A page is alive while it polls for commands (`poll`). After `stale_after` seconds without a poll,
-   or after `bye`, it is gone: its files are released and its queued commands dropped. Page numbers
-   are never reused while the viewer runs.
+   or after `bye`, it is gone: its files are released and its queued commands dropped. A new page
+   gets the lowest number no live page has, so closing Page 2 frees "Page 2". Numbers are only
+   labels for people; everything that acts on a page uses its id.
 3. Delivery (a double-clicked file): `offer` asks the page that already has the file open to show
    it; other files go to the most recently focused live page, which must acknowledge (`ack`)
    within `ack_timeout`. Otherwise the caller withdraws them and opens a new browser tab instead.
@@ -119,7 +120,6 @@ class Pages:
         self.transfers: Dict[str, Transfer] = {}
         self.locked: Dict[str, str] = {}            # file path -> transfer id
         self.deliveries: Dict[int, Delivery] = {}
-        self._numbers = itertools.count(1)
         self._command_ids = itertools.count(1)
         self._changed = threading.Condition(threading.RLock())
 
@@ -127,10 +127,16 @@ class Pages:
 
     def register(self) -> Page:
         with self._changed:
+            self.expire()                        # pages gone without a goodbye free their numbers
             now = self.clock()
-            page = Page(secrets.token_urlsafe(9), next(self._numbers), now, now)
+            page = Page(secrets.token_urlsafe(9), self._free_number(), now, now)
             self.pages[page.id] = page
             return page
+
+    def _free_number(self) -> int:
+        """The lowest page number (1, 2, ...) that no live page has."""
+        used = {p.number for p in self.pages.values()}
+        return next(n for n in itertools.count(1) if n not in used)
 
     def page(self, page_id: str) -> Page:
         """A live page; UnknownPage if it never existed or is gone."""

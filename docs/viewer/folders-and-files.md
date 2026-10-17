@@ -87,7 +87,8 @@ You can open the viewer in several browser tabs or windows, for example to compa
 side by side: put two browser windows next to each other, and hide the Folders panel in each.
 
 Each browser tab showing the viewer is a numbered **page**: its title and the badge at the top
-say **Page 1**, **Page 2**, …. A reloaded tab gets a new number.
+say **Page 1**, **Page 2**, …. A new page takes the lowest free number, so after you close
+Page 2, the next page you open is Page 2 again.
 
 **Files you open from Explorer or Finder** (a double-click, or `lbd-view file.lbd`) go to the
 page you used last, as kept tabs. That page comes to the front, or, if the browser doesn't

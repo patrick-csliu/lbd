@@ -9,7 +9,7 @@ files with the tools its language.toml names (e.g. MATLAB for LBD.mltbx); withou
 -Skip <id>, its fallback files are shipped instead. -Prebuilt matlab=<dir> uses files built
 elsewhere (GitHub's release workflow builds LBD.mltbx in a MATLAB job).
 Everything is built outside the repository (default %LOCALAPPDATA%\lbd-build), so nothing
-large lands in a synced folder. Result: <OutDir>\LBDViewer-Setup-<version>.exe
+large lands in a synced folder. Result: <OutDir>\LBD-Viewer-<version>-windows-x64-setup.exe
 #>
 param(
     [string]$OutDir = (Join-Path $env:LOCALAPPDATA "lbd-build"),
@@ -91,5 +91,5 @@ if (-not $Iscc) {
 & $Iscc "/DAppVersion=$Version" "/DDistDir=$App" "/O$OutDir" "/Q" "packaging\windows\LBDViewer.iss"
 Check "ISCC"
 
-$Setup = Join-Path $OutDir "LBDViewer-Setup-$Version.exe"
+$Setup = Join-Path $OutDir "LBD-Viewer-$Version-windows-x64-setup.exe"
 Write-Host "Done: $Setup" -ForegroundColor Green

@@ -9,7 +9,7 @@ There are two separate parts:
 
 ## LBD Viewer on Windows
 
-1. Run `LBDViewer-Setup-<version>.exe`. No administrator rights are needed; it installs for
+1. Run `LBD-Viewer-<version>-windows-x64-setup.exe`. No administrator rights are needed; it installs for
    your user only.
 2. Optionally tick **Open LBD Viewer now** at the end.
 

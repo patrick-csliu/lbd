@@ -46,7 +46,7 @@ from last year and this year, never look alike and are hard to compare. LBD fixe
 
 ### 1. Install the viewer
 
-- **Windows:** run `LBDViewer-Setup-<version>.exe`. No admin rights are needed.
+- **Windows:** run `LBD-Viewer-<version>-windows-x64-setup.exe`. No admin rights are needed.
 - **Linux:** unpack the archive and run `./install.sh`.
 - **macOS:** open the disk image and drag LBD Viewer to Applications; approve it once in
   System Settings → Privacy & Security (it isn't signed by a registered Apple developer).
