@@ -34,6 +34,11 @@ The file format has its own version (`lbd_version`, currently 1.0).
   with a clear message; closing the new browser tab of a move cancels it at once; and a
   message to a page is sent again if the connection dropped, so a file never ends up in two
   pages. Tested with new browser tests, including a random "chaos" run.
+- Viewer: closing a viewer tab could leave a ghost page behind: the closing tab registered
+  again as it closed, so the other tabs offered "Move to Page 1" for a page that no longer
+  existed, and the move hung. A closing tab now never registers again, a page is only offered
+  once it listens, and a move nobody takes is cancelled after its 5 s (it could take much longer).
+  Found by watching a real session's page log.
 - Viewer: a new page takes the lowest free number, so closing Page 2 and opening a tab gives
   Page 2 again, not Page 7.
 - The Windows installer is now named `LBD-Viewer-<version>-windows-x64-setup.exe`, like the

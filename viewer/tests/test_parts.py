@@ -584,6 +584,7 @@ def test_mac_app_delivers_to_an_open_page(mac_app, tmp_path):
     app.running.server.started = True
     pages = app.running.state.pages
     page = pages.register()
+    pages.start_poll(page.id)                     # the page listens
     f = tmp_path / "a.lbd"
     f.write_bytes(b"x")
 
@@ -604,7 +605,8 @@ def test_mac_app_delivers_to_an_open_page(mac_app, tmp_path):
 def test_mac_app_folder_with_a_page_open_still_opens_a_tab(mac_app, tmp_path):
     app, opened, _ = mac_app
     app.running.server.started = True
-    app.running.state.pages.register()            # a page is open, but it can't come forward
+    pages = app.running.state.pages
+    pages.start_poll(pages.register().id)         # a page is open, but it can't come forward
     app.open_documents(str(tmp_path))
     app.tick(0.0)
     assert opened == [app.running.url()]
@@ -613,7 +615,8 @@ def test_mac_app_folder_with_a_page_open_still_opens_a_tab(mac_app, tmp_path):
 def test_mac_app_setting_browser_tab(mac_app, tmp_path):
     app, opened, _ = mac_app
     app.running.server.started = True
-    app.running.state.pages.register()                   # a page is open, but the setting says tabs
+    pages = app.running.state.pages
+    pages.start_poll(pages.register().id)                # a page is open, but the setting says tabs
     app.running.state.config.set_open_files_in("browser-tab")
     f = tmp_path / "a.lbd"
     f.write_bytes(b"x")

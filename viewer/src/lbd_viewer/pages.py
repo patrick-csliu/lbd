@@ -7,9 +7,11 @@ files side by side), so these rules decide who may do what (docs/viewer/folders-
 1. One owner per open file. A file is open in at most one page, so two pages never hold competing
    unsaved edits of it. `acquire` refuses a file another page owns and names that page.
 2. A page is alive while it polls for commands (`poll`). It is gone after `bye`, after `stale_after`
-   seconds without a poll (asleep, frozen), or `lost_grace` seconds after its long-poll connection
-   dropped (`connection_lost`: the tab was closed or crashed without saying goodbye) unless it polls
-   again meanwhile. A page whose connection dropped is no longer offered to the others. A gone
+   seconds without a poll (asleep, frozen), or after `offline_grace` seconds *offline*, unless it
+   polls meanwhile. A page is offline from `register` until its first poll, and when its long-poll
+   connection dropped (`connection_lost`: the tab was closed or crashed without saying goodbye).
+   An offline page is not offered to the others (a page that registered but never listens, e.g.
+   a tab that registered while it closed, never shows up as a target). A gone
    page's files are released and its queued commands dropped. A new page gets the lowest number
    no live page has, so closing Page 2 frees "Page 2". Numbers are only labels for people;
    everything that acts on a page uses its id.
@@ -77,7 +79,8 @@ class Page:
     files: Set[str] = field(default_factory=set)
     queue: List[Command] = field(default_factory=list)   # sent, not yet confirmed by the page
     polls: int = 0                    # how many polls it made; the latest one is the open long poll
-    lost_at: Optional[float] = None   # when its long-poll connection dropped (None: connected)
+    offline_since: Optional[float] = None   # not listening: since registering (no poll yet) or since
+                                            # its connection dropped; None while connected
 
 
 @dataclass
@@ -125,10 +128,10 @@ class Offer:
 class Pages:
     def __init__(self, clock: Callable[[], float] = time.monotonic, stale_after: float = 40.0,
                  ack_timeout: float = 3.0, transfer_timeout: float = 5.0, new_tab_timeout: float = 15.0,
-                 lost_grace: float = 3.0):
+                 offline_grace: float = 3.0):
         self.clock = clock
         self.stale_after = stale_after
-        self.lost_grace = lost_grace                # a dropped connection: time to poll again
+        self.offline_grace = offline_grace          # offline (new, or connection dropped): time to poll
         self.ack_timeout = ack_timeout
         self.transfer_timeout = transfer_timeout
         self.new_tab_timeout = new_tab_timeout      # a new browser tab must first load the viewer
@@ -148,7 +151,7 @@ class Pages:
         with self._changed:
             self.expire()                        # pages gone without a goodbye free their numbers
             now = self.clock()
-            page = Page(secrets.token_urlsafe(9), self._free_number(), now, now)
+            page = Page(secrets.token_urlsafe(9), self._free_number(), now, now, offline_since=now)
             self.pages[page.id] = page
             self._pages_changed()
             return page
@@ -171,7 +174,7 @@ class Pages:
         """The pages files can go to, by number (not those whose connection just dropped)."""
         with self._changed:
             self.expire()
-            return sorted((p for p in self.pages.values() if p.lost_at is None), key=lambda p: p.number)
+            return sorted((p for p in self.pages.values() if p.offline_since is None), key=lambda p: p.number)
 
     def page_list(self) -> List[Dict[str, Any]]:
         """`live_pages` as sent to the pages: [{"page": id, "number": n, "files": [...]}]."""
@@ -181,7 +184,7 @@ class Pages:
 
     def _page_list(self) -> List[Dict[str, Any]]:
         return [{"page": p.id, "number": p.number, "files": sorted(p.files)}
-                for p in sorted(self.pages.values(), key=lambda p: p.number) if p.lost_at is None]
+                for p in sorted(self.pages.values(), key=lambda p: p.number) if p.offline_since is None]
 
     def focus(self, page_id: str) -> None:
         with self._changed:
@@ -274,8 +277,8 @@ class Pages:
             page.queue = [c for c in page.queue if c.id > after]
             page.last_seen = self.clock()
             page.polls += 1
-            if page.lost_at is not None:          # back in time: offered to the others again
-                page.lost_at = None
+            if page.offline_since is not None:    # listening (again): offered to the others
+                page.offline_since = None
                 self._pages_changed()
             return page.polls
 
@@ -287,23 +290,23 @@ class Pages:
         with self._changed:
             while True:
                 page = self.page(page_id)
-                if page.polls != poll or page.lost_at is not None:
+                if page.polls != poll or page.offline_since is not None:
                     return None
                 page.last_seen = self.clock()
                 left = deadline - time.monotonic()
                 if page.queue or left <= 0:
                     return page.queue[0] if page.queue else None
-                self._changed.wait(left)
+                self._changed.wait(min(left, 1.0))   # wake every second: expire() runs on time
 
     def connection_lost(self, page_id: str, poll: int) -> None:
         """The connection of the page's long poll `poll` dropped before it was answered: the tab
         was closed, reloaded or crashed (or the network failed). Unless the page polls again
-        within `lost_grace`, it is gone. Nothing if a newer poll already replaced that one."""
+        within `offline_grace`, it is gone. Nothing if a newer poll already replaced that one."""
         with self._changed:
             page = self.pages.get(page_id)
-            if page is None or page.polls != poll or page.lost_at is not None:
+            if page is None or page.polls != poll or page.offline_since is not None:
                 return
-            page.lost_at = self.clock()
+            page.offline_since = self.clock()
             self._pages_changed()                 # no longer offered to the others
             self._changed.notify_all()            # the waiting poll ends
 
@@ -321,7 +324,7 @@ class Pages:
             self._pages_changed()
 
     def _gone(self, page: Page, now: float) -> bool:
-        if page.lost_at is not None and now - page.lost_at > self.lost_grace:
+        if page.offline_since is not None and now - page.offline_since > self.offline_grace:
             return True
         return now - page.last_seen > self.stale_after
 
@@ -428,7 +431,7 @@ class Pages:
                 target = self.pages.get(target_id)
                 if target is not None and target.id == source.id:
                     raise PageError("the files are already in this page")
-                if target is None or target.lost_at is not None:
+                if target is None or target.offline_since is not None:
                     raise TargetGone("that page was closed; the files stay here")
             for path in paths:
                 if self.owner_of.get(path) != source_id:

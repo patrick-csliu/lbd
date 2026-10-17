@@ -22,7 +22,9 @@ def api(cfg, data_dir):
 
 
 def new_page(api):
+    """A tab that loads the viewer: it registers, then listens (only then is it offered)."""
     r = api.post("/api/pages").json()
+    api.get(f"/api/pages/{r['page']}/next", params={"wait": 0}).raise_for_status()
     return r["page"], r["number"]
 
 

@@ -6,7 +6,9 @@
 //     (`after`), so a command whose answer got lost on the way is sent again, never skipped;
 //   - after sleep (laptop, frozen background tab) the viewer may have dropped the page: register
 //     anew and let the App re-check its tabs (some may now be open in another page);
-//   - say goodbye when the tab closes, so its files are free at once.
+//   - say goodbye when the tab closes, so its files are free at once, and stop: a closing tab
+//     must never register again (the answer "page gone" to its last poll can still arrive while
+//     it closes; registering then left a ghost page that other pages offered as a target).
 import { useEffect, useRef, useState } from "react";
 import { api, ApiError, PageCommand } from "./api";
 
@@ -32,7 +34,8 @@ export function usePage(handlers: PageHandlers): PageInfo | null {
   handlersRef.current = handlers;
 
   useEffect(() => {
-    let stopped = false;
+    let stopped = false; // the App is done with this page (React unmount)
+    let leaving = false; // the tab is closing, or going into the back/forward cache
     let current: PageInfo | null = null;
     let handled = 0; // id of the last command handled: the next poll confirms it
 
@@ -49,21 +52,30 @@ export function usePage(handlers: PageHandlers): PageInfo | null {
       if (current) api.pageFocus(current.id).catch(() => undefined);
     };
     const visible = () => document.visibilityState === "visible" && focus();
-    const bye = () => current && api.pageBye(current.id);
+    const bye = () => {
+      leaving = true;
+      if (current) api.pageBye(current.id);
+    };
+    // Back from the back/forward cache: the goodbye was said, so join again as a new page.
+    const back = (e: PageTransitionEvent) => {
+      if (!e.persisted || stopped) return;
+      leaving = false;
+      loop(true);
+    };
 
-    const loop = async () => {
+    const loop = async (again: boolean) => {
       let failures = 0;
       try {
-        await register(false);
+        await register(again);
         focus();
       } catch {
         return; // no session: the App shows why (its state request fails the same way)
       }
-      while (!stopped && current) {
+      while (!stopped && !leaving && current) {
         try {
           const command = await api.pageNext(current.id, handled);
           failures = 0;
-          if (command && command.id > handled && !stopped) {
+          if (command && command.id > handled && !stopped && !leaving) {
             try {
               await handlersRef.current.onCommand(current, command);
             } catch (e) {
@@ -72,7 +84,7 @@ export function usePage(handlers: PageHandlers): PageInfo | null {
             handled = command.id;
           }
         } catch (e) {
-          if (stopped) return;
+          if (stopped || leaving) return;
           if (e instanceof ApiError && e.status === 404) {
             await register(true).catch(() => undefined); // dropped while asleep: back as a new page
             continue;
@@ -87,12 +99,14 @@ export function usePage(handlers: PageHandlers): PageInfo | null {
     window.addEventListener("focus", focus);
     document.addEventListener("visibilitychange", visible);
     window.addEventListener("pagehide", bye);
-    loop();
+    window.addEventListener("pageshow", back);
+    loop(false);
     return () => {
       stopped = true;
       window.removeEventListener("focus", focus);
       document.removeEventListener("visibilitychange", visible);
       window.removeEventListener("pagehide", bye);
+      window.removeEventListener("pageshow", back);
       bye();
     };
   }, []);

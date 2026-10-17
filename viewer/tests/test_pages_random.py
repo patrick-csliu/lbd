@@ -71,7 +71,10 @@ class Sim:
         return [s for s in self.sim.values() if s.id in ids]
 
     def new_page(self):
-        s = SimPage(self.pages.register())
+        """A tab that loads the viewer: it registers, then listens (only then is it offered)."""
+        page = self.pages.register()
+        self.pages.start_poll(page.id)
+        s = SimPage(page)
         self.sim[s.id] = s
         return s
 
@@ -125,7 +128,7 @@ class Sim:
         except PageError as e:
             return self.refused(e)
         if offer.delivery is not None:
-            assert self.pages.pages[offer.delivery.page].lost_at is None, "files sent to a closed page"   # 6
+            assert self.pages.pages[offer.delivery.page].offline_since is None, "files sent to a closed page"   # 6
             self.waiting.append((offer.delivery, self.clock.now + self.pages.ack_timeout))
         for path in offer.unplaced:
             self.fallback_tab(path)
@@ -271,6 +274,7 @@ class Sim:
             return self.drain(s)                                  # missed nothing: it was queued
         del self.sim[s.id]
         page = self.pages.register()
+        self.pages.start_poll(page.id)
         s.id, s.number = page.id, page.number
         self.sim[s.id] = s
         s.claimed.clear()
@@ -357,7 +361,7 @@ class Sim:
         numbers = [p.number for p in server.pages.values()]
         assert len(numbers) == len(set(numbers)), f"two pages share a number: {sorted(numbers)}"
         # 6. a page that has read its messages knows the live pages (its "Move to" menu)
-        connected = {p.id for p in server.pages.values() if p.lost_at is None}
+        connected = {p.id for p in server.pages.values() if p.offline_since is None}
         for s in live.values():
             if s.alive and not server.pages[s.id].queue:
                 assert set(s.known) == connected, f"Page {s.number} has an old page list"

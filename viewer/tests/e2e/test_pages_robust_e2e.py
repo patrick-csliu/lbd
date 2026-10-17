@@ -93,6 +93,49 @@ def _page_id(viewer, n: int) -> str:
     return next(p["page"] for p in pages["pages"] if p["number"] == n)
 
 
+def test_a_closing_page_never_comes_back_as_a_ghost(viewer, new_page):
+    """Found by watching a real session: a closed tab said goodbye, the answer "page gone" to its
+    last poll still arrived while it closed, and it registered again. That ghost "Page 1" never
+    listened, yet the other pages offered it, and a move to it hung. Here the tab says goodbye
+    (pagehide) but keeps running, as a closing tab does for a moment."""
+    one, two = new_page(), new_page()
+    open_file(two, "a.lbd")
+    registrations = []
+    one.on("request", lambda r: registrations.append(r) if r.method == "POST" and r.url.endswith("/api/pages") else None)
+    one.evaluate("window.dispatchEvent(new PageTransitionEvent('pagehide', {persisted: false}))")
+    expect(two).to_have_title(re.compile(r"Page 2$"))
+    time.sleep(1.5)                                    # its last poll is answered "page gone"
+    assert registrations == []                         # it doesn't register again
+    assert set(server_pages(viewer)) == {2}
+    open_menu(two, "a.lbd")
+    expect(two.locator(".context-menu")).not_to_contain_text("Page 1")
+
+
+def test_a_page_that_registers_but_never_listens_is_never_offered(viewer, new_page):
+    one = new_page()
+    open_file(one, "a.lbd")
+    r = httpx.post(f"http://127.0.0.1:{viewer.port}/api/pages", headers={"X-LBD-Token": viewer.state.token})
+    ghost = r.json()["number"]                          # registered, but no tab listens
+    open_menu(one, "a.lbd")
+    time.sleep(0.5)
+    expect(one.locator(".context-menu")).not_to_contain_text(f"Page {ghost}")
+    one.keyboard.press("Escape")
+    time.sleep(viewer.state.pages.offline_grace + 1.5)
+    assert set(server_pages(viewer)) == {1}             # and it is gone soon
+
+
+def test_a_move_nobody_takes_is_cancelled_on_time(viewer, new_page):
+    one, two = new_page(), new_page()
+    open_file(one, "a.lbd")
+    two.route("**/api/transfers/*/claim", lambda route: None)   # Page 2 never takes the files
+    open_menu(one, "a.lbd")
+    move_entry(one, 2).click()
+    started = time.monotonic()
+    expect(toast(one, "didn't take the files in time")).to_be_visible()
+    assert time.monotonic() - started < viewer.state.pages.transfer_timeout + 2
+    expect(tab(one, "a.lbd")).not_to_have_class(LOCKED)
+
+
 # ---- unusual sequences ---------------------------------------------------------------------------
 
 

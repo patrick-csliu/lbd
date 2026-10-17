@@ -23,6 +23,14 @@ def pages(clock):
     return Pages(clock=clock, stale_after=40, ack_timeout=3, transfer_timeout=5, new_tab_timeout=15)
 
 
+def listening(pages):
+    """A browser tab with the viewer: it registers, then listens for commands (its long poll).
+    Only then is it offered to the other pages."""
+    page = pages.register()
+    pages.start_poll(page.id)
+    return page
+
+
 def drain(pages, page, lists=False):
     """All queued commands of a page, as (kind, data), each confirmed by the next poll as the web
     page does. The page lists (pages_changed) are left out unless `lists`."""
@@ -43,26 +51,26 @@ def queued(pages, page, kind):
 
 
 def test_pages_are_numbered_and_a_closed_page_frees_its_number(pages):
-    one, two, three = pages.register(), pages.register(), pages.register()
+    one, two, three = listening(pages), listening(pages), listening(pages)
     assert (one.number, two.number, three.number) == (1, 2, 3)
     pages.bye(one.id)
     pages.bye(two.id)
-    assert pages.register().number == 1          # the lowest free number
-    assert pages.register().number == 2
-    assert pages.register().number == 4         # 1, 2 and 3 are taken
+    assert listening(pages).number == 1          # the lowest free number
+    assert listening(pages).number == 2
+    assert listening(pages).number == 4         # 1, 2 and 3 are taken
 
 
 def test_a_page_gone_without_goodbye_frees_its_number_only_when_it_expires(pages, clock):
-    one, two = pages.register(), pages.register()
+    one, two = listening(pages), listening(pages)
     clock.now = 30
     pages.poll(two.id)                           # two keeps polling, one doesn't
-    assert pages.register().number == 3          # one may only be asleep: its number is kept
+    assert listening(pages).number == 3          # one may only be asleep: its number is kept
     clock.now = 41
-    assert pages.register().number == 1          # one is gone now
+    assert listening(pages).number == 1          # one is gone now
 
 
 def test_a_page_that_stops_polling_is_gone_and_releases_its_files(pages, clock):
-    one, two = pages.register(), pages.register()
+    one, two = listening(pages), listening(pages)
     assert pages.acquire(one.id, "a.lbd") is None
     clock.now = 30
     pages.poll(two.id)                           # two keeps polling, one doesn't
@@ -74,7 +82,7 @@ def test_a_page_that_stops_polling_is_gone_and_releases_its_files(pages, clock):
 
 
 def test_a_page_whose_connection_dropped_is_gone_unless_it_polls_again_soon(pages, clock):
-    one, two, three = pages.register(), pages.register(), pages.register()
+    one, two, three = listening(pages), listening(pages), listening(pages)
     pages.acquire(one.id, "a.lbd")
     pages.connection_lost(one.id, pages.start_poll(one.id))     # tab closed without a goodbye
     assert [p.number for p in pages.live_pages()] == [2, 3]     # not offered any more, at once
@@ -86,11 +94,37 @@ def test_a_page_whose_connection_dropped_is_gone_unless_it_polls_again_soon(page
     pages.expire()
     assert sorted(p.number for p in pages.live_pages()) == [2, 3]
     assert one.id not in pages.pages and pages.owner("a.lbd") is None   # one is gone, its file free
-    assert pages.register().number == 1
+    assert listening(pages).number == 1
+
+
+def test_a_page_that_registers_but_never_listens_is_never_offered_and_soon_gone(pages, clock):
+    """A closing tab can still register (the answer to its last poll arrives as it closes). It
+    never listens, so it must not show up as a target, and it is gone after the grace time."""
+    one = listening(pages)
+    pages.acquire(one.id, "a.lbd")
+    ghost = pages.register()
+    assert [p.id for p in pages.live_pages()] == [one.id]       # not listed...
+    with pytest.raises(TargetGone):                              # ...not a target...
+        pages.start_transfer(one.id, ["a.lbd"], {}, ghost.id)
+    clock.now = 1
+    pages.focus(ghost.id)
+    assert pages.offer(["b.lbd"]).delivery.page == one.id         # ...gets no files
+    clock.now = 4
+    pages.poll(one.id)
+    assert ghost.id not in pages.pages                           # gone after offline_grace
+
+
+def test_a_new_page_is_listed_once_it_listens(pages):
+    one = listening(pages)
+    two = pages.register()
+    assert [p.number for p in pages.live_pages()] == [1]
+    pages.start_poll(two.id)
+    assert [p.number for p in pages.live_pages()] == [1, 2]
+    assert [[p["number"] for p in d["pages"]] for k, d in drain(pages, one, lists=True) if k == "pages_changed"] == [[1, 2]]
 
 
 def test_a_dropped_connection_of_an_older_poll_doesnt_count(pages):
-    one = pages.register()
+    one = listening(pages)
     old = pages.start_poll(one.id)
     pages.start_poll(one.id)                     # the page polls again (the old answer was lost)
     pages.connection_lost(one.id, old)           # the old connection is noticed late
@@ -98,7 +132,7 @@ def test_a_dropped_connection_of_an_older_poll_doesnt_count(pages):
 
 
 def test_a_page_whose_connection_dropped_gets_no_files(pages, clock):
-    one, two = pages.register(), pages.register()
+    one, two = listening(pages), listening(pages)
     pages.acquire(one.id, "a.lbd")
     clock.now = 1
     pages.focus(two.id)                          # two was used last...
@@ -111,7 +145,7 @@ def test_a_page_whose_connection_dropped_gets_no_files(pages, clock):
 
 
 def test_a_command_is_sent_again_until_the_page_confirms_it(pages):
-    one = pages.register()
+    one = listening(pages)
     drain(pages, one)
     pages.broadcast("styles_changed")
     first = pages.poll(one.id)                   # the answer is lost on the way...
@@ -121,13 +155,13 @@ def test_a_command_is_sent_again_until_the_page_confirms_it(pages):
 
 
 def test_every_page_is_told_the_page_list_when_it_changes(pages):
-    one = pages.register()
+    one = listening(pages)
 
     def lists():
         return [[(p["number"], p["files"]) for p in d["pages"]] for k, d in drain(pages, one, lists=True) if k == "pages_changed"]
 
     assert lists() == [[(1, [])]]
-    two = pages.register()
+    two = listening(pages)
     pages.acquire(two.id, "a.lbd")
     assert lists() == [[(1, []), (2, ["a.lbd"])]]          # one list, the latest: older ones replaced
     pages.acquire(two.id, "a.lbd")                          # nothing changed: nothing sent
@@ -150,7 +184,7 @@ def test_every_page_is_told_the_page_list_when_it_changes(pages):
 
 
 def test_a_file_is_open_in_one_page_only(pages):
-    one, two = pages.register(), pages.register()
+    one, two = listening(pages), listening(pages)
     assert pages.acquire(one.id, "a.lbd") is None
     assert pages.acquire(one.id, "a.lbd") is None          # again in the same page: fine
     assert pages.acquire(two.id, "a.lbd").number == 1      # refused: open in Page 1
@@ -160,7 +194,7 @@ def test_a_file_is_open_in_one_page_only(pages):
 
 
 def test_show_asks_the_owner(pages):
-    one = pages.register()
+    one = listening(pages)
     pages.acquire(one.id, "a.lbd")
     assert pages.show("a.lbd").id == one.id
     assert drain(pages, one) == [("show", {"path": "a.lbd"})]
@@ -171,7 +205,7 @@ def test_show_asks_the_owner(pages):
 
 
 def test_delivery_goes_to_the_most_recently_focused_page(pages, clock):
-    one, two = pages.register(), pages.register()
+    one, two = listening(pages), listening(pages)
     clock.now = 1
     pages.focus(one.id)
     offer = pages.offer(["a.lbd"])
@@ -182,7 +216,7 @@ def test_delivery_goes_to_the_most_recently_focused_page(pages, clock):
 
 
 def test_delivery_acknowledged_makes_the_page_the_owner(pages):
-    one = pages.register()
+    one = listening(pages)
     offer = pages.offer(["a.lbd", "b.lbd"])
     command = queued(pages, one, "open")
     assert pages.ack(one.id, command.id) == {"granted": ["a.lbd", "b.lbd"], "elsewhere": {}, "busy": []}
@@ -191,7 +225,7 @@ def test_delivery_acknowledged_makes_the_page_the_owner(pages):
 
 
 def test_an_already_open_file_is_shown_where_it_is(pages, clock):
-    one, two = pages.register(), pages.register()
+    one, two = listening(pages), listening(pages)
     pages.acquire(one.id, "a.lbd")
     clock.now = 1
     pages.focus(two.id)                           # two is more recent, but one has the file
@@ -206,7 +240,7 @@ def test_no_page_open_means_a_new_browser_tab(pages):
 
 
 def test_an_unacknowledged_delivery_is_withdrawn_and_never_arrives_late(pages):
-    one = pages.register()
+    one = listening(pages)
     offer = pages.offer(["a.lbd"])
     assert pages.wait_for_ack(offer.delivery, timeout=0.01) is False
     assert offer.delivery.status == "withdrawn"
@@ -216,7 +250,7 @@ def test_an_unacknowledged_delivery_is_withdrawn_and_never_arrives_late(pages):
 
 
 def test_a_delivery_to_a_page_that_goes_away_is_withdrawn(pages, clock):
-    one = pages.register()
+    one = listening(pages)
     offer = pages.offer(["a.lbd"])
     clock.now = 41                                # the page stopped polling
     pages.expire()
@@ -225,7 +259,7 @@ def test_a_delivery_to_a_page_that_goes_away_is_withdrawn(pages, clock):
 
 
 def test_a_file_opened_elsewhere_meanwhile_stays_there(pages):
-    one, two = pages.register(), pages.register()
+    one, two = listening(pages), listening(pages)
     pages.focus(one.id)
     offer = pages.offer(["a.lbd"])
     pages.acquire(two.id, "a.lbd")                # two opened it from its folder panel first
@@ -238,7 +272,7 @@ def test_a_file_opened_elsewhere_meanwhile_stays_there(pages):
 
 
 def test_moving_tabs_to_another_page(pages):
-    one, two = pages.register(), pages.register()
+    one, two = listening(pages), listening(pages)
     for f in ("1.lbd", "2.lbd", "3.lbd"):
         pages.acquire(one.id, f)
     transfer = pages.start_transfer(one.id, ["1.lbd", "2.lbd"], {"1.lbd": {"kind": "heatmap"}}, two.id)
@@ -253,17 +287,17 @@ def test_moving_tabs_to_another_page(pages):
 
 
 def test_moving_to_a_new_browser_tab(pages):
-    one = pages.register()
+    one = listening(pages)
     pages.acquire(one.id, "1.lbd")
     transfer = pages.start_transfer(one.id, ["1.lbd"], {}, None)
-    new = pages.register()                         # the new tab loads with ?claim=<id>
+    new = listening(pages)                         # the new tab loads with ?claim=<id>
     pages.claim(transfer.id, new.id)
     pages.complete(transfer.id, new.id)
     assert pages.owner("1.lbd").id == new.id
 
 
 def test_completing_again_gives_the_same_answer(pages):
-    one, two, three = pages.register(), pages.register(), pages.register()
+    one, two, three = listening(pages), listening(pages), listening(pages)
     pages.acquire(one.id, "1.lbd")
     transfer = pages.start_transfer(one.id, ["1.lbd"], {}, two.id)
     pages.claim(transfer.id, two.id)
@@ -276,7 +310,7 @@ def test_completing_again_gives_the_same_answer(pages):
 
 
 def test_files_being_moved_are_locked(pages):
-    one, two = pages.register(), pages.register()
+    one, two = listening(pages), listening(pages)
     pages.acquire(one.id, "1.lbd")
     pages.start_transfer(one.id, ["1.lbd"], {}, two.id)
     with pytest.raises(PageError, match="being moved"):
@@ -288,7 +322,7 @@ def test_files_being_moved_are_locked(pages):
 
 
 def test_a_move_not_completed_in_time_is_cancelled_and_the_source_keeps_its_tabs(pages, clock):
-    one, two = pages.register(), pages.register()
+    one, two = listening(pages), listening(pages)
     pages.acquire(one.id, "1.lbd")
     transfer = pages.start_transfer(one.id, ["1.lbd"], {}, two.id)
     clock.now = 6
@@ -303,7 +337,7 @@ def test_a_move_not_completed_in_time_is_cancelled_and_the_source_keeps_its_tabs
 
 
 def test_a_late_completion_after_cancel_is_refused(pages, clock):
-    one, two = pages.register(), pages.register()
+    one, two = listening(pages), listening(pages)
     pages.acquire(one.id, "1.lbd")
     transfer = pages.start_transfer(one.id, ["1.lbd"], {}, two.id)
     pages.claim(transfer.id, two.id)
@@ -317,7 +351,7 @@ def test_a_late_completion_after_cancel_is_refused(pages, clock):
 
 
 def test_the_target_closing_cancels_the_move(pages):
-    one, two = pages.register(), pages.register()
+    one, two = listening(pages), listening(pages)
     pages.acquire(one.id, "1.lbd")
     pages.start_transfer(one.id, ["1.lbd"], {}, two.id)
     pages.bye(two.id)
@@ -326,7 +360,7 @@ def test_the_target_closing_cancels_the_move(pages):
 
 
 def test_the_source_closing_does_not_stop_the_move(pages):
-    one, two = pages.register(), pages.register()
+    one, two = listening(pages), listening(pages)
     pages.acquire(one.id, "1.lbd")
     transfer = pages.start_transfer(one.id, ["1.lbd"], {"1.lbd": {"x": 1}}, two.id)
     pages.bye(one.id)                              # the unsaved state is already with the transfer
@@ -336,7 +370,7 @@ def test_the_source_closing_does_not_stop_the_move(pages):
 
 
 def test_a_cancelled_move_from_a_closed_page_leaves_the_file_open_nowhere(pages, clock):
-    one, two = pages.register(), pages.register()
+    one, two = listening(pages), listening(pages)
     pages.acquire(one.id, "1.lbd")
     pages.start_transfer(one.id, ["1.lbd"], {}, two.id)
     pages.bye(one.id)
@@ -352,7 +386,7 @@ def test_a_cancelled_move_from_a_closed_page_leaves_the_file_open_nowhere(pages,
     ("same-page", "already in this page"),
 ])
 def test_moves_that_make_no_sense_are_refused(pages, case, message):
-    one, two = pages.register(), pages.register()
+    one, two = listening(pages), listening(pages)
     pages.acquire(one.id, "1.lbd")
     pages.acquire(two.id, "2.lbd")
     args = {"nothing": ([], two.id), "not-owned": (["2.lbd"], two.id), "same-page": (["1.lbd"], one.id)}[case]
@@ -361,7 +395,7 @@ def test_moves_that_make_no_sense_are_refused(pages, case, message):
 
 
 def test_only_the_target_may_claim(pages):
-    one, two, three = pages.register(), pages.register(), pages.register()
+    one, two, three = listening(pages), listening(pages), listening(pages)
     pages.acquire(one.id, "1.lbd")
     transfer = pages.start_transfer(one.id, ["1.lbd"], {}, two.id)
     with pytest.raises(PageError, match="another page"):
@@ -371,7 +405,7 @@ def test_only_the_target_may_claim(pages):
 
 
 def test_a_double_clicked_file_being_moved_is_shown_in_its_source(pages):
-    one, two = pages.register(), pages.register()
+    one, two = listening(pages), listening(pages)
     pages.acquire(one.id, "1.lbd")
     pages.start_transfer(one.id, ["1.lbd"], {}, two.id)
     drain(pages, two)
@@ -383,7 +417,7 @@ def test_a_double_clicked_file_being_moved_is_shown_in_its_source(pages):
 
 
 def test_events_reach_every_page_and_renames_move_ownership(pages):
-    one, two = pages.register(), pages.register()
+    one, two = listening(pages), listening(pages)
     pages.acquire(one.id, "old.lbd")
     pages.broadcast("renamed", old="old.lbd", new="new.lbd")
     assert pages.owner("new.lbd").id == one.id and pages.owner("old.lbd") is None
@@ -398,7 +432,7 @@ def test_events_reach_every_page_and_renames_move_ownership(pages):
 def test_the_long_poll_returns_a_command_at_once(pages):
     import threading
 
-    one = pages.register()
+    one = listening(pages)
     drain(pages, one)
     threading.Timer(0.05, lambda: pages.broadcast("styles_changed")).start()
     command = pages.wait_for_command(one.id, pages.start_poll(one.id), timeout=5)
@@ -410,7 +444,7 @@ def test_the_long_poll_returns_a_command_at_once(pages):
 def test_waiting_for_an_ack_ends_when_the_page_acknowledges(pages):
     import threading
 
-    one = pages.register()
+    one = listening(pages)
     offer = pages.offer(["a.lbd"])
     threading.Timer(0.05, lambda: pages.ack(one.id, queued(pages, one, "open").id)).start()
     assert pages.wait_for_ack(offer.delivery, timeout=5) is True
@@ -420,7 +454,7 @@ def test_waiting_for_an_ack_ends_when_the_page_acknowledges(pages):
 
 
 def test_a_file_renamed_before_the_page_acknowledges_is_owned_under_its_new_name(pages):
-    one = pages.register()
+    one = listening(pages)
     offer = pages.offer(["old.lbd"])
     pages.broadcast("renamed", old="old.lbd", new="new.lbd")
     queue = [(c.kind, c.data) for c in pages.pages[one.id].queue if c.kind != "pages_changed"]
@@ -432,7 +466,7 @@ def test_a_file_renamed_before_the_page_acknowledges_is_owned_under_its_new_name
 
 
 def test_a_file_deleted_before_the_page_acknowledges_is_owned_by_nobody(pages):
-    one = pages.register()
+    one = listening(pages)
     offer = pages.offer(["a.lbd"])
     pages.broadcast("trashed", path="a.lbd")
     assert pages.ack(one.id, offer.delivery.command_id)["granted"] == ["a.lbd"]   # then "trashed" closes it
@@ -440,7 +474,7 @@ def test_a_file_deleted_before_the_page_acknowledges_is_owned_by_nobody(pages):
 
 
 def test_a_file_moving_from_a_closed_page_is_never_handed_to_a_third_page(pages):
-    one, two, three = pages.register(), pages.register(), pages.register()
+    one, two, three = listening(pages), listening(pages), listening(pages)
     pages.acquire(one.id, "1.lbd")
     pages.start_transfer(one.id, ["1.lbd"], {}, two.id)
     pages.bye(one.id)                                          # the move goes on without its source
@@ -451,7 +485,7 @@ def test_a_file_moving_from_a_closed_page_is_never_handed_to_a_third_page(pages)
 
 
 def test_a_file_that_started_moving_before_the_ack_is_busy(pages, clock):
-    one, two = pages.register(), pages.register()
+    one, two = listening(pages), listening(pages)
     clock.now = 1
     pages.focus(two.id)
     offer = pages.offer(["1.lbd"])                             # to Page 2...
