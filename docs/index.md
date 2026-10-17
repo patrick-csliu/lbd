@@ -12,6 +12,12 @@ Save measurements from Python, MATLAB or Julia as `.lbd` files. Look at any of t
 double-clicking, and get figures that look the same for every dataset, every program and every
 year: the same size, fonts, line widths, colours and colour scales.
 
+![A data file plus a style makes a figure; the same style with any data file makes figures that match](assets/concept.svg)
+
+The core idea: a **data file** holds what you measured, a **style** holds how figures look,
+and LBD puts them together when it draws. Keep one style, and every figure matches.
+[How LBD works :octicons-arrow-right-24:](getting-started/how-it-works.md)
+
 <div class="grid cards" markdown>
 
 -   :material-rocket-launch:{ .lg .middle } **Get started**
@@ -111,6 +117,7 @@ year: the same size, fonts, line widths, colours and colour scales.
 
 | I want to… | Read |
 |---|---|
+| understand the idea | [How LBD works](getting-started/how-it-works.md). |
 | look at data files | [Install the viewer](getting-started/install.md#lbd-viewer-on-windows), then the [viewer guide](viewer/index.md). |
 | make my programs write `.lbd` files | [Install the module](getting-started/install.md#language-modules), the [quick start](getting-started/quickstart.md) and [Concepts](getting-started/concepts.md). |
 | make every figure of a paper or thesis match | [Consistent figures in your own code](styles/consistent-figures.md) and [fixed scales per quantity](styles/scales-and-units.md#fixed-scales-per-quantity). |

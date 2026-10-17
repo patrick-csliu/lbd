@@ -122,6 +122,7 @@ validation:
 nav:
   - Home: index.md
   - Getting started:
+      - How LBD works: getting-started/how-it-works.md
       - Install: getting-started/install.md
       - Quick start: getting-started/quickstart.md
       - Concepts: getting-started/concepts.md

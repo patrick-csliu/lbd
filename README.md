@@ -15,6 +15,25 @@ from last year and this year, never look alike and are hard to compare. LBD fixe
   figure looks the same whichever program made the data, and what you see is exactly what
   exports to PDF for your paper.
 
+## How it works
+
+![A data file plus a style makes a figure; the same style with any data file makes figures that match](docs/assets/concept.svg)
+
+LBD keeps **what you measured** and **how figures look** apart, and puts them together only
+when it draws:
+
+- **Data file (`.lbd`):** the axes you swept, the values you measured, units, labels and
+  metadata. Optionally a saved *view*: what to plot by default. Written from Python, MATLAB or
+  Julia.
+- **Style:** size, fonts, line widths, ticks, colours, colour maps, and fixed scales per
+  quantity. A named *preset* on your computer, or a `.lbd.json` style file to share.
+- **Figure:** LBD Viewer and Python's `lbd.plot` draw the data file with the style, with the
+  same code, on screen and in PDF, SVG or PNG at the real size.
+
+Keep one style, and every figure matches: across datasets, programs and years. Change the style
+once, and every figure follows; the data is never touched. More in
+[How LBD works](docs/getting-started/how-it-works.md).
+
 ## Features
 
 - **The `.lbd` format:** plain HDF5 inside, so HDFView and h5py can also open it.
