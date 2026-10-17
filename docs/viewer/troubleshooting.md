@@ -19,4 +19,10 @@
 | macOS: "Apple could not verify 'LBD Viewer'…", or nothing happens | The app isn't signed by a registered developer, so macOS asks for your approval once per version: System Settings → Privacy & Security → **Open Anyway** (see [Install](../getting-started/install.md#lbd-viewer-on-macos)). Otherwise, check the log in `~/Library/Logs/lbd/viewer.log`; a startup failure also shows an alert. |
 | macOS: "LBD Viewer is damaged and can't be opened" | The download was changed on its way, or the app was copied without its signature. Download the disk image again, then approve it as above. |
 | A file can't be opened | It may not be an LBD file, or it may be from a newer major format version. The message says which; update the viewer for newer files. |
+| "Already open in Page N" | A file is open in one viewer page at a time, so two pages can't hold different unsaved changes. Click **Show it in Page N**, or move the tab there (right-click → **Move to Page N**). See [Several browser tabs](folders-and-files.md#several-browser-tabs). |
+| "The move was cancelled (…); the files stay here" | The other page was closed, or didn't take the files within a few seconds (a new browser tab blocked as a pop-up, or closed). Nothing is lost: the tabs stay where they were. Allow pop-ups for the viewer's address to move tabs to a new browser tab. |
+| A tab shows 🔒 *now open in Page N* | This page was asleep (a closed laptop) and another page opened the file meanwhile. Close this copy; the file is in Page N. |
+| "…was changed since this tab opened it" when saving | Another program, a script, or another computer wrote the file after you opened it. **Overwrite** saves your view anyway (the data stays); **Reload** shows the file as it is now. |
+| Double-clicked files don't open in a new browser tab | By default they open as tabs in the viewer page you used last. To get a new browser tab every time, choose it under **⚙**. |
+| A single number isn't plotted | Values without axes (e.g. a fitted T1) are listed with their value under **Numbers**, not drawn as a figure. |
 | Port already in use with `--port` | Choose another port, or leave `--port` out to pick a free one. |

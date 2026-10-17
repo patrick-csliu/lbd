@@ -5,69 +5,93 @@ The file format has its own version (`lbd_version`, currently 1.0).
 
 ## Unreleased
 
-- Plotting: the "single number" plot type is gone (viewer and `lbd.plot`, `kind="scalar"`).
-  Single numbers are listed with their value in the viewer; a file with only single numbers
+**Changes to how things behave** (read these when upgrading)
+
+- `lbd.plot` and the viewer no longer plot single numbers: the "single number" plot type
+  (`kind="scalar"`) is removed and gives an error that names the valid kinds. The viewer lists
+  a file's single numbers with their value (`T1 = 21 µs`), and a file with only single numbers
   shows that list. An old saved view with `kind: "scalar"` falls back to the default, with a
   note.
+- An axis with a single point is a fixed parameter (a setting that wasn't swept). A 1 × N
+  value is now drawn as curves; it was a heat map one row high, or N one-point curves. The
+  viewer shows `Power = -40 dBm (fixed)` instead of a slider.
+- Files double-clicked in Explorer / Finder (or `lbd-view file.lbd`) open as tabs in the
+  viewer page you used last, instead of a new browser tab each time. **⚙** switches back to
+  new browser tabs.
 
-- Viewer, plotting: changing the plot type (e.g. a saved scatter view to Curves) showed a
-  misleading note "saved view: 'I' can't be used as horizontal axis". Settings that belong to
-  the saved plot type are no longer borrowed by another type (`lbd.plot` too).
-- Viewer, plotting: a value on another axis (e.g. a noise spectrum next to a decay) can be
-  chosen: **On other axes** switches the plot to it, instead of the error "can't share the x
-  axis". Single numbers are listed with their value (`T1 = 21 µs`) and can be shown.
-- Plotting: an axis with a single point is a fixed parameter. A 1 × N value is drawn as curves
-  (it was a heat map one row high, or N one-point curves), and the viewer shows `Power = -40 dBm
-  (fixed)` instead of a slider.
-- Viewer, plotting: type the axis value next to a slider (e.g. Power `-42`): it goes to the
-  nearest measured point.
-- Viewer, plotting: **DPI (PNG/JPG)** next to Width/Height, for this file's raster exports.
+**Viewer: several browser tabs**
 
-- Viewer: a **Theme** choice under **⚙**: System (follows the light or dark mode of Windows,
-  macOS or Linux), Light or Dark. Saved, and every open viewer tab follows at once. Changing a
-  ⚙ setting now also updates the other tabs' ⚙ menu.
-- Starting LBD Viewer from the Start menu (or a shortcut, or with only a folder) while it already
-  runs now opens a viewer tab. Before, only the open tab's title flashed, because browsers don't
-  let a page come to the front.
-- Installers ask for shortcuts: on Windows **Start menu** (default yes) and **desktop** (default
-  no); on Linux `install.sh` asks the same about the applications menu and the desktop. On
-  macOS the app is in Launchpad by itself.
-- Linux: `uninstall.sh` ended with an error code when no settings folder existed; fixed.
-- Tests and the build's smoke test no longer touch the installed viewer's "running viewer"
-  record (`LBD_RUNTIME_DIR`), which could make the next double-click start a second viewer.
+- Several browser tabs work together. Each is a numbered page (a new page takes the lowest
+  free number). Select tabs (Ctrl/⌘+click, Shift+click) and right-click → **Move to Page N** or
+  **Move to a new browser tab**, unsaved settings included.
+- A file is open in one page at a time. A rename, deletion, folder or preset change shows in
+  every page.
+- Robust moves: a closed page leaves the other pages' menus within seconds, even without
+  saying goodbye (a crash, a killed browser), and an open menu updates itself ("Page 2 was
+  closed"). A move to a page that is gone is refused with a clear message, and closing the new
+  browser tab of a move cancels it at once. Messages to a page are sent again if the
+  connection dropped, so a file never ends up in two pages. A closing tab can no longer leave a
+  ghost page behind that others offered as a target.
+- **Open in new browser tab** for files in the folder panel (also Ctrl/⌘+click or middle-click),
+  and **◧ Folders** to hide the panel.
 
-- Viewer: files double-clicked in Explorer / Finder (or `lbd-view file.lbd`) open as tabs in
-  the viewer page you used last, instead of a new browser tab each time. **⚙** at the top right
-  switches back to new browser tabs.
-- Viewer: several browser tabs work together. Each is a numbered page; select tabs
-  (Ctrl/⌘+click, Shift+click) and right-click → **Move to Page N** or **to a new browser tab**,
-  unsaved settings included. A file is open in one page at a time, and a rename, deletion,
-  folder or preset change shows in every page. See
-  [Several browser tabs](docs/viewer/folders-and-files.md#several-browser-tabs).
-- Viewer: **Open in new browser tab** for files in the Folders panel (also Ctrl/⌘+click or
-  middle-click), and a **◧ Folders** button to hide the panel.
-- Viewer: moving tabs between pages is more robust. A closed page leaves the other pages'
-  **Move to Page N** menus within seconds, even without saying goodbye (crash, killed browser);
-  an open menu updates itself ("Page 2 was closed"); a move to a page that is gone is refused
-  with a clear message; closing the new browser tab of a move cancels it at once; and a
-  message to a page is sent again if the connection dropped, so a file never ends up in two
-  pages. Tested with new browser tests, including a random "chaos" run.
-- Viewer: closing a viewer tab could leave a ghost page behind: the closing tab registered
-  again as it closed, so the other tabs offered "Move to Page 1" for a page that no longer
-  existed, and the move hung. A closing tab now never registers again, a page is only offered
-  once it listens, and a move nobody takes is cancelled after its 5 s (it could take much longer).
-  Found by watching a real session's page log.
-- Viewer: a new page takes the lowest free number, so closing Page 2 and opening a tab gives
-  Page 2 again, not Page 7.
-- The Windows installer is now named `LBD-Viewer-<version>-windows-x64-setup.exe`, like the
-  macOS and Linux files, so the system shows in the name.
-- Viewer: saving a view into a file that changed since you opened it asks first: Overwrite or
-  Reload.
-- Windows uninstaller: also removes the empty `.lbd` and `Applications\lbd-view.exe` registry
-  keys and the "running viewer" record (`%LOCALAPPDATA%\Temp\lbd`), so nothing is left behind.
-  The release workflow checks this after every test uninstall.
-- The uninstall question is now "Keep your LBD presets and settings…?" (Yes, the default, keeps
-  them). "Also remove…? No" was easy to read as "don't keep". The same on Linux (`[Y/n]`).
+**Viewer: plotting**
+
+- Changing the plot type no longer shows a misleading note such as "saved view: 'I' can't be
+  used as horizontal axis": settings that belong to the saved plot type are no longer borrowed
+  by another type (`lbd.plot` too).
+- A value on another axis (e.g. a noise spectrum next to a decay) can be chosen: **On other
+  axes** switches the plot to it, instead of the error "can't share the x axis".
+- Type the axis value next to a slider (e.g. Power `-42`): it goes to the nearest measured
+  point.
+- **DPI (PNG/JPG)** next to Width/Height, for this file's raster exports.
+- Saving a view into a file that changed since you opened it asks first: Overwrite or Reload.
+
+**Viewer: settings and starting**
+
+- A **Theme** choice under **⚙**: System (follows the light or dark mode of Windows, macOS or
+  Linux), Light or Dark. Saved, and every open viewer tab follows at once.
+- Starting LBD Viewer from the Start menu (or a shortcut, or with only a folder) while it
+  already runs opens a viewer tab. Before, only the open tab's title flashed, because browsers
+  don't let a page come to the front.
+
+**Installers**
+
+- Shortcuts: on Windows the installer asks for a **Start menu** shortcut (default yes) and a
+  **desktop** shortcut (default no); on Linux `install.sh` asks the same about the applications
+  menu and the desktop. On macOS the app is in Launchpad by itself.
+- The Windows installer is named `LBD-Viewer-<version>-windows-x64-setup.exe`, like the macOS and
+  Linux files.
+- The uninstall question is now "Keep your LBD presets and settings…?" (Yes, the default,
+  keeps them), on Windows and Linux. "Also remove…? No" was easy to read as "don't keep".
+- The Windows uninstaller also removes the empty `.lbd` and `Applications\lbd-view.exe` registry
+  keys and the "running viewer" record, so nothing is left behind.
+- Linux: `uninstall.sh` ended with an error code when no settings folder existed.
+
+**Documentation**
+
+- **How LBD works**: the core idea in one page, with a diagram: a data file (what you
+  measured) + a style (how figures look) → a figure, so one style makes every figure match.
+  Also on the home page and in the README.
+- The LBD Viewer pages describe every part of the window, with numbered screenshots, and a
+  "Common tasks" table for plotting.
+- The Quick start is rewritten as six short steps with pictures; its example resonance now
+  moves with power, so the plots show something.
+- General pages no longer list the supported languages; they link to the one list (Install).
+  The format specification says any language with HDF5 can implement LBD.
+
+**For developers**
+
+- Browser tests (Playwright, headless Chromium) of the viewer: several pages, moving tabs in
+  unusual ways, a seeded random "chaos" run, the plot controls, the theme. Part of
+  `scripts/test_all.py` and CI.
+- `scripts/make_screenshots.py` makes the documentation's screenshots;
+  `tests/scripts/test_screenshots.py` checks they are all used and exist.
+- HTTP API: `GET /api/axis`; the page list (`pages_changed`) and `settings_changed` events;
+  `GET /api/pages/{id}/next?after=` confirms commands; `theme` in `/api/settings`. See
+  *HTTP API* in the developer docs.
+- `LBD_RUNTIME_DIR` moves the "running viewer" record; tests and the smoke test use their own,
+  so they never touch an installed viewer's.
 
 ## 1.0.0 (2026-10-16)
 

@@ -57,12 +57,16 @@ once, and every figure follows; the data is never touched. More in
   - a folder panel with search and a right-click menu (show in Explorer, copy path, rename,
     move to the Recycle Bin);
   - curves, scatter plots (also value vs value, the complex I/Q plane, colour by a third
-    quantity) and heat maps; complex data as magnitude/dB/phase; sliders for higher dimensions;
+    quantity) and heat maps; complex data as magnitude/dB/phase; sliders (or typed values) for
+    higher dimensions, and single-point axes shown as fixed parameters;
+  - several browser tabs that work together: numbered pages, move tabs between them with their
+    unsaved settings, one page per file;
   - style presets, with fixed colour scales per quantity for fair comparisons;
   - save a view (plot settings, style, annotations) into the file;
   - export PDF/SVG/PNG/JPG at an exact physical size, with a Save as dialog;
   - images (PNG, JPEG, TIFF, SVG, …) shown with their metadata, view only;
-  - double-click any `.lbd` file to open it.
+  - light, dark or system theme;
+  - double-click any `.lbd` file to open it in the viewer page you used last.
 
 ## Quick start
 
