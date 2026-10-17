@@ -19,7 +19,8 @@ from lbd_viewer.config import Config, ConfigError
 
 def test_config_settings_roundtrip(tmp_path):
     cfg = Config(tmp_path / "c")
-    assert cfg.settings() == {"roots": [], "default_style": "default"} and cfg.problems() == []
+    assert cfg.settings() == {"roots": [], "default_style": "default", "open_files_in": "viewer"}
+    assert cfg.problems() == []
     folder = tmp_path / "data"
     folder.mkdir()
     assert cfg.add_root(str(folder)) == [str(folder.resolve())]
@@ -37,12 +38,23 @@ def test_config_settings_roundtrip(tmp_path):
     (json.dumps({"roots": "C:/data"}), "'roots' must be a list"),
     (json.dumps({"roots": [1]}), "'roots' must be a list"),
     (json.dumps({"default_style": 3}), "'default_style' must be text"),
+    (json.dumps({"open_files_in": "window"}), "'open_files_in' must be one of viewer, browser-tab"),
 ])
 def test_config_broken_settings(tmp_path, content, match):
     cfg = Config(tmp_path / "c")
     cfg.settings_path.write_text(content)
     with pytest.raises(ConfigError, match=match):
         cfg.settings()
+
+
+def test_config_open_files_in(tmp_path):
+    cfg = Config(tmp_path / "c")
+    cfg.set_open_files_in("browser-tab")
+    assert cfg.settings()["open_files_in"] == "browser-tab"
+    cfg.set_default_style("default")                     # other changes keep it
+    assert Config(tmp_path / "c").settings()["open_files_in"] == "browser-tab"
+    with pytest.raises(ConfigError, match="one of viewer, browser-tab"):
+        cfg.set_open_files_in("popup")
 
 
 def test_config_default_style_and_problems(tmp_path):
@@ -303,6 +315,58 @@ def test_cli_hands_over_to_a_running_viewer(tmp_path, monkeypatch, capsys):
     assert "token=t" in out.out
 
 
+@pytest.fixture
+def running_viewer(monkeypatch):
+    """A fake running viewer for lbd-view's hand-over: records requests and opened browser tabs."""
+    seen = {"calls": [], "tabs": [], "setting": "viewer", "deliver": None}
+
+    def fake_api(port, token, method, path, body=None, timeout=5.0):
+        seen["calls"].append(path)
+        if path == "/api/state":
+            return {"open_files_in": seen["setting"]}
+        if path == "/api/deliver":
+            return seen["deliver"]
+        return {}
+
+    monkeypatch.setattr(cli, "_running_server", lambda: {"port": 1, "token": "t"})
+    monkeypatch.setattr(cli, "_api", fake_api)
+    monkeypatch.setattr(cli.webbrowser, "open", seen["tabs"].append)
+    return seen
+
+
+def test_cli_delivers_to_the_open_page_without_a_new_tab(tmp_path, running_viewer):
+    f = tmp_path / "a.lbd"
+    f.write_bytes(b"x")
+    running_viewer["deliver"] = {"delivered": True, "shown": [], "busy": [], "unplaced": []}
+    assert cli.main([str(f)]) == 0
+    assert "/api/deliver" in running_viewer["calls"] and running_viewer["tabs"] == []
+
+
+def test_cli_opens_tabs_for_files_no_page_took(tmp_path, running_viewer, capsys):
+    f = tmp_path / "a.lbd"
+    f.write_bytes(b"x")
+    running_viewer["deliver"] = {"delivered": False, "shown": [], "busy": ["b.lbd"], "unplaced": [str(f)]}
+    assert cli.main([str(f)]) == 0
+    assert len(running_viewer["tabs"]) == 1 and "open=" in running_viewer["tabs"][0]
+    assert "being moved" in capsys.readouterr().err
+
+
+def test_cli_setting_browser_tab_skips_delivery(tmp_path, running_viewer):
+    f = tmp_path / "a.lbd"
+    f.write_bytes(b"x")
+    running_viewer["setting"] = "browser-tab"
+    assert cli.main([str(f)]) == 0
+    assert "/api/deliver" not in running_viewer["calls"] and len(running_viewer["tabs"]) == 1
+
+
+def test_cli_with_an_older_viewer_opens_tabs_as_before(tmp_path, running_viewer):
+    f = tmp_path / "a.lbd"
+    f.write_bytes(b"x")
+    running_viewer["setting"] = None                     # its /api/state has no open_files_in
+    assert cli.main([str(f)]) == 0
+    assert "/api/deliver" not in running_viewer["calls"] and len(running_viewer["tabs"]) == 1
+
+
 def test_open_tabs_prints_urls(capsys):
     cli._open_tabs(5, "tok", ["C:/a.lbd"], no_browser=True)
     assert "open=" in capsys.readouterr().out
@@ -484,3 +548,37 @@ def test_mac_app_folders_missing_files_reopen_and_quit(mac_app, tmp_path):
     assert len(opened) == 2
     app.quit()                                  # ⌘Q
     assert app.running.stopped and app.tick(1.0) is False
+
+
+def test_mac_app_delivers_to_an_open_page(mac_app, tmp_path):
+    import threading
+
+    app, opened, alerts = mac_app
+    app.running.server.started = True
+    pages = app.running.state.pages
+    page = pages.register()
+    f = tmp_path / "a.lbd"
+    f.write_bytes(b"x")
+
+    def take():     # the open page receives the file and confirms
+        command = pages.wait_for_command(page.id, timeout=5)
+        pages.ack(page.id, command.id)
+
+    t = threading.Thread(target=take)
+    t.start()
+    app.open_documents(str(f))
+    app.tick(0.0)
+    t.join()
+    assert opened == [] and alerts == [] and pages.owner(str(f.resolve())).id == page.id
+
+
+def test_mac_app_setting_browser_tab(mac_app, tmp_path):
+    app, opened, _ = mac_app
+    app.running.server.started = True
+    app.running.state.pages.register()                   # a page is open, but the setting says tabs
+    app.running.state.config.set_open_files_in("browser-tab")
+    f = tmp_path / "a.lbd"
+    f.write_bytes(b"x")
+    app.open_documents(str(f))
+    app.tick(0.0)
+    assert len(opened) == 1 and "open=" in opened[0]

@@ -192,6 +192,16 @@ class Pages:
         if path in self.locked:
             raise PageError(f"{path} is being moved to another page; try again in a moment")
 
+    def attention(self) -> Optional[Page]:
+        """Ask the most recently focused live page to come forward (a folder was opened). Returns
+        that page, or None if no page is open."""
+        with self._changed:
+            self.expire()
+            page = max(self.pages.values(), key=lambda p: p.last_focus, default=None)
+            if page is not None:
+                self._send(page, "show", {"path": None})
+            return page
+
     def show(self, path: str) -> Optional[Page]:
         """Ask the owner of `path` to show it (switch to it, come forward). Returns that page."""
         with self._changed:

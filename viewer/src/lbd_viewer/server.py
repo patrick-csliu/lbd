@@ -38,6 +38,7 @@ from lbd.plot.style import STYLE_SUFFIX, read_style_file  # noqa: E402
 
 from . import __version__  # noqa: E402
 from . import files, images, scan, sdk  # noqa: E402
+from .pages import PageError, Pages, UnknownPage  # noqa: E402
 from .config import Config, ConfigError, Style, StyleError, from_dict  # noqa: E402
 
 CREATOR = f"LBD viewer {__version__} (matplotlib {matplotlib.__version__})"
@@ -92,8 +93,9 @@ class _DocsApp:
 
 class AppState:
     def __init__(self, config: Config, token: Optional[str] = None, port: int = 0,
-                 check_host: bool = True):
+                 check_host: bool = True, pages: Optional[Pages] = None):
         self.config = config
+        self.pages = pages or Pages()       # the browser tabs showing the viewer (pages.py)
         self.token = token or secrets.token_urlsafe(24)
         self.port = port
         self.check_host = check_host
@@ -193,7 +195,8 @@ class ImportBody(_Body):
 
 
 class SettingsBody(_Body):
-    default_style: str
+    default_style: Optional[str] = None
+    open_files_in: Optional[str] = None   # "viewer" or "browser-tab" (config.OPEN_FILES_IN)
 
 
 class FilePlotBody(_Body):
@@ -201,6 +204,38 @@ class FilePlotBody(_Body):
     spec: Optional[Dict[str, Any]] = None
     style: Optional[Dict[str, Any]] = None
     style_name: Optional[str] = None
+    if_version: Optional[str] = None      # the file's `version` when the page loaded it
+
+
+class PagePathBody(_Body):
+    path: str
+
+
+class TransferBody(_Body):
+    page: str
+    paths: List[str]
+    states: Dict[str, Any] = {}           # unsaved tab settings that travel with the files
+    to: Optional[str] = None              # a page id, or None for a new browser tab
+
+
+class PageBody(_Body):
+    page: str
+
+
+class DeliverBody(_Body):
+    files: List[str] = []
+    dirs: List[str] = []
+
+
+def canonical(path: str) -> str:
+    """One spelling per file, so the page rules never see one file as two."""
+    return str(Path(path).expanduser().resolve())
+
+
+def file_version(path: Path) -> str:
+    """Changes when the file is written: modification time and size."""
+    st = path.stat()
+    return f"{st.st_mtime_ns}-{st.st_size}"
 
 
 # ---- JSON helpers -------------------------------------------------------------------
@@ -250,6 +285,7 @@ def file_summary(d: "lbd.Dataset") -> Dict[str, Any]:
         "lbd_version": d.lbd_version, "size": stat.st_size if stat else None,
         "axes": axes, "values": values, "meta": jsonable(d.meta),
         "plot": d.plot, "style": d.style, "style_name": d.style_name, "matplotlib": d.matplotlib,
+        "version": file_version(d.path) if d.path else None,
     }
 
 
@@ -348,6 +384,30 @@ def native_save_dialog(folder: Path, name: str, fmt: str) -> Optional[str]:
         "save", fallback)
 
 
+def deliver_files(state: AppState, files: List[str], dirs: List[str]) -> Dict[str, Any]:
+    """Hand double-clicked files and folders to the open viewer pages (lbd-view, the macOS app).
+
+    Folders join the folder panel. Files go to the open pages (Pages.offer): a file already open
+    is shown where it is, the others go to the most recently used page, which must take them
+    within a few seconds. Returns {"delivered", "shown", "busy", "unplaced"}: files in
+    "unplaced" need a new browser tab (no page took them); "busy" files are being moved between
+    pages right now. FileNotFoundError for a missing file, ConfigError for a bad folder.
+    """
+    opened = [state.open_file(f) for f in files]
+    for d in dirs:
+        state.config.add_root(d)
+    if dirs:
+        state.pages.broadcast("roots_changed")
+    offer = state.pages.offer(opened)
+    unplaced = list(offer.unplaced)
+    if offer.delivery is not None and not state.pages.wait_for_ack(offer.delivery):
+        unplaced += [p for p in offer.delivery.current.values() if p is not None]
+    if not opened:                                  # only folders: bring a page forward
+        page = state.pages.attention()
+        return {"delivered": page is not None, "shown": [], "busy": [], "unplaced": []}
+    return {"delivered": not unplaced, "shown": offer.shown, "busy": offer.busy, "unplaced": unplaced}
+
+
 # ---- app ---------------------------------------------------------------------------------
 
 
@@ -415,6 +475,7 @@ def create_app(state: AppState) -> FastAPI:
         return {
             "version": __version__, "lbd_version": lbd.FORMAT_VERSION,
             "roots": s["roots"], "default_style": s["default_style"], "styles": names,
+            "open_files_in": s["open_files_in"],
             "platform": sys.platform, "config_dir": str(cfg.dir), "warnings": problems + warns,
         }
 
@@ -426,7 +487,9 @@ def create_app(state: AppState) -> FastAPI:
 
     @app.post("/api/roots")
     def add_root(body: PathBody):
-        return {"roots": cfg.add_root(body.path)}
+        roots = cfg.add_root(body.path)
+        state.pages.broadcast("roots_changed")
+        return {"roots": roots}
 
     @app.post("/api/pick-folder")
     def pick_folder():
@@ -436,9 +499,11 @@ def create_app(state: AppState) -> FastAPI:
     @app.delete("/api/roots")
     def remove_root(path: str = Query(...)):
         try:
-            return {"roots": cfg.remove_root(path)}
+            roots = cfg.remove_root(path)
         except KeyError:
             raise HTTPException(404, f"{path} is not one of your folders")
+        state.pages.broadcast("roots_changed")
+        return {"roots": roots}
 
     @app.get("/api/list")
     def list_dir(path: str = Query(...)):
@@ -471,6 +536,13 @@ def create_app(state: AppState) -> FastAPI:
         changes = {k: getattr(body, k) for k in ("spec", "style", "style_name") if k in body.model_fields_set}
         if not changes:
             raise HTTPException(400, "nothing to change: send spec, style and/or style_name")
+        try:
+            state.pages.check_unlocked(str(p))
+        except PageError as e:
+            raise HTTPException(409, str(e))
+        if body.if_version is not None and p.is_file() and file_version(p) != body.if_version:
+            raise HTTPException(409, f"{p.name} was changed since you opened it (in another page or "
+                                     "program); reload it, or save again to overwrite")
         with collect_warnings() as warns:
             lbd.set_plot(p, **changes)
             summary = file_summary(lbd.info(p))
@@ -577,6 +649,7 @@ def create_app(state: AppState) -> FastAPI:
     @app.put("/api/styles/{name}")
     def put_style(name: str, body: PresetBody):
         cfg.save_preset(name, body.preset)
+        state.pages.broadcast("styles_changed")
         return get_style(name)
 
     @app.get("/api/styles/{name}/export")
@@ -610,6 +683,7 @@ def create_app(state: AppState) -> FastAPI:
             cfg.save_preset(body.name, content)
         else:
             cfg.import_preset(body.name, content)
+        state.pages.broadcast("styles_changed")
         return get_style(body.name)
 
     @app.get("/api/stylefile")
@@ -644,11 +718,18 @@ def create_app(state: AppState) -> FastAPI:
             cfg.delete_preset(name)
         except KeyError:
             raise HTTPException(404, f"no style named {name!r}")
+        state.pages.broadcast("styles_changed")
         return list_styles()
 
     @app.put("/api/settings")
     def put_settings(body: SettingsBody):
-        cfg.set_default_style(body.default_style)
+        if body.default_style is None and body.open_files_in is None:
+            raise HTTPException(400, "nothing to change: send default_style and/or open_files_in")
+        if body.default_style is not None:
+            cfg.set_default_style(body.default_style)
+            state.pages.broadcast("styles_changed")
+        if body.open_files_in is not None:
+            cfg.set_open_files_in(body.open_files_in)
         return get_state()
 
     # -- SDK page
@@ -675,6 +756,10 @@ def create_app(state: AppState) -> FastAPI:
     def rename_file(body: RenameBody):
         p = state.check_allowed(body.path)
         try:
+            state.pages.check_unlocked(str(p))
+        except PageError as e:
+            raise HTTPException(409, str(e))
+        try:
             new = files.rename(p, body.name)
         except files.NameTakenError as e:
             raise HTTPException(409, str(e))
@@ -684,11 +769,16 @@ def create_app(state: AppState) -> FastAPI:
             raise HTTPException(404, str(e))
         if _key(p) in state.opened:  # a file opened by double-click stays readable
             state.opened.add(_key(new))
+        state.pages.broadcast("renamed", old=str(p), new=str(new))
         return {"path": str(new)}
 
     @app.post("/api/file/trash")
     def trash_file(body: PathBody):
         p = state.check_allowed(body.path)
+        try:
+            state.pages.check_unlocked(str(p))
+        except PageError as e:
+            raise HTTPException(409, str(e))
         try:
             files.trash(p)
         except files.FileActionError as e:
@@ -697,7 +787,98 @@ def create_app(state: AppState) -> FastAPI:
             raise HTTPException(404, str(e))
         except OSError as e:
             raise HTTPException(500, str(e))
+        state.pages.broadcast("trashed", path=str(p))
         return {"ok": True}
+
+    # -- pages: the browser tabs showing the viewer (the rules are in pages.py)
+
+    def page_call(action, *args):
+        """Run a page rule; its refusals become HTTP errors carrying the rule's message."""
+        try:
+            return action(*args)
+        except UnknownPage as e:
+            raise HTTPException(404, str(e))
+        except PageError as e:
+            raise HTTPException(409, str(e))
+
+    @app.post("/api/pages")
+    def register_page():
+        page = state.pages.register()
+        return {"page": page.id, "number": page.number}
+
+    @app.post("/api/pages/{page_id}/focus")
+    def page_focus(page_id: str):
+        page_call(state.pages.focus, page_id)
+        return {"ok": True}
+
+    @app.post("/api/pages/{page_id}/bye")
+    def page_bye(page_id: str):
+        state.pages.bye(page_id)
+        return {"ok": True}
+
+    @app.get("/api/pages/{page_id}/next")
+    def page_next(page_id: str, wait: float = Query(25.0, ge=0, le=30)):
+        """The long poll: the page's next command, or {} after `wait` seconds."""
+        command = page_call(state.pages.wait_for_command, page_id, wait)
+        if command is None:
+            return {}
+        return {"id": command.id, "kind": command.kind, "data": command.data}
+
+    @app.post("/api/pages/{page_id}/ack/{command_id}")
+    def page_ack(page_id: str, command_id: int):
+        return page_call(state.pages.ack, page_id, command_id)
+
+    @app.post("/api/pages/{page_id}/acquire")
+    def page_acquire(page_id: str, body: PagePathBody):
+        """The page opens a file: {"path"} (its canonical spelling), plus {"owner": n} if Page n
+        has it open already (then this page doesn't open it)."""
+        path = str(state.check_allowed(body.path))
+        other = page_call(state.pages.acquire, page_id, path)
+        return {"path": path} if other is None else {"path": path, "owner": other.number}
+
+    @app.post("/api/pages/{page_id}/release")
+    def page_release(page_id: str, body: PagePathBody):
+        page_call(state.pages.release, page_id, canonical(body.path))
+        return {"ok": True}
+
+    @app.post("/api/pages/show")
+    def page_show(body: PagePathBody):
+        """Ask the page that has the file open to show it (switch to it, come forward)."""
+        owner = state.pages.show(canonical(body.path))
+        if owner is None:
+            raise HTTPException(404, "no page has this file open")
+        return {"page": owner.number}
+
+    @app.post("/api/transfers")
+    def start_transfer(body: TransferBody):
+        transfer = page_call(state.pages.start_transfer, body.page, [canonical(p) for p in body.paths],
+                             {canonical(k): v for k, v in body.states.items()}, body.to)
+        return {"id": transfer.id, "timeout": transfer.timeout}
+
+    @app.post("/api/transfers/{transfer_id}/claim")
+    def claim_transfer(transfer_id: str, body: PageBody):
+        transfer = page_call(state.pages.claim, transfer_id, body.page)
+        source = state.pages.pages.get(transfer.source)
+        return {"paths": transfer.paths, "states": transfer.states, "from": source.number if source else None}
+
+    @app.post("/api/transfers/{transfer_id}/complete")
+    def complete_transfer(transfer_id: str, body: PageBody):
+        return {"paths": page_call(state.pages.complete, transfer_id, body.page)}
+
+    @app.post("/api/transfers/{transfer_id}/cancel")
+    def cancel_transfer(transfer_id: str):
+        page_call(state.pages.cancel_transfer, transfer_id, "the move was cancelled")
+        return {"ok": True}
+
+    @app.post("/api/deliver")
+    def deliver(body: DeliverBody):
+        """lbd-view hands over double-clicked files and folders (see deliver_files)."""
+        try:
+            return deliver_files(state, body.files, body.dirs)
+        except FileNotFoundError as e:
+            raise HTTPException(404, f"not found: {e}")
+        except PageError as e:
+            raise HTTPException(409, str(e))
 
     # -- documentation (Help)
 

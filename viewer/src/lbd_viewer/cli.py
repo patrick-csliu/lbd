@@ -110,6 +110,31 @@ def _hand_over(port: int, token: str, method: str, path: str, body: dict) -> Non
         print(f"lbd-view: the running viewer refused {body.get('path')}: {detail}", file=sys.stderr)
 
 
+def _open_files_in(port: int, token: str) -> Optional[str]:
+    """The running viewer's setting for double-clicked files ("viewer" or "browser-tab"); None
+    from a viewer too old to have it."""
+    try:
+        return _api(port, token, "GET", "/api/state").get("open_files_in")
+    except (OSError, ValueError):
+        return None
+
+
+def _deliver(port: int, token: str, files: List[str], dirs: List[str]) -> Optional[dict]:
+    """Hand files and folders to the running viewer's open page (server.deliver_files).
+    None if that failed: then the caller opens browser tabs as before."""
+    try:
+        return _api(port, token, "POST", "/api/deliver", {"files": files, "dirs": dirs}, timeout=15)
+    except urllib.error.HTTPError as e:
+        try:
+            detail = json.loads(e.read().decode() or "{}").get("detail", e.reason)
+        except ValueError:
+            detail = e.reason
+        print(f"lbd-view: the running viewer refused the files: {detail}", file=sys.stderr)
+        return None
+    except (OSError, ValueError):
+        return None
+
+
 def _open_tabs(port: int, token: str, files: List[str], no_browser: bool) -> None:
     urls = [viewer_url(port, token, f) for f in files] or [viewer_url(port, token)]
     for u in urls:
@@ -169,11 +194,21 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("lbd-view: none of the given files or folders exist", file=sys.stderr)
         return 2
 
-    # Reuse a running viewer: hand it the files/folders and open browser tabs.
+    # Reuse a running viewer: hand it the files and folders. They open in the viewer page that is
+    # already open (setting "open_files_in": "viewer"), else in new browser tabs.
     if not args.new and not args.dev:
         running = _running_server()
         if running:
             port, token = running["port"], running["token"]
+            if not args.no_browser and _open_files_in(port, token) == "viewer":
+                result = _deliver(port, token, files, dirs)
+                if result is not None:
+                    for path in result["busy"]:
+                        print(f"lbd-view: {path} is being moved between viewer pages; try again in a moment",
+                              file=sys.stderr)
+                    if not result["delivered"]:
+                        _open_tabs(port, token, result["unplaced"], no_browser=False)
+                    return 0
             for d in dirs:
                 _hand_over(port, token, "POST", "/api/roots", {"path": d})
             for f in files:
