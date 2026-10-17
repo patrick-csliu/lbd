@@ -1,5 +1,5 @@
 import { CSSProperties, KeyboardEvent, MouseEvent, PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, ApiError, AppState, baseName, fileKind, OpenFilesIn, PageCommand, PageEntry, TabState, viewerUrl } from "./api";
+import { api, ApiError, AppState, baseName, fileKind, OpenFilesIn, PageCommand, PageEntry, TabState, Theme, viewerUrl } from "./api";
 import FolderPanel from "./FolderPanel";
 import FileView from "./FileView";
 import ImageView from "./ImageView";
@@ -10,6 +10,7 @@ import { ToastProvider, useToast } from "./toast";
 import { ConfirmDialog, ConfirmRequest, ContextMenu, isMenuKey, MenuAt, menuAt, MenuEntry } from "./menu";
 import { attention, PageInfo, usePage } from "./pages";
 import { docsUrl } from "./help";
+import { applyTheme } from "./theme";
 
 type Page = "data" | "styles" | "sdk";
 
@@ -59,6 +60,9 @@ interface Lock {
   reason: string;
   transfer?: string; // set while the tab is being moved to another page
 }
+
+/** The operating system's name, for "System (follows Windows)". */
+const systemName = (platform: string) => (platform === "win32" ? "Windows" : platform === "darwin" ? "macOS" : "the system");
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
@@ -134,6 +138,7 @@ function Shell() {
     try {
       const s = await api.state();
       setState(s);
+      applyTheme(s.theme);
       for (const w of s.warnings) {
         if (!shownWarnings.current.has(w)) {
           shownWarnings.current.add(w);
@@ -423,7 +428,7 @@ function Shell() {
           else if (data.event === "trashed" && tabsRef.current.some((t) => t.path === data.path)) {
             dropTabs([data.path as string]);
             toast(`${baseName(data.path as string)} was moved to the Recycle Bin / Trash; its tab was closed.`);
-          } else if (data.event === "roots_changed") await refreshState();
+          } else if (data.event === "roots_changed" || data.event === "settings_changed") await refreshState();
           else if (data.event === "styles_changed") {
             await refreshState();
             setStyleRevision((n) => n + 1);
@@ -547,12 +552,26 @@ function Shell() {
     });
   };
 
+  // The ⚙ choices show at once; the viewer's answer (or a refusal, with the old value) follows.
+  const setTheme = async (theme: Theme) => {
+    applyTheme(theme); // the other pages follow when the viewer tells them
+    setState((s) => s && { ...s, theme });
+    try {
+      setState(await api.setTheme(theme));
+    } catch (e) {
+      toast((e as Error).message, "error");
+      await refreshState();
+    }
+  };
+
   const setOpenFilesIn = async (where: OpenFilesIn) => {
+    setState((s) => s && { ...s, open_files_in: where });
     try {
       setState(await api.setOpenFilesIn(where));
       toast(where === "viewer" ? "Files opened from Explorer / Finder now open in this viewer." : "Files opened from Explorer / Finder now open in new browser tabs.");
     } catch (e) {
       toast((e as Error).message, "error");
+      await refreshState();
     }
   };
 
@@ -659,6 +678,19 @@ function Shell() {
                 ).map(([value, label]) => (
                   <label key={value} className="settings-choice">
                     <input type="radio" name="open-files-in" checked={state.open_files_in === value} onChange={() => setOpenFilesIn(value)} />
+                    {label}
+                  </label>
+                ))}
+                <div className="settings-title">Theme</div>
+                {(
+                  [
+                    ["system", `System (follows ${systemName(state.platform)})`],
+                    ["light", "Light"],
+                    ["dark", "Dark"],
+                  ] as [Theme, string][]
+                ).map(([value, label]) => (
+                  <label key={value} className="settings-choice">
+                    <input type="radio" name="theme" checked={state.theme === value} onChange={() => setTheme(value)} />
                     {label}
                   </label>
                 ))}

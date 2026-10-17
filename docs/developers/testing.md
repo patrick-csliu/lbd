@@ -49,8 +49,8 @@ Run the cross-language matrix after any change to a module or the spec.
 
 ## Rules the Python tests follow
 
-- **No test touches your real settings.** The root `conftest.py` points `LBD_CONFIG_DIR` at a
-  fresh temporary folder for every test and closes all matplotlib figures afterwards.
+- **No test touches your real settings.** The root `conftest.py` points `LBD_CONFIG_DIR` and
+  `LBD_RUNTIME_DIR` (the "running viewer" record) at fresh temporary folders for every test and closes all matplotlib figures afterwards.
 - **An unexpected LBD warning fails the test.** `pyproject.toml` turns `lbd.LBDWarning` (and
   its subclasses) into errors; a test that expects one uses `pytest.warns(...)`. Because nothing
   in LBD may change or drop input silently, every such case is either an error or a warning, and

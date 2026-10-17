@@ -31,7 +31,11 @@ from .server import AppState, create_app
 
 
 def lock_path() -> Path:
-    d = Path(platformdirs.user_runtime_dir("lbd", appauthor=False, ensure_exists=True))
+    """The "running viewer" record (port, token, pid), so a second `lbd-view` reuses the viewer.
+    In the user's runtime folder; LBD_RUNTIME_DIR overrides it (tests, a second copy)."""
+    env = os.environ.get("LBD_RUNTIME_DIR")
+    d = Path(env) if env else Path(platformdirs.user_runtime_dir("lbd", appauthor=False))
+    d.mkdir(parents=True, exist_ok=True)
     return d / "server.json"
 
 
@@ -194,13 +198,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("lbd-view: none of the given files or folders exist", file=sys.stderr)
         return 2
 
-    # Reuse a running viewer: hand it the files and folders. They open in the viewer page that is
-    # already open (setting "open_files_in": "viewer"), else in new browser tabs.
+    # Reuse a running viewer: hand it the files and folders. Files open in the viewer page that is
+    # already open (setting "open_files_in": "viewer"), else in new browser tabs. Without files
+    # (the Start menu, the program itself, a folder) a new browser tab opens: a page that is
+    # already open can't be brought to the front by the viewer (browsers don't allow it), so
+    # "come forward" would show nothing.
     if not args.new and not args.dev:
         running = _running_server()
         if running:
             port, token = running["port"], running["token"]
-            if not args.no_browser and _open_files_in(port, token) == "viewer":
+            if files and not args.no_browser and _open_files_in(port, token) == "viewer":
                 result = _deliver(port, token, files, dirs)
                 if result is not None:
                     for path in result["busy"]:

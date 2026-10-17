@@ -24,6 +24,7 @@ __all__ = ["Config", "ConfigError", "Style", "QuantityStyle", "StyleError", "dee
 # Where files opened from Explorer / Finder (double-click) appear: in the viewer page that is
 # already open, or each in a new browser tab.
 OPEN_FILES_IN = ("viewer", "browser-tab")
+THEMES = ("system", "light", "dark")      # the viewer's colours; "system" follows the OS setting
 
 
 class ConfigError(ValueError):
@@ -48,11 +49,12 @@ class Config:
 
     def _stored(self) -> Dict[str, Any]:
         """settings.json as stored, checked:
-        {"roots": [...], "default_style": str or None, "open_files_in": one of OPEN_FILES_IN}."""
+        {"roots": [...], "default_style": str or None, "open_files_in": one of OPEN_FILES_IN,
+         "theme": one of THEMES}."""
         with self._lock:
             data = _read_json(self.settings_path)
         if data is None:
-            return {"roots": [], "default_style": None, "open_files_in": "viewer"}
+            return {"roots": [], "default_style": None, "open_files_in": "viewer", "theme": "system"}
         if not isinstance(data, dict):
             raise ConfigError(f"{self.settings_path} must contain a JSON object; fix or delete the file")
         roots = data.get("roots", [])
@@ -65,16 +67,21 @@ class Config:
         if open_in not in OPEN_FILES_IN:
             raise ConfigError(f"{self.settings_path}: 'open_files_in' must be one of {', '.join(OPEN_FILES_IN)}, "
                               f"not {open_in!r}; fix or delete the file")
-        return {"roots": list(roots), "default_style": default or None, "open_files_in": open_in}
+        theme = data.get("theme", "system")
+        if theme not in THEMES:
+            raise ConfigError(f"{self.settings_path}: 'theme' must be one of {', '.join(THEMES)}, "
+                              f"not {theme!r}; fix or delete the file")
+        return {"roots": list(roots), "default_style": default or None, "open_files_in": open_in, "theme": theme}
 
     def settings(self) -> Dict[str, Any]:
-        """{"roots": [...], "default_style": name, "open_files_in": ...}; a default style that no
-        longer exists is 'default'."""
+        """{"roots": [...], "default_style": name, "open_files_in": ..., "theme": ...}; a default
+        style that no longer exists is 'default'."""
         stored = self._stored()
         default = stored["default_style"] or "default"
         if default not in self.style_names():
             default = "default"
-        return {"roots": stored["roots"], "default_style": default, "open_files_in": stored["open_files_in"]}
+        return {"roots": stored["roots"], "default_style": default, "open_files_in": stored["open_files_in"],
+                "theme": stored["theme"]}
 
     def problems(self) -> List[str]:
         """Things the user should know about the settings (shown as warnings in the viewer)."""
@@ -129,6 +136,15 @@ class Config:
         with self._lock:
             s = self.settings()
             s["open_files_in"] = where
+            self._save_settings(s)
+
+    def set_theme(self, theme: str) -> None:
+        """The viewer's colours: "system" (follow the operating system), "light" or "dark"."""
+        if theme not in THEMES:
+            raise ConfigError(f"theme must be one of {', '.join(THEMES)}, not {theme!r}")
+        with self._lock:
+            s = self.settings()
+            s["theme"] = theme
             self._save_settings(s)
 
     # style presets (delegated to the shared store)

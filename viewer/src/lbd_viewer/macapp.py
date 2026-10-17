@@ -95,7 +95,7 @@ class MacApp:
             result = deliver_files(state, files, dirs)
             problems += [f"{p}: being moved between viewer pages; try again in a moment" for p in result["busy"]]
             tabs = result["unplaced"]
-            main_tab = bool(dirs) and not result["delivered"] and not tabs
+            main_tab = bool(dirs) and not files     # only folders: show them (a page can't come forward)
             self.shown = self.shown or result["delivered"]
         for f in tabs:
             self.open_url(self.running.url(state.open_file(f)))

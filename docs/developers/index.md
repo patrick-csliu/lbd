@@ -147,4 +147,5 @@ uv run mkdocs build --strict     # into site/; lbd-view --dev serves it at /docs
    ```
 
 Point the viewer at a scratch settings folder with `LBD_CONFIG_DIR=<dir>`, so your real presets
-aren't touched. `python -m lbd_viewer` is the same as `lbd-view`.
+aren't touched, and `LBD_RUNTIME_DIR=<dir>` keeps its "running viewer" record (`server.json`)
+apart from an installed viewer's. `python -m lbd_viewer` is the same as `lbd-view`.

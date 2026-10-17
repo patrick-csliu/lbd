@@ -41,9 +41,9 @@ UI shows them as notes. They are the messages of Python's `lbd.LBDWarning`s.
 |---|---|---|
 | `GET /api/ping` | | `{app: "lbd-viewer", version, pid}`. Used by `cli.py` to detect a running viewer. |
 | `POST /api/heartbeat` | | `{ok: true}`. Tabs call it every 10 s; the server stops after `--idle-exit` seconds without one. |
-| `GET /api/state` | | `{version, lbd_version, roots, default_style, open_files_in, styles, platform, config_dir, warnings}`. `warnings` also lists folders that no longer exist and a default style that was deleted. |
+| `GET /api/state` | | `{version, lbd_version, roots, default_style, open_files_in, theme, styles, platform, config_dir, warnings}`. `warnings` also lists folders that no longer exist and a default style that was deleted. |
 | `POST /api/open` | `{path}` | `{path}` (resolved). Allows reading a file outside the roots. |
-| `PUT /api/settings` | `{default_style?, open_files_in?}` | Same as `GET /api/state`. `open_files_in`: `"viewer"` (files from Explorer / Finder go to the open page) or `"browser-tab"`. 400 if neither is given or a value is invalid. |
+| `PUT /api/settings` | `{default_style?, open_files_in?, theme?}` | Same as `GET /api/state`. `open_files_in`: `"viewer"` (files from Explorer / Finder go to the open page) or `"browser-tab"`. `theme`: `"system"` (follow the operating system), `"light"` or `"dark"`. Every page gets `settings_changed` for these two. 400 if none is given or a value is invalid. |
 
 ## Folders
 
@@ -92,7 +92,7 @@ Commands a page receives (`kind`, `data`):
 | `transfer_done` | `{id, paths, to}` | this page's tabs arrived in page `to`; close them |
 | `transfer_cancelled` | `{id, paths, reason}` | this page's move was cancelled; unlock the tabs |
 | `pages_changed` | `{pages: [{page, number, files}]}` | the live pages changed: one opened, closed or lost its connection, or opened, closed or took files. The whole list; an older one still queued is replaced |
-| `event` | `{event: "renamed", old, new}`, `{event: "trashed", path}`, `{event: "roots_changed"}`, `{event: "styles_changed"}` | a file was renamed or moved to the trash, or the folder list or the presets changed |
+| `event` | `{event: "renamed", old, new}`, `{event: "trashed", path}`, `{event: "roots_changed"}`, `{event: "styles_changed"}`, `{event: "settings_changed"}` | a file was renamed or moved to the trash, or the folder list, the presets or the ⚙ settings (`open_files_in`, `theme`) changed |
 
 ## Images (view only)
 

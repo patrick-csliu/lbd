@@ -11,11 +11,13 @@ There are two separate parts:
 
 1. Run `LBD-Viewer-<version>-windows-x64-setup.exe`. No administrator rights are needed; it installs for
    your user only.
-2. Optionally tick **Open LBD Viewer now** at the end.
+2. Choose the shortcuts: **Add LBD Viewer to the Start menu** (ticked by default) and **Create a
+   desktop shortcut** (not ticked). An upgrade remembers your choice.
+3. Optionally tick **Open LBD Viewer now** at the end.
 
 The installer:
 - puts the viewer in `%LOCALAPPDATA%\Programs\LBDViewer`;
-- adds **LBD Viewer** to the Start menu;
+- adds the shortcuts you chose (the uninstaller removes them);
 - makes double-clicking `.lbd` files open the viewer;
 - puts the language modules in `%LOCALAPPDATA%\Programs\LBDViewer\sdk`.
 
@@ -40,10 +42,13 @@ Requirements: 64-bit Windows 10 or 11.
    cd lbd-viewer-<version>-linux-x86_64 && ./install.sh
    ```
 
-`install.sh`:
+`install.sh` asks two questions: **Show LBD Viewer in the applications menu? [Y/n]** and **Add a
+shortcut to the desktop? [y/N]** (Enter takes the capital letter, the default). Run without a
+terminal (in a script), it takes the defaults. Then it:
 - puts the viewer in `~/.local/share/lbd-viewer`;
 - links the `lbd-view` command into `~/.local/bin`;
-- adds **LBD Viewer** to the applications menu;
+- adds the shortcuts you chose. Without the menu entry, double-clicking `.lbd` files still
+  works: the entry is installed but hidden from the menu;
 - registers the file type `application/x-lbd` for `*.lbd` files and makes the viewer its
   default app.
 
@@ -90,7 +95,9 @@ distributions include.
    ```
    After each update, approve the new version the same way.
 
-After that, double-clicking a `.lbd` file opens it in LBD Viewer, in your browser. The app shows
+After that, double-clicking a `.lbd` file opens it in LBD Viewer, in your browser. There are no
+shortcut questions on the Mac: LBD Viewer is in Launchpad and Spotlight once it is in
+Applications. For a Dock icon, drag it from Applications onto the Dock. The app shows
 in the Dock while it runs; it quits with ⌘Q, or by itself 90 seconds after the last viewer tab
 is closed.
 

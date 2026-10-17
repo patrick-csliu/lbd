@@ -204,6 +204,17 @@ def test_save_refuses_a_file_changed_since_it_was_opened(api, data_dir):
     assert forced.status_code == 200
 
 
+def test_theme_setting_reaches_every_page(api):
+    one, _ = new_page(api)
+    two, _ = new_page(api)
+    assert api.get("/api/state").json()["theme"] == "system"
+    assert api.put("/api/settings", json={"theme": "dark"}).json()["theme"] == "dark"
+    for page in (one, two):                       # every page shows the new setting at once
+        assert {"event": "settings_changed"} in [c["data"] for c in drain(api, page) if c["kind"] == "event"]
+    r = api.put("/api/settings", json={"theme": "blue"})
+    assert r.status_code == 400 and "system, light, dark" in r.json()["detail"]
+
+
 def test_open_files_in_setting(api):
     assert api.get("/api/state").json()["open_files_in"] == "viewer"
     assert api.put("/api/settings", json={"open_files_in": "browser-tab"}).json()["open_files_in"] == "browser-tab"

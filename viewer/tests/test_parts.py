@@ -19,7 +19,7 @@ from lbd_viewer.config import Config, ConfigError
 
 def test_config_settings_roundtrip(tmp_path):
     cfg = Config(tmp_path / "c")
-    assert cfg.settings() == {"roots": [], "default_style": "default", "open_files_in": "viewer"}
+    assert cfg.settings() == {"roots": [], "default_style": "default", "open_files_in": "viewer", "theme": "system"}
     assert cfg.problems() == []
     folder = tmp_path / "data"
     folder.mkdir()
@@ -39,6 +39,7 @@ def test_config_settings_roundtrip(tmp_path):
     (json.dumps({"roots": [1]}), "'roots' must be a list"),
     (json.dumps({"default_style": 3}), "'default_style' must be text"),
     (json.dumps({"open_files_in": "window"}), "'open_files_in' must be one of viewer, browser-tab"),
+    (json.dumps({"theme": "blue"}), "'theme' must be one of system, light, dark"),
 ])
 def test_config_broken_settings(tmp_path, content, match):
     cfg = Config(tmp_path / "c")
@@ -55,6 +56,15 @@ def test_config_open_files_in(tmp_path):
     assert Config(tmp_path / "c").settings()["open_files_in"] == "browser-tab"
     with pytest.raises(ConfigError, match="one of viewer, browser-tab"):
         cfg.set_open_files_in("popup")
+
+
+def test_config_theme(tmp_path):
+    cfg = Config(tmp_path / "c")
+    cfg.set_theme("dark")
+    cfg.set_open_files_in("browser-tab")                 # other changes keep it
+    assert Config(tmp_path / "c").settings()["theme"] == "dark"
+    with pytest.raises(ConfigError, match="one of system, light, dark"):
+        cfg.set_theme("blue")
 
 
 def test_config_default_style_and_problems(tmp_path):
@@ -367,6 +377,23 @@ def test_cli_with_an_older_viewer_opens_tabs_as_before(tmp_path, running_viewer)
     assert "/api/deliver" not in running_viewer["calls"] and len(running_viewer["tabs"]) == 1
 
 
+@pytest.mark.parametrize("folder", [False, True])
+def test_cli_without_files_opens_a_browser_tab(tmp_path, running_viewer, folder):
+    """The Start menu (or a folder): a page that is open can't be brought to the front, so a new
+    browser tab shows the viewer."""
+    args = [str(tmp_path)] if folder else []
+    running_viewer["deliver"] = {"delivered": True, "shown": [], "busy": [], "unplaced": []}
+    assert cli.main(args) == 0
+    assert "/api/deliver" not in running_viewer["calls"]
+    assert len(running_viewer["tabs"]) == 1 and "open=" not in running_viewer["tabs"][0]
+    assert ("/api/roots" in running_viewer["calls"]) == folder
+
+
+def test_lock_path_follows_lbd_runtime_dir(tmp_path, monkeypatch):
+    monkeypatch.setenv("LBD_RUNTIME_DIR", str(tmp_path / "rt"))
+    assert cli.lock_path() == tmp_path / "rt" / "server.json" and (tmp_path / "rt").is_dir()
+
+
 def test_open_tabs_prints_urls(capsys):
     cli._open_tabs(5, "tok", ["C:/a.lbd"], no_browser=True)
     assert "open=" in capsys.readouterr().out
@@ -572,6 +599,15 @@ def test_mac_app_delivers_to_an_open_page(mac_app, tmp_path):
     app.tick(0.0)
     t.join()
     assert opened == [] and alerts == [] and pages.owner(str(f.resolve())).id == page.id
+
+
+def test_mac_app_folder_with_a_page_open_still_opens_a_tab(mac_app, tmp_path):
+    app, opened, _ = mac_app
+    app.running.server.started = True
+    app.running.state.pages.register()            # a page is open, but it can't come forward
+    app.open_documents(str(tmp_path))
+    app.tick(0.0)
+    assert opened == [app.running.url()]
 
 
 def test_mac_app_setting_browser_tab(mac_app, tmp_path):

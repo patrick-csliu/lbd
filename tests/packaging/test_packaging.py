@@ -178,6 +178,68 @@ def test_linux_scripts_parse(script):
     assert r.returncode == 0, r.stderr
 
 
+def test_windows_installer_asks_for_shortcuts():
+    """Start menu shortcut: yes by default; desktop shortcut: no by default."""
+    from pathlib import Path
+
+    iss = (Path(__file__).resolve().parents[2] / "packaging" / "windows" / "LBDViewer.iss").read_text(encoding="utf-8")
+    tasks = {line.split('"')[1]: line for line in iss.splitlines() if line.startswith('Name: "') and "Description:" in line}
+    assert set(tasks) == {"startmenu", "desktopicon"}
+    assert "unchecked" not in tasks["startmenu"] and "Flags: unchecked" in tasks["desktopicon"]
+    assert '{autoprograms}\\LBD Viewer"; Filename: "{app}\\lbd-view.exe"; Comment: "View LBD data files"; Tasks: startmenu' in iss
+    assert '{autodesktop}\\LBD Viewer"; Filename: "{app}\\lbd-view.exe"; Comment: "View LBD data files"; Tasks: desktopicon' in iss
+
+
+def test_linux_install_without_a_terminal_uses_the_shortcut_defaults(tmp_path):
+    """Run install.sh (and uninstall.sh) into a temporary home, unattended: a menu entry, no
+    desktop shortcut; uninstall removes everything it made."""
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    sh = shutil.which("sh") or shutil.which("bash")
+    if not sh:
+        pytest.skip("no POSIX shell here")
+    linux = Path(__file__).resolve().parents[2] / "packaging" / "linux"
+    icons = linux.parent / "icons"
+    unpacked = tmp_path / "unpacked"
+    (unpacked / "LBDViewer").mkdir(parents=True)
+    for f in ("install.sh", "uninstall.sh", "lbd-viewer.desktop", "lbd-mime.xml"):
+        shutil.copy(linux / f, unpacked / f)
+    for f in ("lbd.png", "lbd.svg"):
+        shutil.copy(icons / f, unpacked / f)
+    exe = unpacked / "LBDViewer" / "lbd-view"
+    exe.write_text("#!/bin/sh\necho viewer\n", newline="\n")
+    exe.chmod(0o755)
+    home = tmp_path / "home"
+    (home / "Desktop").mkdir(parents=True)
+    env = {"HOME": str(home), "XDG_DATA_HOME": str(home / "data"), "XDG_CONFIG_HOME": str(home / "config"),
+           "PATH": __import__("os").environ["PATH"]}
+
+    def run(name, *args):
+        r = subprocess.run([sh, str(unpacked / name), *args], env=env, stdin=subprocess.DEVNULL,
+                           capture_output=True, text=True)
+        assert r.returncode == 0, r.stdout + r.stderr
+        return r.stdout
+
+    out = run("install.sh", "--no-fonts")
+    entry = home / "data" / "applications" / "lbd-viewer.desktop"
+    assert entry.is_file() and "NoDisplay" not in entry.read_text()        # in the menu
+    assert not (home / "Desktop" / "lbd-viewer.desktop").exists()           # no desktop shortcut
+    assert "applications menu" in out
+    run("uninstall.sh")
+    assert not entry.exists() and not (home / "data" / "lbd-viewer").exists()
+
+
+def test_linux_installer_asks_for_shortcuts():
+    from pathlib import Path
+
+    sh = (Path(__file__).resolve().parents[2] / "packaging" / "linux" / "install.sh").read_text(encoding="utf-8")
+    assert 'ask "Show LBD Viewer in the applications menu?" y' in sh
+    assert 'ask "Add a shortcut to the desktop?" n' in sh
+    assert "NoDisplay=true" in sh and "metadata::trusted" in sh
+
+
 def test_every_language_has_the_same_license(load_module):
     """Each language folder can be installed on its own, so each carries the top LICENSE."""
     from pathlib import Path

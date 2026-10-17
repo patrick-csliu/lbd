@@ -8,7 +8,9 @@ Nothing is uploaded anywhere.
 
 - **Double-click an `.lbd` file** in File Explorer (Windows) or your file manager (Linux). The
   viewer opens it in a new browser tab.
-- **Start menu / applications menu → LBD Viewer** opens the viewer without a file.
+- **Start menu / applications menu / desktop shortcut → LBD Viewer** opens the viewer without
+  a file, in a new browser tab, also when the viewer already runs. (The viewer can't bring an
+  open browser tab to the front: browsers don't allow it.)
 - **Command line:** `lbd-view`, `lbd-view file.lbd` or `lbd-view some/folder`; see
   [Command line](command-line.md#command-line).
 
@@ -30,6 +32,13 @@ viewer.
   all after a start, it waits at least 60 seconds first.
 
 ## The window
+
+**⚙** at the top right holds two settings, saved for every viewer tab and the next start:
+- **Files opened from Explorer / Finder:** in the open viewer, or in a new browser tab (see
+  [Several browser tabs](folders-and-files.md#several-browser-tabs)).
+- **Theme:** **System** follows the light or dark mode of Windows, macOS or Linux, also when it
+  changes while the viewer is open; **Light** and **Dark** stay as chosen. Figures always stay on
+  white, because they are print figures. The Help pages have their own light/dark switch.
 
 The top bar switches between the viewer's pages:
 

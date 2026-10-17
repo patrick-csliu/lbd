@@ -47,7 +47,8 @@ class App:
         self.base = f"http://127.0.0.1:{self.port}"
         self.token = ""
         self.output: List[str] = []     # everything the viewer prints, read continuously
-        env = {**os.environ, "LBD_CONFIG_DIR": str(config)}
+        # Its own settings and "running viewer" record: never those of an installed viewer.
+        env = {**os.environ, "LBD_CONFIG_DIR": str(config), "LBD_RUNTIME_DIR": str(config / "runtime")}
         self.process = subprocess.Popen(
             [*command, "--new", "--no-browser", "--port", str(self.port), "--idle-exit", "120", str(data)],
             env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")

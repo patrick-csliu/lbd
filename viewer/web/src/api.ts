@@ -11,9 +11,12 @@ export interface AppState {
   warnings: string[];
   /** where files opened from Explorer / Finder appear: the open viewer page, or a new browser tab */
   open_files_in: OpenFilesIn;
+  /** the viewer's colours: "system" follows the operating system */
+  theme: Theme;
 }
 
 export type OpenFilesIn = "viewer" | "browser-tab";
+export type Theme = "system" | "light" | "dark";
 
 /** A command for this page from the viewer (lbd_viewer/pages.py). */
 export interface PageCommand {
@@ -313,6 +316,7 @@ export const api = {
   styleDefaults: () => call<{ defaults: JsonObject; schema: JsonObject }>("GET", "/api/style-defaults"),
   setDefaultStyle: (name: string) => call<AppState>("PUT", "/api/settings", { default_style: name }),
   setOpenFilesIn: (where: OpenFilesIn) => call<AppState>("PUT", "/api/settings", { open_files_in: where }),
+  setTheme: (theme: Theme) => call<AppState>("PUT", "/api/settings", { theme }),
 
   // ---- pages: this browser tab among the viewer's open pages (lbd_viewer/pages.py)
   registerPage: () => call<{ page: string; number: number }>("POST", "/api/pages"),

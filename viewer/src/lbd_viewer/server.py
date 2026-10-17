@@ -199,6 +199,7 @@ class ImportBody(_Body):
 class SettingsBody(_Body):
     default_style: Optional[str] = None
     open_files_in: Optional[str] = None   # "viewer" or "browser-tab" (config.OPEN_FILES_IN)
+    theme: Optional[str] = None           # "system", "light" or "dark" (config.THEMES)
 
 
 class FilePlotBody(_Body):
@@ -481,7 +482,7 @@ def create_app(state: AppState) -> FastAPI:
         return {
             "version": __version__, "lbd_version": lbd.FORMAT_VERSION,
             "roots": s["roots"], "default_style": s["default_style"], "styles": names,
-            "open_files_in": s["open_files_in"],
+            "open_files_in": s["open_files_in"], "theme": s["theme"],
             "platform": sys.platform, "config_dir": str(cfg.dir), "warnings": problems + warns,
         }
 
@@ -729,13 +730,17 @@ def create_app(state: AppState) -> FastAPI:
 
     @app.put("/api/settings")
     def put_settings(body: SettingsBody):
-        if body.default_style is None and body.open_files_in is None:
-            raise HTTPException(400, "nothing to change: send default_style and/or open_files_in")
+        if body.default_style is None and body.open_files_in is None and body.theme is None:
+            raise HTTPException(400, "nothing to change: send default_style, open_files_in and/or theme")
         if body.default_style is not None:
             cfg.set_default_style(body.default_style)
             state.pages.broadcast("styles_changed")
         if body.open_files_in is not None:
             cfg.set_open_files_in(body.open_files_in)
+        if body.theme is not None:
+            cfg.set_theme(body.theme)
+        if body.open_files_in is not None or body.theme is not None:
+            state.pages.broadcast("settings_changed")      # every page shows the new setting
         return get_state()
 
     # -- SDK page

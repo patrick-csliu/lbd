@@ -52,8 +52,15 @@ Type: filesandordirs; Name: "{app}"
 ; The "running viewer" record (server.json); the viewer is stopped before uninstalling.
 Type: filesandordirs; Name: "{localappdata}\Temp\lbd"
 
+[Tasks]
+; Asked on the "Additional shortcuts" page: Start menu yes, desktop no (also for a silent install).
+; An upgrade remembers the earlier choices; the uninstaller removes the shortcuts made.
+Name: "startmenu"; Description: "Add LBD Viewer to the &Start menu"; GroupDescription: "Shortcuts:"
+Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Shortcuts:"; Flags: unchecked
+
 [Icons]
-Name: "{autoprograms}\LBD Viewer"; Filename: "{app}\lbd-view.exe"; Comment: "View LBD data files"
+Name: "{autoprograms}\LBD Viewer"; Filename: "{app}\lbd-view.exe"; Comment: "View LBD data files"; Tasks: startmenu
+Name: "{autodesktop}\LBD Viewer"; Filename: "{app}\lbd-view.exe"; Comment: "View LBD data files"; Tasks: desktopicon
 
 [Registry]
 ; .lbd -> LBDViewer.lbd (per user: HKA resolves to HKCU for a non-admin install)
@@ -72,7 +79,7 @@ Root: HKA; Subkey: "Software\Classes\Applications\lbd-view.exe\SupportedTypes"; 
 Filename: "{app}\lbd-view.exe"; Description: "Open LBD Viewer now"; Flags: nowait postinstall skipifsilent
 
 [Messages]
-FinishedLabel=LBD Viewer is installed. Double-click any .lbd file to open it, or start LBD Viewer from the Start menu.%n%nTo write .lbd files from Python, MATLAB or Julia, open LBD Viewer and go to "Language modules".
+FinishedLabel=LBD Viewer is installed. Double-click any .lbd file to open it, or start LBD Viewer from its shortcut.%n%nTo write .lbd files from Python, MATLAB or Julia, open LBD Viewer and go to "Language modules".
 
 [Code]
 // Stop a running viewer from this installation (only lbd-view.exe processes whose program file

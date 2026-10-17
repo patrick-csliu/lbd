@@ -5,6 +5,19 @@ The file format has its own version (`lbd_version`, currently 1.0).
 
 ## Unreleased
 
+- Viewer: a **Theme** choice under **⚙**: System (follows the light or dark mode of Windows,
+  macOS or Linux), Light or Dark. Saved, and every open viewer tab follows at once. Changing a
+  ⚙ setting now also updates the other tabs' ⚙ menu.
+- Starting LBD Viewer from the Start menu (or a shortcut, or with only a folder) while it already
+  runs now opens a viewer tab. Before, only the open tab's title flashed, because browsers don't
+  let a page come to the front.
+- Installers ask for shortcuts: on Windows **Start menu** (default yes) and **desktop** (default
+  no); on Linux `install.sh` asks the same about the applications menu and the desktop. On
+  macOS the app is in Launchpad by itself.
+- Linux: `uninstall.sh` ended with an error code when no settings folder existed; fixed.
+- Tests and the build's smoke test no longer touch the installed viewer's "running viewer"
+  record (`LBD_RUNTIME_DIR`), which could make the next double-click start a second viewer.
+
 - Viewer: files double-clicked in Explorer / Finder (or `lbd-view file.lbd`) open as tabs in
   the viewer page you used last, instead of a new browser tab each time. **⚙** at the top right
   switches back to new browser tabs.

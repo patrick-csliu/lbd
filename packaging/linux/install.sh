@@ -1,9 +1,10 @@
 #!/bin/sh
 # Install LBD Viewer for the current user (no root needed).
-#   ./install.sh               (asks to install the Arial font if it is missing)
+#   ./install.sh               (asks about shortcuts, and to install Arial if it is missing)
 #   ./install.sh --no-fonts    (skip the font check, e.g. for scripted installs)
-# Installs to ~/.local/share/lbd-viewer, adds `lbd-view` to ~/.local/bin, a menu entry,
-# and makes double-clicking .lbd files open the viewer.
+# Installs to ~/.local/share/lbd-viewer, adds `lbd-view` to ~/.local/bin, and makes
+# double-clicking .lbd files open the viewer. Asks whether to show it in the applications menu
+# (default yes) and to add a desktop shortcut (default no); without a terminal, the defaults.
 set -eu
 
 CHECK_FONTS=1
@@ -24,6 +25,22 @@ if [ ! -x "$HERE/LBDViewer/lbd-view" ]; then
     exit 1
 fi
 
+# ask "question" default: true for yes. The default is used without a terminal (scripted).
+ask() {
+    answer=$2
+    if [ -t 0 ]; then
+        if [ "$2" = y ]; then printf "%s [Y/n] " "$1"; else printf "%s [y/N] " "$1"; fi
+        read -r answer || answer=$2
+        [ -z "$answer" ] && answer=$2
+    fi
+    case "$answer" in y|Y|yes|YES) return 0 ;; *) return 1 ;; esac
+}
+
+MENU=0
+DESKTOP=0
+ask "Show LBD Viewer in the applications menu?" y && MENU=1
+ask "Add a shortcut to the desktop?" n && DESKTOP=1
+
 echo "Installing LBD Viewer to $APPDIR"
 rm -rf "$APPDIR"
 mkdir -p "$APPDIR" "$BINDIR" "$DATA/applications" "$DATA/mime/packages" \
@@ -37,8 +54,21 @@ cp "$HERE/lbd.png" "$DATA/icons/hicolor/256x256/mimetypes/application-x-lbd.png"
 cp "$HERE/lbd.svg" "$DATA/icons/hicolor/scalable/apps/lbd-viewer.svg"
 cp "$HERE/lbd.svg" "$DATA/icons/hicolor/scalable/mimetypes/application-x-lbd.svg"
 
+# The menu entry is always installed: it is what opens double-clicked .lbd files. Without the
+# menu shortcut it is hidden from the menu (NoDisplay), and double-clicking still works.
 sed "s|@EXEC@|$APPDIR/lbd-view|g" "$HERE/lbd-viewer.desktop" > "$DATA/applications/lbd-viewer.desktop"
+[ "$MENU" = 0 ] && echo "NoDisplay=true" >> "$DATA/applications/lbd-viewer.desktop"
 chmod 644 "$DATA/applications/lbd-viewer.desktop"
+
+if [ "$DESKTOP" = 1 ]; then
+    DESK=$(xdg-user-dir DESKTOP 2>/dev/null || echo "$HOME/Desktop")
+    mkdir -p "$DESK"
+    sed "s|@EXEC@|$APPDIR/lbd-view|g" "$HERE/lbd-viewer.desktop" > "$DESK/lbd-viewer.desktop"
+    chmod 755 "$DESK/lbd-viewer.desktop"
+    # GNOME runs desktop launchers only once marked trusted ("Allow Launching").
+    command -v gio >/dev/null 2>&1 && gio set "$DESK/lbd-viewer.desktop" metadata::trusted true 2>/dev/null || true
+    echo "Desktop shortcut: $DESK/lbd-viewer.desktop"
+fi
 cp "$HERE/lbd-mime.xml" "$DATA/mime/packages/lbd-viewer.xml"
 
 # Register the file type and make the viewer its default app. These tools are optional.
@@ -52,7 +82,11 @@ case ":$PATH:" in
     *":$BINDIR:"*) ;;
     *) echo "Note: $BINDIR is not on your PATH; add it to start the viewer with 'lbd-view'." ;;
 esac
-echo "Open LBD Viewer from your applications menu, or double-click an .lbd file."
+if [ "$MENU" = 1 ]; then
+    echo "Open LBD Viewer from your applications menu, or double-click an .lbd file."
+else
+    echo "Double-click an .lbd file to open LBD Viewer, or run lbd-view."
+fi
 
 # ---- the default style's font -------------------------------------------------------------
 # LBD's default style uses Arial, and drawing with a font that isn't installed is an error.

@@ -18,24 +18,23 @@
   color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #15181c;
-    --panel: #1d2126;
-    --panel-2: #252a30;
-    --border: #343a42;
-    --text: #e6e9ed;
-    --muted: #9aa4b1;
-    --accent: #4aa8e0;
-    --accent-text: #0b1620;
-    --accent-soft: #1d3446;
-    --danger: #f28b82;
-    --danger-soft: #3a2222;
-    --warn-soft: #3a3320;
-    /* figures stay on white: they are print figures */
-    --figure-bg: #ffffff;
-    color-scheme: dark;
-  }
+/* Dark colours: set by theme.ts from the ⚙ setting (System follows prefers-color-scheme). */
+:root[data-theme="dark"] {
+  --bg: #15181c;
+  --panel: #1d2126;
+  --panel-2: #252a30;
+  --border: #343a42;
+  --text: #e6e9ed;
+  --muted: #9aa4b1;
+  --accent: #4aa8e0;
+  --accent-text: #0b1620;
+  --accent-soft: #1d3446;
+  --danger: #f28b82;
+  --danger-soft: #3a2222;
+  --warn-soft: #3a3320;
+  /* figures stay on white: they are print figures */
+  --figure-bg: #ffffff;
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -95,6 +94,7 @@ textarea { font-family: var(--mono); font-size: 12.5px; width: 100%; resize: ver
 .settings { position: relative; }
 .settings-popover { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; min-width: 260px; padding: 10px 12px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 6px 20px rgb(0 0 0 / 0.18); }
 .settings-title { font-weight: 600; margin-bottom: 6px; }
+.settings-title:not(:first-child) { margin-top: 12px; }
 .settings-choice { display: flex; align-items: center; gap: 6px; padding: 3px 0; cursor: pointer; }
 .fatal { max-width: 560px; margin: 80px auto; padding: 0 16px; }
 

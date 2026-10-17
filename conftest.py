@@ -1,6 +1,7 @@
 """Shared pytest setup for every Python test suite of the repository.
 
-- No test touches the real LBD settings: LBD_CONFIG_DIR points to a fresh temporary folder.
+- No test touches the real LBD settings or "running viewer" record: LBD_CONFIG_DIR and
+  LBD_RUNTIME_DIR point to fresh temporary folders.
 - matplotlib draws off-screen and every figure is closed after each test.
 - `load_module` imports a script (scripts/, packaging/, examples/) by path, for testing it.
 """
@@ -17,6 +18,7 @@ REPO = Path(__file__).resolve().parent
 @pytest.fixture(autouse=True)
 def _isolated_lbd_config(tmp_path_factory, monkeypatch):
     monkeypatch.setenv("LBD_CONFIG_DIR", str(tmp_path_factory.mktemp("lbd-config")))
+    monkeypatch.setenv("LBD_RUNTIME_DIR", str(tmp_path_factory.mktemp("lbd-runtime")))
     yield
     if "matplotlib.pyplot" in sys.modules:
         sys.modules["matplotlib.pyplot"].close("all")

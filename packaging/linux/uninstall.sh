@@ -16,6 +16,10 @@ rm -f "$DATA/applications/lbd-viewer.desktop" \
       "$DATA/icons/hicolor/scalable/apps/lbd-viewer.svg" \
       "$DATA/icons/hicolor/scalable/mimetypes/application-x-lbd.svg"
 
+# The desktop shortcut, if install.sh made one.
+DESK=$(xdg-user-dir DESKTOP 2>/dev/null || echo "$HOME/Desktop")
+rm -f "$DESK/lbd-viewer.desktop"
+
 # Drop the default-application entry that install.sh added.
 for f in "$CONF/mimeapps.list" "$DATA/applications/mimeapps.list"; do
     [ -f "$f" ] && sed -i '/^application\/x-lbd=lbd-viewer\.desktop;\?$/d' "$f"
@@ -43,5 +47,6 @@ case "$keep" in
             echo "Presets, settings and logs deleted (no trash available)."
         fi ;;
     *)
-        [ -d "$CONF/lbd" ] && echo "Presets and settings in $CONF/lbd were kept." ;;
+        # (an "if", not "&&": the script's last command decides its exit code)
+        if [ -d "$CONF/lbd" ]; then echo "Presets and settings in $CONF/lbd were kept."; fi ;;
 esac

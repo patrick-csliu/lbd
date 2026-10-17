@@ -133,6 +133,11 @@ jobs:
           Start-Process -Wait -FilePath $setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
           $app = "$env:LOCALAPPDATA\Programs\LBDViewer"
           if (-not (Test-Path "$app\lbd-view.exe")) { throw "the installer didn't install $app\lbd-view.exe" }
+          # Default shortcuts: the Start menu yes, the desktop no.
+          $startMenu = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\LBD Viewer.lnk"
+          $desktop = Join-Path ([Environment]::GetFolderPath("Desktop")) "LBD Viewer.lnk"
+          if (-not (Test-Path $startMenu)) { throw "no Start menu shortcut: $startMenu" }
+          if (Test-Path $desktop) { throw "a desktop shortcut was made, but it is off by default" }
           uv run --no-project python scripts/smoke_test_app.py --release --exe "$app\lbd-view.exe"
           if ($LASTEXITCODE -ne 0) { throw "the installed app failed its smoke test" }
           Start-Process -Wait -FilePath "$app\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
@@ -142,7 +147,7 @@ jobs:
           if (-not (Test-Path "$env:APPDATA\lbd\settings.json")) { throw "the uninstaller removed the settings" }
           # Nothing else may be left behind: registry keys of the .lbd file type, the lock file.
           $left = @("HKCU:\Software\Classes\.lbd", "HKCU:\Software\Classes\LBDViewer.lbd",
-                    "HKCU:\Software\Classes\Applications\lbd-view.exe", "$env:LOCALAPPDATA\Temp\lbd") |
+                    "HKCU:\Software\Classes\Applications\lbd-view.exe", "$env:LOCALAPPDATA\Temp\lbd", $startMenu) |
                   Where-Object { Test-Path $_ }
           if ($left) { throw "the uninstaller left behind: $($left -join ', ')" }
           "installed, smoke-tested and uninstalled; settings kept, nothing else left behind"
