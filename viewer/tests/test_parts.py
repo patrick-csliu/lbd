@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import urllib.error
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -517,6 +518,45 @@ def test_show_in_file_manager_selects_the_file(tmp_path, monkeypatch):
         assert calls[-1] == ("folder", str(tmp_path))
         if files.shutil.which("dbus-send"):
             assert calls[-2][0] == "dbus-send" and f.as_uri() in calls[-2][-2]
+
+
+def test_rename_and_trash_wait_while_another_program_has_the_file_open(tmp_path, monkeypatch):
+    """Windows refuses to rename or delete an open file. The viewer drawing it in another page
+    opens it for a moment (found on GitHub's Windows runner): both retry for a while."""
+    from lbd_viewer import files
+
+    p = tmp_path / "a.lbd"
+    p.write_bytes(b"x")
+    busy = {"left": 2}
+
+    def sometimes_busy(path):
+        if busy["left"]:
+            busy["left"] -= 1
+            raise PermissionError(13, "The process cannot access the file")
+        Path(path).unlink()
+
+    monkeypatch.setattr(files.send2trash, "send2trash", sometimes_busy)
+    files.trash(p)                                         # busy twice, then done
+    assert not p.exists() and busy["left"] == 0
+
+    p.write_bytes(b"x")
+    monkeypatch.setattr(files, "IN_USE_WAIT", 0.3)
+    monkeypatch.setattr(Path, "rename", lambda self, target: (_ for _ in ()).throw(PermissionError(13, "in use")))
+    with pytest.raises(files.FileActionError, match="it is open in another program; close it there"):
+        files.rename(p, "b.lbd")                          # still busy after the wait: a clear message
+
+
+@pytest.mark.skipif(os.name != "nt", reason="only Windows refuses to rename an open file")
+def test_rename_waits_for_a_real_open_file_on_windows(tmp_path):
+    import threading
+
+    from lbd_viewer import files
+
+    p = tmp_path / "a.lbd"
+    p.write_bytes(b"x")
+    handle = open(p, "rb")                                 # another program reading it
+    threading.Timer(0.4, handle.close).start()
+    assert files.rename(p, "b.lbd") == tmp_path / "b.lbd"
 
 
 def test_extension_kept_by_rename():

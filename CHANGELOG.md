@@ -46,6 +46,9 @@ The file format has its own version (`lbd_version`, currently 1.0).
   point.
 - **DPI (PNG/JPG)** next to Width/Height, for this file's raster exports.
 - Saving a view into a file that changed since you opened it asks first: Overwrite or Reload.
+- Windows: renaming a file, or moving it to the Recycle Bin, failed if the file was open at that
+  moment, even briefly (the viewer drawing it in another page, an antivirus scan). The viewer
+  now waits a few seconds for it, and otherwise says the file is open in another program.
 
 **Viewer: settings and starting**
 

@@ -3,6 +3,10 @@
 Rename and trash only act on files the panel shows (data, style and image files), never on
 folders. Trash never falls back to deleting permanently: if the system has no trash for that
 file, it is an error.
+
+On Windows a file can't be renamed or deleted while any program has it open, even for a moment:
+the viewer itself drawing it in another page, an antivirus scan, Explorer's preview. So both
+retry for a few seconds (`IN_USE_WAIT`) before reporting that the file is in use.
 """
 
 from __future__ import annotations
@@ -11,7 +15,9 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
+from typing import Callable
 
 import send2trash
 from lbd.plot.style import STYLE_SUFFIX
@@ -26,6 +32,27 @@ class FileActionError(ValueError):
 
 class NameTakenError(FileActionError):
     """Another file already has the new name."""
+
+
+IN_USE_WAIT = 3.0      # seconds to wait for a file another program has open (Windows)
+
+
+def _in_use(e: BaseException) -> bool:
+    """Windows' "the file is open in another program" (sharing violation, or access denied while
+    it is being read)."""
+    return isinstance(e, PermissionError) or getattr(e, "winerror", None) in (5, 32)
+
+
+def _while_in_use(action: Callable[[], None], wait: float = None) -> None:
+    """Run `action`; while it fails because the file is open elsewhere, try again for a while."""
+    deadline = time.monotonic() + (IN_USE_WAIT if wait is None else wait)
+    while True:
+        try:
+            return action()
+        except OSError as e:
+            if not _in_use(e) or time.monotonic() > deadline:
+                raise
+            time.sleep(0.1)
 
 
 def show_in_file_manager(path: Path) -> None:
@@ -80,9 +107,10 @@ def rename(path: Path, name: str) -> Path:
     if target.exists() and not _same_file(target, path):
         raise NameTakenError(f"{name} already exists in this folder")
     try:
-        path.rename(target)
+        _while_in_use(lambda: path.rename(target))
     except OSError as e:
-        raise FileActionError(f"couldn't rename {path.name} to {name}: {e.strerror or e}") from e
+        why = "it is open in another program; close it there and try again" if _in_use(e) else (e.strerror or e)
+        raise FileActionError(f"couldn't rename {path.name} to {name}: {why}") from e
     return target
 
 
@@ -90,9 +118,10 @@ def trash(path: Path) -> None:
     """Move a file to the Recycle Bin (Windows) or Trash. Never deletes it permanently."""
     check_shown_file(path)
     try:
-        send2trash.send2trash(str(path))
+        _while_in_use(lambda: send2trash.send2trash(str(path)))
     except Exception as e:  # send2trash raises OSError or its TrashPermissionError
-        raise OSError(f"couldn't move {path.name} to the trash, so it was not deleted: {e}") from e
+        why = "it is open in another program; close it there and try again" if _in_use(e) else e
+        raise OSError(f"couldn't move {path.name} to the trash, so it was not deleted: {why}") from e
 
 
 def _same_file(a: Path, b: Path) -> bool:
