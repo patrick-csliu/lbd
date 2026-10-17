@@ -15,6 +15,12 @@ The file format has its own version (`lbd_version`, currently 1.0).
   [Several browser tabs](docs/viewer/folders-and-files.md#several-browser-tabs).
 - Viewer: **Open in new browser tab** for files in the Folders panel (also Ctrl/⌘+click or
   middle-click), and a **◧ Folders** button to hide the panel.
+- Viewer: moving tabs between pages is more robust. A closed page leaves the other pages'
+  **Move to Page N** menus within seconds, even without saying goodbye (crash, killed browser);
+  an open menu updates itself ("Page 2 was closed"); a move to a page that is gone is refused
+  with a clear message; closing the new browser tab of a move cancels it at once; and a
+  message to a page is sent again if the connection dropped, so a file never ends up in two
+  pages. Tested with new browser tests, including a random "chaos" run.
 - Viewer: a new page takes the lowest free number, so closing Page 2 and opening a tab gives
   Page 2 again, not Page 7.
 - The Windows installer is now named `LBD-Viewer-<version>-windows-x64-setup.exe`, like the

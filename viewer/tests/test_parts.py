@@ -560,8 +560,10 @@ def test_mac_app_delivers_to_an_open_page(mac_app, tmp_path):
     f = tmp_path / "a.lbd"
     f.write_bytes(b"x")
 
-    def take():     # the open page receives the file and confirms
-        command = pages.wait_for_command(page.id, timeout=5)
+    def take():     # the open page receives the file and confirms (other commands: the page list)
+        handled = 0
+        while (command := pages.wait_for_command(page.id, pages.start_poll(page.id, handled), timeout=5)).kind != "open":
+            handled = command.id
         pages.ack(page.id, command.id)
 
     t = threading.Thread(target=take)

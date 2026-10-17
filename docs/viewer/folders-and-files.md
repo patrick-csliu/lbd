@@ -103,8 +103,13 @@ and a file from Explorer that is already open is shown in its page.
 **Moving tabs.** Right-click a tab → **Move to Page N** or **Move to a new browser tab**. The
 tabs move with their unsaved settings. While they are moving, they show ⇢ and can't be closed,
 saved, renamed or moved again. The files leave this page only once the other page has them: if
-that page is closed, or a new browser tab is blocked or doesn't open within a few seconds, the
-move is cancelled, the tabs stay here, and a message says why.
+that page is closed, or a new browser tab is blocked or closed before it opens them, the move
+is cancelled, the tabs stay here, and a message says why.
+
+The **Move to Page N** entries always list the pages that are open now. A page you close leaves
+the other pages' menus within a few seconds, even if the browser didn't say it was closing (a
+crash, a killed browser). A menu that is open at that moment updates itself: the entry turns
+grey and says *Page 2 was closed*.
 
 If your browser blocks the new tab, allow pop-ups for the viewer's address
 (`http://127.0.0.1:…`).

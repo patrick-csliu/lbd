@@ -62,24 +62,24 @@ UI shows them as notes. They are the messages of Python's `lbd.LBDWarning`s.
 
 Each browser tab showing the viewer is a *page*. The rules (one page per open file, delivery,
 moving tabs) are in `viewer/src/lbd_viewer/pages.py`; these endpoints adapt them to HTTP. An
-unknown or expired page or transfer is a 404 (a page then registers again); a refused rule
-(a file being moved, a transfer already claimed) is a 409.
+unknown or expired page is a 404 (a page then registers again); a refused rule (a file being
+moved, a transfer already over or claimed, a move to a page that was closed) is a 409.
 
 | Method and path | Body / query | Response |
 |---|---|---|
 | `POST /api/pages` | | `{page, number}`: a new page, with the lowest number no live page has (closed and expired pages free theirs). |
-| `GET /api/pages` | | `{pages: [{page, number, files}]}`: the live pages and the files each has open. |
-| `GET /api/pages/{id}/next` | `?wait=` (0–30 s, default 25) | The long poll, which also keeps the page alive: the next command `{id, kind, data}`, or `{}` after `wait` seconds. A page that hasn't polled for 40 s is dropped. |
+| `GET /api/pages` | | `{pages: [{page, number, files}]}`: the live pages and the files each has open (the same list `pages_changed` sends). |
+| `GET /api/pages/{id}/next` | `?wait=` (0–30 s, default 25), `?after=` (default 0) | The long poll, which also keeps the page alive: the first command not handled yet, `{id, kind, data}`, or `{}` after `wait` seconds. `after` is the `id` of the last command the page handled: it and the ones before are confirmed and dropped. A command stays queued until confirmed, so if its answer got lost (the connection dropped), it comes again. A page is dropped 40 s after its last poll, or 3 s after its long poll's connection dropped (the tab closed, even without `bye`) unless it polls again in time; from that moment it is no longer listed or sent files. |
 | `POST /api/pages/{id}/ack/{command}` | | `{granted, elsewhere, busy}`: the page takes the files of an `open` command. It opens `granted`; `elsewhere` (`{path: page number}`) are open in another page; `busy` ones are being moved. |
 | `POST /api/pages/{id}/focus` | | `{ok}`: the page was used; files from Explorer go to the page used last. |
 | `POST /api/pages/{id}/bye` | | `{ok}`: the page is closing; its files are free at once. |
 | `POST /api/pages/{id}/acquire` | `{path}` | `{path}` (its canonical spelling) if the page may open it, or `{path, owner}` if page `owner` has it open (then nothing changes). |
 | `POST /api/pages/{id}/release` | `{path}` | `{ok}`: the page closed the file. |
 | `POST /api/pages/show` | `{path}` | `{page}`: asks the page that has the file open to show it. 404 if no page has. |
-| `POST /api/transfers` | `{page, paths, states, to}` | `{id, timeout}`: starts moving tabs from `page` to page `to`, or to a new browser tab (`to: null`; the source opens `/?claim=<id>`). `states` are the tabs' unsaved settings. The files are locked until the move ends. |
+| `POST /api/transfers` | `{page, paths, states, to}` | `{id, timeout}`: starts moving tabs from `page` to page `to`, or to a new browser tab (`to: null`; the source opens `/?claim=<id>`). `states` are the tabs' unsaved settings. The files are locked until the move ends. 409 "that page was closed" if `to` is gone. |
 | `POST /api/transfers/{id}/claim` | `{page}` | `{paths, states, from}`: the target takes the files and opens the tabs. |
-| `POST /api/transfers/{id}/complete` | `{page}` | `{paths}`: the target has the tabs; the files are now its own, and the source gets `transfer_done`. |
-| `POST /api/transfers/{id}/cancel` | | `{ok}`. A move without `complete` in time (5 s; 15 s for a new browser tab), or whose target closes, is cancelled the same way: the source gets `transfer_cancelled` and keeps its tabs. |
+| `POST /api/transfers/{id}/complete` | `{page}` | `{paths}`: the target has the tabs; the files are now its own, and the source gets `transfer_done`. Asking again (the answer got lost) gives the same answer. |
+| `POST /api/transfers/{id}/cancel` | `{reason}` (optional) | `{ok}`; the source is told the `reason` (the page cancels when the new browser tab it opened was closed). A move without `complete` in time (5 s; 15 s for a new browser tab), or whose target closes, is cancelled the same way: the source gets `transfer_cancelled` and keeps its tabs. |
 | `POST /api/deliver` | `{files, dirs}` | `{delivered, shown, busy, unplaced}`: what `lbd-view file.lbd` sends to a running viewer. Files already open are shown in their page (`shown`); the others go to the page used last, which must take them within 3 s. `unplaced`: files no page took (the caller opens a browser tab for them); `busy`: files being moved. `dirs` are added to the folder list. |
 
 Commands a page receives (`kind`, `data`):
@@ -91,6 +91,7 @@ Commands a page receives (`kind`, `data`):
 | `transfer` | `{id, from}` | another page moves tabs here; the page claims them |
 | `transfer_done` | `{id, paths, to}` | this page's tabs arrived in page `to`; close them |
 | `transfer_cancelled` | `{id, paths, reason}` | this page's move was cancelled; unlock the tabs |
+| `pages_changed` | `{pages: [{page, number, files}]}` | the live pages changed: one opened, closed or lost its connection, or opened, closed or took files. The whole list; an older one still queued is replaced |
 | `event` | `{event: "renamed", old, new}`, `{event: "trashed", path}`, `{event: "roots_changed"}`, `{event: "styles_changed"}` | a file was renamed or moved to the trash, or the folder list or the presets changed |
 
 ## Images (view only)

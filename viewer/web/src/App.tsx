@@ -1,5 +1,5 @@
-import { CSSProperties, KeyboardEvent, MouseEvent, PointerEvent, useCallback, useEffect, useRef, useState } from "react";
-import { api, ApiError, AppState, baseName, fileKind, OpenFilesIn, PageCommand, TabState, viewerUrl } from "./api";
+import { CSSProperties, KeyboardEvent, MouseEvent, PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { api, ApiError, AppState, baseName, fileKind, OpenFilesIn, PageCommand, PageEntry, TabState, viewerUrl } from "./api";
 import FolderPanel from "./FolderPanel";
 import FileView from "./FileView";
 import ImageView from "./ImageView";
@@ -62,6 +62,24 @@ interface Lock {
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
+/** Run a request; if it didn't reach the viewer (a network error, not a refusal), try once more. */
+async function retryOnce<T>(request: () => Promise<T>): Promise<T> {
+  try {
+    return await request();
+  } catch (e) {
+    if (e instanceof ApiError) throw e;
+    return request();
+  }
+}
+
+/** Where the tab menu is open, for which tab, and the other pages it listed when it opened. */
+interface TabMenu {
+  x: number;
+  y: number;
+  path: string;
+  pages: PageEntry[];
+}
+
 /** A promise with its resolve function: "wait until this page is registered". */
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -85,7 +103,7 @@ function Shell() {
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [active, setActive] = useState<string | null>(null);
   const [styleRevision, setStyleRevision] = useState(0);
-  const [tabMenu, setTabMenu] = useState<MenuAt | null>(null);
+  const [tabMenu, setTabMenu] = useState<TabMenu | null>(null);
   const closeTabMenu = useCallback(() => setTabMenu(null), []);
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
   const [locks, setLocks] = useState<Map<string, Lock>>(new Map());
@@ -98,6 +116,10 @@ function Shell() {
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
   const dragging = useRef(false);
 
+  // The other open pages (from the viewer's page list, kept current): "Move to Page N".
+  const [otherPages, setOtherPages] = useState<PageEntry[]>([]);
+  const otherPagesRef = useRef(otherPages);
+  otherPagesRef.current = otherPages;
   // The latest tabs and locks for async handlers (commands arrive at any time).
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
@@ -288,6 +310,10 @@ function Shell() {
     async (paths: string[], to: { page: string; number: number } | null) => {
       const page = pageInfo.current;
       if (!page || !paths.length) return;
+      if (to && !otherPagesRef.current.some((p) => p.page === to.page)) {
+        toast(`Page ${to.number} was closed; the files stay here.`, "error");
+        return;
+      }
       // A new browser tab must be opened right away, in the click, or the browser blocks it.
       const win = to ? null : window.open("about:blank", "_blank");
       if (!to && !win) {
@@ -303,22 +329,38 @@ function Shell() {
       lockTabs(paths, { reason: `Moving to ${to ? `Page ${to.number}` : "a new browser tab"}…`, transfer: "starting" });
       try {
         const transfer = await api.startTransfer(page.id, paths, states, to ? to.page : null);
-        if (win) win.location.href = viewerUrl({ claim: transfer.id });
+        if (win) {
+          win.location.href = viewerUrl({ claim: transfer.id });
+          watchNewTab(win, transfer.id, paths[0], transfer.timeout);
+        }
       } catch (e) {
         lockTabs(paths, null);
         win?.close();
-        toast((e as Error).message, "error");
+        toast(to ? `The files couldn't be moved to Page ${to.number}: ${(e as Error).message}` : (e as Error).message, "error");
       }
     },
     [lockTabs, toast],
   );
 
+  /** A new browser tab closed before it took the files: cancel the move at once, instead of
+   *  waiting for its timeout. The watch ends when the move ends (the tab is unlocked or gone). */
+  const watchNewTab = (win: Window, transfer: string, path: string, timeout: number) => {
+    const until = Date.now() + (timeout + 2) * 1000;
+    const id = window.setInterval(() => {
+      const moving = locksRef.current.get(path)?.transfer;
+      if (!moving || Date.now() > until) return window.clearInterval(id);
+      if (!win.closed) return;
+      window.clearInterval(id);
+      api.cancelTransfer(transfer, "the new browser tab was closed").catch(() => undefined); // already over: fine
+    }, 500);
+  };
+
   /** Take moved files: claim them with their unsaved settings, confirm, then show them. */
   const receiveTransfer = useCallback(
     async (page: PageInfo, id: string) => {
       try {
-        const claimed = await api.claimTransfer(id, page.id);
-        await api.completeTransfer(id, page.id);
+        const claimed = await retryOnce(() => api.claimTransfer(id, page.id));
+        await retryOnce(() => api.completeTransfer(id, page.id)); // asking again gives the same answer
         for (const [p, s] of Object.entries(claimed.states)) initialStates.current.set(p, s);
         addTabs(claimed.paths, true);
         const from = claimed.from ? ` from Page ${claimed.from}` : "";
@@ -358,6 +400,10 @@ function Shell() {
         }
         case "transfer":
           return receiveTransfer(page, data.id as string);
+        case "pages_changed":
+          // The open pages changed (one came, went, or opened files): the Move menu follows.
+          setOtherPages((data.pages as unknown as PageEntry[]).filter((p) => p.page !== page.id));
+          return;
         case "transfer_done": {
           // The other page took the files: close them here (no release: they belong there now).
           const moved = data.paths as string[];
@@ -418,7 +464,13 @@ function Shell() {
     [lockTabs, openTab, pageReady, receiveTransfer],
   );
 
-  const pageMe = usePage({ onCommand, onRegistered });
+  const onCommandFailed = useCallback(
+    (command: PageCommand, error: unknown) =>
+      toast(`A message from the viewer (${command.kind}) couldn't be handled: ${(error as Error).message}`, "error"),
+    [toast],
+  );
+
+  const pageMe = usePage({ onCommand, onRegistered, onCommandFailed });
 
   // ---- tab bar: selection, menu ---------------------------------------------------------------
 
@@ -446,31 +498,43 @@ function Shell() {
     setActive(path);
   };
 
-  const openTabMenu = async (e: MouseEvent | KeyboardEvent, path: string) => {
+  const openTabMenu = (e: MouseEvent | KeyboardEvent, path: string) => {
     e.preventDefault();
-    const at = menuAt(e, []);
+    const { x, y } = menuAt(e, []);
+    setTabMenu({ x, y, path, pages: otherPagesRef.current });
+  };
+
+  // The tab menu is built from the live page list, so an open menu follows pages that close
+  // (their entry stays, disabled: "Page 2 was closed") or open. Pages are matched by id: a new
+  // page may reuse a closed page's number.
+  const tabMenuShown = useMemo<MenuAt | null>(() => {
+    if (!tabMenu) return null;
+    const { path } = tabMenu;
     // The menu acts on the selection if this tab is part of it, else on this tab alone.
-    const chosen = selected.has(path) ? tabs.map((t) => t.path).filter((p) => selected.has(p)) : [path];
+    const chosen = selected.has(path) ? tabs.map((t) => t.path).filter((p) => selected.has(p)) : tabs.some((t) => t.path === path) ? [path] : [];
+    if (!chosen.length) return null;
     const what = chosen.length > 1 ? plural(chosen.length, "tab") : "";
-    let others: { page: string; number: number; files: string[] }[] = [];
-    try {
-      others = (await api.pages()).pages.filter((p) => p.page !== pageInfo.current?.id);
-    } catch {
-      /* no list: only "new browser tab" is offered */
-    }
+    const moving = chosen.some((p) => locks.get(p)?.transfer); // already on its way: one move at a time
+    const live = new Map(otherPages.map((p) => [p.page, p]));
+    const listed = [...tabMenu.pages.filter((p) => !live.has(p.page)), ...otherPages].sort((a, b) => a.number - b.number);
     const items: MenuEntry[] = [
       { label: chosen.length > 1 ? `Close ${what}` : "Close", onClick: () => closeTabs(chosen) },
       { label: "Close others", onClick: () => closeTabs(tabs.map((t) => t.path).filter((p) => !chosen.includes(p))) },
       { label: "Close all", onClick: () => closeTabs(tabs.map((t) => t.path)) },
       "-",
-      ...others.map((o) => ({
-        label: `Move ${what ? `${what} ` : ""}to Page ${o.number}${o.files.length ? ` (${o.files.map(baseName).slice(0, 2).join(", ")}${o.files.length > 2 ? ", …" : ""})` : ""}`,
-        onClick: () => moveTabs(chosen, o),
-      })),
-      { label: `Move ${what ? `${what} ` : ""}to a new browser tab`, onClick: () => moveTabs(chosen, null) },
+      ...listed.map((o): MenuEntry =>
+        live.has(o.page)
+          ? {
+              label: `Move ${what ? `${what} ` : ""}to Page ${o.number}${o.files.length ? ` (${o.files.map(baseName).slice(0, 2).join(", ")}${o.files.length > 2 ? ", …" : ""})` : ""}`,
+              onClick: () => moveTabs(chosen, o),
+              disabled: moving,
+            }
+          : { label: `Page ${o.number} was closed`, onClick: () => undefined, disabled: true },
+      ),
+      { label: `Move ${what ? `${what} ` : ""}to a new browser tab`, onClick: () => moveTabs(chosen, null), disabled: moving },
     ];
-    setTabMenu({ ...at, items });
-  };
+    return { x: tabMenu.x, y: tabMenu.y, items };
+  }, [tabMenu, otherPages, tabs, selected, locks, closeTabs, moveTabs]);
 
   const toggleFolders = () => {
     setFoldersShown((shown) => {
@@ -689,7 +753,7 @@ function Shell() {
               );
             })}
           </div>
-          {tabMenu && <ContextMenu menu={tabMenu} onClose={closeTabMenu} />}
+          {tabMenuShown && <ContextMenu menu={tabMenuShown} onClose={closeTabMenu} />}
           {confirm && <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />}
           {tabs.length === 0 && <EmptyMain hasRoots={!!state?.roots.length} />}
           {state &&

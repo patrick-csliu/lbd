@@ -7,8 +7,10 @@ below must hold. Every run is reproducible from its seed; a failure names the se
 steps, so it can be replayed with `replay(seed)`.
 
 A page can go to sleep (no polls: a laptop asleep, a frozen background tab) and wake up again.
-If the viewer dropped it meanwhile, it registers anew and re-acquires each tab; a file another
-page took meanwhile stays visible but locked ("now open in Page N"), never usable twice.
+Its connection can drop (a closed tab without goodbye, a network hiccup), and an answer to a poll
+can get lost on the way. If the viewer dropped the page meanwhile, it registers anew and
+re-acquires each tab; a file another page took meanwhile stays visible but locked ("now open in
+Page N"), never usable twice.
 
 Invariants (for pages that are awake; 3 once a page has read its waiting messages):
   1. No file is shown, usable, in two live pages (a tab being moved away is locked, not usable).
@@ -18,6 +20,8 @@ Invariants (for pages that are awake; 3 once a page has read its waiting message
   4. A move never loses a file: when it ends, the file is in the target (completed) or still in
      the source (cancelled), unless that page itself is gone.
   5. Every refused action comes with a message.
+  6. A page that has read its messages knows exactly which other pages are live (its "Move to"
+     menu), and files never go to a page whose connection dropped.
 """
 
 import random
@@ -47,6 +51,8 @@ class SimPage:
         self.detached = {}           # path -> number of the page that has it now (locked, see wake)
         self.alive = True            # False: asleep (laptop asleep, frozen background tab): no polls
         self.claimed = {}            # transfer id -> paths, claimed but not completed yet
+        self.last = 0                # id of the last command handled (confirmed by the next poll)
+        self.known = []              # page ids of the last page list (pages_changed) it read
 
 
 class Sim:
@@ -77,7 +83,7 @@ class Sim:
     def act(self):
         actions = [self.open_from_panel, self.close_tab, self.double_click, self.move, self.process,
                    self.process, self.process, self.tick, self.sleep, self.wake, self.bye, self.rename,
-                   self.trash, self.new_page_action]
+                   self.trash, self.new_page_action, self.drop_connection]
         action = self.rng.choice(actions)
         self.log.append(action.__name__)
         action()
@@ -119,6 +125,7 @@ class Sim:
         except PageError as e:
             return self.refused(e)
         if offer.delivery is not None:
+            assert self.pages.pages[offer.delivery.page].lost_at is None, "files sent to a closed page"   # 6
             self.waiting.append((offer.delivery, self.clock.now + self.pages.ack_timeout))
         for path in offer.unplaced:
             self.fallback_tab(path)
@@ -182,13 +189,19 @@ class Sim:
         for transfer_id in list(s.claimed):                     # finish a claimed move later
             if self.rng.random() < 0.5:
                 self.complete(s, transfer_id)
-        while (command := self.pages.poll(s.id)) is not None:
+        while (command := self.pages.poll(s.id, after=s.last)) is not None:
+            if self.rng.random() < 0.1:
+                return                                          # the answer got lost: sent again next time
             self.handle(s, command, eager=False)
 
     def handle(self, s, command, eager):
         """What pages.ts does with one command. `eager`: no random slowness."""
+        assert command.id > s.last, "a command handled twice"
+        s.last = command.id
         kind, data = command.kind, command.data
-        if kind == "open":
+        if kind == "pages_changed":
+            s.known = [p["page"] for p in data["pages"]]
+        elif kind == "open":
             if not eager and self.rng.random() < 0.2:            # too slow: the caller withdraws first
                 return
             try:
@@ -218,7 +231,7 @@ class Sim:
 
     def drain(self, s):
         """The page reads everything waiting for it (a real page does this within milliseconds)."""
-        while (command := self.pages.poll(s.id)) is not None:
+        while (command := self.pages.poll(s.id, after=s.last)) is not None:
             self.handle(s, command, eager=True)
 
     def tick(self):
@@ -261,6 +274,7 @@ class Sim:
         s.id, s.number = page.id, page.number
         self.sim[s.id] = s
         s.claimed.clear()
+        s.last, s.known = 0, []
         for path in sorted(s.tabs | set(s.moving)):
             s.tabs.discard(path)
             s.moving.pop(path, None)
@@ -274,6 +288,15 @@ class Sim:
                 s.tabs.add(path)
             else:
                 s.detached[path] = other.number                  # "now open in Page N", locked
+
+    def drop_connection(self):
+        """The long poll's connection drops (a tab closed without goodbye, a network hiccup). The
+        page is offline until it wakes: it polls again (in time or not) or registers anew."""
+        pages = [s for s in self.live() if s.alive]
+        if pages:
+            s = self.rng.choice(pages)
+            self.pages.connection_lost(s.id, self.pages.start_poll(s.id, after=s.last))
+            s.alive = False
 
     def bye(self):
         pages = [s for s in self.live() if s.alive]
@@ -333,6 +356,11 @@ class Sim:
         # 4. numbers are reused, but never two live pages with the same number
         numbers = [p.number for p in server.pages.values()]
         assert len(numbers) == len(set(numbers)), f"two pages share a number: {sorted(numbers)}"
+        # 6. a page that has read its messages knows the live pages (its "Move to" menu)
+        connected = {p.id for p in server.pages.values() if p.lost_at is None}
+        for s in live.values():
+            if s.alive and not server.pages[s.id].queue:
+                assert set(s.known) == connected, f"Page {s.number} has an old page list"
 
 
 def run(seed, steps=250):
@@ -358,5 +386,6 @@ def test_the_sequences_cover_the_interesting_cases():
     for seed in range(300):
         for name in run(seed).log:
             counts[name] = counts.get(name, 0) + 1
-    for name in ("move", "double_click", "sleep", "wake", "bye", "rename", "trash", "process", "tick"):
+    for name in ("move", "double_click", "sleep", "wake", "bye", "rename", "trash", "process", "tick",
+                 "drop_connection"):
         assert counts.get(name, 0) > 1000, (name, counts)

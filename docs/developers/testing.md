@@ -65,9 +65,9 @@ and are tested in three layers:
 
 | Layer | File | What it checks |
 |---|---|---|
-| Rules | `viewer/tests/test_pages.py`, `test_pages_http.py` | Each rule alone, with a fake clock: one page per file, delivery and its timeout, moving tabs (done, cancelled, timed out), locks, sleeping and closed pages, events; and the endpoints. |
-| Random sequences | `viewer/tests/test_pages_random.py` | 300 seeded random runs of 1–4 simulated pages that open, close, move, sleep, wake, close, rename and trash. After every step it checks that a file is usable in at most one page and that each page shows exactly what it owns. A failure names its seed, so it can be replayed. |
-| Real browser | `viewer/tests/e2e/` | A viewer server with short timeouts and headless Chromium (Playwright), used like a person would: delivery to the page used last, moving tabs with unsaved changes, a move whose target closes, rename and trash seen in another page, the overwrite question. About 20 s. |
+| Rules | `viewer/tests/test_pages.py`, `test_pages_http.py` | Each rule alone, with a fake clock: one page per file, delivery and its timeout, moving tabs (done, cancelled, timed out, completed twice), locks, sleeping and closed pages, dropped connections, commands sent again until confirmed, the page list sent to every page, events; and the endpoints. |
+| Random sequences | `viewer/tests/test_pages_random.py` | 300 seeded random runs of 1–4 simulated pages that open, close, move, sleep, wake, close, lose their connection or an answer, rename and trash. After every step it checks that a file is usable in at most one page, that each page shows exactly what it owns, and that each page knows the live pages. A failure names its seed, so it can be replayed. |
+| Real browser | `viewer/tests/e2e/` | A viewer server with short timeouts and headless Chromium (Playwright), used like a person would: delivery to the page used last, moving tabs with unsaved changes, a move whose target closes, rename and trash seen in another page, the overwrite question. `test_pages_robust_e2e.py` does it in unusual ways: pages closed without goodbye or while a menu is open, numbers reused, a new browser tab closed at once, ping-pong, crossing moves, reloads mid-move, a lost answer; and a seeded random *chaos* run that checks after every step that the pages agree with each other and with the viewer. About 1–2 min. |
 
 When a rule changes, change `pages.py` and its rule test first; the random runs then show
 whether the change breaks a combination nobody thought of. To try more seeds once, widen the

@@ -1,7 +1,7 @@
 import { FormEvent, KeyboardEvent, MouseEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 /** One entry of a right-click menu; "-" is a separator line. */
-export type MenuEntry = { label: string; onClick: () => void; danger?: boolean } | "-";
+export type MenuEntry = { label: string; onClick: () => void; danger?: boolean; disabled?: boolean } | "-";
 
 export interface MenuAt {
   x: number;
@@ -35,7 +35,7 @@ export function ContextMenu({ menu, onClose }: { menu: MenuAt; onClose: () => vo
       left: Math.max(4, Math.min(menu.x, window.innerWidth - width - 4)),
       top: Math.max(4, Math.min(menu.y, window.innerHeight - height - 4)),
     });
-    el.querySelector("button")?.focus();
+    el.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
   }, [menu]);
 
   useEffect(() => {
@@ -56,7 +56,7 @@ export function ContextMenu({ menu, onClose }: { menu: MenuAt; onClose: () => vo
   }, [onClose]);
 
   const onKeyDown = (e: KeyboardEvent) => {
-    const buttons = [...(ref.current?.querySelectorAll("button") ?? [])];
+    const buttons = [...(ref.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? [])];
     const i = buttons.indexOf(document.activeElement as HTMLButtonElement);
     if (e.key === "Escape") onClose();
     else if (e.key === "ArrowDown") buttons[(i + 1) % buttons.length]?.focus();
@@ -76,6 +76,7 @@ export function ContextMenu({ menu, onClose }: { menu: MenuAt; onClose: () => vo
             key={i}
             role="menuitem"
             className={item.danger ? "danger" : ""}
+            disabled={item.disabled}
             onClick={() => {
               onClose();
               item.onClick();

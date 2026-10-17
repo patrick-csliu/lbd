@@ -9,6 +9,7 @@ data, so it needs no token.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import math
@@ -30,6 +31,7 @@ import numpy as np  # noqa: E402
 from fastapi import Body, FastAPI, HTTPException, Query, Request  # noqa: E402
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
+from starlette.concurrency import run_in_threadpool  # noqa: E402
 from pydantic import BaseModel, ConfigDict  # noqa: E402
 
 import lbd  # noqa: E402
@@ -220,6 +222,10 @@ class TransferBody(_Body):
 
 class PageBody(_Body):
     page: str
+
+
+class CancelBody(_Body):
+    reason: str = "the move was cancelled"   # shown to the user: "The move was cancelled (<reason>)"
 
 
 class DeliverBody(_Body):
@@ -809,8 +815,7 @@ def create_app(state: AppState) -> FastAPI:
     @app.get("/api/pages")
     def list_pages():
         """The open pages and their files, for "Move to ▸ Page N"."""
-        return {"pages": [{"page": p.id, "number": p.number, "files": sorted(p.files)}
-                          for p in state.pages.live_pages()]}
+        return {"pages": state.pages.page_list()}
 
     @app.post("/api/pages/{page_id}/focus")
     def page_focus(page_id: str):
@@ -823,9 +828,20 @@ def create_app(state: AppState) -> FastAPI:
         return {"ok": True}
 
     @app.get("/api/pages/{page_id}/next")
-    def page_next(page_id: str, wait: float = Query(25.0, ge=0, le=30)):
-        """The long poll: the page's next command, or {} after `wait` seconds."""
-        command = page_call(state.pages.wait_for_command, page_id, wait)
+    async def page_next(request: Request, page_id: str, wait: float = Query(25.0, ge=0, le=30),
+                        after: int = Query(0, ge=0)):
+        """The long poll: the page's first unconfirmed command, or {} after `wait` seconds.
+        `after`: the id of the last command the page handled (confirms it and those before).
+
+        While it waits, the connection is watched: if it drops (the tab was closed or crashed,
+        even without saying goodbye), the page is gone unless it polls again soon (pages.py)."""
+        poll = await run_in_threadpool(page_call, state.pages.start_poll, page_id, after)
+        waiting = asyncio.ensure_future(run_in_threadpool(page_call, state.pages.wait_for_command, page_id, poll, wait))
+        while not waiting.done():
+            await asyncio.wait({waiting}, timeout=0.5)
+            if not waiting.done() and await request.is_disconnected():
+                state.pages.connection_lost(page_id, poll)     # ends the wait at once
+        command = await waiting
         if command is None:
             return {}
         return {"id": command.id, "kind": command.kind, "data": command.data}
@@ -872,8 +888,9 @@ def create_app(state: AppState) -> FastAPI:
         return {"paths": page_call(state.pages.complete, transfer_id, body.page)}
 
     @app.post("/api/transfers/{transfer_id}/cancel")
-    def cancel_transfer(transfer_id: str):
-        page_call(state.pages.cancel_transfer, transfer_id, "the move was cancelled")
+    def cancel_transfer(transfer_id: str, body: Optional[CancelBody] = None):
+        reason = body.reason if body else CancelBody().reason
+        page_call(state.pages.cancel_transfer, transfer_id, reason)
         return {"ok": True}
 
     @app.post("/api/deliver")

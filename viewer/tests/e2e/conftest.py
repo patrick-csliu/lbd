@@ -58,7 +58,7 @@ class Viewer:
         for name in ("a", "b", "c"):
             shutil.copy(data_dir / "curve.lbd", data_dir / f"{name}.lbd")
         self.port = _free_port()
-        pages = Pages(ack_timeout=1, transfer_timeout=2, new_tab_timeout=3)
+        pages = Pages(ack_timeout=1, transfer_timeout=2, new_tab_timeout=3, lost_grace=2)
         self.state = AppState(cfg, token=TOKEN, port=self.port, pages=pages)
         cfg.add_root(str(data_dir))
         config = uvicorn.Config(create_app(self.state), host="127.0.0.1", port=self.port,

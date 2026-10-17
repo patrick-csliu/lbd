@@ -1,8 +1,9 @@
 // This browser tab as one of the viewer's open pages. The rules live on the server
 // (viewer/src/lbd_viewer/pages.py); this file keeps the page connected to them:
 //   - register (a number: Page 1, 2, ...), and report focus, so files go to the page used last;
-//   - the long poll: wait for commands (open, show, transfer, events) and hand them to the App,
-//     one at a time, in order;
+//   - the long poll: wait for commands (open, show, transfer, events, the page list) and hand
+//     them to the App, one at a time, in order. Each poll confirms the command handled before
+//     (`after`), so a command whose answer got lost on the way is sent again, never skipped;
 //   - after sleep (laptop, frozen background tab) the viewer may have dropped the page: register
 //     anew and let the App re-check its tabs (some may now be open in another page);
 //   - say goodbye when the tab closes, so its files are free at once.
@@ -19,6 +20,9 @@ export interface PageHandlers {
   onCommand: (page: PageInfo, command: PageCommand) => Promise<void> | void;
   /** The page was registered. `again`: after being dropped (sleep); re-check the open tabs. */
   onRegistered: (page: PageInfo, again: boolean) => Promise<void> | void;
+  /** Handling a command failed (a bug): say so. The command counts as handled, so it isn't
+   *  sent again and again. */
+  onCommandFailed: (command: PageCommand, error: unknown) => void;
 }
 
 /** Register this tab as a page and keep it connected; returns the page once registered. */
@@ -30,10 +34,12 @@ export function usePage(handlers: PageHandlers): PageInfo | null {
   useEffect(() => {
     let stopped = false;
     let current: PageInfo | null = null;
+    let handled = 0; // id of the last command handled: the next poll confirms it
 
     const register = async (again: boolean) => {
       const r = await api.registerPage();
       current = { id: r.page, number: r.number };
+      handled = 0;
       setPage(current);
       document.title = `LBD Viewer · Page ${current.number}`;
       await handlersRef.current.onRegistered(current, again);
@@ -55,9 +61,16 @@ export function usePage(handlers: PageHandlers): PageInfo | null {
       }
       while (!stopped && current) {
         try {
-          const command = await api.pageNext(current.id);
+          const command = await api.pageNext(current.id, handled);
           failures = 0;
-          if (command && !stopped) await handlersRef.current.onCommand(current, command);
+          if (command && command.id > handled && !stopped) {
+            try {
+              await handlersRef.current.onCommand(current, command);
+            } catch (e) {
+              handlersRef.current.onCommandFailed(command, e);
+            }
+            handled = command.id;
+          }
         } catch (e) {
           if (stopped) return;
           if (e instanceof ApiError && e.status === 404) {

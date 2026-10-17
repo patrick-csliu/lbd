@@ -2,7 +2,7 @@
 
 import pytest
 
-from lbd_viewer.pages import PageError, Pages, UnknownPage
+from lbd_viewer.pages import PageError, Pages, TargetGone, UnknownPage
 
 
 class Clock:
@@ -23,12 +23,20 @@ def pages(clock):
     return Pages(clock=clock, stale_after=40, ack_timeout=3, transfer_timeout=5, new_tab_timeout=15)
 
 
-def drain(pages, page):
-    """All queued commands of a page, as (kind, data)."""
-    out = []
-    while (command := pages.poll(page.id)) is not None:
-        out.append((command.kind, command.data))
+def drain(pages, page, lists=False):
+    """All queued commands of a page, as (kind, data), each confirmed by the next poll as the web
+    page does. The page lists (pages_changed) are left out unless `lists`."""
+    out, last = [], 0
+    while (command := pages.poll(page.id, after=last)) is not None:
+        last = command.id
+        if lists or command.kind != "pages_changed":
+            out.append((command.kind, command.data))
     return out
+
+
+def queued(pages, page, kind):
+    """The first queued command of this kind (e.g. a delivery to acknowledge)."""
+    return next(c for c in pages.pages[page.id].queue if c.kind == kind)
 
 
 # ---- pages -------------------------------------------------------------------------------------
@@ -63,6 +71,79 @@ def test_a_page_that_stops_polling_is_gone_and_releases_its_files(pages, clock):
     assert pages.owner("a.lbd") is None
     with pytest.raises(UnknownPage, match="reload"):
         pages.poll(one.id)
+
+
+def test_a_page_whose_connection_dropped_is_gone_unless_it_polls_again_soon(pages, clock):
+    one, two, three = pages.register(), pages.register(), pages.register()
+    pages.acquire(one.id, "a.lbd")
+    pages.connection_lost(one.id, pages.start_poll(one.id))     # tab closed without a goodbye
+    assert [p.number for p in pages.live_pages()] == [2, 3]     # not offered any more, at once
+    clock.now = 2
+    pages.connection_lost(two.id, pages.start_poll(two.id))     # a network hiccup...
+    clock.now = 3.5
+    pages.start_poll(two.id)                                  # ...and two polls again in time
+    clock.now = 4
+    pages.expire()
+    assert sorted(p.number for p in pages.live_pages()) == [2, 3]
+    assert one.id not in pages.pages and pages.owner("a.lbd") is None   # one is gone, its file free
+    assert pages.register().number == 1
+
+
+def test_a_dropped_connection_of_an_older_poll_doesnt_count(pages):
+    one = pages.register()
+    old = pages.start_poll(one.id)
+    pages.start_poll(one.id)                     # the page polls again (the old answer was lost)
+    pages.connection_lost(one.id, old)           # the old connection is noticed late
+    assert [p.id for p in pages.live_pages()] == [one.id]
+
+
+def test_a_page_whose_connection_dropped_gets_no_files(pages, clock):
+    one, two = pages.register(), pages.register()
+    pages.acquire(one.id, "a.lbd")
+    clock.now = 1
+    pages.focus(two.id)                          # two was used last...
+    pages.connection_lost(two.id, pages.start_poll(two.id))   # ...but its tab was just closed
+    offer = pages.offer(["b.lbd"])
+    assert offer.delivery.page == one.id
+    with pytest.raises(TargetGone, match="that page was closed"):
+        pages.start_transfer(one.id, ["a.lbd"], {}, two.id)
+    assert pages.attention().id == one.id
+
+
+def test_a_command_is_sent_again_until_the_page_confirms_it(pages):
+    one = pages.register()
+    drain(pages, one)
+    pages.broadcast("styles_changed")
+    first = pages.poll(one.id)                   # the answer is lost on the way...
+    again = pages.poll(one.id)                   # ...so the page asks again, confirming nothing new
+    assert first.id == again.id and first.data == {"event": "styles_changed"}
+    assert pages.poll(one.id, after=again.id) is None       # confirmed: the next poll has nothing
+
+
+def test_every_page_is_told_the_page_list_when_it_changes(pages):
+    one = pages.register()
+
+    def lists():
+        return [[(p["number"], p["files"]) for p in d["pages"]] for k, d in drain(pages, one, lists=True) if k == "pages_changed"]
+
+    assert lists() == [[(1, [])]]
+    two = pages.register()
+    pages.acquire(two.id, "a.lbd")
+    assert lists() == [[(1, []), (2, ["a.lbd"])]]          # one list, the latest: older ones replaced
+    pages.acquire(two.id, "a.lbd")                          # nothing changed: nothing sent
+    assert lists() == []
+    transfer = pages.start_transfer(two.id, ["a.lbd"], {}, one.id)
+    pages.claim(transfer.id, one.id)
+    pages.complete(transfer.id, one.id)
+    assert lists() == [[(1, ["a.lbd"]), (2, [])]]
+    pages.release(one.id, "a.lbd")
+    assert lists() == [[(1, []), (2, [])]]
+    pages.connection_lost(two.id, pages.start_poll(two.id))
+    assert lists() == [[(1, [])]]                           # left out at once
+    pages.start_poll(two.id)
+    assert lists() == [[(1, []), (2, [])]]                  # back in time
+    pages.bye(two.id)
+    assert lists() == [[(1, [])]]
 
 
 # ---- rule 1: one owner per open file ----------------------------------------------------------
@@ -103,7 +184,7 @@ def test_delivery_goes_to_the_most_recently_focused_page(pages, clock):
 def test_delivery_acknowledged_makes_the_page_the_owner(pages):
     one = pages.register()
     offer = pages.offer(["a.lbd", "b.lbd"])
-    command = pages.poll(one.id)
+    command = queued(pages, one, "open")
     assert pages.ack(one.id, command.id) == {"granted": ["a.lbd", "b.lbd"], "elsewhere": {}, "busy": []}
     assert offer.delivery.status == "acked"
     assert pages.owner("b.lbd").id == one.id
@@ -129,7 +210,7 @@ def test_an_unacknowledged_delivery_is_withdrawn_and_never_arrives_late(pages):
     offer = pages.offer(["a.lbd"])
     assert pages.wait_for_ack(offer.delivery, timeout=0.01) is False
     assert offer.delivery.status == "withdrawn"
-    assert pages.poll(one.id) is None             # out of the queue: never opened twice
+    assert drain(pages, one) == []                # out of the queue: never opened twice
     with pytest.raises(PageError, match="withdrawn"):
         pages.ack(one.id, offer.delivery.command_id)
 
@@ -148,7 +229,7 @@ def test_a_file_opened_elsewhere_meanwhile_stays_there(pages):
     pages.focus(one.id)
     offer = pages.offer(["a.lbd"])
     pages.acquire(two.id, "a.lbd")                # two opened it from its folder panel first
-    result = pages.ack(one.id, pages.poll(one.id).id)
+    result = pages.ack(one.id, queued(pages, one, "open").id)
     assert result == {"granted": [], "elsewhere": {"a.lbd": 2}, "busy": []}
     assert pages.owner("a.lbd").id == two.id
 
@@ -179,6 +260,19 @@ def test_moving_to_a_new_browser_tab(pages):
     pages.claim(transfer.id, new.id)
     pages.complete(transfer.id, new.id)
     assert pages.owner("1.lbd").id == new.id
+
+
+def test_completing_again_gives_the_same_answer(pages):
+    one, two, three = pages.register(), pages.register(), pages.register()
+    pages.acquire(one.id, "1.lbd")
+    transfer = pages.start_transfer(one.id, ["1.lbd"], {}, two.id)
+    pages.claim(transfer.id, two.id)
+    assert pages.complete(transfer.id, two.id) == ["1.lbd"]
+    assert pages.complete(transfer.id, two.id) == ["1.lbd"]    # the first answer was lost: ask again
+    with pytest.raises(PageError, match="over"):
+        pages.complete(transfer.id, three.id)                  # but only the page that took them
+    done = [k for k, _ in drain(pages, one) if k == "transfer_done"]
+    assert done == ["transfer_done"]                           # the source is told once
 
 
 def test_files_being_moved_are_locked(pages):
@@ -305,10 +399,12 @@ def test_the_long_poll_returns_a_command_at_once(pages):
     import threading
 
     one = pages.register()
+    drain(pages, one)
     threading.Timer(0.05, lambda: pages.broadcast("styles_changed")).start()
-    command = pages.wait_for_command(one.id, timeout=5)
+    command = pages.wait_for_command(one.id, pages.start_poll(one.id), timeout=5)
     assert command.kind == "event" and command.data == {"event": "styles_changed"}
-    assert pages.wait_for_command(one.id, timeout=0.01) is None      # nothing: returns after its timeout
+    poll = pages.start_poll(one.id, after=command.id)
+    assert pages.wait_for_command(one.id, poll, timeout=0.01) is None   # nothing: returns after its timeout
 
 
 def test_waiting_for_an_ack_ends_when_the_page_acknowledges(pages):
@@ -316,7 +412,7 @@ def test_waiting_for_an_ack_ends_when_the_page_acknowledges(pages):
 
     one = pages.register()
     offer = pages.offer(["a.lbd"])
-    threading.Timer(0.05, lambda: pages.ack(one.id, pages.poll(one.id).id)).start()
+    threading.Timer(0.05, lambda: pages.ack(one.id, queued(pages, one, "open").id)).start()
     assert pages.wait_for_ack(offer.delivery, timeout=5) is True
 
 
@@ -327,7 +423,7 @@ def test_a_file_renamed_before_the_page_acknowledges_is_owned_under_its_new_name
     one = pages.register()
     offer = pages.offer(["old.lbd"])
     pages.broadcast("renamed", old="old.lbd", new="new.lbd")
-    queue = [(c.kind, c.data) for c in pages.pages[one.id].queue]
+    queue = [(c.kind, c.data) for c in pages.pages[one.id].queue if c.kind != "pages_changed"]
     assert queue[0] == ("open", {"paths": ["old.lbd"]})      # sent messages never change...
     assert queue[1][1]["event"] == "renamed"                  # ...the rename follows, in order
     result = pages.ack(one.id, offer.delivery.command_id)

@@ -18,7 +18,7 @@ export type OpenFilesIn = "viewer" | "browser-tab";
 /** A command for this page from the viewer (lbd_viewer/pages.py). */
 export interface PageCommand {
   id: number;
-  kind: "open" | "show" | "transfer" | "transfer_done" | "transfer_cancelled" | "event";
+  kind: "open" | "show" | "transfer" | "transfer_done" | "transfer_cancelled" | "event" | "pages_changed";
   data: { [k: string]: Json };
 }
 
@@ -318,9 +318,13 @@ export const api = {
   registerPage: () => call<{ page: string; number: number }>("POST", "/api/pages"),
   pages: () => call<{ pages: PageEntry[] }>("GET", "/api/pages"),
   pageFocus: (page: string) => call<{ ok: boolean }>("POST", `/api/pages/${page}/focus`),
-  /** The long poll: the next command, or null after `wait` seconds. */
-  pageNext: async (page: string, wait = 25) => {
-    const r = await call<PageCommand | Record<string, never>>("GET", `/api/pages/${page}/next`, undefined, { wait: String(wait) });
+  /** The long poll: the first command not handled yet, or null after `wait` seconds. `after`: the
+   *  id of the last command handled (confirms it; a command whose answer got lost comes again). */
+  pageNext: async (page: string, after: number, wait = 25) => {
+    const r = await call<PageCommand | Record<string, never>>("GET", `/api/pages/${page}/next`, undefined, {
+      wait: String(wait),
+      after: String(after),
+    });
     return "kind" in r ? (r as PageCommand) : null;
   },
   pageAck: (page: string, command: number) => call<AckResult>("POST", `/api/pages/${page}/ack/${command}`),
@@ -333,7 +337,7 @@ export const api = {
   claimTransfer: (id: string, page: string) =>
     call<{ paths: string[]; states: { [path: string]: TabState }; from: number | null }>("POST", `/api/transfers/${id}/claim`, { page }),
   completeTransfer: (id: string, page: string) => call<{ paths: string[] }>("POST", `/api/transfers/${id}/complete`, { page }),
-  cancelTransfer: (id: string) => call<{ ok: boolean }>("POST", `/api/transfers/${id}/cancel`),
+  cancelTransfer: (id: string, reason: string) => call<{ ok: boolean }>("POST", `/api/transfers/${id}/cancel`, { reason }),
   /** The page is closing: tell the viewer, even while the page unloads (keepalive). */
   pageBye: (page: string) => {
     fetch(`/api/pages/${page}/bye`, { method: "POST", keepalive: true, headers: { "X-LBD-Token": token } }).catch(() => undefined);

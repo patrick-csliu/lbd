@@ -6,10 +6,18 @@ files side by side), so these rules decide who may do what (docs/viewer/folders-
 
 1. One owner per open file. A file is open in at most one page, so two pages never hold competing
    unsaved edits of it. `acquire` refuses a file another page owns and names that page.
-2. A page is alive while it polls for commands (`poll`). After `stale_after` seconds without a poll,
-   or after `bye`, it is gone: its files are released and its queued commands dropped. A new page
-   gets the lowest number no live page has, so closing Page 2 frees "Page 2". Numbers are only
-   labels for people; everything that acts on a page uses its id.
+2. A page is alive while it polls for commands (`poll`). It is gone after `bye`, after `stale_after`
+   seconds without a poll (asleep, frozen), or `lost_grace` seconds after its long-poll connection
+   dropped (`connection_lost`: the tab was closed or crashed without saying goodbye) unless it polls
+   again meanwhile. A page whose connection dropped is no longer offered to the others. A gone
+   page's files are released and its queued commands dropped. A new page gets the lowest number
+   no live page has, so closing Page 2 frees "Page 2". Numbers are only labels for people;
+   everything that acts on a page uses its id.
+   Commands are never lost: `poll` returns the first command the page hasn't confirmed, and the
+   page confirms it with its next poll (`after`), so a command whose answer never arrived (the
+   connection dropped) is sent again.
+   Every live page is told the list of pages (`pages_changed`) whenever it changes: a page
+   came or went, or opened, closed or took files. So its "Move to Page N" menu is always current.
 3. Delivery (a double-clicked file): `offer` asks the page that already has the file open to show
    it; other files go to the most recently focused live page, which must acknowledge (`ack`)
    within `ack_timeout`. Otherwise the caller withdraws them and opens a new browser tab instead.
@@ -18,7 +26,8 @@ files side by side), so these rules decide who may do what (docs/viewer/folders-
    by the source); the target `claim`s the files with their unsaved state, then `complete`s, which
    moves ownership; only then is the source told to close its tabs. Without completion in time
    (`expire`), the transfer is cancelled and the source keeps everything. A locked file refuses
-   other actions (`check_unlocked`) with a message.
+   other actions (`check_unlocked`) with a message. The target must be a live page
+   (`TargetGone` otherwise), and `complete` may be repeated (its answer may have been lost).
 5. File events (`broadcast`): renamed, trashed, folders or presets changed, to every live page.
 
 Pure Python with an injectable clock and no HTTP, so every rule is tested directly
@@ -45,12 +54,16 @@ class UnknownPage(PageError):
     """The page is not registered, or is gone (closed, or no poll for too long)."""
 
 
+class TargetGone(PageError):
+    """Files were to be moved to a page that is closed (or whose connection dropped)."""
+
+
 @dataclass
 class Command:
     """A message to one page. `needs_ack` commands wait for the page to confirm (deliveries)."""
 
     id: int
-    kind: str              # open | show | transfer | transfer_done | transfer_cancelled | event
+    kind: str              # open | show | transfer | transfer_done | transfer_cancelled | event | pages_changed
     data: Dict[str, Any]
     needs_ack: bool = False
 
@@ -62,7 +75,9 @@ class Page:
     last_seen: float
     last_focus: float
     files: Set[str] = field(default_factory=set)
-    queue: List[Command] = field(default_factory=list)
+    queue: List[Command] = field(default_factory=list)   # sent, not yet confirmed by the page
+    polls: int = 0                    # how many polls it made; the latest one is the open long poll
+    lost_at: Optional[float] = None   # when its long-poll connection dropped (None: connected)
 
 
 @dataclass
@@ -109,9 +124,11 @@ class Offer:
 
 class Pages:
     def __init__(self, clock: Callable[[], float] = time.monotonic, stale_after: float = 40.0,
-                 ack_timeout: float = 3.0, transfer_timeout: float = 5.0, new_tab_timeout: float = 15.0):
+                 ack_timeout: float = 3.0, transfer_timeout: float = 5.0, new_tab_timeout: float = 15.0,
+                 lost_grace: float = 3.0):
         self.clock = clock
         self.stale_after = stale_after
+        self.lost_grace = lost_grace                # a dropped connection: time to poll again
         self.ack_timeout = ack_timeout
         self.transfer_timeout = transfer_timeout
         self.new_tab_timeout = new_tab_timeout      # a new browser tab must first load the viewer
@@ -120,6 +137,8 @@ class Pages:
         self.transfers: Dict[str, Transfer] = {}
         self.locked: Dict[str, str] = {}            # file path -> transfer id
         self.deliveries: Dict[int, Delivery] = {}
+        self.finished: Dict[str, Transfer] = {}     # completed transfers, kept a while: `complete` may be repeated
+        self._listed: Optional[list] = None         # the page list last sent (pages_changed)
         self._command_ids = itertools.count(1)
         self._changed = threading.Condition(threading.RLock())
 
@@ -131,6 +150,7 @@ class Pages:
             now = self.clock()
             page = Page(secrets.token_urlsafe(9), self._free_number(), now, now)
             self.pages[page.id] = page
+            self._pages_changed()
             return page
 
     def _free_number(self) -> int:
@@ -148,9 +168,20 @@ class Pages:
             return page
 
     def live_pages(self) -> List[Page]:
+        """The pages files can go to, by number (not those whose connection just dropped)."""
         with self._changed:
             self.expire()
-            return sorted(self.pages.values(), key=lambda p: p.number)
+            return sorted((p for p in self.pages.values() if p.lost_at is None), key=lambda p: p.number)
+
+    def page_list(self) -> List[Dict[str, Any]]:
+        """`live_pages` as sent to the pages: [{"page": id, "number": n, "files": [...]}]."""
+        with self._changed:
+            self.expire()
+            return self._page_list()
+
+    def _page_list(self) -> List[Dict[str, Any]]:
+        return [{"page": p.id, "number": p.number, "files": sorted(p.files)}
+                for p in sorted(self.pages.values(), key=lambda p: p.number) if p.lost_at is None]
 
     def focus(self, page_id: str) -> None:
         with self._changed:
@@ -162,6 +193,7 @@ class Pages:
         with self._changed:
             if page_id in self.pages:
                 self._remove(self.pages[page_id])
+                self._pages_changed()
 
     # ---- rule 1: one owner per open file ------------------------------------------------------
 
@@ -182,6 +214,7 @@ class Pages:
             self.check_unlocked(path)
             page.files.add(path)
             self.owner_of[path] = page_id
+            self._pages_changed()
             return None
 
     def release(self, page_id: str, path: str) -> None:
@@ -192,6 +225,7 @@ class Pages:
             page.files.discard(path)
             if self.owner_of.get(path) == page_id:
                 del self.owner_of[path]
+            self._pages_changed()
 
     def check_unlocked(self, path: str) -> None:
         """PageError while `path` is being moved between pages (rule 4)."""
@@ -202,11 +236,14 @@ class Pages:
         """Ask the most recently focused live page to come forward (a folder was opened). Returns
         that page, or None if no page is open."""
         with self._changed:
-            self.expire()
-            page = max(self.pages.values(), key=lambda p: p.last_focus, default=None)
+            page = self._last_focused()
             if page is not None:
                 self._send(page, "show", {"path": None})
             return page
+
+    def _last_focused(self) -> Optional[Page]:
+        """The live page used last (files and attention go there), or None."""
+        return max(self.live_pages(), key=lambda p: p.last_focus, default=None)
 
     def show(self, path: str) -> Optional[Page]:
         """Ask the owner of `path` to show it (switch to it, come forward). Returns that page."""
@@ -218,32 +255,75 @@ class Pages:
 
     # ---- rule 2: alive while polling ----------------------------------------------------------
 
-    def poll(self, page_id: str) -> Optional[Command]:
-        """The next command for the page, or None. Polling keeps the page alive."""
+    def poll(self, page_id: str, after: int = 0) -> Optional[Command]:
+        """The first command the page hasn't confirmed yet, or None. Polling keeps the page alive.
+
+        `after`: the id of the last command the page handled. That command and the ones before it
+        are confirmed and dropped. A command stays queued until confirmed, so if its answer is lost
+        (the connection dropped), the next poll sends it again."""
+        with self._changed:
+            self.start_poll(page_id, after)
+            queue = self.pages[page_id].queue
+            return queue[0] if queue else None
+
+    def start_poll(self, page_id: str, after: int = 0) -> int:
+        """Begin a (long) poll: confirm the commands up to `after`, and mark the page connected.
+        Returns the poll's number, for `wait_for_command` and `connection_lost`."""
         with self._changed:
             page = self.page(page_id)
+            page.queue = [c for c in page.queue if c.id > after]
             page.last_seen = self.clock()
-            return page.queue.pop(0) if page.queue else None
+            page.polls += 1
+            if page.lost_at is not None:          # back in time: offered to the others again
+                page.lost_at = None
+                self._pages_changed()
+            return page.polls
 
-    def wait_for_command(self, page_id: str, timeout: float) -> Optional[Command]:
-        """`poll`, waiting up to `timeout` real seconds for a command (the long poll)."""
+    def wait_for_command(self, page_id: str, poll: int, timeout: float) -> Optional[Command]:
+        """The long poll started by `start_poll`: wait up to `timeout` real seconds for the first
+        unconfirmed command. Returns None after the timeout, or at once if the connection
+        dropped or a newer poll of the same page replaced this one."""
         deadline = time.monotonic() + timeout
         with self._changed:
             while True:
-                command = self.poll(page_id)
+                page = self.page(page_id)
+                if page.polls != poll or page.lost_at is not None:
+                    return None
+                page.last_seen = self.clock()
                 left = deadline - time.monotonic()
-                if command is not None or left <= 0:
-                    return command
+                if page.queue or left <= 0:
+                    return page.queue[0] if page.queue else None
                 self._changed.wait(left)
 
+    def connection_lost(self, page_id: str, poll: int) -> None:
+        """The connection of the page's long poll `poll` dropped before it was answered: the tab
+        was closed, reloaded or crashed (or the network failed). Unless the page polls again
+        within `lost_grace`, it is gone. Nothing if a newer poll already replaced that one."""
+        with self._changed:
+            page = self.pages.get(page_id)
+            if page is None or page.polls != poll or page.lost_at is not None:
+                return
+            page.lost_at = self.clock()
+            self._pages_changed()                 # no longer offered to the others
+            self._changed.notify_all()            # the waiting poll ends
+
     def expire(self) -> None:
-        """Remove pages that stopped polling, withdraw their deliveries, cancel late transfers."""
+        """Remove pages that stopped polling or lost their connection, withdraw their deliveries,
+        cancel late transfers."""
         with self._changed:
             now = self.clock()
-            for page in [p for p in self.pages.values() if now - p.last_seen > self.stale_after]:
+            for page in [p for p in self.pages.values() if self._gone(p, now)]:
                 self._remove(page)
             for transfer in [t for t in self.transfers.values() if now - t.started > t.timeout]:
                 self._cancel(transfer, "the other page didn't take the files in time")
+            for transfer_id in [i for i, t in self.finished.items() if now - t.started > 60]:
+                del self.finished[transfer_id]
+            self._pages_changed()
+
+    def _gone(self, page: Page, now: float) -> bool:
+        if page.lost_at is not None and now - page.lost_at > self.lost_grace:
+            return True
+        return now - page.last_seen > self.stale_after
 
     # ---- rule 3: delivery ---------------------------------------------------------------------
 
@@ -269,7 +349,7 @@ class Pages:
                     shown.append(path)
                 else:
                     rest.append(path)
-            target = max(self.pages.values(), key=lambda p: p.last_focus, default=None)
+            target = self._last_focused()
             if not rest or target is None:
                 return Offer(shown, None, rest, busy)
             command = self._send(target, "open", {"paths": list(rest)}, needs_ack=True)
@@ -304,6 +384,7 @@ class Pages:
                     page.files.add(now)
                     self.owner_of[now] = page_id
                     granted.append(sent)
+            self._pages_changed()
             self._changed.notify_all()
             return {"granted": granted, "elsewhere": elsewhere, "busy": busy}
 
@@ -344,9 +425,11 @@ class Pages:
             if not paths:
                 raise PageError("no files selected to move")
             if target_id is not None:
-                target = self.page(target_id)
-                if target.id == source.id:
+                target = self.pages.get(target_id)
+                if target is not None and target.id == source.id:
                     raise PageError("the files are already in this page")
+                if target is None or target.lost_at is not None:
+                    raise TargetGone("that page was closed; the files stay here")
             for path in paths:
                 if self.owner_of.get(path) != source_id:
                     raise PageError(f"{path} is not open in this page")
@@ -374,13 +457,18 @@ class Pages:
             return transfer
 
     def complete(self, transfer_id: str, page_id: str) -> List[str]:
-        """The target confirms: it now owns the files; the source is told to close its tabs."""
+        """The target confirms: it now owns the files; the source is told to close its tabs.
+        Asking again (the first answer was lost) gives the same answer."""
         with self._changed:
             page = self.page(page_id)
+            done = self.finished.get(transfer_id)
+            if done is not None and done.claimed_by == page.id:
+                return done.paths
             transfer = self._transfer(transfer_id)
             if transfer.claimed_by != page.id:
                 raise PageError("claim the files before completing the move")
             del self.transfers[transfer.id]
+            self.finished[transfer.id] = transfer
             source = self.pages.get(transfer.source)
             for path in transfer.paths:
                 del self.locked[path]
@@ -390,6 +478,7 @@ class Pages:
                 self.owner_of[path] = page.id
             if source is not None:
                 self._send(source, "transfer_done", {"id": transfer.id, "paths": transfer.paths, "to": page.number})
+            self._pages_changed()
             return transfer.paths
 
     def cancel_transfer(self, transfer_id: str, reason: str) -> None:
@@ -418,6 +507,7 @@ class Pages:
                 self._rewrite_pending(lambda path: None if path == data["path"] else path)
             for page in self.pages.values():
                 self._send(page, "event", {"event": event, **data})
+            self._pages_changed()
 
     def _rewrite_pending(self, change: Callable[[str], Optional[str]]) -> None:
         """Deliveries not yet acknowledged follow a rename (new name) or a deletion (None), so the
@@ -435,6 +525,17 @@ class Pages:
         page.queue.append(command)
         self._changed.notify_all()
         return command
+
+    def _pages_changed(self) -> None:
+        """If the page list changed since it was last sent, send it to every page. Each list is
+        complete, so an older one still queued is replaced: the queue doesn't grow."""
+        listed = self._page_list()
+        if listed == self._listed:
+            return
+        self._listed = listed
+        for page in self.pages.values():
+            page.queue = [c for c in page.queue if c.kind != "pages_changed"]
+            self._send(page, "pages_changed", {"pages": listed})
 
     def _transfer(self, transfer_id: str) -> Transfer:
         self.expire()

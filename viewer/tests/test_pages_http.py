@@ -17,6 +17,7 @@ def api(cfg, data_dir):
     c.headers["X-LBD-Token"] = "t0k"
     c.post("/api/roots", json={"path": str(data_dir)}).raise_for_status()
     c.state = state
+    c.last = {}                       # page -> id of the last command it handled
     return c
 
 
@@ -26,7 +27,14 @@ def new_page(api):
 
 
 def next_command(api, page, wait=0):
-    return api.get(f"/api/pages/{page}/next", params={"wait": wait}).json()
+    """The page's next command (not counting page lists), confirming the one before, as the web
+    page does; {} if none."""
+    while True:
+        command = api.get(f"/api/pages/{page}/next", params={"wait": wait, "after": api.last.get(page, 0)}).json()
+        if command:
+            api.last[page] = command["id"]
+        if command.get("kind") != "pages_changed":
+            return command
 
 
 def drain(api, page):
@@ -44,6 +52,29 @@ def test_pages_register_and_unknown_pages_are_404(api):
     r = api.get("/api/pages/nope/next", params={"wait": 0})
     assert r.status_code == 404 and "reload" in r.json()["detail"]
     assert api.post("/api/pages/nope/focus").status_code == 404
+
+
+def test_a_command_is_sent_again_until_the_page_confirms_it(api):
+    page, _ = new_page(api)
+    drain(api, page)
+    api.put("/api/styles/mine", json={"preset": {}}).raise_for_status()
+    after = api.last[page]
+
+    def get(after):
+        return api.get(f"/api/pages/{page}/next", params={"wait": 0, "after": after}).json()
+
+    first = get(after)                              # the answer is lost on the way...
+    assert get(after) == first                      # ...so it comes again
+    assert first["data"] == {"event": "styles_changed"}
+    assert get(first["id"]) == {}                   # confirmed: gone
+
+
+def test_every_page_gets_the_page_list(api):
+    one, _ = new_page(api)
+    two, _ = new_page(api)
+    r = api.get(f"/api/pages/{one}/next", params={"wait": 0}).json()
+    assert r["kind"] == "pages_changed"
+    assert [(p["page"], p["number"]) for p in r["data"]["pages"]] == [(one, 1), (two, 2)]
 
 
 def test_list_pages_with_their_files(api, data_dir):
@@ -141,7 +172,7 @@ def test_a_file_being_moved_cannot_be_saved_renamed_or_trashed(api, data_dir):
 @pytest.mark.parametrize("body, status, message", [
     ({"paths": []}, 409, "no files selected"),
     ({"paths": ["{data}/curve.lbd"]}, 409, "not open in this page"),
-    ({"paths": ["{data}/curve.lbd"], "to": "nope"}, 404, "reload"),
+    ({"paths": ["{data}/curve.lbd"], "to": "nope"}, 409, "that page was closed"),
 ])
 def test_transfer_errors(api, data_dir, body, status, message):
     one, _ = new_page(api)
