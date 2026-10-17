@@ -59,7 +59,7 @@ def test_bump_sets_every_version_and_dates_the_changelog(bump, repo, capsys, hig
     assert set(release.values()) == {higher} and len(release) >= 12   # every place, lock files too
     changelog = (repo / "CHANGELOG.md").read_text(encoding="utf-8")
     assert f"## {higher} (2026-11-03)\n\n- a change" in changelog and "## Unreleased" not in changelog
-    assert "git tag v" + higher in capsys.readouterr().out
+    assert "git tag -a v" + higher in capsys.readouterr().out
     assert (REPO / "uv.lock").read_text(encoding="utf-8") != (repo / "uv.lock").read_text(encoding="utf-8")
 
 

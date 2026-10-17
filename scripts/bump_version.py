@@ -116,7 +116,7 @@ def main(argv=None, repo: Path = REPO, today: Optional[str] = None) -> int:
 Next:
   uv run python scripts/test_all.py
   git commit -am "Release {new}"
-  git tag v{new}
+  git tag -a v{new} -m "LBD {new}"   # annotated: --follow-tags pushes only those
   git push --follow-tags        # GitHub builds and tests it, then makes a draft release""")
     return 0
 
