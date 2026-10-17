@@ -252,7 +252,7 @@ def test_move_every_tab_out_then_close_the_empty_page(viewer, new_page):
     one, two = new_page(), new_page()
     open_file(one, "a.lbd")
     open_file(one, "b.lbd")
-    tab(one, "a.lbd").locator(".tab-label").click(modifiers=["Control"])
+    tab(one, "a.lbd").locator(".tab-label").click(modifiers=["ControlOrMeta"])   # ⌘ on macOS
     open_menu(one, "a.lbd")
     move_entry(one, 2).click()
     expect(two.locator(".tab")).to_have_count(2)

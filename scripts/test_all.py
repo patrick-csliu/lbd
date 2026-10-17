@@ -147,12 +147,17 @@ def main(argv=None) -> int:
     failed = [r for r in results if r[1] == "FAILED"]
     skipped = [r for r in results if r[1] == "skipped"]
     for suite, _, _, out in failed:
-        tail = "\n".join(out.strip().splitlines()[-40:])
+        lines = out.strip().splitlines()
+        tail = "\n".join(lines[-40:])
         print(f"\n===== {suite} output (last 40 lines) =====")
         print(tail)
         if os.environ.get("GITHUB_ACTIONS") == "true":
-            # A GitHub annotation: shown on the run's page and readable without signing in.
-            print(f"::error title={_escape(suite, title=True)} failed::{_escape(tail)}")
+            # A GitHub annotation: shown on the run's page and readable without signing in. It
+            # starts with pytest's list of failed tests (the end of the output may be a long page
+            # snapshot that hides which test failed).
+            which = [ln for ln in lines if ln.startswith(("FAILED ", "ERROR "))][:20]
+            summary = "\n".join(which + (["..."] if which else []) + lines[-25:])
+            print(f"::error title={_escape(suite, title=True)} failed::{_escape(summary)}")
     if failed:
         print(f"\n{len(failed)} SUITE(S) FAILED")
     elif skipped:

@@ -46,7 +46,7 @@ def test_move_two_tabs_with_unsaved_changes_to_another_page(viewer, new_page):
     plot_type(one).select_option("scatter")            # an unsaved change
 
     # Select a and b (Ctrl+click adds b to the tab on show), then right-click → Move to Page 2.
-    tab(one, "b.lbd").locator(".tab-label").click(modifiers=["Control"])
+    tab(one, "b.lbd").locator(".tab-label").click(modifiers=["ControlOrMeta"])   # ⌘ on macOS
     tab(one, "b.lbd").click(button="right")
     number = re.search(r"Page (\d+)", two.title()).group(1)
     menu(one, re.compile(rf"^Move 2 tabs to Page {number}")).click()

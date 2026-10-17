@@ -19,8 +19,8 @@ A suite whose program (e.g. `matlab`, or Playwright's Chromium) is missing is re
 skipped, not failed.
 
 **On GitHub** (`.github/workflows/tests.yml`), every push to `main` and every pull request runs
-`test_all.py` on Linux, Windows and macOS. The browser tests run on Linux; release runs
-(`release.yml`) run them on all three. MATLAB runs as a separate job with MathWorks' GitHub actions,
+`test_all.py` on Linux, Windows and macOS, the browser tests included. A failed suite shows on
+the run's page with pytest's list of failed tests, readable without signing in. MATLAB runs as a separate job with MathWorks' GitHub actions,
 because MATLAB isn't on `PATH` there; the cross-language matrix and the documentation's MATLAB
 examples run without MATLAB on GitHub, so run them locally before a release. The Linux machine
 gets Arial (the default style's font) from Microsoft's core fonts package.
