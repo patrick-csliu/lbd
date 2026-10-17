@@ -6,8 +6,9 @@ Runs, in order:
   1. each language's unit tests ([test] in languages/<id>/language.toml),
   2. the viewer's Python tests, the tests of scripts/ and packaging/, and the web UI type check,
   3. the documentation: strict site build and every code example (scripts/check_doc_examples.py),
-  4. the cross-language round-trip matrix (skipped with --fast).
-A suite whose required program (e.g. matlab) is not on PATH is reported as skipped.
+  4. the cross-language round-trip matrix and the viewer's end-to-end tests in a real browser
+     (viewer/tests/e2e/, Playwright with Chromium), both skipped with --fast.
+A suite whose required program (e.g. matlab, or Playwright's Chromium) is missing is reported as skipped.
 """
 
 import argparse
@@ -36,13 +37,27 @@ def run(cmd, cwd: Path):
     return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace")
 
 
+def _e2e_missing() -> str:
+    """Why the browser tests can't run here, or "" if they can."""
+    if not (REPO / "viewer/src/lbd_viewer/static/index.html").is_file():
+        return "web UI not built: npm run build in viewer/web"
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return "Playwright not installed: uv sync --all-packages"
+    with sync_playwright() as p:
+        if not Path(p.chromium.executable_path).is_file():
+            return "no browser: uv run playwright install chromium"
+    return ""
+
+
 def main(argv=None) -> int:
     # Child programs print any character (e.g. Julia's ✓); never crash on a narrow console encoding.
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(errors="replace")
     ap = argparse.ArgumentParser()
-    ap.add_argument("--fast", action="store_true", help="skip the cross-language matrix")
+    ap.add_argument("--fast", action="store_true", help="skip the cross-language matrix and the browser tests")
     args = ap.parse_args(argv)
 
     results = []  # (suite, status, seconds, output)
@@ -73,7 +88,7 @@ def main(argv=None) -> int:
         record(f"{lang.name} tests", lang_test)
 
     def viewer_tests():
-        r = run([sys.executable, "-m", "pytest", "-q", "viewer/tests"], REPO)
+        r = run([sys.executable, "-m", "pytest", "-q", "viewer/tests", "--ignore=viewer/tests/e2e"], REPO)
         return ("passed" if r.returncode == 0 else "FAILED", r.stdout + r.stderr)
 
     def tools_tests():
@@ -112,6 +127,15 @@ def main(argv=None) -> int:
             return ("passed" if r.returncode == 0 else "FAILED", r.stdout + r.stderr)
 
         record("Cross-language matrix", crosslang)
+
+        def viewer_e2e():
+            missing = _e2e_missing()
+            if missing:
+                return ("skipped", missing)
+            r = run([sys.executable, "-m", "pytest", "-q", "viewer/tests/e2e"], REPO)
+            return ("passed" if r.returncode == 0 else "FAILED", r.stdout + r.stderr)
+
+        record("Viewer in a browser (e2e)", viewer_e2e)
 
     print()
     width = max(len(s) for s, *_ in results)

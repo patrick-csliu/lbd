@@ -2,7 +2,7 @@
 
 ```bash
 uv run python scripts/test_all.py          # everything; prints a passed / skipped / failed table
-uv run python scripts/test_all.py --fast   # without the cross-language matrix
+uv run python scripts/test_all.py --fast   # without the cross-language matrix and the browser tests
 ```
 
 `test_all.py` runs, in order:
@@ -12,12 +12,15 @@ uv run python scripts/test_all.py --fast   # without the cross-language matrix
 4. the web UI type check;
 5. the documentation: a strict site build (broken links, missing anchors or bad API
    references fail it) and every code example in the docs;
-6. the cross-language matrix.
+6. the cross-language matrix;
+7. the viewer in a real browser (see [Several viewer pages](#several-viewer-pages)).
 
-A suite whose program (e.g. `matlab`) isn't on `PATH` is reported as skipped, not failed.
+A suite whose program (e.g. `matlab`, or Playwright's Chromium) is missing is reported as
+skipped, not failed.
 
 **On GitHub** (`.github/workflows/tests.yml`), every push to `main` and every pull request runs
-`test_all.py` on Linux and Windows. MATLAB runs as a separate job with MathWorks' GitHub actions,
+`test_all.py` on Linux, Windows and macOS. The browser tests run on Linux; release runs
+(`release.yml`) run them on all three. MATLAB runs as a separate job with MathWorks' GitHub actions,
 because MATLAB isn't on `PATH` there; the cross-language matrix and the documentation's MATLAB
 examples run without MATLAB on GitHub, so run them locally before a release. The Linux machine
 gets Arial (the default style's font) from Microsoft's core fonts package.
@@ -30,7 +33,8 @@ To run single suites:
 | Suite | Command |
 |---|---|
 | Python `lbd` | `uv run pytest languages/python/tests` |
-| Viewer | `uv run pytest viewer/tests` |
+| Viewer | `uv run pytest viewer/tests --ignore=viewer/tests/e2e` |
+| Viewer in a browser | `uv run pytest viewer/tests/e2e` (once: `uv run playwright install chromium`) |
 | Scripts and packaging | `uv run pytest tests/scripts tests/packaging` |
 | All Python suites | `uv run pytest` (the root `pyproject.toml` lists every test folder) |
 | MATLAB | `cd languages/matlab && matlab -batch "r = runtests('tests'); assert(~any([r.Failed]))"` |
@@ -52,6 +56,22 @@ Run the cross-language matrix after any change to a module or the spec.
   in LBD may change or drop input silently, every such case is either an error or a warning, and
   both are tested.
 - Scripts are imported by path with the `load_module` fixture (`load_module("scripts/languages.py")`).
+
+## Several viewer pages
+
+The viewer can be open in several browser tabs (pages) at once. They must never lose unsaved
+work or hold one file twice. The rules live in one module, `viewer/src/lbd_viewer/pages.py`,
+and are tested in three layers:
+
+| Layer | File | What it checks |
+|---|---|---|
+| Rules | `viewer/tests/test_pages.py`, `test_pages_http.py` | Each rule alone, with a fake clock: one page per file, delivery and its timeout, moving tabs (done, cancelled, timed out), locks, sleeping and closed pages, events; and the endpoints. |
+| Random sequences | `viewer/tests/test_pages_random.py` | 300 seeded random runs of 1–4 simulated pages that open, close, move, sleep, wake, close, rename and trash. After every step it checks that a file is usable in at most one page and that each page shows exactly what it owns. A failure names its seed, so it can be replayed. |
+| Real browser | `viewer/tests/e2e/` | A viewer server with short timeouts and headless Chromium (Playwright), used like a person would: delivery to the page used last, moving tabs with unsaved changes, a move whose target closes, rename and trash seen in another page, the overwrite question. About 20 s. |
+
+When a rule changes, change `pages.py` and its rule test first; the random runs then show
+whether the change breaks a combination nobody thought of. To try more seeds once, widen the
+`range(300)` in `test_pages_random.py`.
 
 ## Coverage
 

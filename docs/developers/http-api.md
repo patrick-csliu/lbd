@@ -23,7 +23,9 @@ one, it answers 404 with a page that explains how to build it.
   unknown setting), a broken settings file;
 - 403: missing token, wrong host, or a path outside the allowed folders;
 - 404: not found (also: a folder that isn't in the list, a path that isn't a file or folder);
-- 409 / 501: folder dialog busy or unavailable;
+- 409: a dialog is already open; a file that is being moved between pages; a view saved over a
+  file that changed since the page loaded it; a page rule refused (see [Pages](#pages));
+- 501: no system dialog here;
 - 422: a request body with a missing field, a wrong type or an **unknown field** (bodies are
   strict, so a typo in a field name is an error instead of being ignored).
 
@@ -39,9 +41,9 @@ UI shows them as notes. They are the messages of Python's `lbd.LBDWarning`s.
 |---|---|---|
 | `GET /api/ping` | | `{app: "lbd-viewer", version, pid}`. Used by `cli.py` to detect a running viewer. |
 | `POST /api/heartbeat` | | `{ok: true}`. Tabs call it every 10 s; the server stops after `--idle-exit` seconds without one. |
-| `GET /api/state` | | `{version, lbd_version, roots, default_style, styles, platform, config_dir, warnings}`. `warnings` also lists folders that no longer exist and a default style that was deleted. |
+| `GET /api/state` | | `{version, lbd_version, roots, default_style, open_files_in, styles, platform, config_dir, warnings}`. `warnings` also lists folders that no longer exist and a default style that was deleted. |
 | `POST /api/open` | `{path}` | `{path}` (resolved). Allows reading a file outside the roots. |
-| `PUT /api/settings` | `{default_style}` | Same as `GET /api/state`. |
+| `PUT /api/settings` | `{default_style?, open_files_in?}` | Same as `GET /api/state`. `open_files_in`: `"viewer"` (files from Explorer / Finder go to the open page) or `"browser-tab"`. 400 if neither is given or a value is invalid. |
 
 ## Folders
 
@@ -53,8 +55,43 @@ UI shows them as notes. They are the messages of Python's `lbd.LBDWarning`s.
 | `GET /api/list` | `?path=` | `{path, dirs: [name], files: [{name, type, size, mtime}], errors: [{name, error}]}`: direct children only; `type` is `lbd`, `style` (`.lbd.json`) or `image`; other files and skipped folders are left out; entries that can't be read (permissions, broken links) are in `errors`. |
 | `GET /api/search` | `?root=&q=` | `{root, query, results: [{path, rel, type, size, mtime}], truncated, errors: [{path, error}]}`: recursive, case-insensitive substring of the relative path, up to 500 results; folders or files that couldn't be read are in `errors`. 404 if `root` isn't a folder. |
 | `POST /api/reveal` | `{path}` | `{ok}`. Opens the system file manager with the file selected (a folder: opens it). |
-| `POST /api/file/rename` | `{path, name}` | `{path}`: the new path, in the same folder. Only data, style and image files. 400 for a folder, another kind of file, a name with `/` or `\`, or a changed extension; 409 if the name exists; 404 if the file is missing. |
-| `POST /api/file/trash` | `{path}` | `{ok}`. Moves the file to the Recycle Bin / Trash (`send2trash`); never deletes permanently. 400 and 404 as rename; 500 if the system has no trash for it (the file stays). |
+| `POST /api/file/rename` | `{path, name}` | `{path}`: the new path, in the same folder. Only data, style and image files. 400 for a folder, another kind of file, a name with `/` or `\`, or a changed extension; 409 if the name exists or the file is being moved between pages; 404 if the file is missing. Every page gets a `renamed` event. |
+| `POST /api/file/trash` | `{path}` | `{ok}`. Moves the file to the Recycle Bin / Trash (`send2trash`); never deletes permanently. 400, 404 and 409 as rename; 500 if the system has no trash for it (the file stays). Every page gets a `trashed` event. |
+
+## Pages
+
+Each browser tab showing the viewer is a *page*. The rules (one page per open file, delivery,
+moving tabs) are in `viewer/src/lbd_viewer/pages.py`; these endpoints adapt them to HTTP. An
+unknown or expired page or transfer is a 404 (a page then registers again); a refused rule
+(a file being moved, a transfer already claimed) is a 409.
+
+| Method and path | Body / query | Response |
+|---|---|---|
+| `POST /api/pages` | | `{page, number}`: a new page, numbered 1, 2, …; numbers are never reused. |
+| `GET /api/pages` | | `{pages: [{page, number, files}]}`: the live pages and the files each has open. |
+| `GET /api/pages/{id}/next` | `?wait=` (0–30 s, default 25) | The long poll, which also keeps the page alive: the next command `{id, kind, data}`, or `{}` after `wait` seconds. A page that hasn't polled for 40 s is dropped. |
+| `POST /api/pages/{id}/ack/{command}` | | `{granted, elsewhere, busy}`: the page takes the files of an `open` command. It opens `granted`; `elsewhere` (`{path: page number}`) are open in another page; `busy` ones are being moved. |
+| `POST /api/pages/{id}/focus` | | `{ok}`: the page was used; files from Explorer go to the page used last. |
+| `POST /api/pages/{id}/bye` | | `{ok}`: the page is closing; its files are free at once. |
+| `POST /api/pages/{id}/acquire` | `{path}` | `{path}` (its canonical spelling) if the page may open it, or `{path, owner}` if page `owner` has it open (then nothing changes). |
+| `POST /api/pages/{id}/release` | `{path}` | `{ok}`: the page closed the file. |
+| `POST /api/pages/show` | `{path}` | `{page}`: asks the page that has the file open to show it. 404 if no page has. |
+| `POST /api/transfers` | `{page, paths, states, to}` | `{id, timeout}`: starts moving tabs from `page` to page `to`, or to a new browser tab (`to: null`; the source opens `/?claim=<id>`). `states` are the tabs' unsaved settings. The files are locked until the move ends. |
+| `POST /api/transfers/{id}/claim` | `{page}` | `{paths, states, from}`: the target takes the files and opens the tabs. |
+| `POST /api/transfers/{id}/complete` | `{page}` | `{paths}`: the target has the tabs; the files are now its own, and the source gets `transfer_done`. |
+| `POST /api/transfers/{id}/cancel` | | `{ok}`. A move without `complete` in time (5 s; 15 s for a new browser tab), or whose target closes, is cancelled the same way: the source gets `transfer_cancelled` and keeps its tabs. |
+| `POST /api/deliver` | `{files, dirs}` | `{delivered, shown, busy, unplaced}`: what `lbd-view file.lbd` sends to a running viewer. Files already open are shown in their page (`shown`); the others go to the page used last, which must take them within 3 s. `unplaced`: files no page took (the caller opens a browser tab for them); `busy`: files being moved. `dirs` are added to the folder list. |
+
+Commands a page receives (`kind`, `data`):
+
+| Kind | Data | Sent when |
+|---|---|---|
+| `open` | `{paths}` | files were delivered; the page answers with `ack` |
+| `show` | `{path}` | the file is wanted, and this page has it (`path: null`: just come forward) |
+| `transfer` | `{id, from}` | another page moves tabs here; the page claims them |
+| `transfer_done` | `{id, paths, to}` | this page's tabs arrived in page `to`; close them |
+| `transfer_cancelled` | `{id, paths, reason}` | this page's move was cancelled; unlock the tabs |
+| `event` | `{event: "renamed", old, new}`, `{event: "trashed", path}`, `{event: "roots_changed"}`, `{event: "styles_changed"}` | a file was renamed or moved to the trash, or the folder list or the presets changed |
 
 ## Images (view only)
 
@@ -67,8 +104,8 @@ UI shows them as notes. They are the messages of Python's `lbd.LBDWarning`s.
 
 | Method and path | Body / query | Response |
 |---|---|---|
-| `GET /api/file` | `?path=` | File summary: `{path, name, title, description, created, writer, lbd_version, size, axes: [{name, unit, label, length, dtype, min, max}], values: [{name, unit, label, axes, shape, dtype, complex}], meta, plot, style, style_name, matplotlib}` (`matplotlib`: the version that last wrote the saved view, or `null`). In `meta`, arrays over 50 elements become `{array, shape, dtype, preview}` and complex numbers become strings. |
-| `PUT /api/file/plot` | `{path, spec?, style?, style_name?}` | The updated file summary. Keys present in the body are set; `null` removes the entry; absent keys are kept; 400 if none is given or the spec has unknown keys. Calls `lbd.set_plot`. |
+| `GET /api/file` | `?path=` | File summary: `{path, name, title, description, created, writer, lbd_version, size, axes: [{name, unit, label, length, dtype, min, max}], values: [{name, unit, label, axes, shape, dtype, complex}], meta, plot, style, style_name, matplotlib, version}` (`matplotlib`: the version that last wrote the saved view, or `null`; `version`: the file's modification time and size, for `if_version`). In `meta`, arrays over 50 elements become `{array, shape, dtype, preview}` and complex numbers become strings. |
+| `PUT /api/file/plot` | `{path, spec?, style?, style_name?, if_version?}` | The updated file summary. Keys present in the body are set; `null` removes the entry; absent keys are kept; 400 if none is given or the spec has unknown keys. Calls `lbd.set_plot`. With `if_version`, 409 if the file changed since (another program wrote it); without it, the file is overwritten. 409 also while the file is being moved between pages. |
 | `POST /api/render` | `{path, spec?, preset?, style?, style_file?}` | `{svg, spec, preset, size_mm: [w, h], warnings}`. An unknown `preset` is a 400; a file's own `style_name` that doesn't exist falls back to the default with a warning. Plot settings that don't apply to the chosen plot type are ignored without a warning here, because the UI keeps them while switching types. `spec` in the response is the resolved [plot spec](../styles/plot-settings.md), plus `slices: [{axis, index, length, label, unit, value}]`. `preset` names the preset used; `style` holds unsaved UI changes; `style_file` (a `.lbd.json` inside a root) replaces the preset, for previews. |
 | `POST /api/export/save` | as export | Renders, then shows the system "Save as" dialog on this computer (data file's folder, default name filled in) and writes the file there: `{path, warnings}`, `path` is `null` if cancelled. Render errors come before the dialog. 400 if the chosen name has another extension (nothing saved); 501 without a dialog (the UI then uses `/api/export`); 409 if another dialog is open. |
 | `POST /api/export` | as render, plus `format`: `svg`, `pdf`, `png` or `jpg` | The file bytes as a download, with `Content-Disposition: attachment; filename="<file>_<values>.<fmt>"`, and `X-LBD-Warnings` when there are warnings. |

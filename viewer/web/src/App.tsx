@@ -261,12 +261,13 @@ function Shell() {
     setActive((a) => (a === oldPath ? newPath : a));
     setSelected((prev) => new Set([...prev].map((p) => (p === oldPath ? newPath : p))));
     setLocks((prev) => new Map([...prev].map(([p, l]) => [p === oldPath ? newPath : p, l])));
-    for (const m of [tabStates.current, initialStates.current]) {
-      const s = m.get(oldPath);
-      if (s) {
-        m.delete(oldPath);
-        m.set(newPath, s);
-      }
+    // The tab's view is made anew for the new name: it starts from the unsaved state it had.
+    const state = tabStates.current.get(oldPath) ?? initialStates.current.get(oldPath);
+    tabStates.current.delete(oldPath);
+    initialStates.current.delete(oldPath);
+    if (state) {
+      tabStates.current.set(newPath, state);
+      initialStates.current.set(newPath, state);
     }
   }, []);
 

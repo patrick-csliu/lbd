@@ -2,9 +2,11 @@
 #
 # The `test` job runs scripts/test_all.py, the same command as on a developer's computer:
 # Python, the viewer, Julia, the scripts and packaging, the web UI type check, the strict docs
-# build, the documentation's code examples and the cross-language matrix. MATLAB isn't on PATH
-# there, so test_all reports its suites as skipped; the `matlab` job runs the MATLAB tests with
-# MathWorks' actions instead (free for public repositories).
+# build, the documentation's code examples, the cross-language matrix and the viewer's tests in a
+# real browser (Playwright's Chromium: on Linux for every push and pull request, on all three
+# systems when release.yml runs these tests; elsewhere test_all reports them as skipped).
+# MATLAB isn't on PATH there, so test_all reports its suites as skipped; the `matlab` job runs
+# the MATLAB tests with MathWorks' actions instead (free for public repositories).
 name: Tests
 
 on:
@@ -13,6 +15,11 @@ on:
   pull_request:
   workflow_dispatch:
   workflow_call:   # release.yml runs these same tests before building
+    inputs:
+      browser_tests_everywhere:
+        description: Run the viewer's browser tests on Windows and macOS too, not only on Linux
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -68,6 +75,12 @@ jobs:
         run: |
           npm ci
           npm run build
+
+      # Chromium for the viewer's end-to-end tests (viewer/tests/e2e); on Linux with the system
+      # libraries it needs.
+      - name: Install Chromium for the browser tests
+        if: runner.os == 'Linux' || inputs.browser_tests_everywhere
+        run: uv run playwright install ${{ runner.os == 'Linux' && '--with-deps' || '' }} chromium
 
       - name: Run all test suites
         run: uv run python scripts/test_all.py

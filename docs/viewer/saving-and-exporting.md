@@ -15,6 +15,12 @@ to, and with `lbd.plot.plot(path)` in Python. The data itself is never changed.
 | **Reset** | Drops your unsaved changes and goes back to the file's saved view, or to the defaults. |
 | **Remove saved view** | Deletes the saved plot settings and style changes from the file. It appears only when the file has some. |
 
+**If the file changed since you opened it** (another program, a Python script, or the viewer
+on another computer wrote it), saving asks first:
+- **Overwrite** saves your view anyway, replacing the saved view in the file (the data stays);
+- **Reload** shows the file as it is now, dropping your unsaved changes;
+- **Cancel** keeps your changes, unsaved.
+
 The same can be done from code with [`lbd.set_plot`][lbd.set_plot] (Python), or by
 setting `plot`/`style`/`style_name` before saving in any language.
 

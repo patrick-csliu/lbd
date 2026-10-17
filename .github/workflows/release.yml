@@ -63,6 +63,8 @@ jobs:
     name: Tests
     needs: check
     uses: ./.github/workflows/tests.yml
+    with:
+      browser_tests_everywhere: true
 
   matlab-toolbox:
     name: MATLAB toolbox

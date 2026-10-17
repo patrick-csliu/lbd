@@ -5,6 +5,18 @@ The file format has its own version (`lbd_version`, currently 1.0).
 
 ## Unreleased
 
+- Viewer: files double-clicked in Explorer / Finder (or `lbd-view file.lbd`) open as tabs in
+  the viewer page you used last, instead of a new browser tab each time. **⚙** at the top right
+  switches back to new browser tabs.
+- Viewer: several browser tabs work together. Each is a numbered page; select tabs
+  (Ctrl/⌘+click, Shift+click) and right-click → **Move to Page N** or **to a new browser tab**,
+  unsaved settings included. A file is open in one page at a time, and a rename, deletion,
+  folder or preset change shows in every page. See
+  [Several browser tabs](docs/viewer/folders-and-files.md#several-browser-tabs).
+- Viewer: **Open in new browser tab** for files in the Folders panel (also Ctrl/⌘+click or
+  middle-click), and a **◧ Folders** button to hide the panel.
+- Viewer: saving a view into a file that changed since you opened it asks first: Overwrite or
+  Reload.
 - Windows uninstaller: also removes the empty `.lbd` and `Applications\lbd-view.exe` registry
   keys and the "running viewer" record (`%LOCALAPPDATA%\Temp\lbd`), so nothing is left behind.
   The release workflow checks this after every test uninstall.
