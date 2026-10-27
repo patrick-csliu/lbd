@@ -24,7 +24,7 @@ using OrderedCollections: OrderedDict
 
 export Dataset, Axis, Value, add_axis!, add_value!, LBDError, LBDVersionError
 
-const PACKAGE_VERSION = "1.2.0"
+const PACKAGE_VERSION = "1.3.0-dev"
 const FORMAT_VERSION = "1.0"
 const FORMAT_MAJOR = 1
 const FORMAT_MINOR = 0

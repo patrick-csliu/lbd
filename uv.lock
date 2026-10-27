@@ -1618,7 +1618,7 @@ wheels = [
 
 [[package]]
 name = "lbd"
-version = "1.2.0"
+version = "1.3.0.dev0"
 source = { editable = "languages/python" }
 dependencies = [
     { name = "h5py" },
@@ -1648,7 +1648,7 @@ provides-extras = ["plot"]
 
 [[package]]
 name = "lbd-viewer"
-version = "1.2.0"
+version = "1.3.0.dev0"
 source = { editable = "viewer" }
 dependencies = [
     { name = "fastapi" },
