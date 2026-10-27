@@ -132,6 +132,12 @@ uv run mkdocs build --strict     # into site/; lbd-view --dev serves it at /docs
   needs is vendored in `docs/assets/vendor/`.
 - `uv run python scripts/test_all.py` builds the site in strict mode and runs every code
   example; see [Testing](testing.md#documentation-examples).
+- **The public site**, [patrick-csliu.github.io/lbd](https://patrick-csliu.github.io/lbd/),
+  shows the latest release. The **Docs** workflow (`.github/workflows/docs.yml`) builds it from
+  the release's tag and publishes it to GitHub Pages whenever a release is published. Changes on
+  `main` reach it with the next release. **Actions → Docs → Run workflow** publishes it again
+  (the latest release, or a tag you enter). One-time setup: **Settings → Pages → Source:
+  GitHub Actions**.
 
 ## Working on the viewer
 
