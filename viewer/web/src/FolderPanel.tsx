@@ -2,6 +2,8 @@ import { FormEvent, KeyboardEvent, MouseEvent, useCallback, useEffect, useState 
 import { api, ApiError, baseName, DirListing, FileKind, fileKind, joinPath, SearchResult } from "./api";
 import { ConfirmDialog, ConfirmRequest, ContextMenu, isMenuKey, MenuAt, menuAt, MenuEntry, systemNames } from "./menu";
 import { useToast } from "./toast";
+import { useDiskVersion } from "./watch";
+import { fileEntries, renameRequest } from "./fileActions";
 
 interface Props {
   roots: string[];
@@ -36,46 +38,6 @@ function saveExpanded(s: Set<string>) {
   } catch {
     /* storage unavailable: expansion just isn't remembered */
   }
-}
-
-/** The part of a name that rename keeps (same rule as the server): ".lbd.json", else the last suffix. */
-function extension(name: string): string {
-  if (name.toLowerCase().endsWith(".lbd.json")) return name.slice(-".lbd.json".length);
-  const i = name.lastIndexOf(".");
-  return i > 0 ? name.slice(i) : "";
-}
-
-/** Put text on the clipboard. The clipboard API first; if the browser blocks it, the older copy command. */
-async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    const box = document.createElement("textarea");
-    box.value = text;
-    box.style.position = "fixed";
-    box.style.opacity = "0";
-    document.body.appendChild(box);
-    box.select();
-    try {
-      return document.execCommand("copy");
-    } catch {
-      return false;
-    } finally {
-      box.remove();
-    }
-  }
-}
-
-/** Why a new file name can't be used, or null. The server checks the same, plus existing names. */
-function checkNewName(oldName: string, name: string): string | null {
-  const ext = extension(oldName);
-  const n = name.trim();
-  if (!n) return "Enter a file name.";
-  if (n.includes("/") || n.includes("\\")) return "A file name can't contain / or \\.";
-  if (extension(n).toLowerCase() !== ext.toLowerCase() || n.length <= ext.length)
-    return `The name must end in ${ext}, so the file type stays the same.`;
-  return null;
 }
 
 export default function FolderPanel(props: Props) {
@@ -146,25 +108,17 @@ export default function FolderPanel(props: Props) {
 
   // ---- right-click menu
 
-  const copyPath = async (path: string) => {
-    if ((await copyText(path))) toast(`Copied: ${path}`);
-    else toast(`Couldn't use the clipboard here. The path is: ${path}`, "error");
-  };
-
-  const askRename = (path: string) => {
-    const name = baseName(path);
-    setConfirm({
-      title: "Rename file",
-      action: "Rename",
-      input: { value: name, selectEnd: name.length - extension(name).length, check: (v) => checkNewName(name, v) },
-      onConfirm: async (value) => {
-        const r = await api.renameFile(path, value.trim());
-        onRenamed(path, r.path);
-        refresh();
-        toast(`Renamed to ${baseName(r.path)}`);
-      },
-    });
-  };
+  const askRename = (path: string) =>
+    setConfirm(
+      renameRequest(
+        path,
+        (newPath) => {
+          onRenamed(path, newPath);
+          refresh();
+        },
+        toast,
+      ),
+    );
 
   const askTrash = (path: string) => {
     const name = baseName(path);
@@ -185,10 +139,7 @@ export default function FolderPanel(props: Props) {
   const openMenu: OnMenu = (e, path, kind) => {
     e.preventDefault();
     e.stopPropagation();
-    const items: MenuEntry[] = [
-      { label: `Show in ${names.fileManager}`, onClick: () => api.reveal(path).catch((err) => toast((err as Error).message, "error")) },
-      { label: "Copy path", onClick: () => copyPath(path) },
-    ];
+    const items: MenuEntry[] = fileEntries(path, platform, toast);
     if (kind === "root") items.push("-", { label: "Remove from list", onClick: () => removeRoot(path) });
     if (kind === "file")
       items.push(
@@ -334,6 +285,14 @@ interface DirProps {
 function DirNode({ path, depth, expanded, toggle, refreshKey, activePath, onSelect, onOpen, onOpenNew, onMenu }: DirProps) {
   const [listing, setListing] = useState<DirListing | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Files that another program adds, removes or rewrites show up by themselves: the folder is
+  // listed again when its signature on disk differs from the listing shown.
+  const disk = useDiskVersion("dir", path);
+  const stale = !!listing && typeof disk.version === "string" && disk.version !== listing.signature;
+  const [reloads, setReloads] = useState(0);
+  useEffect(() => {
+    if (stale) setReloads((n) => n + 1);
+  }, [stale, disk.version]);
 
   useEffect(() => {
     let cancelled = false;
@@ -344,7 +303,7 @@ function DirNode({ path, depth, expanded, toggle, refreshKey, activePath, onSele
     return () => {
       cancelled = true;
     };
-  }, [path, refreshKey]);
+  }, [path, refreshKey, reloads]);
 
   if (error) return <div className="muted small" style={{ paddingLeft: depth * 14 + 8 }}>{error}</div>;
   if (!listing) return <div className="muted small" style={{ paddingLeft: depth * 14 + 8 }}>Loading…</div>;

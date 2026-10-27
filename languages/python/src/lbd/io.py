@@ -12,6 +12,7 @@ import json
 import os
 import re
 import sys
+import time
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -453,7 +454,9 @@ class Dataset:
             read without its data, a value whose shape no longer matches its axes, a `plot` with
             unknown keys or NaN, a `style` that isn't a dict, an invalid `compression`.
         OSError
-            File-system problems.
+            File-system problems. On Windows, a file another program keeps open (e.g. LBD Viewer
+            reading it, a sync client) can't be replaced: `save` waits up to 3 s for it, then
+            raises `PermissionError` naming the file.
 
         Warns
         -----
@@ -484,7 +487,7 @@ class Dataset:
         try:
             with h5py.File(tmp, "w") as f:
                 self._write(f, compression, created, writer, plot_json, style_json, style_name, mpl)
-            os.replace(tmp, path)
+            _replace(tmp, path)
         finally:
             if tmp.exists():
                 tmp.unlink()
@@ -575,6 +578,26 @@ class Dataset:
                 g_plot.attrs["style_name"] = style_name
             if mpl:
                 g_plot.attrs["matplotlib"] = mpl
+
+
+REPLACE_WAIT = 3.0   # seconds `save` waits for a file another program has open (Windows)
+
+
+def _replace(tmp: Path, path: Path) -> None:
+    """Put the finished temporary file in place of `path`. On Windows this fails while another
+    program has `path` open, even for a moment (LBD Viewer reading the new version, a sync
+    client, an antivirus scan), so it tries again for up to REPLACE_WAIT seconds."""
+    deadline = time.monotonic() + REPLACE_WAIT
+    while True:
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError as e:
+            if time.monotonic() > deadline:
+                raise PermissionError(
+                    f"can't write {path}: another program kept it open for {REPLACE_WAIT:g} s "
+                    "(e.g. LBD Viewer or a sync client). Close it there and save again.") from e
+            time.sleep(0.05)
 
 
 def _matplotlib_version() -> Optional[str]:

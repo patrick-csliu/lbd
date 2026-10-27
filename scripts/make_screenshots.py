@@ -330,13 +330,18 @@ def tabs_menu(page: Page, url: str, ctx) -> None:
     page.locator(".tab-label", has_text="sweep.lbd").click(button="right")
     menu = page.locator(".context-menu")
     menu.wait_for()
+    # Entries: Close, Close others, Move to Page 2, Move to a new browser tab | Show in Explorer,
+    # Copy path, Rename… | Close all, Move all tabs to Page 2, Move all tabs to a new browser tab.
     mark(page, [
         (1, ".page-badge", 0, "tr"),
         (2, ".tabs .tab", 0, "l"),
-        (3, ".context-menu [role=menuitem]", 3, "r"),
-        (4, ".context-menu [role=menuitem]", 4, "r"),
+        (3, ".context-menu [role=menuitem]", 2, "r"),
+        (4, ".context-menu [role=menuitem]", 3, "r"),
+        (5, ".context-menu [role=menuitem]", 4, "r"),
+        (6, ".context-menu [role=menuitem]", 7, "r"),
     ])
-    save(page, VIEWER_IMG / "tabs-menu.png", clip={"x": 0, "y": 0, "width": 900, "height": 330})
+    box = menu.bounding_box()
+    save(page, VIEWER_IMG / "tabs-menu.png", clip={"x": 0, "y": 0, "width": 900, "height": box["y"] + box["height"] + 16})
 
 
 

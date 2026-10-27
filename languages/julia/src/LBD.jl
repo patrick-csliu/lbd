@@ -30,6 +30,7 @@ const FORMAT_MAJOR = 1
 const FORMAT_MINOR = 0
 const NAME_RE = r"^[A-Za-z][A-Za-z0-9_]{0,62}$"
 const COMPRESS_MIN_SIZE = 1024
+const REPLACE_WAIT = 3.0   # seconds `save` waits for a file another program has open (Windows)
 
 # Element types allowed in values, with the names used across all LBD implementations.
 const DTYPE_NAMES = Dict{DataType,String}(
@@ -206,6 +207,8 @@ from_file(x) = x
 
 Write `d` to `path`. With `compression=true`, large arrays are gzip-compressed. The file is
 written under a temporary name and then renamed, so a viewer never sees a half-written file.
+On Windows a file another program keeps open (e.g. LBD Viewer reading it, a sync client) can't
+be replaced: `save` waits up to $(REPLACE_WAIT) s for it, then throws an `IOError` naming the file.
 """
 function save(path::AbstractString, d::Dataset; compression::Bool=false)
     lowercase(splitext(path)[2]) == ".lbd" || @warn "$(basename(path)): LBD files should use the .lbd extension"
@@ -217,12 +220,30 @@ function save(path::AbstractString, d::Dataset; compression::Bool=false)
         h5open(tmp, "w") do f
             write_file(f, d, compression)
         end
-        mv(tmp, path; force=true)
+        replace_file(tmp, path)
     finally
         isfile(tmp) && rm(tmp)
     end
     d.path = String(path)
     return path
+end
+
+# Put the finished temporary file in place of `path`. On Windows this fails while another
+# program has `path` open, even for a moment (LBD Viewer reading the new version, a sync client,
+# an antivirus scan), so it tries again for up to REPLACE_WAIT seconds.
+function replace_file(tmp::AbstractString, path::AbstractString)
+    deadline = time() + REPLACE_WAIT
+    while true
+        try
+            mv(tmp, path; force=true)
+            return
+        catch e
+            (e isa Base.IOError && Sys.iswindows()) || rethrow()
+            time() > deadline && throw(Base.IOError("can't write $path: another program kept it open " *
+                "for $(REPLACE_WAIT) s (e.g. LBD Viewer or a sync client). Close it there and save again", e.code))
+            sleep(0.05)
+        end
+    end
 end
 
 function write_file(f, d::Dataset, compression::Bool)

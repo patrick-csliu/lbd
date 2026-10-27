@@ -25,4 +25,7 @@
 | "…was changed since this tab opened it" when saving | Another program, a script, or another computer wrote the file after you opened it. **Overwrite** saves your view anyway (the data stays); **Reload** shows the file as it is now. |
 | Double-clicked files don't open in a new browser tab | By default they open as tabs in the viewer page you used last. To get a new browser tab every time, choose it under **⚙**. |
 | A single number isn't plotted | Values without axes (e.g. a fitted T1) are listed with their value under **Numbers**, not drawn as a figure. |
+| "…your unsaved plot settings were dropped" | The file was written again (by your program, a script, a sync client) while you had changed its plot settings; the tab now shows the new data with the file's own view. Save a view into the file to keep it across runs. See [Files that change](folders-and-files.md#files-that-change). |
+| "The file was changed on disk, but the new version can't be read" | The file is still being written, or the program writing it stopped halfway. The tab keeps the previous version and updates when the file is written again. |
+| Saving from your program fails: "another program kept it open" (Windows) | Windows can't replace a file another program has open. Saving waits up to 3 seconds; if the file stays open (an image viewer, Excel, a sync client holding it), close it there and save again. LBD Viewer only opens a file for a moment. |
 | Port already in use with `--port` | Choose another port, or leave `--port` out to pick a free one. |

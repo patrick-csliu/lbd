@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, AxisValues, baseName, FileInfo, formatBytes, Json, JsonObject, lastDownloadWarnings, PlotSpec, RenderResult, Slice, TabState, ValueInfo } from "./api";
 import { deepMerge, isEmptyObject } from "./util";
 import { ConfirmDialog, ConfirmRequest } from "./menu";
 import { useToast } from "./toast";
 import { HelpLink } from "./help";
+import { useDiskVersion } from "./watch";
 
 interface Props {
   path: string;
@@ -19,6 +20,8 @@ interface Props {
   onStateChange?: (state: TabState) => void;
   /** Why this tab can't be saved right now (being moved, or open in another page), or null. */
   locked?: string | null;
+  /** Right-click on the file's header: the same menu as its tab. */
+  onMenu?: (e: MouseEvent) => void;
 }
 
 const COMPLEX_MODES: [string, string][] = [
@@ -39,9 +42,11 @@ const ZOOMS: [string, string][] = [
 ];
 
 const MM_TO_PX = 96 / 25.4;
+// A changed file that can't be read (still being written) is tried again for this long.
+const GIVE_UP_AFTER = 10_000;
 
 export default function FileView(props: Props) {
-  const { path, plotted, onPlot, styles, defaultStyle, styleRevision, onError, initialState, onStateChange, locked } = props;
+  const { path, plotted, onPlot, styles, defaultStyle, styleRevision, onError, initialState, onStateChange, locked, onMenu } = props;
   const toast = useToast();
   const [info, setInfo] = useState<FileInfo | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -50,12 +55,17 @@ export default function FileView(props: Props) {
   const [override, setOverride] = useState<JsonObject>(initialState?.override ?? {});
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
 
-  // Keep the App informed of the unsaved settings (they move along with the tab).
+  // Keep the App informed of the unsaved settings and the file version they were made on (they
+  // move along with the tab).
   const onStateChangeRef = useRef(onStateChange);
   onStateChangeRef.current = onStateChange;
+  const shownVersion = info ? info.version : initialState?.version;
   useEffect(() => {
-    onStateChangeRef.current?.({ spec, preset, override });
-  }, [spec, preset, override]);
+    onStateChangeRef.current?.({ spec, preset, override, version: shownVersion });
+  }, [spec, preset, override, shownVersion]);
+  // The settings as they are now, for code that runs later (a reload after a change on disk).
+  const unsavedRef = useRef({ spec, preset, override });
+  unsavedRef.current = { spec, preset, override };
   const [result, setResult] = useState<RenderResult | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -75,6 +85,96 @@ export default function FileView(props: Props) {
   useEffect(() => {
     loadInfo();
   }, [loadInfo]);
+
+  // ---- the file changed on disk (another program rewrote it; see watch.ts)
+  // The tab shows the new data by itself. Unsaved settings are dropped (they were made for the
+  // data before), with a message. Reading can fail while the file is being written: the
+  // previous version stays shown and it tries again, for up to GIVE_UP_AFTER.
+  const disk = useDiskVersion("file", path);
+  const saving = useRef(false); // our own Save view / Remove saved view: not a change from outside
+  const [diskNote, setDiskNote] = useState<{ kind: "updated" | "updating" | "gone" | "failed"; text: string } | null>(null);
+  const failing = useRef<{ version: string; since: number } | null>(null);
+  const [retry, setRetry] = useState(0);
+  // Every version this tab has shown. A check that ran before our own save answers with the
+  // version before it; that is old news, not a change.
+  const shownVersions = useRef(new Set<string>());
+  if (info?.version) shownVersions.current.add(info.version);
+
+  const dropUnsaved = useCallback(
+    (shown: FileInfo, why: string) => {
+      const { spec, preset, override } = unsavedRef.current;
+      const unsaved = Object.keys(spec).length > 0 || !isEmptyObject(override) || (preset !== null && preset !== (shown.style_name ?? null));
+      if (!unsaved) return;
+      setSpec({});
+      setPreset(null);
+      setOverride({});
+      toast(`${baseName(path)} ${why}, so your unsaved plot settings were dropped.`, "warning");
+    },
+    [path, toast],
+  );
+
+  useEffect(() => {
+    if (!info || saving.current) return;
+    if (disk.error) {
+      setDiskNote({ kind: "failed", text: `Can't check this file for changes: ${disk.error}` });
+      return;
+    }
+    if (disk.version === undefined) return; // not checked yet
+    if (disk.version === null) {
+      setDiskNote({ kind: "gone", text: "The file is gone (deleted, moved, or being written again). This shows it as it was, and updates when it is back." });
+      return;
+    }
+    if (shownVersions.current.has(disk.version)) {
+      setDiskNote((n) => (n && n.kind !== "updated" ? null : n));
+      return;
+    }
+    const version = disk.version;
+    if (failing.current?.version !== version) failing.current = null;
+    let cancelled = false;
+    let again: number | undefined;
+    api.file(path).then(
+      (fresh) => {
+        if (cancelled) return;
+        failing.current = null;
+        dropUnsaved(info, "was changed on disk and has been reloaded");
+        setInfo(fresh);
+        setDiskNote({ kind: "updated", text: `Updated ${new Date().toLocaleTimeString()}: the file was changed on disk.` });
+      },
+      (e) => {
+        if (cancelled) return;
+        failing.current ??= { version, since: Date.now() };
+        if (Date.now() - failing.current.since < GIVE_UP_AFTER) {
+          setDiskNote({ kind: "updating", text: "The file was changed on disk; reading the new version…" });
+          again = window.setTimeout(() => setRetry((n) => n + 1), 1000);
+        } else {
+          setDiskNote({
+            kind: "failed",
+            text: `The file was changed on disk, but the new version can't be read: ${(e as Error).message} ` +
+              "This shows the previous version; it updates when the file is written again.",
+          });
+        }
+      },
+    );
+    return () => {
+      cancelled = true;
+      window.clearTimeout(again);
+    };
+  }, [disk, info, retry, path, dropUnsaved]);
+
+  // A file that couldn't be opened (e.g. it was half written) is tried again when it changes.
+  useEffect(() => {
+    if (loadError && typeof disk.version === "string") loadInfo();
+  }, [disk.version]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A tab moved here from another page brings its unsaved settings; if the file changed since
+  // they were made, they no longer fit and are dropped.
+  const checkedMoved = useRef(false);
+  useEffect(() => {
+    if (!info || checkedMoved.current) return;
+    checkedMoved.current = true;
+    const madeOn = initialState?.version;
+    if (madeOn && info.version && madeOn !== info.version) dropUnsaved(info, "was changed on disk while this tab was being moved");
+  }, [info, initialState, dropUnsaved]);
 
   // Re-render whenever the view settings change (debounced; stale responses are dropped).
   // Single numbers (values without axes) aren't plotted; a file with nothing else shows a list.
@@ -143,6 +243,7 @@ export default function FileView(props: Props) {
     const { slices: _slices, ...savedSpec } = result.spec;
     void _slices;
     const newStyle = deepMerge(info.style ?? {}, override);
+    saving.current = true;
     try {
       const updated = await api.saveFilePlot(path, {
         spec: savedSpec,
@@ -178,10 +279,13 @@ export default function FileView(props: Props) {
       } else {
         onError((e as Error).message);
       }
+    } finally {
+      saving.current = false;
     }
   };
 
   const clearSaved = async () => {
+    saving.current = true;
     try {
       setInfo(await api.saveFilePlot(path, { spec: null, style: null, style_name: null }));
       setSpec({});
@@ -190,6 +294,8 @@ export default function FileView(props: Props) {
       toast("Removed the saved view from the file.");
     } catch (e) {
       onError((e as Error).message);
+    } finally {
+      saving.current = false;
     }
   };
 
@@ -214,7 +320,7 @@ export default function FileView(props: Props) {
           🔒 {locked}
         </div>
       )}
-      <div className="file-head">
+      <div className="file-head" onContextMenu={onMenu}>
         <div>
           <h1>{info.title || info.name}</h1>
           <div className="muted small path" title={info.path}>
@@ -230,6 +336,11 @@ export default function FileView(props: Props) {
           <button onClick={() => api.reveal(info.path).catch((e) => onError(e.message))}>Show in folder</button>
         </div>
       </div>
+      {diskNote && (
+        <div className={`disk-note ${diskNote.kind}`} role="status">
+          {diskNote.text}
+        </div>
+      )}
 
       {plotted && onlyNumbers && (
         <div className="numbers-only" role="status">
@@ -636,6 +747,7 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
             <SliceControl
               key={s.axis}
               path={info.path}
+              version={info.version}
               slice={s}
               onIndex={(i) => update({ index: { ...(resolved.index ?? {}), [s.axis]: i } })}
             />
@@ -763,10 +875,10 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
 
 // ---- file details ---------------------------------------------------------------------------
 
-// Axis values, fetched once per file and axis (to find the point nearest a typed value).
+// Axis values, fetched once per file version and axis (to find the point nearest a typed value).
 const axisCache = new Map<string, Promise<AxisValues>>();
-function axisValues(path: string, axis: string): Promise<AxisValues> {
-  const key = `${path}\n${axis}`;
+function axisValues(path: string, version: string | null, axis: string): Promise<AxisValues> {
+  const key = `${path}\n${version}\n${axis}`;
   if (!axisCache.has(key)) {
     const p = api.axis(path, axis);
     p.catch(() => axisCache.delete(key)); // a failure is retried next time
@@ -777,7 +889,7 @@ function axisValues(path: string, axis: string): Promise<AxisValues> {
 
 /** The position on an axis that isn't drawn: a slider, and a box to type the axis value. A typed
  *  value goes to the nearest measured point; the box then shows that point's exact value. */
-function SliceControl({ path, slice: s, onIndex }: { path: string; slice: Slice; onIndex: (i: number) => void }) {
+function SliceControl({ path, version, slice: s, onIndex }: { path: string; version: string | null; slice: Slice; onIndex: (i: number) => void }) {
   const shown = s.value === null ? "" : String(s.value);
   const [text, setText] = useState(shown);
   const [note, setNote] = useState<string | null>(null);
@@ -792,7 +904,7 @@ function SliceControl({ path, slice: s, onIndex }: { path: string; slice: Slice;
       return;
     }
     try {
-      const { values } = await axisValues(path, s.axis);
+      const { values } = await axisValues(path, version, s.axis);
       let best = -1;
       values.forEach((v, i) => {
         if (v !== null && (best < 0 || Math.abs(v - wanted) < Math.abs((values[best] as number) - wanted))) best = i;

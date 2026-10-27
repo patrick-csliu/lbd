@@ -5,6 +5,31 @@ The file format has its own version (`lbd_version`, currently 1.0).
 
 ## 1.2.0 (in development)
 
+**Changes to how things behave** (read these when upgrading)
+
+- A file written again while the viewer shows it (e.g. by a simulation you run over and over)
+  updates by itself within about two seconds. Unsaved plot settings of its tab are dropped,
+  with a message, since they were made for the data before; save a view into the file to keep
+  it across runs.
+
+**Viewer**
+
+- Files that change on disk: open tabs (data, images, style files) show the new version; the
+  Folders panel shows new and deleted files without ⟳. A file that is gone, or still being
+  written, stays shown as it was, with a note, until it can be read again. The viewer only
+  reads sizes and times to notice changes, and doesn't check while its browser tab is in the
+  background.
+- The tab row: right-click on its empty part, or the new **⋯** button at its end (always in
+  reach, however many tabs are open), for **Close all** and **Move all tabs to Page N / a new
+  browser tab**. A tab's menu also has these, plus **Show in Explorer**, **Copy path** and
+  **Rename…** for its file. Right-click on a file's name above its plot opens its tab's menu.
+
+**File format and languages**
+
+- Saving on Windows waits up to 3 seconds when another program (e.g. LBD Viewer reading the
+  previous version) has the file open, then fails with a message naming the file. Python,
+  MATLAB and Julia alike.
+
 **For developers**
 
 - Between releases every component says `X.Y.Z-dev` (Python `1.2.0.dev0`, npm `1.2.0-dev.0`),

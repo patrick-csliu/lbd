@@ -42,6 +42,8 @@ export interface TabState {
   spec: PlotSpec;
   preset: string | null;
   override: JsonObject;
+  /** The file's version these settings were made on: if the file changed since, they are dropped. */
+  version?: string | null;
 }
 
 export interface DirListing {
@@ -49,6 +51,16 @@ export interface DirListing {
   dirs: string[];
   files: { name: string; type: FileKind; size: number; mtime: number }[];
   errors: { name: string; error: string }[];
+  /** Changes when the listing changes (a file added, removed or rewritten); see watch.ts. */
+  signature: string;
+}
+
+/** /api/changes: the version of each file and the signature of each folder (null = gone), and the
+ *  paths the server refused, with the reason. */
+export interface Changes {
+  files: { [path: string]: string | null };
+  dirs: { [path: string]: string | null };
+  errors: { [path: string]: string };
 }
 
 export interface SearchResult {
@@ -295,6 +307,8 @@ export const api = {
   removeRoot: (path: string) => call<{ roots: string[] }>("DELETE", "/api/roots", undefined, { path }),
   pickFolder: () => call<{ path: string | null }>("POST", "/api/pick-folder"),
   list: (path: string) => call<DirListing>("GET", "/api/list", undefined, { path }),
+  /** What changed on disk: see watch.ts. Reads only sizes and times; never opens a file. */
+  changes: (files: string[], dirs: string[]) => call<Changes>("POST", "/api/changes", { files, dirs }),
   search: (root: string, q: string) => call<SearchResult>("GET", "/api/search", undefined, { root, q }),
   file: (path: string) => call<FileInfo>("GET", "/api/file", undefined, { path }),
   render: (path: string, spec: PlotSpec | null, preset: string | null, style: JsonObject | null, styleFile?: string | null) =>

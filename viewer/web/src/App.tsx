@@ -11,6 +11,7 @@ import { ConfirmDialog, ConfirmRequest, ContextMenu, isMenuKey, MenuAt, menuAt, 
 import { attention, PageInfo, usePage } from "./pages";
 import { docsUrl } from "./help";
 import { applyTheme } from "./theme";
+import { fileEntries, renameRequest } from "./fileActions";
 
 type Page = "data" | "styles" | "sdk";
 
@@ -76,11 +77,12 @@ async function retryOnce<T>(request: () => Promise<T>): Promise<T> {
   }
 }
 
-/** Where the tab menu is open, for which tab, and the other pages it listed when it opened. */
+/** Where the tab menu is open, for which tab (null: the bar's menu, for all tabs), and the other
+ *  pages it listed when it opened. */
 interface TabMenu {
   x: number;
   y: number;
-  path: string;
+  path: string | null;
   pages: PageEntry[];
 }
 
@@ -503,43 +505,66 @@ function Shell() {
     setActive(path);
   };
 
-  const openTabMenu = (e: MouseEvent | KeyboardEvent, path: string) => {
+  /** Open the tab menu: for one tab (`path`; right-click on it or on its file's header), or for
+   *  all tabs (null; right-click on the empty part of the bar, or its ⋯ button). */
+  const openTabMenu = (e: MouseEvent | KeyboardEvent, path: string | null) => {
     e.preventDefault();
+    e.stopPropagation();
     const { x, y } = menuAt(e, []);
     setTabMenu({ x, y, path, pages: otherPagesRef.current });
   };
 
+  const askRenameTab = useCallback(
+    (path: string) => setConfirm(renameRequest(path, (newPath) => fileRenamed(path, newPath), toast)),
+    [fileRenamed, toast],
+  );
+
   // The tab menu is built from the live page list, so an open menu follows pages that close
   // (their entry stays, disabled: "Page 2 was closed") or open. Pages are matched by id: a new
-  // page may reuse a closed page's number.
+  // page may reuse a closed page's number. Three groups: the tab (or the selected tabs), its
+  // file, and all tabs. The bar's own menu has the last group only, and the tab menu has it too,
+  // so it is always at hand, even when the tabs fill the whole bar.
   const tabMenuShown = useMemo<MenuAt | null>(() => {
-    if (!tabMenu) return null;
+    if (!tabMenu || !tabs.length) return null;
     const { path } = tabMenu;
-    // The menu acts on the selection if this tab is part of it, else on this tab alone.
-    const chosen = selected.has(path) ? tabs.map((t) => t.path).filter((p) => selected.has(p)) : tabs.some((t) => t.path === path) ? [path] : [];
-    if (!chosen.length) return null;
-    const what = chosen.length > 1 ? plural(chosen.length, "tab") : "";
-    const moving = chosen.some((p) => locks.get(p)?.transfer); // already on its way: one move at a time
+    const all = tabs.map((t) => t.path);
     const live = new Map(otherPages.map((p) => [p.page, p]));
     const listed = [...tabMenu.pages.filter((p) => !live.has(p.page)), ...otherPages].sort((a, b) => a.number - b.number);
+    /** "Move … to Page N" for each other page, and "… to a new browser tab". */
+    const moveEntries = (chosen: string[], what: string): MenuEntry[] => {
+      const moving = chosen.some((p) => locks.get(p)?.transfer); // already on its way: one move at a time
+      return [
+        ...listed.map((o): MenuEntry =>
+          live.has(o.page)
+            ? {
+                label: `Move ${what ? `${what} ` : ""}to Page ${o.number}${o.files.length ? ` (${o.files.map(baseName).slice(0, 2).join(", ")}${o.files.length > 2 ? ", …" : ""})` : ""}`,
+                onClick: () => moveTabs(chosen, o),
+                disabled: moving,
+              }
+            : { label: `Page ${o.number} was closed`, onClick: () => undefined, disabled: true },
+        ),
+        { label: `Move ${what ? `${what} ` : ""}to a new browser tab`, onClick: () => moveTabs(chosen, null), disabled: moving },
+      ];
+    };
+    const allTabs: MenuEntry[] = [
+      { label: "Close all", onClick: () => closeTabs(all) },
+      ...moveEntries(all, all.length > 1 ? "all tabs" : "the tab"),
+    ];
+    if (path === null) return { x: tabMenu.x, y: tabMenu.y, items: allTabs };
+
+    // The menu acts on the selection if this tab is part of it, else on this tab alone.
+    const chosen = selected.has(path) ? all.filter((p) => selected.has(p)) : all.includes(path) ? [path] : [];
+    if (!chosen.length) return null;
+    const what = chosen.length > 1 ? plural(chosen.length, "tab") : "";
     const items: MenuEntry[] = [
       { label: chosen.length > 1 ? `Close ${what}` : "Close", onClick: () => closeTabs(chosen) },
-      { label: "Close others", onClick: () => closeTabs(tabs.map((t) => t.path).filter((p) => !chosen.includes(p))) },
-      { label: "Close all", onClick: () => closeTabs(tabs.map((t) => t.path)) },
-      "-",
-      ...listed.map((o): MenuEntry =>
-        live.has(o.page)
-          ? {
-              label: `Move ${what ? `${what} ` : ""}to Page ${o.number}${o.files.length ? ` (${o.files.map(baseName).slice(0, 2).join(", ")}${o.files.length > 2 ? ", …" : ""})` : ""}`,
-              onClick: () => moveTabs(chosen, o),
-              disabled: moving,
-            }
-          : { label: `Page ${o.number} was closed`, onClick: () => undefined, disabled: true },
-      ),
-      { label: `Move ${what ? `${what} ` : ""}to a new browser tab`, onClick: () => moveTabs(chosen, null), disabled: moving },
+      { label: "Close others", onClick: () => closeTabs(all.filter((p) => !chosen.includes(p))), disabled: chosen.length === all.length },
+      ...moveEntries(chosen, what),
     ];
+    if (chosen.length === 1) items.push("-", ...fileEntries(path, state?.platform ?? "", toast, () => askRenameTab(path)));
+    if (chosen.length < all.length) items.push("-", ...allTabs); // else the first group already does it
     return { x: tabMenu.x, y: tabMenu.y, items };
-  }, [tabMenu, otherPages, tabs, selected, locks, closeTabs, moveTabs]);
+  }, [tabMenu, otherPages, tabs, selected, locks, closeTabs, moveTabs, state?.platform, toast, askRenameTab]);
 
   const toggleFolders = () => {
     setFoldersShown((shown) => {
@@ -743,7 +768,9 @@ function Shell() {
           />
         )}
         <main className="main">
-          <div className="tabs" role="tablist">
+          {/* The open-files bar. Right-click on a tab: that tab's menu; anywhere else on the bar,
+              or the ⋯ button (always visible, outside the part that scrolls): the menu for all tabs. */}
+          <div className="tabbar" onContextMenu={(e) => tabs.length > 0 && openTabMenu(e, null)}>
             <button
               className="folders-toggle"
               aria-pressed={foldersShown}
@@ -752,38 +779,51 @@ function Shell() {
             >
               ◧ Folders
             </button>
-            {tabs.map((t) => {
-              const lock = locks.get(t.path);
-              return (
-                <div
-                  key={t.path}
-                  className={
-                    "tab" +
-                    (t.path === active ? " active" : "") +
-                    (t.pinned ? "" : " preview") +
-                    (selected.has(t.path) ? " selected" : "") +
-                    (lock ? " locked" : "")
-                  }
-                  title={`${t.path}${lock ? `\n${lock.reason}` : ""}\nCtrl+click: select several · Right-click: close, move to another page`}
-                  onContextMenu={(e) => openTabMenu(e, t.path)}
-                  onKeyDown={(e) => isMenuKey(e) && openTabMenu(e, t.path)}
-                >
-                  <button
-                    role="tab"
-                    aria-selected={t.path === active}
-                    className="tab-label"
-                    onClick={(e) => clickTab(e, t.path)}
-                    onDoubleClick={() => openFile(t.path)}
+            <div className="tabs" role="tablist">
+              {tabs.map((t) => {
+                const lock = locks.get(t.path);
+                return (
+                  <div
+                    key={t.path}
+                    className={
+                      "tab" +
+                      (t.path === active ? " active" : "") +
+                      (t.pinned ? "" : " preview") +
+                      (selected.has(t.path) ? " selected" : "") +
+                      (lock ? " locked" : "")
+                    }
+                    title={`${t.path}${lock ? `\n${lock.reason}` : ""}\nCtrl+click: select several · Right-click: close, move to another page`}
+                    onContextMenu={(e) => openTabMenu(e, t.path)}
+                    onKeyDown={(e) => isMenuKey(e) && openTabMenu(e, t.path)}
                   >
-                    {lock ? (lock.transfer ? "⇢ " : "🔒 ") : ""}
-                    {baseName(t.path)}
-                  </button>
-                  <button className="tab-close" aria-label={`Close ${baseName(t.path)}`} onClick={() => closeTabs([t.path])}>
-                    ×
-                  </button>
-                </div>
-              );
-            })}
+                    <button
+                      role="tab"
+                      aria-selected={t.path === active}
+                      className="tab-label"
+                      onClick={(e) => clickTab(e, t.path)}
+                      onDoubleClick={() => openFile(t.path)}
+                    >
+                      {lock ? (lock.transfer ? "⇢ " : "🔒 ") : ""}
+                      {baseName(t.path)}
+                    </button>
+                    <button className="tab-close" aria-label={`Close ${baseName(t.path)}`} onClick={() => closeTabs([t.path])}>
+                      ×
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            {tabs.length > 0 && (
+              <button
+                className="tabs-more"
+                title="All tabs: close, move to another page"
+                aria-label="Menu for all tabs"
+                aria-haspopup="menu"
+                onClick={(e) => openTabMenu(e, null)}
+              >
+                ⋯
+              </button>
+            )}
           </div>
           {tabMenuShown && <ContextMenu menu={tabMenuShown} onClose={closeTabMenu} />}
           {confirm && <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />}
@@ -814,6 +854,7 @@ function Shell() {
                     onError={(m) => toast(m, "error")}
                     initialState={initialStates.current.get(t.path)}
                     onStateChange={(s) => tabStates.current.set(t.path, s)}
+                    onMenu={(e) => openTabMenu(e, t.path)}
                     locked={locks.get(t.path)?.reason ?? null}
                   />
                 )}

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
@@ -63,7 +65,16 @@ def list_dir(path: Path) -> Dict[str, Any]:
                 errors.append({"name": e.name, "error": err.strerror or str(err)})
     dirs.sort(key=str.lower)
     files.sort(key=lambda f: f["name"].lower())
-    return {"path": str(path), "dirs": dirs, "files": files, "errors": errors}
+    listing = {"path": str(path), "dirs": dirs, "files": files, "errors": errors}
+    return {**listing, "signature": signature(listing)}
+
+
+def signature(listing: Dict[str, Any]) -> str:
+    """A short text that changes whenever the listing does: a file or folder added, removed or
+    renamed, or a file rewritten (size or time). The pages compare it to see that a folder changed
+    (watch.ts in the web UI)."""
+    text = json.dumps([listing["dirs"], listing["files"], listing["errors"]], sort_keys=True)
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()[:16]
 
 
 def walk_files(root: Path, errors: Optional[List[Dict[str, str]]] = None) -> Iterator[Path]:

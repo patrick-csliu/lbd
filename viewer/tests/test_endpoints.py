@@ -82,6 +82,36 @@ def test_list_and_search_errors(client, data_dir):
     assert body["truncated"] is False and body["errors"] == [] and len(body["results"]) == 3
 
 
+def test_changes_reports_versions_and_signatures(client, data_dir, tmp_path):
+    """What the pages ask every few seconds: a rewritten file gets a new version, a folder a new
+    signature when a file is added or rewritten, a removed one None; a path outside the folders is
+    an error entry, never left out."""
+    curve, sub = data_dir / "curve.lbd", data_dir / "sub"
+    outside = tmp_path / "elsewhere.lbd"
+    ask = lambda: client.post("/api/changes", json={  # noqa: E731
+        "files": [str(curve), str(data_dir / "gone.lbd"), str(outside)], "dirs": [str(data_dir), str(sub)]}).json()
+
+    before = ask()
+    assert before["files"][str(curve)] == client.get("/api/file", params={"path": str(curve)}).json()["version"]
+    assert before["files"][str(data_dir / "gone.lbd")] is None
+    assert before["dirs"][str(data_dir)] == client.get("/api/list", params={"path": str(data_dir)}).json()["signature"]
+    assert "not inside one of your folders" in before["errors"][str(outside)]
+    assert str(outside) not in before["files"]
+
+    d = lbd.load(curve)
+    d.title = "rewritten"
+    d.save(curve)                                   # rewritten: new version, its folder changes too
+    lbd.load(curve).save(sub / "new.lbd")           # a new file in a subfolder
+    after = ask()
+    assert after["files"][str(curve)] != before["files"][str(curve)]
+    assert after["dirs"][str(data_dir)] != before["dirs"][str(data_dir)]
+    assert after["dirs"][str(sub)] != before["dirs"][str(sub)]
+    assert ask() == after                           # nothing changed: the same answer
+
+    curve.unlink()
+    assert ask()["files"][str(curve)] is None
+
+
 @pytest.fixture()
 def no_tkinter(monkeypatch):
     """The tkinter dialogs (Windows, Linux) on a system without tkinter."""

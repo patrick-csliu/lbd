@@ -7,7 +7,7 @@ The folder panel lists folders you choose, and inside them every subfolder and t
 ![The folder panel with a file's right-click menu](img/folders.png){ width="560" }
 
 1. **Filter files in all folders…:** type part of a file name to find it in every listed folder.
-2. **⊟** closes all folders, **⟳** rereads them (to see new files), **+ Add folder** adds one.
+2. **⊟** closes all folders, **⟳** rereads them, **+ Add folder** adds one.
 3. **A folder you added.** Its **×** removes it from the list (no files are deleted).
 4. **A subfolder:** click to open or close it.
 5. **A file.** The icon shows its kind (below). Click to look at it, double-click to plot it.
@@ -31,7 +31,7 @@ Other files are not shown.
 | Close all folders | The **⊟** (collapse all) button. |
 | Make the panel wider | Drag its right edge. Double-click the edge to fit the longest name shown. The width is remembered in this browser. With the keyboard: focus the edge (Tab), then ← / →; Home resets it. |
 | Find a file | Type in **Filter files in all folders…**. It searches every subfolder of every listed folder for file paths containing the text, ignoring case. At most 500 matches are shown per folder. |
-| See new files | The **⟳** (refresh) button rereads the folders. |
+| See new files | Nothing to do: new, rewritten and deleted files show up within a few seconds (see [Files that change](#files-that-change)). **⟳** rereads the folders at once. |
 | Open a file in a new browser tab | Ctrl+click it (⌘+click on macOS), middle-click it, or right-click → **Open in new browser tab**. |
 | Hide the panel | **◧ Folders** at the left of the tab row, for more room for plots; click it again to show the panel. Each browser tab remembers its own choice. |
 
@@ -82,12 +82,17 @@ Click a tab to switch to it, double-click a preview tab to keep it, and close a 
 a quick way to compare them.
 
 To act on several tabs, select them: Ctrl+click (⌘+click on macOS) adds or removes a tab,
-Shift+click selects a range. Right-click a tab for:
-- **Close**, **Close others**, **Close all**;
-- **Move to Page N**, with the files that page already has, or **Move to a new browser tab**:
-  see [Several browser tabs](#several-browser-tabs).
+Shift+click selects a range. Right-click a tab (or the file's name above its plot) for:
+- the tab: **Close**, **Close others**, **Move to Page N** with the files that page already has,
+  **Move to a new browser tab** (see [Several browser tabs](#several-browser-tabs));
+- its file: **Show in Explorer**, **Copy path**, **Rename…**;
+- all tabs: **Close all**, **Move all tabs to Page N**, **Move all tabs to a new browser tab**.
 
-The menu acts on the selected tabs if you right-click one of them, otherwise on that tab alone.
+The tab part acts on the selected tabs if you right-click one of them, otherwise on that tab
+alone.
+
+The menu for all tabs is also on the empty part of the tab row (right-click) and on the **⋯**
+button at its right end, which stays in place however many tabs are open.
 
 Ctrl+click means *select* on a tab, but *open in a new browser tab* on a file in the Folders
 panel.
@@ -117,6 +122,9 @@ and a file from Explorer that is already open is shown in its page.
 2. **The tab** that was right-clicked (or the selected tabs).
 3. **Move to Page 2:** the other open pages are listed with the files they already have.
 4. **Move to a new browser tab** opens a new page with the tab in it.
+5. **The tab's file:** show it in Explorer, copy its path, rename it.
+6. **All tabs:** close them, or move them all to another page or a new browser tab. The same
+   menu opens from the empty part of the tab row and from the **⋯** button at its end.
 
 **Moving tabs.** Right-click a tab → **Move to Page N** or **Move to a new browser tab**. The
 tabs move with their unsaved settings. While they are moving, they show ⇢ and can't be closed,
@@ -137,6 +145,33 @@ added or removed folders and changed style presets show in every page.
 
 A page that was asleep for a while (a closed laptop) registers again when it wakes up. Its
 tabs stay, except files another page opened meanwhile: they show 🔒 *now open in Page N*.
+
+## Files that change
+
+When a program writes a file again while the viewer shows it, for example a simulation you run
+over and over while fixing it, the viewer shows the new version by itself, within about two
+seconds. You don't need to close and open the file.
+
+- **An open tab** reads the file again and redraws its plot. Above the plot it says *Updated
+  14:32:05*.
+- **Unsaved plot settings are dropped**, with a message, because they were made for the data
+  before. To keep a view across runs, save it into the file (**Save this view to the file**) or
+  have your program write it, then every new version opens like that.
+- **The Folders panel** shows new files, and removes deleted ones, in the folders that are open.
+- **A file that is gone** (deleted, or being written again) stays on screen as it was, with a
+  note, and updates when it is back.
+- **A file that can't be read yet** (still being written) keeps showing the previous version
+  while the viewer tries again. If it still can't be read after about 10 seconds, the note
+  says why; it updates when the file is written again.
+- **A tab moved to another page** while its file changed drops its unsaved settings the same way.
+
+The viewer only looks at each file's size and time to notice a change; it never keeps a file
+open. While a browser tab is in the background, it doesn't check; it catches up as soon as you
+come back to it. Images and style files update the same way.
+
+The language modules write a file under a temporary name and then put it in place, so the
+viewer never sees half a file from them. On Windows, if the viewer happens to be reading the
+file at that moment, saving waits for it (up to 3 seconds).
 
 ## File details
 

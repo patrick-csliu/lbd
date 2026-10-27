@@ -161,7 +161,19 @@ classdef Dataset < handle
             tmp = path + ".tmp-" + string(feature('getpid'));
             try
                 obj.writeFile(tmp, opts.Compression);
-                movefile(tmp, path, 'f');
+                % On Windows the file can't be replaced while another program has it open, even
+                % for a moment (LBD Viewer reading the new version, a sync client, an antivirus
+                % scan): try again for up to 3 s.
+                started = tic;
+                while true
+                    [ok, msg] = movefile(tmp, path, 'f');
+                    if ok, break; end
+                    if ~ispc || toc(started) > 3
+                        error('lbd:write', ['can''t write %s: %s. If another program has it open ' ...
+                            '(e.g. LBD Viewer or a sync client), close it there and save again.'], path, msg);
+                    end
+                    pause(0.05);
+                end
             catch err
                 if isfile(tmp), delete(tmp); end
                 rethrow(err);

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, baseName, StyleFileInfo } from "./api";
 import { useToast } from "./toast";
+import { useDiskVersion, useLatestVersion } from "./watch";
 
 interface Props {
   path: string;
@@ -17,13 +18,16 @@ export default function StyleFileView({ path, previewPath, onImported, onError }
   const [preview, setPreview] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [showJson, setShowJson] = useState(false);
+  // Read again when the style file changes on disk (while it is gone, the last one stays).
+  const disk = useDiskVersion("file", path);
+  const version = useLatestVersion(disk.version);
 
   useEffect(() => {
     api
       .styleFile(path)
       .then((i) => (setInfo(i), setError(null)))
       .catch((e) => setError((e as Error).message));
-  }, [path]);
+  }, [path, version]);
 
   useEffect(() => {
     if (!previewPath) return;
@@ -40,7 +44,7 @@ export default function StyleFileView({ path, previewPath, onImported, onError }
       cancelled = true;
       if (made) URL.revokeObjectURL(made);
     };
-  }, [path, previewPath]);
+  }, [path, previewPath, version]);
 
   const importIt = async () => {
     if (!info) return;

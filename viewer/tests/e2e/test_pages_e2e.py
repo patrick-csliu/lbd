@@ -125,6 +125,9 @@ def test_rename_and_trash_in_one_page_update_the_page_with_the_file(viewer, new_
 
 def test_saving_a_view_of_a_file_changed_since_it_was_opened_asks_first(viewer, new_page):
     one = new_page()
+    # The page notices a change on disk by itself (test_live_update_e2e.py). Here it hasn't yet:
+    # saving must still ask first.
+    one.route("**/api/changes", lambda route: route.abort())
     open_file(one, "a.lbd")
     plot_type(one).select_option("scatter")
     path = viewer.path("a.lbd")

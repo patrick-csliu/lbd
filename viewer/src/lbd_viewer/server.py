@@ -235,6 +235,11 @@ class DeliverBody(_Body):
     dirs: List[str] = []
 
 
+class ChangesBody(_Body):
+    files: List[str] = []                 # the files a page shows
+    dirs: List[str] = []                  # the folders it lists
+
+
 def canonical(path: str) -> str:
     """One spelling per file, so the page rules never see one file as two."""
     return str(Path(path).expanduser().resolve())
@@ -542,6 +547,29 @@ def create_app(state: AppState) -> FastAPI:
         if not p.is_dir():
             raise HTTPException(404, f"not a folder: {path}")
         return scan.list_dir(p)
+
+    @app.post("/api/changes")
+    def changes(body: ChangesBody):
+        """What changed on disk, for pages that show files and folders (watch.ts): each file's
+        version and each folder's listing signature, None when it is gone. Only sizes and times
+        are read; no file is opened, so a program writing it is never in the way. A path that
+        isn't allowed is listed under "errors" with the reason."""
+        out: Dict[str, Any] = {"files": {}, "dirs": {}, "errors": {}}
+        for kind, paths in (("files", body.files), ("dirs", body.dirs)):
+            for path in paths:
+                try:
+                    p = state.check_allowed(path)
+                    if kind == "files":
+                        out[kind][path] = file_version(p) if p.is_file() else None
+                    else:
+                        out[kind][path] = scan.list_dir(p)["signature"] if p.is_dir() else None
+                except HTTPException as e:
+                    out["errors"][path] = e.detail
+                except FileNotFoundError:          # removed between the check and the read
+                    out[kind][path] = None
+                except OSError as e:
+                    out["errors"][path] = e.strerror or str(e)
+        return out
 
     @app.get("/api/search")
     def search(root: str = Query(...), q: str = Query("")):

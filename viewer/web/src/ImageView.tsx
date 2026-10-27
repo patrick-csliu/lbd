@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, formatBytes, ImageInfo } from "./api";
+import { useDiskVersion, useLatestVersion } from "./watch";
 
 const MM_TO_PX = 96 / 25.4;
 
@@ -9,13 +10,16 @@ export default function ImageView({ path, onError }: { path: string; onError: (m
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [zoom, setZoom] = useState("fit");
+  // Shown again when the image changes on disk (while it is gone, the last one stays).
+  const disk = useDiskVersion("file", path);
+  const version = useLatestVersion(disk.version);
 
   useEffect(() => {
     let cancelled = false;
     let made: string | null = null;
     api
       .imageInfo(path)
-      .then((i) => !cancelled && setInfo(i))
+      .then((i) => !cancelled && (setInfo(i), setError(null)))
       .catch((e) => !cancelled && setError((e as Error).message));
     api
       .imageUrl(path)
@@ -28,7 +32,7 @@ export default function ImageView({ path, onError }: { path: string; onError: (m
       cancelled = true;
       if (made) URL.revokeObjectURL(made);
     };
-  }, [path]);
+  }, [path, version]);
 
   if (error) {
     return (

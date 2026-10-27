@@ -1,4 +1,7 @@
 import json
+import sys
+import threading
+import time
 import warnings
 
 import h5py
@@ -35,6 +38,23 @@ def test_roundtrip_values_and_axes(tmp_path):
     assert r["S21"].data.dtype == np.complex128
     np.testing.assert_array_equal(r["S21"].data, d["S21"].data)
     assert r["mag"].label == "|S21|"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="only Windows refuses to replace an open file")
+def test_save_waits_for_a_file_another_program_has_open(tmp_path, monkeypatch):
+    """A viewer reading the file while a simulation saves it again: the save waits, then goes on."""
+    p = make_sweep().save(tmp_path / "sweep.lbd")
+    reader = open(p, "rb")                      # like LBD Viewer reading the previous version
+    threading.Timer(0.5, reader.close).start()
+    t0 = time.monotonic()
+    make_sweep().save(p)
+    assert time.monotonic() - t0 >= 0.4 and lbd.info(p).title == "Resonator power sweep"
+    assert not list(tmp_path.glob("*.tmp-*"))  # no leftover temporary file
+
+    monkeypatch.setattr(lbd.io, "REPLACE_WAIT", 0.3)
+    with open(p, "rb"), pytest.raises(PermissionError, match="another program kept it open"):
+        make_sweep().save(p)
+    assert not list(tmp_path.glob("*.tmp-*"))
 
 
 def test_file_layout_matches_spec(tmp_path):
