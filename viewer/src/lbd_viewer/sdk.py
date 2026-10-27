@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import lbd
 
-from . import __version__
+from . import VERSION
 
 REPO_ROOT = Path(__file__).resolve().parents[3]  # viewer/src/lbd_viewer -> repo
 _PLACEHOLDER_RE = re.compile(r"\{(path|match|version)\}")
@@ -146,7 +146,7 @@ def languages() -> List[Dict[str, Any]]:
 def sdk_info() -> Dict[str, Any]:
     base, where = languages_dir()
     return {
-        "version": __version__,
+        "version": VERSION,
         "lbd_version": lbd.FORMAT_VERSION,
         "bundled": where == "sdk",
         "sdk_dir": str(base) if where == "sdk" else None,

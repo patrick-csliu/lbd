@@ -46,7 +46,8 @@ if sys.platform == "darwin":
     sys.path.insert(0, str(ROOT / "scripts"))
     from check_versions import release_version
 
-    VERSION = release_version()
+    # macOS wants numbers only in the bundle version; a development build says "-dev" in the app.
+    VERSION = release_version("number")
     # The oldest macOS the app runs on. scripts/build_macos.sh checks that no bundled library
     # needs a newer one.
     MACOS_MIN = "14.0"   # measured by the first release build (1.0.0): bundled libraries need 14

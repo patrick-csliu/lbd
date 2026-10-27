@@ -43,7 +43,7 @@ def remove_staged() -> None:
 
 
 def build(out: Path, prebuilt: List[str]) -> List[Path]:
-    version = release_version()
+    version = release_version("python")   # wheel names use the Python spelling (1.2.0.dev0)
     out.mkdir(parents=True, exist_ok=True)
     remove_staged()   # leftovers of an interrupted run
     try:

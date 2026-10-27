@@ -3,8 +3,10 @@
 ;   ISCC /DAppVersion=0.1.0 /DDistDir=<out>\dist\LBDViewer /O<out> packaging\windows\LBDViewer.iss
 
 #ifndef AppVersion
-  #error Pass /DAppVersion=x.y.z
+  #error Pass /DAppVersion=x.y.z (or x.y.z-dev)
 #endif
+; The Windows file version takes numbers only: 1.2.0-dev -> 1.2.0.
+#define AppNumber Copy(AppVersion, 1, Pos("-", AppVersion + "-") - 1)
 #ifndef DistDir
   #error Pass /DDistDir=<folder containing lbd-view.exe>
 #endif
@@ -14,6 +16,7 @@
 AppId={{99E94BF7-613F-40EE-9E44-A0E148634E8E}
 AppName=LBD Viewer
 AppVersion={#AppVersion}
+VersionInfoVersion={#AppNumber}
 AppPublisher=Patrick Liu
 DefaultDirName={localappdata}\Programs\LBDViewer
 DisableDirPage=auto

@@ -138,19 +138,22 @@ def test_check_versions_on_the_repository(load_module, capsys):
     cv = load_module("scripts/check_versions.py")
     assert cv.main() == 0
     version = capsys.readouterr().out.strip()
-    assert re.fullmatch(r"\d+\.\d+\.\d+", version) and cv.release_version() == version
+    assert re.fullmatch(r"\d+\.\d+\.\d+(-dev)?", version) and cv.release_version() == version
     assert cv.spec_version() == "1.0"
 
 
 def test_check_versions_reports_a_mismatch(load_module, monkeypatch, capsys):
     cv = load_module("scripts/check_versions.py")
-    monkeypatch.setattr(cv, "collect", lambda: ({"a": "1.0.0", "b": "1.0.1", "c": None}, {"x": "1.0"}))
+    names = [where for where, _, _ in cv.version_locations()]
+    release = dict.fromkeys(names, "1.0.0")
+    release[names[0]], release[names[1]] = "1.0.1", None
+    monkeypatch.setattr(cv, "collect", lambda repo=None: (release, {"x": "1.0"}))
     assert cv.main() == 1
     err = capsys.readouterr().err
     assert "1.0.1" in err and "None" in err
     with pytest.raises(cv.VersionError, match="differ"):
         cv.release_version()
-    monkeypatch.setattr(cv, "collect", lambda: ({"a": "1"}, {"x": "9.9"}))
+    monkeypatch.setattr(cv, "collect", lambda repo=None: (dict.fromkeys(names, "1.0.0"), {"x": "9.9"}))
     assert cv.main() == 1 and "format versions differ" in capsys.readouterr().err
 
 
@@ -191,7 +194,7 @@ def test_on_page_markdown_replaces_only_outside_code(hooks):
 def test_on_config_sets_the_version(hooks):
     config = {"site_name": "LBD", "extra": {}}
     hooks.on_config(config)
-    assert re.fullmatch(r"LBD \d+\.\d+\.\d+", config["site_name"]) and config["extra"]["version"]
+    assert re.fullmatch(r"LBD \d+\.\d+\.\d+(-dev)?", config["site_name"]) and config["extra"]["version"]
 
 
 def test_release_version_mismatch_warns_and_shows_dev(hooks, monkeypatch, caplog):

@@ -13,14 +13,22 @@ FILES = ["CHANGELOG.md", "uv.lock", "viewer/pyproject.toml", "viewer/src/lbd_vie
          "viewer/web/package.json", "viewer/web/package-lock.json", "spec/LBD-v1.md"]
 
 
+# The copy's version, whatever the repository's is right now (a release or X.Y.Z-dev).
+CURRENT = "1.1.0"
+HIGHER = "1.2.0"
+
+
 @pytest.fixture()
-def repo(tmp_path):
-    """A copy of the files that carry the version (the CHANGELOG's top section is unreleased)."""
+def repo(tmp_path, bump):
+    """A copy of the files that carry the version, all set to CURRENT (the CHANGELOG's top section
+    is unreleased)."""
     for rel in FILES:
         (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(REPO / rel, tmp_path / rel)
     shutil.copytree(REPO / "languages", tmp_path / "languages",
                     ignore=shutil.ignore_patterns("__pycache__", "tests", "test", "crosslang"))
+    for where, path, pattern in bump.version_locations(tmp_path):
+        bump.write(path, bump.set_version(bump.read(path), pattern, CURRENT, where))
     # A CHANGELOG of its own, so the tests don't depend on what the real one says right now.
     (tmp_path / "CHANGELOG.md").write_text(
         "# Changelog\n\n## Unreleased\n\n- a change\n\n## 0.9.0 (2026-01-01)\n\n- older\n", encoding="utf-8")
@@ -38,24 +46,58 @@ def notes(load_module):
 
 
 @pytest.fixture(scope="module")
-def current(load_module):
-    """The repository's version now, e.g. "0.1.0"."""
-    return load_module("scripts/check_versions.py").release_version()
+def versions(load_module):
+    return load_module("scripts/check_versions.py")
 
 
-@pytest.fixture(scope="module")
-def higher(current):
-    """A version above the current one, e.g. "0.2.0"."""
-    major, minor, _ = (int(n) for n in current.split("."))
-    return f"{major}.{minor + 1}.0"
+@pytest.fixture()
+def current():
+    return CURRENT
+
+
+@pytest.fixture()
+def higher():
+    return HIGHER
+
+
+# ---- check_versions.py --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("text, form, expected", [
+    ("1.2.0", "python", (1, 2, 0, False)),
+    ("1.2.0.dev0", "python", (1, 2, 0, True)),
+    ("1.2.0-dev.0", "npm", (1, 2, 0, True)),
+    ("1.2.0-dev", "text", (1, 2, 0, True)),
+    ("1.2.0-dev", "python", None),        # each file must use its own spelling
+    ("1.2.0.dev0", "text", None),
+    ("1.2.0rc1", "python", None),
+    ("1.2", "text", None),
+])
+def test_parse_version_forms(versions, text, form, expected):
+    v = versions.parse_version(text, form)
+    assert (tuple(v) if v else None) == expected
+
+
+def test_version_spellings_and_order(versions):
+    dev = versions.Version(1, 2, 0, True)
+    assert [dev.spell(f) for f in ("python", "npm", "text", "number")] == ["1.2.0.dev0", "1.2.0-dev.0", "1.2.0-dev", "1.2.0"]
+    assert str(dev) == "1.2.0-dev"
+    assert versions.Version(1, 1, 0).order() < dev.order() < versions.Version(1, 2, 0).order()
+
+
+def test_check_versions_names_a_file_with_the_wrong_spelling(versions, bump, repo):
+    init = repo / "viewer" / "src" / "lbd_viewer" / "__init__.py"
+    init.write_text(init.read_text(encoding="utf-8").replace(f'"{CURRENT}"', f'"{CURRENT}-dev"'), encoding="utf-8")
+    with pytest.raises(versions.VersionError, match=r"lbd_viewer/__init__.py  \(not a version as python files write it\)"):
+        bump.the_version(repo)
 
 
 # ---- bump_version.py ----------------------------------------------------------------------------
 
 
-def test_bump_sets_every_version_and_dates_the_changelog(bump, repo, capsys, higher):
+def test_bump_sets_every_version_and_dates_the_changelog(bump, versions, repo, capsys, higher):
     assert bump.main([higher], repo=repo, today="2026-11-03") == 0
-    release, _ = bump.collect(repo)
+    release, _ = versions.collect(repo)
     assert set(release.values()) == {higher} and len(release) >= 12   # every place, lock files too
     changelog = (repo / "CHANGELOG.md").read_text(encoding="utf-8")
     assert f"## {higher} (2026-11-03)\n\n- a change" in changelog and "## Unreleased" not in changelog
@@ -115,6 +157,39 @@ def test_bump_refuses_when_files_disagree(bump, repo, capsys, current, higher):
     assert "don't agree" in capsys.readouterr().err
 
 
+def test_bump_dev_writes_each_spelling_and_starts_the_changelog(bump, versions, repo, capsys, higher):
+    assert bump.main([higher, "--dev"], repo=repo) == 0
+    assert str(bump.the_version(repo)) == f"{higher}-dev"
+    release, _ = versions.collect(repo)
+    assert release["uv.lock (lbd)"] == f"{higher}.dev0"
+    assert release["viewer/web/package.json"] == f"{higher}-dev.0"
+    assert release["languages/julia/Project.toml"] == f"{higher}-dev"
+    changelog = (repo / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert changelog.startswith(f"# Changelog\n\n## {higher} (in development)\n\n- a change")   # "Unreleased" renamed
+    assert "can't be released" in capsys.readouterr().out
+
+
+def test_bump_dev_then_release(bump, repo, capsys, higher):
+    changelog = repo / "CHANGELOG.md"
+    changelog.write_text("# Changelog\n\n## 0.9.0 (2026-01-01)\n\n- older\n", encoding="utf-8")
+    assert bump.main([higher, "--dev"], repo=repo) == 0
+    assert bump.main([higher, "--dev"], repo=repo) == 0        # again: the section is kept, not doubled
+    text = changelog.read_text(encoding="utf-8")
+    assert text.count(f"## {higher} (in development)") == 1
+    changelog.write_text(text.replace("(in development)\n", "(in development)\n\n- a change\n"), encoding="utf-8")
+    assert bump.main([higher], repo=repo, today="2026-11-03") == 0
+    assert str(bump.the_version(repo)) == higher
+    assert f"## {higher} (2026-11-03)\n\n- a change" in changelog.read_text(encoding="utf-8")
+    # A released version can't go back to development.
+    assert bump.main([higher, "--dev"], repo=repo) == 1
+    assert "lower than the current version" in capsys.readouterr().err
+
+
+def test_bump_refuses_a_dev_spelling_as_the_argument(bump, repo, capsys, higher):
+    assert bump.main([f"{higher}-dev"], repo=repo) == 1
+    assert "add --dev" in capsys.readouterr().err
+
+
 # ---- release_notes.py ---------------------------------------------------------------------------
 
 CHANGELOG = """# Changelog
@@ -160,6 +235,16 @@ def test_release_notes_main_writes_utf8(notes, tmp_path, capfdbinary):
     assert notes.main(["0.2.0"], repo=tmp_path) == 0
     assert "≥".encode("utf-8") in capfdbinary.readouterr().out
     assert notes.main(["0.9.9"], repo=tmp_path) == 1
+
+
+def test_release_notes_of_a_dev_version(notes, tmp_path, capfdbinary):
+    """A trial build of 0.3.0-dev shows the section in development; a release of it is refused."""
+    (tmp_path / "CHANGELOG.md").write_text(CHANGELOG, encoding="utf-8")
+    assert notes.main(["0.3.0-dev", "--allow-unreleased"], repo=tmp_path) == 0
+    out = capfdbinary.readouterr()
+    assert out.out == b"- next\n"
+    assert notes.main(["0.3.0-dev"], repo=tmp_path) == 1
+    assert b"development version; it can't be released" in capfdbinary.readouterr().err
 
 
 # ---- smoke_test_app.py --------------------------------------------------------------------------
@@ -209,9 +294,10 @@ def test_build_wheels_always_removes_the_staged_folders(load_module, tmp_path, m
     assert ["npm", "ci"] in steps
 
 
-def test_build_wheels_checks_the_viewer_wheel(load_module, tmp_path, monkeypatch, current):
+def test_build_wheels_checks_the_viewer_wheel(load_module, tmp_path, monkeypatch, versions):
     import zipfile
 
+    current = versions.release_version("python")     # wheel names: 1.2.0.dev0 for 1.2.0-dev
     bw = load_module("scripts/build_wheels.py")
     monkeypatch.setattr(bw, "STAGED", [])
     out = tmp_path / "out"

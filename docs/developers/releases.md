@@ -8,7 +8,7 @@ public before that click.
 | Step | Who | What |
 |---|---|---|
 | 1. Write the notes | you | Every change has a line in `CHANGELOG.md` under the top heading, `## Unreleased` (or `## <version> (in development)`). If the viewer's look changed, redo the documentation's screenshots: `uv run python scripts/make_screenshots.py` (on Windows, with Chromium for Playwright), look at them, and commit them. `tests/scripts/test_screenshots.py` checks that every shot is used and every image exists. |
-| 2. Set the version | you | `uv run python scripts/bump_version.py 0.2.0`: writes the version into every place `check_versions.py` reads (the viewer, each language's `[[version]]` files, `uv.lock`, `package-lock.json`) and heads the CHANGELOG section `## 0.2.0 (<date>)`. Refuses a lower or malformed version and a missing or empty section. `--dry-run` shows the changes only. |
+| 2. Set the version | you | `uv run python scripts/bump_version.py 0.2.0` (also from `0.2.0-dev`): writes the version into every place `check_versions.py` reads (the viewer, each language's `[[version]]` files, `uv.lock`, `package-lock.json`) and heads the CHANGELOG section `## 0.2.0 (<date>)`. Refuses a lower or malformed version and a missing or empty section. `--dry-run` shows the changes only. |
 | 3. Test | you | `uv run python scripts/test_all.py` |
 | 4. Tag and push | you | `git commit -am "Release 0.2.0"`, `git tag -a v0.2.0 -m "LBD 0.2.0"`, `git push --follow-tags`. The tag must be annotated (`-a`): `--follow-tags` doesn't push plain tags. |
 | 5. Build and check | GitHub | The **Release** workflow (`.github/workflows/release.yml`) starts from the tag: it checks that the tag matches the files and that the CHANGELOG has the section, runs all tests, builds `LBD.mltbx` with MATLAB, then the Windows installer, the macOS app for Apple Silicon and Intel (`scripts/build_macos.sh`), the Linux package and the Python wheels (`scripts/build_wheels.py`). Each is checked with `scripts/smoke_test_app.py --release`: the Windows installer is installed silently, checked, and uninstalled (settings must stay); the macOS app is checked, its disk image opened, and a `.lbd` file opened the way Finder does (`open -a`) before the app is quit; the Linux package is unpacked and checked; the wheels are installed on macOS with `uv tool install`, exactly as the install guide says, and checked. |
@@ -25,8 +25,31 @@ run replaces the earlier *draft* of the same version; a *published* release is n
 the files (no tag needed; the CHANGELOG section may still be "in development") and makes a draft
 titled "LBD <version> (trial build)". Look at it, then delete the draft.
 
-Versions are `X.Y.Z` only: Python, npm and Julia write pre-release versions differently, so
-there are no release candidates.
+## Versions
+
+A release is `X.Y.Z`. Between releases the files say `X.Y.Z-dev`, the version in development, so
+a build from the repository is never mistaken for the release before or after it:
+
+```bash
+uv run python scripts/bump_version.py 1.2.0 --dev    # right after releasing 1.1.0
+```
+
+This writes `1.2.0-dev` everywhere and starts the CHANGELOG section `## 1.2.0 (in development)`.
+Each ecosystem spells it its own way, and `check_versions.py` checks that every file uses its own:
+
+| Files | 1.2.0 in development |
+|---|---|
+| Python (`pyproject.toml`, `*.py`, `uv.lock`) | `1.2.0.dev0` |
+| npm (`package.json`, `package-lock.json`) | `1.2.0-dev.0` |
+| everything else (Julia, MATLAB, ...) | `1.2.0-dev` |
+
+All of them sort before `1.2.0`. The viewer shows `1.2.0-dev`, and files written by a development
+build say so (`python lbd 1.2.0.dev0`). Where only numbers are allowed (the MATLAB toolbox, the
+Windows and macOS file versions), a development build is labelled `1.2.0`.
+
+A development version is never released: a pushed tag of one fails the Release workflow at its
+first step. Trial builds (*Run workflow*) of it are fine and are titled "LBD 1.2.0-dev (trial
+build)". There are no release candidates.
 
 `scripts/smoke_test_app.py --exe <app>/lbd-view[.exe] [--release]` also checks a build on your own
 computer: it starts the viewer with empty settings and the example data, then checks the version,

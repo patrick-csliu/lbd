@@ -3,6 +3,15 @@
 All components (the viewer and every language module) share one version number.
 The file format has its own version (`lbd_version`, currently 1.0).
 
+## 1.2.0 (in development)
+
+**For developers**
+
+- Between releases every component says `X.Y.Z-dev` (Python `1.2.0.dev0`, npm `1.2.0-dev.0`),
+  so a build from the repository is never mistaken for a release. `bump_version.py 1.2.0 --dev`
+  starts it, `bump_version.py 1.2.0` releases it; the Release workflow refuses a development
+  version. The viewer shows `1.2.0-dev`.
+
 ## 1.1.0 (2026-10-17)
 
 **Changes to how things behave** (read these when upgrading)

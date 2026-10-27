@@ -25,7 +25,7 @@ import platformdirs
 
 import lbd
 
-from . import __version__
+from . import VERSION
 from .config import Config, ConfigError
 from .server import AppState, create_app
 
@@ -158,7 +158,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--dev", action="store_true",
                     help="development: port 8765, token 'dev', never exit; for the Vite dev server")
     ap.add_argument("--new", action="store_true", help="always start a new server")
-    ap.add_argument("--version", action="version", version=f"lbd-view {__version__}")
+    ap.add_argument("--version", action="version", version=f"lbd-view {VERSION}")
     return ap
 
 

@@ -28,6 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      python_version: ${{ steps.version.outputs.python_version }}
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
@@ -36,11 +37,19 @@ jobs:
         id: version
         run: |
           version=$(uv run --no-project python scripts/check_versions.py)
-          if [ "${{ github.event_name }}" = "push" ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
-            echo "::error::The tag $GITHUB_REF_NAME doesn't match the version in the files ($version). Run scripts/bump_version.py first."
-            exit 1
+          if [ "${{ github.event_name }}" = "push" ]; then
+            case "$version" in *-dev)
+              echo "::error::$version is a development version; it can't be released. Run scripts/bump_version.py ${version%-dev} first."
+              exit 1;;
+            esac
+            if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+              echo "::error::The tag $GITHUB_REF_NAME doesn't match the version in the files ($version). Run scripts/bump_version.py first."
+              exit 1
+            fi
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          # Wheel file names use the Python spelling (1.2.0.dev0 for 1.2.0-dev).
+          echo "python_version=$(uv run --no-project python -c 'import sys; sys.path.insert(0, "scripts"); from check_versions import release_version; print(release_version("python"))')" >> "$GITHUB_OUTPUT"
 
       - name: Release notes (from CHANGELOG.md)
         run: |
@@ -229,7 +238,7 @@ jobs:
     needs: [check, wheels]
     runs-on: macos-latest   # the newest macOS, where a too-new default Python shows up first
     env:
-      VERSION: ${{ needs.check.outputs.version }}
+      VERSION: ${{ needs.check.outputs.python_version }}
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0

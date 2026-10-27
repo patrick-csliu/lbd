@@ -39,12 +39,12 @@ from lbd.plot import render as rnd  # noqa: E402
 from lbd.plot.style import STYLE_SUFFIX, read_style_file  # noqa: E402
 from lbd.plot.units import prefix_scale  # noqa: E402
 
-from . import __version__  # noqa: E402
+from . import VERSION  # noqa: E402
 from . import files, images, scan, sdk  # noqa: E402
 from .pages import PageError, Pages, UnknownPage  # noqa: E402
 from .config import Config, ConfigError, Style, StyleError, from_dict  # noqa: E402
 
-CREATOR = f"LBD viewer {__version__} (matplotlib {matplotlib.__version__})"
+CREATOR = f"LBD viewer {VERSION} (matplotlib {matplotlib.__version__})"
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 META_ARRAY_PREVIEW = 50
@@ -443,7 +443,7 @@ def deliver_files(state: AppState, files: List[str], dirs: List[str]) -> Dict[st
 
 
 def create_app(state: AppState) -> FastAPI:
-    app = FastAPI(title="LBD viewer", version=__version__, docs_url=None, redoc_url=None, openapi_url=None)
+    app = FastAPI(title="LBD viewer", version=VERSION, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.lbd = state
     cfg = state.config
 
@@ -490,7 +490,7 @@ def create_app(state: AppState) -> FastAPI:
 
     @app.get("/api/ping")
     def ping():
-        return {"app": "lbd-viewer", "version": __version__, "pid": os.getpid()}
+        return {"app": "lbd-viewer", "version": VERSION, "pid": os.getpid()}
 
     @app.post("/api/heartbeat")
     def heartbeat():
@@ -504,7 +504,7 @@ def create_app(state: AppState) -> FastAPI:
             names = cfg.style_names()
             problems = cfg.problems()
         return {
-            "version": __version__, "lbd_version": lbd.FORMAT_VERSION,
+            "version": VERSION, "lbd_version": lbd.FORMAT_VERSION,
             "roots": s["roots"], "default_style": s["default_style"], "styles": names,
             "open_files_in": s["open_files_in"], "theme": s["theme"],
             "platform": sys.platform, "config_dir": str(cfg.dir), "warnings": problems + warns,

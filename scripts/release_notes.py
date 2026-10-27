@@ -41,12 +41,18 @@ def section(changelog: str, version: str, allow_unreleased: bool = False) -> str
 
 def main(argv=None, repo: Path = REPO) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("version", help="X.Y.Z")
+    ap.add_argument("version", help="X.Y.Z, or X.Y.Z-dev (its section is still in development)")
     ap.add_argument("--allow-unreleased", action="store_true",
                     help='accept a section still "in development" (trial runs only)')
     args = ap.parse_args(argv)
     try:
-        notes = section((repo / "CHANGELOG.md").read_text(encoding="utf-8"), args.version,
+        version = args.version
+        if version.endswith("-dev"):
+            if not args.allow_unreleased:
+                raise NotesError(f"{version} is a development version; it can't be released. "
+                                 f"Run scripts/bump_version.py {version[:-4]} first")
+            version = version[:-4]       # its section is "## X.Y.Z (in development)"
+        notes = section((repo / "CHANGELOG.md").read_text(encoding="utf-8"), version,
                         args.allow_unreleased)
     except NotesError as e:
         print(f"release_notes: {e}", file=sys.stderr)
