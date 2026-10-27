@@ -63,6 +63,7 @@ def test_unsaved_settings_are_dropped_when_the_file_changes(viewer, new_page):
 def test_a_file_deleted_and_written_again_comes_back(viewer, new_page):
     one = new_page()
     open_file(one, "a.lbd")
+    expect(title(one)).to_have_text("curve")            # shown first: then it goes away
     d = lbd.load(viewer.path("a.lbd"))
     viewer.data.joinpath("a.lbd").unlink()
     expect(note(one)).to_contain_text("The file is gone")
@@ -76,6 +77,7 @@ def test_a_file_deleted_and_written_again_comes_back(viewer, new_page):
 def test_a_half_written_file_is_read_again_once_complete(viewer, new_page):
     one = new_page()
     open_file(one, "a.lbd")
+    expect(title(one)).to_have_text("curve")            # shown first: then it is half written
     d = lbd.load(viewer.path("a.lbd"))
     viewer.data.joinpath("a.lbd").write_bytes(b"\x89HDF\r\n half of a file")   # a writer that isn't done
     expect(note(one)).to_contain_text("reading the new version")
