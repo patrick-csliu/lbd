@@ -358,3 +358,23 @@ def test_run_all_python_only(load_module, capsys):
     ra = load_module("tests/crosslang/run_all.py")
     assert ra.main(["--only", "python"]) == 0
     assert "ALL OK (1 languages" in capsys.readouterr().out
+
+
+# ---- GitHub workflows ----------------------------------------------------------------------------
+
+
+def test_docs_site_is_published_from_releases_only():
+    """The public documentation matches the version people download: built from a release's tag
+    (or a tag entered by hand), in strict mode; pushes to main never publish it."""
+    yaml = pytest.importorskip("yaml")
+    wf = yaml.safe_load((REPO / ".github/workflows/docs.yml").read_text(encoding="utf-8"))
+    triggers = wf[True]                          # YAML 1.1 reads the key `on` as True
+    assert set(triggers) == {"release", "workflow_dispatch"}
+    assert triggers["release"]["types"] == ["published"]
+    steps = wf["jobs"]["build"]["steps"]
+    checkout = next(s for s in steps if s.get("uses", "").startswith("actions/checkout"))
+    assert checkout["with"]["ref"] == "${{ steps.tag.outputs.tag }}"
+    assert any("mkdocs build --strict" in s.get("run", "") for s in steps)
+    # Inputs reach the script as variables, never pasted into it (script injection).
+    assert not any("${{" in s.get("run", "") for s in steps)
+    assert re.search(r"^site_url: https://patrick-csliu\.github\.io/lbd/", (REPO / "mkdocs.yml").read_text(encoding="utf-8"), re.M)

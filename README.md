@@ -2,6 +2,7 @@
 
 [![Tests](https://github.com/patrick-csliu/lbd/actions/workflows/tests.yml/badge.svg)](https://github.com/patrick-csliu/lbd/actions/workflows/tests.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Documentation](https://img.shields.io/badge/docs-patrick--csliu.github.io%2Flbd-blue.svg)](https://patrick-csliu.github.io/lbd/)
 
 **One data format for every program, and one viewer for every figure.**
 
@@ -16,6 +17,10 @@ to compare. LBD fixes this:
 - **LBD Viewer** opens every `.lbd` file and draws it with **one** matplotlib style system. A
   figure looks the same whichever program made the data, and what you see is exactly what
   exports to PDF for your paper.
+
+**Documentation: [patrick-csliu.github.io/lbd](https://patrick-csliu.github.io/lbd/)**, with a
+[quick start](https://patrick-csliu.github.io/lbd/getting-started/quickstart.html), examples
+with their figures, and every feature of the viewer.
 
 ## How it works
 
@@ -149,8 +154,11 @@ with lp.use("default"):                 # your own figure, same look
 ## Documentation
 
 The full documentation is a searchable website built from `docs/` with
-[MkDocs](https://www.mkdocs.org/) and Material for MkDocs. LBD Viewer ships a copy that works
-offline: use **Help** in the viewer's top bar. To build or preview it from the repository:
+[MkDocs](https://www.mkdocs.org/) and Material for MkDocs. It is online at
+**[patrick-csliu.github.io/lbd](https://patrick-csliu.github.io/lbd/)**, for the latest release
+(it is updated when a release is published). LBD Viewer ships a copy that works offline and
+matches the installed version: use **Help** in the viewer's top bar. To build or preview it
+from the repository:
 
 ```bash
 uv sync --all-packages --group docs

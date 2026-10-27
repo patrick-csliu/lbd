@@ -15,6 +15,7 @@ public before that click.
 | 6. Draft | GitHub | A **draft** release "LBD 0.2.0" with `LBD-Viewer-0.2.0-windows-x64-setup.exe`, `LBD-Viewer-0.2.0-macos-arm64.dmg` and `…-macos-x86_64.dmg`, `lbd-viewer-0.2.0-linux-x86_64.tar.gz`, `LBD.mltbx`, and the two wheels `lbd-0.2.0-py3-none-any.whl` and `lbd_viewer-0.2.0-py3-none-any.whl` (the viewer with its Help and language modules, for macOS and anyone with Python); its text is the CHANGELOG section. Only people with write access see drafts. |
 | 7. Check | you | GitHub → **Releases** → the draft: download the installer, try it, edit the text if needed. |
 | 8. Publish | you | **Publish release**. Now it's public and marked *Latest*. |
+| 9. Documentation | GitHub | Publishing starts the **Docs** workflow (`.github/workflows/docs.yml`): it builds the documentation of the release's tag and puts it on [patrick-csliu.github.io/lbd](https://patrick-csliu.github.io/lbd/). |
 
 **When something fails:** nothing is published. The run is red under **Actions**; the failing
 test suite and its output show as annotations on the run's page. Fix it, commit, and either move

@@ -27,8 +27,14 @@ The file format has its own version (`lbd_version`, currently 1.0).
 **File format and languages**
 
 - Saving on Windows waits up to 3 seconds when another program (e.g. LBD Viewer reading the
-  previous version) has the file open, then fails with a message naming the file. Python,
-  MATLAB and Julia alike.
+  previous version) has the file open, then fails with a message naming the file. Every
+  language module alike.
+
+**Documentation**
+
+- The documentation is online at [patrick-csliu.github.io/lbd](https://patrick-csliu.github.io/lbd/),
+  for the latest release: it is published from the release's tag each time a release is
+  published (`.github/workflows/docs.yml`).
 
 **For developers**
 

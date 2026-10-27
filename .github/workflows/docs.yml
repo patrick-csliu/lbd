@@ -1,0 +1,75 @@
+# Publish the documentation site (GitHub Pages): https://patrick-csliu.github.io/lbd/
+#
+# The site always matches a released version, the one people download:
+#   - publishing a release builds the docs of that release's tag;
+#   - Actions > Docs > Run workflow republishes the latest release (or the tag you enter).
+# Pushes to main don't change the site: docs of unreleased features wait for their release.
+#
+# One-time setup: Settings > Pages > Build and deployment > Source: "GitHub Actions".
+name: Docs
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish (empty: the latest release)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:                     # one deployment at a time; a newer one waits, none is cut off
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Which release
+        id: tag
+        env:                     # passed as variables, never pasted into the script
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "release" ]; then
+            tag="$RELEASE_TAG"
+          elif [ -n "$INPUT_TAG" ]; then
+            tag="$INPUT_TAG"
+          else
+            tag=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName) || {
+              echo "::error::There is no published release yet; publish one, or enter a tag."
+              exit 1
+            }
+          fi
+          echo "Publishing the documentation of $tag" >> "$GITHUB_STEP_SUMMARY"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - name: Build (strict, so a broken link or missing page fails it)
+        run: |
+          uv sync --all-packages --group docs
+          uv run mkdocs build --strict --site-dir site
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
