@@ -48,3 +48,6 @@ playground/
 
 # Built documentation site (uv run mkdocs build)
 site/
+
+# Claude Code project notes (local only, never committed)
+CLAUDE.md
