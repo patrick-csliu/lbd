@@ -1,11 +1,11 @@
 [project]
 name = "lbd-viewer"
-version = "1.2.0.dev0"
+version = "1.2.0"
 description = "LBD Viewer: list and plot LBD (.lbd) files in the browser"
 requires-python = ">=3.10"
 license = "MIT"
 dependencies = [
-    "lbd[plot]==1.2.0.dev0",   # styles and the plotting engine; exact: the viewer ships with its own lbd
+    "lbd[plot]==1.2.0",   # styles and the plotting engine; exact: the viewer ships with its own lbd
     "fastapi>=0.110",
     "uvicorn>=0.29",
     "pillow>=10.0",       # image metadata (also a matplotlib dependency)

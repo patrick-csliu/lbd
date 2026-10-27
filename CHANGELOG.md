@@ -3,7 +3,7 @@
 All components (the viewer and every language module) share one version number.
 The file format has its own version (`lbd_version`, currently 1.0).
 
-## 1.2.0 (in development)
+## 1.2.0 (2026-10-28)
 
 **Changes to how things behave** (read these when upgrading)
 

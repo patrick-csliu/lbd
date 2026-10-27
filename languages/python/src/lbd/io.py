@@ -21,7 +21,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Union
 import h5py
 import numpy as np
 
-__version__ = "1.2.0.dev0"
+__version__ = "1.2.0"
 FORMAT_VERSION = "1.0"
 _FORMAT_MAJOR, _FORMAT_MINOR = (int(p) for p in FORMAT_VERSION.split("."))
 

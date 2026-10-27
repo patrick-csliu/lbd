@@ -1,6 +1,6 @@
 name = "LBD"
 uuid = "44dc4c57-7a91-47e5-94e8-d9f126389c02"
-version = "1.2.0-dev"
+version = "1.2.0"
 authors = ["Patrick Liu"]
 
 [deps]

@@ -96,13 +96,14 @@ def test_check_versions_names_a_file_with_the_wrong_spelling(versions, bump, rep
 
 
 def test_bump_sets_every_version_and_dates_the_changelog(bump, versions, repo, capsys, higher):
+    real_lock = (REPO / "uv.lock").read_text(encoding="utf-8")
     assert bump.main([higher], repo=repo, today="2026-11-03") == 0
     release, _ = versions.collect(repo)
     assert set(release.values()) == {higher} and len(release) >= 12   # every place, lock files too
     changelog = (repo / "CHANGELOG.md").read_text(encoding="utf-8")
     assert f"## {higher} (2026-11-03)\n\n- a change" in changelog and "## Unreleased" not in changelog
     assert "git tag -a v" + higher in capsys.readouterr().out
-    assert (REPO / "uv.lock").read_text(encoding="utf-8") != (repo / "uv.lock").read_text(encoding="utf-8")
+    assert (REPO / "uv.lock").read_text(encoding="utf-8") == real_lock   # the repository is untouched
 
 
 def test_bump_to_the_same_version_releases_it(bump, repo, current):
