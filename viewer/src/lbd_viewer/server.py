@@ -41,6 +41,7 @@ from lbd.plot.units import prefix_scale  # noqa: E402
 
 from . import VERSION  # noqa: E402
 from . import files, images, scan, sdk  # noqa: E402
+from .explore import ExploreError, ExploreSession, Sessions  # noqa: E402
 from .pages import PageError, Pages, UnknownPage  # noqa: E402
 from .config import Config, ConfigError, Style, StyleError, from_dict  # noqa: E402
 
@@ -103,6 +104,7 @@ class AppState:
         self.port = port
         self.check_host = check_host
         self.opened: Set[str] = set()
+        self.explore = Sessions()           # the Explore views' sessions (explore.py)
         self.started = time.monotonic()
         self.last_heartbeat: Optional[float] = None
 
@@ -238,6 +240,30 @@ class DeliverBody(_Body):
 class ChangesBody(_Body):
     files: List[str] = []                 # the files a page shows
     dirs: List[str] = []                  # the folders it lists
+
+
+class ExploreBody(_Body):
+    path: str
+    spec: Optional[Dict[str, Any]] = None
+    preset: Optional[str] = None
+    width: int                            # the plot panel, in CSS pixels
+    height: int
+    dpr: float = 1.0                      # the screen's device pixel ratio (sharpness; capped at 2)
+
+
+class ExploreRenderBody(_Body):
+    xlim: Optional[List[float]] = None    # None: the whole data
+    ylim: Optional[List[float]] = None
+    stat: str = "max"                     # how a pixel shows several map cells: max, min, mean
+    format: str = "raw"                   # "raw" RGBA pixels or "png"
+    width: Optional[int] = None           # the panel's size now, if it changed since opening
+    height: Optional[int] = None
+    dpr: Optional[float] = None
+
+
+class ExplorePickBody(_Body):
+    x: float                              # a pixel of the last picture (top-left origin)
+    y: float
 
 
 def canonical(path: str) -> str:
@@ -479,6 +505,10 @@ def create_app(state: AppState) -> FastAPI:
     async def _style_error(request: Request, exc: StyleError):
         return JSONResponse({"detail": str(exc)}, status_code=400)
 
+    @app.exception_handler(ExploreError)
+    async def _explore_error(request: Request, exc: ExploreError):
+        return JSONResponse({"detail": str(exc)}, status_code=400)
+
     @app.exception_handler(images.ImageError)
     async def _image_error(request: Request, exc: images.ImageError):
         return JSONResponse({"detail": str(exc)}, status_code=400)
@@ -649,6 +679,52 @@ def create_app(state: AppState) -> FastAPI:
                                         warn_unused=False)
         return {"svg": svg.decode("utf-8"), "spec": spec, "preset": preset,
                 "size_mm": [style.figure.width_mm, style.figure.height_mm], "warnings": notes + warns}
+
+    # -- Explore view (explore.py): a session per Explore tab, pictures of its current view
+
+    def _session(session_id: str) -> ExploreSession:
+        try:
+            return state.explore.get(session_id)
+        except KeyError:
+            raise HTTPException(404, "this Explore view was closed on the server (unused for a while, or the "
+                                     "viewer restarted); it reopens by itself")
+
+    @app.post("/api/explore")
+    def explore_open(body: ExploreBody):
+        p = state.check_allowed(body.path)
+        if not p.is_file():
+            raise HTTPException(404, f"not a file: {body.path}")
+        notes: List[str] = []
+        with collect_warnings() as warns:
+            header = lbd.info(p)
+            preset = cfg.preset_for(body.preset, header.style_name, notes)
+            style = cfg.resolve(preset=preset, file_style=header.style)
+            s = ExploreSession(p, file_version(p), body.spec or {}, style, body.width, body.height, body.dpr)
+        state.explore.add(s)
+        return {"session": s.id, "spec": s.spec, "kind": s.kind, "preset": preset,
+                "full": [list(s.full[0]), list(s.full[1])], "warnings": notes + warns}
+
+    @app.post("/api/explore/{session_id}/render")
+    def explore_render(session_id: str, body: ExploreRenderBody):
+        """The picture of a view: raw RGBA pixels (or PNG), and in the X-LBD-Frame header (JSON)
+        the mapping between its pixels and the data, the reduction used and the timings."""
+        s = _session(session_id)
+        if body.width is not None and body.height is not None:
+            s.resize(body.width, body.height, body.dpr if body.dpr is not None else s.dpr)
+        data, meta = s.render(body.xlim, body.ylim, body.stat, body.format)
+        media = "image/png" if meta["format"] == "png" else "application/octet-stream"
+        return Response(content=data, media_type=media,
+                        headers={"X-LBD-Frame": json.dumps(meta), "Cache-Control": "no-store"})
+
+    @app.post("/api/explore/{session_id}/pick")
+    def explore_pick(session_id: str, body: ExplorePickBody):
+        """The stored point or cell at a pixel of the last picture, read from the full data."""
+        return {"pick": _session(session_id).pick(body.x, body.y)}
+
+    @app.delete("/api/explore/{session_id}")
+    def explore_close(session_id: str):
+        state.explore.close(session_id)
+        return {"ok": True}
 
     def _export(body: RenderBody) -> Tuple[Path, str, bytes, str, List[str]]:
         """Render a figure for export: (data file, format, bytes, default file name, warnings)."""

@@ -5,6 +5,7 @@ import { ConfirmDialog, ConfirmRequest } from "./menu";
 import { useToast } from "./toast";
 import { HelpLink } from "./help";
 import { useDiskVersion } from "./watch";
+import ExploreView from "./ExploreView";
 
 interface Props {
   path: string;
@@ -24,7 +25,7 @@ interface Props {
   onMenu?: (e: MouseEvent) => void;
 }
 
-const COMPLEX_MODES: [string, string][] = [
+export const COMPLEX_MODES: [string, string][] = [
   ["abs", "Magnitude"],
   ["db", "Magnitude (dB)"],
   ["phase", "Phase (rad)"],
@@ -71,6 +72,7 @@ export default function FileView(props: Props) {
   const [busy, setBusy] = useState(false);
   const [zoom, setZoom] = useState("fit");
   const [showInfo, setShowInfo] = useState(true);
+  const [exploring, setExploring] = useState(false);
   const renderSeq = useRef(0);
 
   const loadInfo = useCallback(async () => {
@@ -333,6 +335,16 @@ export default function FileView(props: Props) {
               Plot
             </button>
           )}
+          {plotted && !onlyNumbers && (
+            <button
+              aria-pressed={exploring}
+              className={exploring ? "primary" : ""}
+              onClick={() => setExploring((x) => !x)}
+              title="Explore this file interactively: zoom, pan, click points (a preview of the coming Explore view)"
+            >
+              {exploring ? "Back to the figure" : "Explore (preview)"}
+            </button>
+          )}
           <button onClick={() => api.reveal(info.path).catch((e) => onError(e.message))}>Show in folder</button>
         </div>
       </div>
@@ -355,7 +367,9 @@ export default function FileView(props: Props) {
         </div>
       )}
 
-      {plotted && !onlyNumbers && (
+      {plotted && !onlyNumbers && exploring && <ExploreView info={info} spec={result?.spec ?? spec} onError={(m) => toast(m, "info")} />}
+
+      {plotted && !onlyNumbers && !exploring && (
         <div className="plot-area">
           <PlotControls
             info={info}

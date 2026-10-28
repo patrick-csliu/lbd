@@ -17,6 +17,7 @@ import math
 import numbers
 import re
 import threading
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import matplotlib
@@ -235,13 +236,30 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
         return _resolve_scatter(d, out, values, pick, spec, index_in, warn_unused)
 
     axes = list(first.axes)
+    # Curves may also take a value as x, as scatter plots do: one with the same axes as the
+    # plotted value, e.g. a frequency that differs from trace to trace. The points then run along
+    # the value's last swept axis (`along`); a series, if any, is another axis.
+    x_values = ([n for n, v in d.values.items() if n not in values and v.axes == axes and len(v.shape) > 0]
+                if kind == "curve" else [])
 
     def check_x(v: Any) -> str:
+        if kind == "curve" and isinstance(v, str) and v in d.values:
+            if v not in x_values:
+                raise RenderError(f"'{v}' can't be the horizontal axis of '{first.name}': a value used as x needs "
+                                  f"the same axes {axes}; values that have them: {x_values or 'none'}")
+            if d.values[v].dtype.startswith("complex"):
+                raise RenderError(f"'{v}' is complex; the horizontal axis needs real numbers (plot its magnitude "
+                                  "or phase as a value of its own)")
+            return v
         return _pick(v, axes, role="horizontal axis")
 
     x = pick("x", check_x, (swept or axes)[-1])
     out["x"] = x
-    keep = [x]
+    along = x
+    if x in d.values:
+        along = (swept or axes)[-1]
+        out["along"] = along
+    keep = [along]
     if kind == "heatmap":
         if len(values) > 1 and warn_unused:
             _warn(f"a heat map shows one value; {values[1:]} ignored", RenderWarning)
@@ -252,9 +270,12 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
         keep.append(y)
     else:
         for name in values[1:]:
-            if x not in d.values[name].axes:
+            if x in d.values and d.values[name].axes != axes:
+                raise RenderError(f"'{name}' doesn't have the axes {axes}, so it can't be plotted against '{x}' "
+                                  f"together with '{values[0]}'")
+            if x not in d.values and x not in d.values[name].axes:
                 raise RenderError(f"'{name}' has no axis '{x}', so it can't share the x axis with '{values[0]}'")
-        others = [a for a in axes if a != x]
+        others = [a for a in axes if a != along]
         if len(values) == 1 and others:
             series = spec.get("series") if explicit("series") else file_spec.get("series")
             if series != "none":
@@ -648,11 +669,11 @@ def build_figure(d: "lbd.Dataset", spec: Dict[str, Any], style: Style,
         fig = ax.figure
     kind = spec["kind"]
     if kind == "curve":
-        _draw_curves(fig, ax, d, spec, style)
+        draw_curves(fig, ax, prepare_curves(d, spec, style), d, spec, style)
     elif kind == "scatter":
         _draw_scatter(fig, ax, d, spec, style)
     else:
-        _draw_heatmap(fig, ax, d, spec, style)
+        draw_map(fig, ax, prepare_map(d, spec, style), d, spec, style)
     if spec.get("title"):
         ax.set_title(mathsafe(spec["title"]))
     apply_axis_text(ax, style)
@@ -703,22 +724,69 @@ def _axis_quantity(style: Style, d, name: str) -> QuantityStyle:
     return find_quantity(style, name, a.label, None)
 
 
-def _draw_curves(fig: Figure, ax, d, spec, style: Style) -> None:
+@dataclass
+class CurveModel:
+    """A curve plot worked out from the full data (prepare_curves): what draw_curves draws.
+
+    Everything is in plot units (the axes' unit prefixes applied), so a reduced copy of the lines
+    (lbd.plot.reduce, for the Explore view) is drawn with the same labels, prefixes and scales.
+    """
+
+    xs: List[np.ndarray]                                # each line's x (one shared array when x is an axis)
+    lines: List[Tuple[np.ndarray, str]]                 # (y, legend label)
+    colors: Optional[np.ndarray]                        # per line (many series), or None: the colour cycle
+    xf: float                                           # plot units per stored unit
+    yf: float
+    x_label: str
+    y_label: str
+    x_scale: str
+    y_scale: str
+    ylim: Optional[Tuple[Optional[float], Optional[float]]]
+    series_bar: Optional[Tuple[ScalarMappable, str]]    # many series: a colour bar instead of a legend
+    auto_axes: List[Tuple[str, str]]
+
+
+@dataclass
+class MapModel:
+    """A heat map worked out from the full data (prepare_map): what draw_map draws, in plot units."""
+
+    x: np.ndarray                                       # cell centres
+    y: np.ndarray
+    z: np.ndarray                                       # rows = y, columns = x
+    xf: float
+    yf: float
+    zf: float
+    norm: mcolors.Normalize
+    cmap: str
+    x_label: str
+    y_label: str
+    z_label: str
+    x_scale: str
+    y_scale: str
+    auto_axes: List[Tuple[str, str]]
+
+
+def prepare_curves(d, spec, style: Style) -> CurveModel:
     a = style.figure.axes
     xs, ys = style.axis_style("x"), style.axis_style("y")
-    xa = d.axes[spec["x"]]
-    x_raw = np.asarray(xa.data, dtype=float)
+    # x is an axis (shared by every curve) or a value (its own x for each curve, see resolve_spec)
+    x_is_value = spec["x"] in d.values
+    along = spec.get("along", spec["x"])
+    keep = [along] + ([spec["series"]] if spec.get("series") else [])
+    xa = d.values[spec["x"]] if x_is_value else d.axes[spec["x"]]
+    x_raw = np.asarray(_take(xa, keep, spec["index"]) if x_is_value else xa.data, dtype=float)
     xq = _axis_quantity(style, d, spec["x"])
     xf, xunit = _unit_scale(x_raw, xa.unit, xq, xs.label.auto_prefix)
     auto_axes = [(spec["x"], xunit)] if _auto_prefix(xq, xa.unit, xs.label.auto_prefix) else []
+    x_shown = x_raw * xf
     lines: List[Tuple[np.ndarray, str]] = []
+    line_x: List[np.ndarray] = []
     labels, units = [], []
     quantity: Optional[QuantityStyle] = None
     series_colors = None
     series_mappable = None
     for name in spec["values"]:
         v = d.values[name]
-        keep = [spec["x"]] + ([spec["series"]] if spec.get("series") else [])
         arr = _take(v, keep, spec["index"])
         arr, label, unit = apply_complex(arr, v.label, v.unit, spec["complex"])
         labels.append(label)
@@ -735,8 +803,10 @@ def _draw_curves(fig: Figure, ax, d, spec, style: Style) -> None:
                 series_mappable = (ScalarMappable(norm=norm, cmap=cmap), sa)
             for j in range(n):
                 lines.append((arr[:, j], _legend_label(sa, sa.data[j])))
+                line_x.append(x_shown[:, j] if x_is_value else x_shown)
         else:
             lines.append((arr, label))
+            line_x.append(x_shown)
     quantity = quantity or QuantityStyle()
 
     yall = np.concatenate([np.ravel(y) for y, _ in lines]) if lines else np.array([])
@@ -746,34 +816,52 @@ def _draw_curves(fig: Figure, ax, d, spec, style: Style) -> None:
     yf, yunit = _unit_scale(yall, common_unit, quantity, ys.label.auto_prefix)
     if _auto_prefix(quantity, common_unit, ys.label.auto_prefix):
         auto_axes.append((spec["values"][0], yunit))
-    for j, (y, lab) in enumerate(lines):
-        kw = {"color": series_colors[j]} if series_colors is not None else {}
-        ax.plot(x_raw * xf, np.asarray(y) * yf, label=lab, **kw)
-
-    ax.set_xlabel(axis_label(spec.get("x_label") or xa.label, xunit, xs.label.unit_format))
     # Several values: the legend names them, so the axis gets a generic label.
     ylabel = spec.get("y_label") or (labels[0] if len(set(labels)) == 1 else "Value")
-    ax.set_ylabel(axis_label(ylabel, yunit, ys.label.unit_format))
     y_scale = "log" if quantity.scale == "log" else spec["y_scale"]
     if spec["x_scale"] == "log":
         _check_log(x_raw, f"the horizontal axis '{xa.name}'")
     if y_scale == "log":
         _check_log(yall.real if np.iscomplexobj(yall) else yall, "the vertical axis")
-    ax.set_xscale(spec["x_scale"])
-    ax.set_yscale(y_scale)
+    ylim = None
     if quantity.vmin is not None or quantity.vmax is not None:
-        ax.set_ylim(None if quantity.vmin is None else quantity.vmin * yf,
-                    None if quantity.vmax is None else quantity.vmax * yf)
-    ax.margins(x=0)
-    _annotate(ax, d, spec, auto_axes)
+        ylim = (None if quantity.vmin is None else quantity.vmin * yf,
+                None if quantity.vmax is None else quantity.vmax * yf)
+    series_bar = None
     if series_mappable is not None:
         sm, sa = series_mappable
-        _colorbar(fig, sm, ax, style, axis_label(sa.label, sa.unit, ys.label.unit_format))
+        series_bar = (sm, axis_label(sa.label, sa.unit, ys.label.unit_format))
+    return CurveModel(
+        xs=line_x, lines=[(np.asarray(y) * yf, lab) for y, lab in lines], colors=series_colors, xf=xf, yf=yf,
+        x_label=axis_label(spec.get("x_label") or xa.label, xunit, xs.label.unit_format),
+        y_label=axis_label(ylabel, yunit, ys.label.unit_format), x_scale=spec["x_scale"], y_scale=y_scale,
+        ylim=ylim, series_bar=series_bar, auto_axes=auto_axes)
+
+
+def draw_curves(fig: Figure, ax, model: CurveModel, d, spec, style: Style,
+                data: Optional[List[Tuple[np.ndarray, np.ndarray]]] = None) -> List[Any]:
+    """Draw a CurveModel; `data` replaces each line's (x, y), e.g. by a reduced copy. Returns the lines."""
+    drawn = []
+    for j, (y, lab) in enumerate(model.lines):
+        kw = {"color": model.colors[j]} if model.colors is not None else {}
+        x, y = (model.xs[j], y) if data is None else data[j]
+        drawn += ax.plot(x, y, label=lab, **kw)
+    ax.set_xlabel(model.x_label)
+    ax.set_ylabel(model.y_label)
+    ax.set_xscale(model.x_scale)
+    ax.set_yscale(model.y_scale)
+    if model.ylim is not None:
+        ax.set_ylim(*model.ylim)
+    ax.margins(x=0)
+    _annotate(ax, d, spec, model.auto_axes)
+    if model.series_bar is not None:
+        _colorbar(fig, model.series_bar[0], ax, style, model.series_bar[1])
     else:
-        _legend(ax, a)
+        _legend(ax, style.figure.axes)
+    return drawn
 
 
-def _draw_heatmap(fig: Figure, ax, d, spec, style: Style) -> None:
+def prepare_map(d, spec, style: Style) -> MapModel:
     a = style.figure.axes
     xs, ys = style.axis_style("x"), style.axis_style("y")
     name = spec["values"][0]
@@ -797,14 +885,31 @@ def _draw_heatmap(fig: Figure, ax, d, spec, style: Style) -> None:
     for scale, raw, axis in ((spec["x_scale"], x_raw, xa), (spec["y_scale"], y_raw, ya)):
         if scale == "log":
             _check_log(raw, f"axis '{axis.name}'")
-    mesh = ax.pcolormesh(x_raw * xf, y_raw * yf, z * zf, shading="nearest", norm=_norm(q, zf),
-                         cmap=q.cmap or a.image.cmap, rasterized=True)
-    ax.set_xlabel(axis_label(spec.get("x_label") or xa.label, xunit, xs.label.unit_format))
-    ax.set_ylabel(axis_label(spec.get("y_label") or ya.label, yunit, ys.label.unit_format))
-    ax.set_xscale(spec["x_scale"])
-    ax.set_yscale(spec["y_scale"])
-    _annotate(ax, d, spec, auto_axes)
-    _colorbar(fig, mesh, ax, style, axis_label(spec.get("z_label") or label, zunit, ys.label.unit_format))
+    return MapModel(
+        x=x_raw * xf, y=y_raw * yf, z=z * zf, xf=xf, yf=yf, zf=zf, norm=_norm(q, zf), cmap=q.cmap or a.image.cmap,
+        x_label=axis_label(spec.get("x_label") or xa.label, xunit, xs.label.unit_format),
+        y_label=axis_label(spec.get("y_label") or ya.label, yunit, ys.label.unit_format),
+        z_label=axis_label(spec.get("z_label") or label, zunit, ys.label.unit_format),
+        x_scale=spec["x_scale"], y_scale=spec["y_scale"], auto_axes=auto_axes)
+
+
+def draw_map(fig: Figure, ax, model: MapModel, d, spec, style: Style, image: Optional[np.ndarray] = None):
+    """Draw a MapModel. `image` replaces the cells by a picture of exactly the plot area's pixels
+    (rows bottom to top, e.g. reduced by lbd.plot.reduce): it is placed on the axes box, whatever
+    the limits and scales, so no pixel is resampled. Returns the drawn mappable."""
+    if image is None:
+        mappable = ax.pcolormesh(model.x, model.y, model.z, shading="nearest", norm=model.norm,
+                                 cmap=model.cmap, rasterized=True)
+    else:
+        mappable = ax.imshow(image, extent=(0, 1, 0, 1), transform=ax.transAxes, origin="lower",
+                             interpolation="nearest", aspect="auto", norm=model.norm, cmap=model.cmap)
+    ax.set_xlabel(model.x_label)
+    ax.set_ylabel(model.y_label)
+    ax.set_xscale(model.x_scale)
+    ax.set_yscale(model.y_scale)
+    _annotate(ax, d, spec, model.auto_axes)
+    _colorbar(fig, mappable, ax, style, model.z_label)
+    return mappable
 
 
 def _draw_scatter(fig: Figure, ax, d, spec, style: Style) -> None:

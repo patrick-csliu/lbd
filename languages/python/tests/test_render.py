@@ -489,3 +489,68 @@ def test_scatter_coloured_by_a_long_axis_or_a_value_gets_a_colour_bar():
 def test_render_jpg():
     data, _ = rnd.render_dataset(sweep(), {"kind": "curve", "values": ["S21"]}, Style(), fmt="jpeg")
     assert data[:2] == b"\xff\xd8"
+
+
+# ---- a value as the horizontal axis of curves ---------------------------------------------------
+
+
+def varying_span():
+    """A VNA-like sweep whose frequency span changes with power: each trace has its own x."""
+    p = np.array([-40.0, -20.0, 0.0])
+    k = np.arange(11.0)
+    f = 7e9 + np.outer(1 + np.arange(3.0), k - 5) * 1e6             # wider span at higher power
+    d = lbd.Dataset(title="varying span")
+    d.add_axis("power", p, unit="dBm", label="Power")
+    d.add_axis("point", k, label="Point")
+    d.add_value("freq", f, axes=["power", "point"], unit="Hz", label="Frequency")
+    d.add_value("S21", 1 - 0.5 / (1 + ((f - 7e9) / 1e6) ** 2), axes=["power", "point"])
+    d.add_value("c", f * 1j, axes=["power", "point"])
+    return d
+
+
+def test_a_value_can_be_the_horizontal_axis_of_curves():
+    d = varying_span()
+    r = resolve_spec(d, {"kind": "curve", "values": ["S21"], "x": "freq"})
+    assert r["x"] == "freq" and r["along"] == "point" and r["series"] == "power"
+    m = rnd.prepare_curves(d, r, lp_style())
+    assert len(m.xs) == 3 and m.x_label == "Frequency (GHz)"
+    for j in range(3):                                              # each trace on its own x
+        assert np.allclose(m.xs[j], d["freq"].data[j] * 1e-9)
+    assert not np.allclose(m.xs[0], m.xs[2])
+
+
+def test_a_figure_with_a_value_as_x_draws_each_trace_at_its_x():
+    d = varying_span()
+    r = resolve_spec(d, {"kind": "curve", "values": ["S21"], "x": "freq"})
+    with rnd.matplotlib.rc_context(lp_style().to_rcparams()):
+        fig, ax = rnd.build_figure(d, r, lp_style())
+    widths = [np.ptp(line.get_xdata()) for line in ax.get_lines()]
+    assert widths == pytest.approx([0.01, 0.02, 0.03])              # GHz: 10, 20, 30 MHz spans
+
+
+@pytest.mark.parametrize("x, match", [
+    ("c", "complex"),                                               # x needs real numbers
+    ("nope", "horizontal axis"),
+])
+def test_a_value_as_x_must_fit(x, match):
+    with pytest.raises(RenderError, match=match):
+        resolve_spec(varying_span(), {"kind": "curve", "values": ["S21"], "x": x})
+
+
+def test_a_value_as_x_needs_the_same_axes():
+    d = varying_span()
+    d.add_axis("other", [1.0, 2.0])
+    d.add_value("w", np.ones(2), axes="other")
+    with pytest.raises(RenderError, match="needs the same axes"):
+        resolve_spec(d, {"kind": "curve", "values": ["S21"], "x": "w"})
+
+
+def test_a_map_still_needs_axes_for_x():
+    with pytest.raises(RenderError, match="horizontal axis"):
+        resolve_spec(varying_span(), {"kind": "heatmap", "values": ["S21"], "x": "freq"})
+
+
+def lp_style():
+    import lbd.plot as lp
+
+    return lp.load_style()

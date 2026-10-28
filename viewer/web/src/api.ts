@@ -279,11 +279,18 @@ export class ApiError extends Error {
 }
 
 async function call<T>(method: string, path: string, body?: unknown, params?: Record<string, string>): Promise<T> {
+  const r = await send(method, path, body, params);
+  return (await r.json()) as T;
+}
+
+/** A request whose answer isn't JSON (e.g. a picture); errors are thrown as ApiError like call(). */
+async function send(method: string, path: string, body?: unknown, params?: Record<string, string>, signal?: AbortSignal): Promise<Response> {
   const qs = params ? "?" + new URLSearchParams(params).toString() : "";
   const r = await fetch(path + qs, {
     method,
     headers: { "X-LBD-Token": token, ...(body !== undefined ? { "Content-Type": "application/json" } : {}) },
     body: body !== undefined ? JSON.stringify(body) : undefined,
+    signal,
   });
   if (!r.ok) {
     let msg = `${r.status} ${r.statusText}`;
@@ -296,10 +303,109 @@ async function call<T>(method: string, path: string, body?: unknown, params?: Re
     }
     throw new ApiError(r.status, msg);
   }
-  return (await r.json()) as T;
+  return r;
+}
+
+// ---- Explore view (server: explore.py; keep in sync with /api/explore in server.py) ----
+
+export type ReduceStat = "max" | "min" | "mean";
+
+export interface ExploreOpen {
+  session: string;
+  spec: PlotSpec;
+  kind: "curve" | "heatmap";
+  preset: string;
+  full: [[number, number], [number, number]]; // the whole data: x and y limits
+  warnings: string[];
+}
+
+/** What a picture shows: its size, where the plot area is, and its axes' limits and scales. */
+export interface ExploreFrameMeta {
+  format: "raw" | "png";
+  width: number; // image pixels
+  height: number;
+  dpr: number;
+  plot: [number, number, number, number]; // plot area: left, top, width, height (image pixels)
+  xlim: [number, number];
+  ylim: [number, number];
+  xscale: string; // "linear" or "log"
+  yscale: string;
+  full: [[number, number], [number, number]];
+  note: string; // how the data was reduced, e.g. "max of 6×6 cells per pixel"
+  reduced: boolean;
+  stat: ReduceStat;
+  ms: { wait: number; reduce: number; draw: number; encode: number };
+}
+
+export interface ExploreFrame {
+  meta: ExploreFrameMeta;
+  image: ImageData | ImageBitmap;
+  /** Milliseconds from asking to having the picture, measured in the page. */
+  roundTripMs: number;
+}
+
+export interface StoredAt {
+  axis: string;
+  value: number;
+  unit: string;
+  label: string;
+}
+
+export interface ExplorePick {
+  kind: "point" | "cell";
+  index: Record<string, number>;
+  x: StoredAt;
+  // a point: its trace and value as plotted (complex modes and units applied)
+  trace?: number;
+  label?: string;
+  value_name?: string;
+  y?: number | StoredAt;
+  y_unit?: string;
+  series?: StoredAt;
+  at?: [number, number]; // image pixels
+  line?: ([number, number] | null)[]; // the picked trace as drawn, image pixels (null: a gap)
+  // a cell
+  value?: number | null;
+  value_unit?: string;
+  rect?: [number, number, number, number]; // image pixels: left, top, width, height
+  shown: { x: number; y: number; value?: number | null };
+}
+
+async function exploreRender(
+  session: string,
+  view: {
+    xlim?: [number, number] | null;
+    ylim?: [number, number] | null;
+    stat: ReduceStat;
+    format?: "raw" | "png";
+    width?: number; // the panel's size now (CSS pixels), when it changed since opening
+    height?: number;
+    dpr?: number;
+  },
+  signal?: AbortSignal,
+): Promise<ExploreFrame> {
+  const t0 = performance.now();
+  const r = await send("POST", `/api/explore/${encodeURIComponent(session)}/render`, { format: "raw", ...view }, undefined, signal);
+  const meta = JSON.parse(r.headers.get("X-LBD-Frame") ?? "{}") as ExploreFrameMeta;
+  const blob = await r.blob();
+  let image: ImageData | ImageBitmap;
+  if (meta.format === "png") {
+    image = await createImageBitmap(blob);
+  } else {
+    image = new ImageData(new Uint8ClampedArray(await blob.arrayBuffer()), meta.width, meta.height);
+  }
+  return { meta, image, roundTripMs: performance.now() - t0 };
 }
 
 export const api = {
+  /** Open an Explore session for a file, drawn for a panel of width × height CSS pixels. */
+  exploreOpen: (path: string, spec: PlotSpec | null, width: number, height: number, dpr: number) =>
+    call<ExploreOpen>("POST", "/api/explore", { path, spec, width: Math.round(width), height: Math.round(height), dpr }),
+  exploreRender,
+  explorePick: (session: string, x: number, y: number) =>
+    call<{ pick: ExplorePick | null }>("POST", `/api/explore/${encodeURIComponent(session)}/pick`, { x, y }),
+  exploreClose: (session: string) => call<{ ok: boolean }>("DELETE", `/api/explore/${encodeURIComponent(session)}`),
+
   state: () => call<AppState>("GET", "/api/state"),
   heartbeat: () => call<{ ok: boolean }>("POST", "/api/heartbeat"),
   open: (path: string) => call<{ path: string }>("POST", "/api/open", { path }),
