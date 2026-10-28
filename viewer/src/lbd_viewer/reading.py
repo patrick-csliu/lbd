@@ -221,7 +221,9 @@ def _map_cursor(s: "ExploreSession", c: Dict[str, Any], kind: str) -> Optional[D
     out = {"x": px, "y": py, "free": free, "items": [x_item, y_item, _value_item(s, "z", name, z)],
            "index": {s.spec["x"]: i, s.spec["y"]: j} if not sh or g.one_to_one else {},
            "cell": [float(v) for v in _cell_box(m, i, j)], "at": [i, j]}
-    stored = _stored(s, name, s.raw_model.z[j, i], s.raw_model.zf) if s.kind == s.base_kind else None
+    # only for a stored cell: an operation's own cells (an I/Q histogram) have no stored value
+    keeps = s.kind == s.base_kind and (not sh or g.one_to_one)
+    stored = _stored(s, name, s.raw_model.z[j, i], s.raw_model.zf) if keeps else None
     if stored:
         out["stored"] = stored
     return out
@@ -281,7 +283,7 @@ def _curve_cursor(s: "ExploreSession", c: Dict[str, Any], kind: str, geo) -> Opt
     items = [_curve_x_item(s, k, i), _value_item(s, "y", name, ys_k[i])]
     series = s.spec.get("series")
     index = {s.spec.get("along", s.spec["x"]): int(i)}
-    same_traces = len(m.lines) == len(s.base_model.lines)
+    same_traces = s.base_kind == "curve" and len(m.lines) == len(s.base_model.lines)   # the file's traces still
     if series and same_traces:
         j = k % _per_value(s)
         items.append(_axis_item(s, "series", series, j))
@@ -289,7 +291,7 @@ def _curve_cursor(s: "ExploreSession", c: Dict[str, Any], kind: str, geo) -> Opt
     one_to_one = not _operated(s) or s.ops_result.grid.one_to_one
     out = {"x": px, "y": py, "free": free, "trace": int(k), "label": m.lines[k][1],
            "index": index if one_to_one else {}, "items": items}
-    if one_to_one and len(m.lines) == len(s.raw_model.lines):
+    if one_to_one and same_traces:
         stored = _stored(s, name, s.raw_model.lines[k][0][i], s.raw_model.yf)
         if stored:
             out["stored"] = stored

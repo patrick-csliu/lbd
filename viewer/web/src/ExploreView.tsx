@@ -1027,6 +1027,13 @@ export default function ExploreView({
         </div>
       )}
       {error && <div className="error-box">{error}</div>}
+      {meta?.hidden && meta.hidden.length > 0 && (
+        <div className="explore-hidden" role="status">
+          {meta.hidden.map((h) => (
+            <div key={h}>{h}</div>
+          ))}
+        </div>
+      )}
       <div className={"explore-stage" + (showCuts ? " with-cuts" : "")}>
         {showCuts && (
           <div className="explore-cut explore-cut-top">
@@ -1042,6 +1049,11 @@ export default function ExploreView({
         {showCuts && <div className="explore-cut-corner" />}
       <div className="explore-host" ref={host}>
         {status && <div className="explore-status muted">{status}</div>}
+        {meta?.empty && !status && (
+          <div className="explore-empty" role="status">
+            {meta.empty}
+          </div>
+        )}
         <canvas ref={picture} className="explore-picture" style={cssSize} />
         <canvas
           ref={overlay}

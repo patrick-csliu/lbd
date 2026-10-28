@@ -386,3 +386,5 @@ details.group fieldset > .group-fields { margin-top: -4px; }
 .op-settings input[type="number"] { width: 5em; }
 .op-list li.complex { border-style: dashed; }
 .op-number { width: 7em; }
+.explore-hidden { font-size: 12px; color: var(--text); background: var(--accent-soft); border-radius: var(--radius); padding: 3px 8px; }
+.explore-empty { position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%); max-width: 70%; text-align: center; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 14px; z-index: 1; }

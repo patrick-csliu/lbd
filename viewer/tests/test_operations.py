@@ -37,7 +37,7 @@ def test_the_derivative_uses_the_real_uneven_steps():
     x = np.array([0.0, 1, 3, 6])
     g = grid([2 * x + 1], x=x)
     d = run(g, ("derivative",)).grid
-    assert d.a[0] == pytest.approx([2, 2, 2, 2]) and d.value == Quantity("dv/dtime", "V/s")
+    assert d.a[0] == pytest.approx([2, 2, 2, 2]) and d.value == Quantity("dv/dtime", "")    # another unit: none
 
 
 def test_smoothing_skips_gaps_and_shrinks_at_the_ends():
@@ -73,7 +73,7 @@ def test_the_fft_finds_a_sine_and_its_amplitude():
     f = run(g, ("fft",)).grid
     peak = int(np.argmax(f.a[0, 1:])) + 1
     assert f.x[peak] == pytest.approx(50e3) and f.a[0, peak] == pytest.approx(2, rel=1e-3)
-    assert f.a[0, 0] == pytest.approx(0.5) and f.xq.unit == "Hz" and not f.one_to_one
+    assert f.a[0, 0] == pytest.approx(0.5) and f.xq == Quantity("Frequency", "") and not f.one_to_one
     uneven = run(grid([[1, 2, 3, 4, 5]], x=[0, 1, 2, 4, 5]), ("fft",))
     assert uneven.applied == 0 and "evenly spaced" in uneven.notes[0]
 
@@ -101,10 +101,9 @@ def test_a_bad_list_is_refused_with_the_choices():
             ops.check(bad)
 
 
-def test_units_read_like_the_axis():
-    f, unit, label = ops.shown(np.array([3e-9, 1e-9]), Quantity("d|S21|/dFrequency", "dB/Hz"), "paren")
-    assert unit == "dB/GHz" and f == pytest.approx(1e9) and label == "d|S21|/dFrequency (dB/GHz)"
-    assert ops.shown(np.array([2e-3]), Quantity("v", "V"), "paren")[1] == "mV"
+def test_units_are_kept_or_left_out():
+    assert ops.shown(np.array([2e-3]), Quantity("v", "V"), "paren")[1:] == ("mV", "v (mV)")
+    assert ops.shown(np.array([3e-9]), Quantity("dv/dtime", ""), "paren") == (1.0, "", "dv/dtime")
 
 
 # ---- through the viewer ---------------------------------------------------------------------------
@@ -140,14 +139,14 @@ SPEC = {"kind": "curve", "x": "f", "series": "power"}
 def test_a_derivative_is_drawn_with_its_unit_and_read_with_the_stored_value(client, sweep):
     o = open_view(client, sweep, SPEC)
     meta = render(client, o, {"ops": [{"op": "derivative"}]})
-    assert meta["ops"]["notes"] == [None] and meta["ops"]["unit"] == "dB/GHz"
+    assert meta["ops"]["notes"] == [None] and meta["ops"]["unit"] == ""
     sess = client.app.state.lbd.explore.get(o["session"])
-    assert sess.ax.get_ylabel() == "dS21/dFrequency (dB/GHz)"
+    assert sess.ax.get_ylabel() == "dS21/dFrequency"                   # the unit changed: none shown
     c = client.post(f"/api/explore/{o['session']}/cursors",
                     json={"cursors": [{"x": 5.0, "y": 2.0, "trace": 1}], "xlim": meta["xlim"], "ylim": meta["ylim"],
                           "width": 500, "height": 300}).json()["cursors"][0]
     shown = next(i for i in c["items"] if i["role"] == "y")
-    assert shown["value"] == pytest.approx(2) and shown["unit"] == "dB/GHz"
+    assert shown["value"] == pytest.approx(2e-9) and shown["unit"] == ""          # dB per Hz, as stored
     assert c["stored"]["value"] == pytest.approx(12) and c["stored"]["unit"] == "dB" and c["index"] == {"f": 100, "power": 1}
 
 
@@ -192,7 +191,7 @@ def test_a_maps_background_is_removed_along_its_vertical_axis(client, data_dir):
     sess = client.app.state.lbd.explore.get(o["session"])
     assert sess.kind == "heatmap" and sess.model.z / sess.model.zf == pytest.approx(np.tile([-2.0, -1, 0, 1, 2], (4, 1)))
     render(client, o, {"ops": [{"op": "fft", "along": "x"}]})
-    assert sess.ax.get_xlabel() == "Time (ms)" and sess.ops_shown.x_changed          # FFT of Hz: time
+    assert sess.ax.get_xlabel() == "Time" and sess.ops_shown.x_changed               # FFT of Hz: time, no unit
 
 
 # ---- complex values: delay, rotation, auto-rotate, Calculate; the I/Q histogram ---------------------

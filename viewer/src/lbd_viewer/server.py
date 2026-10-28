@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import math
 import os
 import secrets
@@ -324,6 +325,27 @@ class SaveCutBody(_Body):
     path: Optional[str] = None            # None: only suggest a file name
 
 
+# What a request was doing, for the message of an unexpected error.
+UNEXPECTED_DOING = (("/render", "drawing the plot"), ("/cursors", "reading the cursors"), ("/find", "searching"),
+                    ("/histogram", "counting the values"), ("/calculate", "calculating"),
+                    ("/save-cut", "saving the cut"), ("/spec", "changing the plot"), ("/api/explore", "opening the file"))
+
+
+def viewer_log(settings_dir: Path) -> Path:
+    """The viewer's log of unexpected errors: next to its database (catalog_dir), set up once.
+    Rotates at 1 MB, keeping one older file."""
+    import logging.handlers
+
+    path = catalog_dir(settings_dir) / "viewer.log"
+    log = logging.getLogger("lbd_viewer")
+    if not any(getattr(h, "baseFilename", None) == str(path) for h in log.handlers):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handler = logging.handlers.RotatingFileHandler(path, maxBytes=1_000_000, backupCount=1, encoding="utf-8")
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        log.addHandler(handler)
+    return path
+
+
 def canonical(path: str) -> str:
     """One spelling per file, so the page rules never see one file as two."""
     return str(Path(path).expanduser().resolve())
@@ -574,6 +596,17 @@ def create_app(state: AppState) -> FastAPI:
     @app.exception_handler(StyleError)
     async def _style_error(request: Request, exc: StyleError):
         return JSONResponse({"detail": str(exc)}, status_code=400)
+
+    @app.exception_handler(Exception)
+    async def _unexpected(request: Request, exc: Exception):
+        # A bug: say so plainly, with what was being done and where the details are; the page
+        # keeps its last picture and settings, so whatever caused it can be changed back.
+        path = request.url.path
+        doing = next((what for end, what in UNEXPECTED_DOING if path.endswith(end)), "answering the page")
+        log_file = viewer_log(state.config.dir)
+        logging.getLogger("lbd_viewer").error("unexpected error on %s %s", request.method, path, exc_info=exc)
+        return JSONResponse({"detail": f"An unexpected error while {doing}: {type(exc).__name__}: {exc}. "
+                                       f"This is a bug; the details are in {log_file}."}, status_code=500)
 
     @app.exception_handler(ExploreError)
     async def _explore_error(request: Request, exc: ExploreError):

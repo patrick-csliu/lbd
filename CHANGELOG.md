@@ -41,6 +41,10 @@ The file format has its own version (`lbd_version`, currently 1.0).
   An operation that can't apply says why. For complex values: electrical delay and rotation,
   each with **Calculate** (from the data between the cursors), auto-rotate each trace, and an
   I/Q histogram (a map of counts). Explore only: never written into the file.
+- Nothing in Explore is hidden silently: points a log scale can't show are counted in a note above
+  the plot, a log scale with nothing above 0 stays linear and says so, an empty result says why,
+  and an unexpected error says it's a bug and where the details are (`viewer.log`, next to LBD's
+  database), keeping the last picture.
 - Explore remembers, per file, what you showed (plot, chosen traces, operations, colours, scales, zoom, cursors), in
   the viewer's own database on this computer, never in the file. **Forget this view** starts
   afresh. A file that grows while it is shown (a running measurement) keeps the zoom and choices.

@@ -14,6 +14,8 @@ trace (a value as x) only allow operations along x.
 Each operation is a small function from a grid to a grid, NaN-aware, working in stored units
 (as plotted: e.g. |S21| in dB); the result knows its label and unit, and whether each shown
 point still comes from one stored point (`one_to_one`), so read-outs can name the stored value.
+Units are not worked out: an operation that keeps the unit (smooth, subtract the mean, …) keeps
+it; one that changes it (derivative, FFT, normalize) shows none, its label says what was done.
 
 **Complex operations** work on the complex values before the complex mode (magnitude, dB, phase
 …) makes numbers of them, so they come first in the list: `complex_data` applies them to a copy
@@ -31,7 +33,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from lbd.plot.units import PREFIXES, axis_label, prefix_scale
+from lbd.plot.units import axis_label, prefix_scale
 
 
 @dataclass(frozen=True)
@@ -136,8 +138,7 @@ def derivative(g: Grid, along: str = "x") -> Grid:
             out[ok] = d
         return out
     a = _per_row(g, along, f)
-    unit = _ratio_unit(g.value.unit, q.unit)
-    return replace(g, a=a, value=Quantity(f"d{g.value.label}/d{_short(q.label)}", unit))
+    return replace(g, a=a, value=Quantity(f"d{g.value.label}/d{q.label}", ""))     # another unit: none shown
 
 
 def smooth(g: Grid, along: str = "x", n: int = 5) -> Grid:
@@ -187,7 +188,7 @@ def _reduce(g: Grid, fn, name: str) -> Grid:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)              # an all-empty column: NaN, as wanted
         row = fn(g.a[have], axis=0)
-    return replace(g, a=row[None, :], t=None, tq=None, one_to_one=False,
+    return replace(g, a=row[None, :], t=None, tq=None, one_to_one=False, kind="curve",   # one row: a curve
                    labels=[f"{name} of {have.size} traces"], value=Quantity(f"{name} of {g.value.label}", g.value.unit))
 
 
@@ -217,7 +218,7 @@ def fft(g: Grid, along: str = "x") -> Grid:
     spec[:, 0] /= 2
     spec[~np.isfinite(rows).any(axis=1)] = np.nan                      # left-out traces stay empty
     freq = np.fft.rfftfreq(n, abs(d.mean()))
-    fq = Quantity({"s": "Frequency", "Hz": "Time"}.get(q.unit, f"1/{q.label}"), _inverse_unit(q.unit))
+    fq = Quantity({"s": "Frequency", "Hz": "Time"}.get(q.unit, f"1/{q.label}"), "")   # another unit: none shown
     out = replace(g, a=_back(g, spec, flipped), one_to_one=False,
                   value=Quantity(f"FFT of {g.value.label}", g.value.unit))
     return replace(out, x=freq, xq=fq) if along == "x" else replace(out, t=freq, tq=fq)
@@ -342,53 +343,11 @@ def run(g: Grid, ops: Sequence[Dict[str, Any]], iq_done: bool = False) -> Result
 
 # -- units --------------------------------------------------------------------------------------------
 
-def _short(label: str) -> str:
-    """'Frequency' -> 'Frequency'; long labels stay as they are (used in d…/d…)."""
-    return label
-
-
-def _ratio_unit(num: str, den: str) -> str:
-    if not den:
-        return num
-    if not num:
-        return f"1/{den}"
-    return f"{num}/{den}"
-
-
-def _inverse_unit(unit: str) -> str:
-    return {"s": "Hz", "Hz": "s", "": ""}.get(unit, f"1/{unit}")
-
-
 def shown(values: np.ndarray, q: Quantity, fmt: str) -> Tuple[float, str, str]:
     """(factor, unit shown, axis label) for numbers in stored units: an SI prefix where the unit
-    takes one (Hz, V, s, …), and for a ratio (dB/Hz, V/s) on its denominator, so a derivative
-    reads per GHz or per µs like its axis."""
-    unit = q.unit
-    if "/" in unit and not unit.startswith("1/"):
-        num, den = unit.split("/", 1)
-        # the denominator's prefix from the size of the numbers: dB/Hz of 3e-9 reads 3 dB/GHz
-        f, pre = _den_prefix(values, den)
-        return f, f"{num}/{pre}{den}", axis_label(q.label, f"{num}/{pre}{den}", fmt)
-    f, u = prefix_scale(values, unit, warn=False) if unit else (1.0, "")
+    takes one (Hz, V, s, …)."""
+    f, u = prefix_scale(values, q.unit, warn=False) if q.unit else (1.0, "")
     return f, u, axis_label(q.label, u, fmt)
-
-
-def _den_prefix(values: np.ndarray, den: str) -> Tuple[float, str]:
-    """A prefix p for the denominator, so values per (p den) are between 1 and 1000."""
-    from lbd.plot.units import AUTO_UNITS
-
-    finite = np.abs(np.asarray(values, dtype=float))
-    finite = finite[np.isfinite(finite) & (finite > 0)]
-    if den not in AUTO_UNITS or not finite.size:
-        return 1.0, ""
-    exp = int(math.floor(math.log10(float(finite.max())) / 3) * 3)      # per unit; per p·unit: × 10^-exp
-    best = ""
-    for p, e in PREFIXES.items():
-        if e == -exp and e % 3 == 0 and p not in ("c", "d", "da", "h"):
-            best = p
-    if not best and exp != 0:
-        return 1.0, ""
-    return 10.0 ** -exp, best
 
 
 
@@ -480,11 +439,13 @@ def model_of(s, base: Grid, g: Grid) -> Tuple[Any, Shown]:
     else:
         x_plot = np.asarray(g.x, dtype=float) * xf
         xs = [x_plot] * n                              # one array: the lines are reduced together
-    labels = g.labels if g.labels and len(g.labels) == n else [lab for _, lab in m.lines][:n]
+    base_lines = getattr(m, "lines", [])               # a map made into one curve (average) has none
+    labels = g.labels if g.labels and len(g.labels) == n else [lab for _, lab in base_lines][:n]
     if len(labels) < n:                                 # one curve per point column (histogram across traces)
         labels = [f"{base.xq.label} = {v:g}" for v in np.asarray(base.x, dtype=float)[:n]]
+    same = n == len(base_lines)
     model = CurveModel(xs=xs, lines=[(g.a[k] * vf, labels[k]) for k in range(n)],
-                       colors=m.colors if n == len(m.lines) else None, xf=xf, yf=vf, x_label=xlabel,
+                       colors=m.colors if same else None, xf=xf, yf=vf, x_label=xlabel,
                        y_label=vlabel, x_scale="linear" if x_changed else m.x_scale,
                        y_scale="linear", ylim=None, series_bar=None, auto_axes=[])
     return model, Shown(vf, vu, x_changed, t_changed)

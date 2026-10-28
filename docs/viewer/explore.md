@@ -157,11 +157,11 @@ top of the list:
 |---|---|---|
 | **Subtract the mean** | each trace minus its mean; *along* a map's other axis it removes a background that changes from row to row | as before |
 | **Normalize** | (value − mean) / standard deviation | none (σ) |
-| **Derivative** | d/dx, with the real steps (uneven ones too) | per the axis' unit, e.g. dB/GHz |
+| **Derivative** | d/dx, with the real steps (uneven ones too) | none: the label says what it is (dS21/dFrequency) |
 | **Smooth** | running mean over N points; missing points are skipped and stay missing | as before |
 | **Subtract the first trace** / **the previous trace** | across the traces (or a map's rows) | as before |
 | **Average** / **Std of the traces** | one curve from the shown traces | as before |
-| **FFT** | amplitude spectrum, positive frequencies (a sine of amplitude A peaks at A); needs evenly spaced points without gaps | the axis becomes 1/its unit: s → Hz, Hz → s |
+| **FFT** | amplitude spectrum, positive frequencies (a sine of amplitude A peaks at A); needs evenly spaced points without gaps | as before; the new axis has none (its label says Frequency, Time, or 1/…) |
 | **Histogram** | counts of the values, in N bins; the value becomes the horizontal axis | counts |
 
 - Each operation runs **along** an axis: the horizontal axis (within each trace, or each row of
@@ -172,7 +172,12 @@ top of the list:
 - An operation that can't apply where it is (an FFT on uneven steps, "subtract the previous
   trace" after averaging) turns **red** with the reason; the plot then shows the result of the
   operations above it.
-- Under the list: what the plot shows now, and in which unit.
+- Under the list: what the plot shows now, and in which unit. Units aren't worked out: an
+  operation that keeps the unit keeps it, one that changes it shows none.
+- **Nothing is hidden silently.** Points a log scale can't show (values ≤ 0) are counted in a
+  note above the plot ("57 points ≤ 0 aren't shown on the log vertical axis"); a log scale with
+  no value above 0 at all stays linear and says so; when an operation leaves nothing to show
+  (Normalize of a constant trace), the plot says why instead of staying empty.
 - **Cursors** read the values as shown and, while each shown point is still one stored point,
   also the stored value: `S21 − mean = 1.07 dB … (stored: S21 = 0.19 dB)`. After an average, an
   FFT or a histogram the points are new ones, so only the shown value is read, and a cut can't

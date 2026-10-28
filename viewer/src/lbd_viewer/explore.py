@@ -299,18 +299,79 @@ class ExploreSession:
             self._check_open()
             if self.kind == "curve":
                 per = len(self.data.axes[axis].data) if axis else 1
-                if len(self.model.lines) != len(self.base_model.lines):
-                    per, chosen = 1, None                # fewer traces after an operation: all shown
+                if self.base_kind != "curve" or len(self.model.lines) != len(self.base_model.lines):
+                    per, chosen = 1, None                # other traces after an operation: all shown
                 self.visible = [chosen is None or k % per in chosen for k in range(len(self.model.lines))]
                 for artist, shown in zip(self.lines, self.visible):
                     artist.set_visible(shown)
-            else:
+            self.log_refused: List[str] = []
+            if self.kind != "curve":
                 self._apply_map(settings, chosen if self.base_kind == "heatmap" else None, clim)
-            self.ax.set_xscale(settings.get("xscale", self.base_scales[0]))
-            self.ax.set_yscale(settings.get("yscale", self.base_scales[1]))
+            for key, which, base in (("xscale", "horizontal", self.base_scales[0]),
+                                     ("yscale", "vertical", self.base_scales[1])):
+                want = settings.get(key, base)
+                if want == "log" and not self._has_positive(which):
+                    want = "linear"                      # nothing could be drawn on a log axis
+                    self.log_refused.append(f"The {which} axis has no value above 0, so it stays linear.")
+                (self.ax.set_xscale if key == "xscale" else self.ax.set_yscale)(want)
             self.full = self._full_view()
         self.settings = settings
         return notes
+
+    def _has_positive(self, which: str) -> bool:
+        """Whether the data shown has a value above 0 along this axis (else a log scale shows nothing)."""
+        m = self.model
+        if self.kind == "curve":
+            shown = [k for k, v in enumerate(self.visible) if v]
+            arrays = [m.xs[k] if which == "horizontal" else m.lines[k][0] for k in shown]
+        else:
+            arrays = [m.x if which == "horizontal" else m.y]
+        with np.errstate(invalid="ignore"):
+            return any(bool(np.any(np.isfinite(v := np.asarray(a, dtype=float)) & (v > 0))) for a in arrays)
+
+    def hidden(self) -> Tuple[List[str], Optional[str]]:
+        """What the scales hide (points ≤ 0 on a log scale, …), and why nothing is shown when
+        nothing can be: notes the page keeps on screen. Worked out once per model and scales."""
+        key = (id(self.model), tuple(self.visible), self.ax.get_xscale(), self.ax.get_yscale(),
+               self.settings.get("cscale"), tuple(getattr(self, "log_refused", [])))
+        if key == getattr(self, "_hidden_key", None):
+            return self._hidden_value
+        notes = list(getattr(self, "log_refused", []))
+        m, empty = self.model, None
+        xlog, ylog = self.ax.get_xscale() == "log", self.ax.get_yscale() == "log"
+        with np.errstate(invalid="ignore"):
+            if self.kind == "curve":
+                shown = [k for k, v in enumerate(self.visible) if v]
+                # stops at the first trace with a value: cheap however many points there are
+                if not any(np.isfinite(np.asarray(m.lines[k][0], dtype=float)).any() for k in shown):
+                    empty = self._why_empty("point")
+                if xlog or ylog:                         # counting what a log scale hides: only then
+                    pairs = [(np.asarray(m.xs[k], dtype=float), np.asarray(m.lines[k][0], dtype=float)) for k in shown]
+                    ok = [np.isfinite(x) & np.isfinite(y) for x, y in pairs]
+                    if xlog and (n := sum(int(((x <= 0) & o).sum()) for (x, _), o in zip(pairs, ok))):
+                        notes.append(f"{n} point{'s' * (n != 1)} at x ≤ 0 aren't shown on the log horizontal axis.")
+                    if ylog and (n := sum(int(((y <= 0) & o).sum()) for (_, y), o in zip(pairs, ok))):
+                        notes.append(f"{n} point{'s' * (n != 1)} ≤ 0 aren't shown on the log vertical axis.")
+            else:
+                z = np.asarray(m.z, dtype=float)
+                finite = np.isfinite(z)
+                if not finite.any():
+                    empty = self._why_empty("cell")
+                if xlog and (n := int((np.asarray(m.x) <= 0).sum())):
+                    notes.append(f"{n} column{'s' * (n != 1)} at x ≤ 0 aren't shown on the log horizontal axis.")
+                if ylog and (n := int((np.asarray(m.y) <= 0).sum())):
+                    notes.append(f"{n} row{'s' * (n != 1)} at y ≤ 0 aren't shown on the log vertical axis.")
+                if self.settings.get("cscale") == "log" and (n := int(((z <= 0) & finite).sum())):
+                    notes.append(f"{n} cell{'s' * (n != 1)} ≤ 0 aren't shown on the log colour scale.")
+        self._hidden_key, self._hidden_value = key, (notes, empty)
+        return notes, empty
+
+    def _why_empty(self, what: str) -> str:
+        r = self.ops_result
+        if r is not None and r.applied:
+            return (f"Nothing to show: no {what} of '{r.grid.value.label}' has a value. The operations made "
+                    "it so (e.g. Normalize of a constant trace); change them, or turn them off for the stored data.")
+        return f"Nothing to show: no {what} of the data shown has a value (they are all missing)."
 
     def _apply_ops(self, ops: List[Dict[str, Any]], chosen: Optional[set]) -> bool:
         """Run the operations (on the chosen traces) when they or the choice changed; True when
@@ -318,7 +379,7 @@ class ExploreSession:
         key = json.dumps([ops, sorted(chosen) if chosen is not None else None])
         if key == self.ops_key:
             return False
-        self.ops_key, self.ops_list = key, ops
+        self.ops_key, self.ops_list = None, ops
         self._apply_complex(ops)
         model, result, shown = self.base_model, None, None
         if any(op["on"] for op in ops):
@@ -336,9 +397,11 @@ class ExploreSession:
                 model, shown = ops_mod.model_of(self, base, result.grid)
         self.ops_result, self.ops_shown = result, shown
         if model is self.model:
+            self.ops_key = key
             return False
         self.model = model
         self._build()
+        self.ops_key = key
         return True
 
     def _per_value(self) -> int:
@@ -412,6 +475,12 @@ class ExploreSession:
                 z = z[z > 0]
             lo = clim[0] if clim[0] is not None else (float(z.min()) if z.size else 1.0)
             hi = clim[1] if clim[1] is not None else (float(z.max()) if z.size else 10.0)
+            if log and not z.size:
+                log = False                              # nothing above 0: a log scale would show nothing
+                self.log_refused.append("The map has no value above 0, so the colour scale stays linear.")
+                z = self.model.z[np.isfinite(self.model.z)]
+                lo = clim[0] if clim[0] is not None else (float(z.min()) if z.size else 0.0)
+                hi = clim[1] if clim[1] is not None else (float(z.max()) if z.size else 1.0)
             if log and lo <= 0:
                 raise ExploreError("a log colour scale needs a range above 0")
             norm = mcolors.LogNorm(lo, hi) if log else mcolors.Normalize(lo, hi)
@@ -430,7 +499,10 @@ class ExploreSession:
             arrays = [np.asarray(a, dtype=float) for a in arrays]
             if log:
                 arrays = [a[a > 0] for a in arrays]
-            return _finite_range(arrays)
+            lo, hi = _finite_range(arrays)
+            if log and lo <= 0:                          # one value (or none): a decade around it
+                return (hi / 10, hi * 10) if hi > 0 else (0.1, 10.0)
+            return lo, hi
 
         if self.kind == "heatmap":
             xe, ye = self.x_edges, self.y_edges
@@ -655,6 +727,7 @@ class ExploreSession:
             rgba = np.asarray(self.fig.canvas.buffer_rgba())
             t3 = time.perf_counter()
         height, width = rgba.shape[:2]
+        hidden, empty = self.hidden()
         if fmt == "png":
             from PIL import Image
 
@@ -670,6 +743,7 @@ class ExploreSession:
             "xscale": self.ax.get_xscale(), "yscale": self.ax.get_yscale(),
             "full": [list(self.full[0]), list(self.full[1])],
             "note": note, "reduced": reduced, "stat": stat, "draft": draft, "ops": self.ops_info(),
+            "hidden": hidden, "empty": empty,
             "ms": {"wait": round((t1 - t0) * 1000, 1), "reduce": round((t2 - t1) * 1000, 1),
                    "draw": round((t3 - t2) * 1000, 1), "encode": round((t4 - t3) * 1000, 1)},
         }

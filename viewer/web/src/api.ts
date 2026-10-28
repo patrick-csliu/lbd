@@ -343,6 +343,8 @@ export interface ExploreFrameMeta {
   ms: { wait: number; reduce: number; draw: number; encode: number; total?: number }; // server time; total: the whole request
   notes?: string[]; // about the view settings, e.g. chosen positions that no longer exist
   ops?: OpsInfo | null; // the operations' state (operations.py), when there are any
+  hidden?: string[]; // what the scales hide (points ≤ 0 on a log scale, …): kept on screen
+  empty?: string | null; // nothing can be shown, and why
 }
 
 /** One operation of the Explore view (operations.py); the list is a view setting. */
