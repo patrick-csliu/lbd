@@ -34,7 +34,12 @@ The file format has its own version (`lbd_version`, currently 1.0).
   histogram with draggable limits sets a map's colour range (**Auto** leaves out outliers).
   Keys for all of it; **?** lists every mouse action and key. **Cursors** above the plot (key K)
   switches them off, so a click does nothing.
-- Explore remembers, per file, what you showed (plot, chosen traces, colours, scales, zoom, cursors), in
+- **Operations in Explore**: subtract the mean, normalize, derivative, smoothing, subtract the
+  first or previous trace, average or std of the traces, FFT and histogram, in any order, along
+  the horizontal axis or across the traces (a map's background along its other axis). Units
+  follow (d/dx in dB/GHz, an FFT of time in Hz); cursors read the shown value and the stored one.
+  An operation that can't apply says why. Explore only: never written into the file.
+- Explore remembers, per file, what you showed (plot, chosen traces, operations, colours, scales, zoom, cursors), in
   the viewer's own database on this computer, never in the file. **Forget this view** starts
   afresh. A file that grows while it is shown (a running measurement) keeps the zoom and choices.
 - **Library**: your folders, and what is inside the file you click; open it in Explore or

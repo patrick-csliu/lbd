@@ -21,6 +21,8 @@ import {
   ExploreOpen,
   FileInfo,
   Histogram,
+  Op,
+  OpsInfo,
   PlotSpec,
   ReduceStat,
 } from "./api";
@@ -58,6 +60,8 @@ export interface ViewSettings {
   yscale?: "linear" | "log";
   cscale?: "linear" | "log";
   clim?: [number | null, number | null];
+  ops?: Op[]; // operations on the data shown (operations.py), in order
+  ops_on?: boolean; // false: all of them off (the list kept)
 }
 interface Size {
   w: number;
@@ -142,6 +146,8 @@ interface Props {
   onStepSlider: (by: number) => void;
   /** Show a map's row or column (through cursor 1) as a curve in this tab. */
   onShowCut: (which: "row" | "column", index: Record<string, number>) => void;
+  /** The operations' state with each picture (which applied, what the plot shows). */
+  onOpsInfo: (info: OpsInfo | null) => void;
 }
 
 /** What the Cursors section (and the menu) can ask the view to do. */
@@ -186,6 +192,7 @@ export default function ExploreView({
   actions,
   onStepSlider,
   onShowCut,
+  onOpsInfo,
 }: Props) {
   // Pictures travel as raw pixels (fastest on this computer; "png" is the server's other choice).
   const format = "raw" as const;
@@ -237,6 +244,8 @@ export default function ExploreView({
   onCursorsRef.current = onCursors;
   const onReadingRef = useRef(onReading);
   onReadingRef.current = onReading;
+  const onOpsInfoRef = useRef(onOpsInfo);
+  onOpsInfoRef.current = onOpsInfo;
   const kindRef = useRef<"curve" | "heatmap" | null>(null);
   kindRef.current = opened?.kind ?? null;
   const readingRef = useRef<CursorsAnswer | null>(null); // the cursors on screen: the last answer
@@ -400,6 +409,7 @@ export default function ExploreView({
           wanted.current = { xlim: f.meta.xlim, ylim: f.meta.ylim };
         }
         onViewRef.current({ xlim: f.meta.xlim, ylim: f.meta.ylim });
+        onOpsInfoRef.current(f.meta.ops ?? null);
         if (f.meta.notes?.length) onErrorRef.current(f.meta.notes.join(" "));
         let src = frameCanvas.current;
         if (!src) src = frameCanvas.current = document.createElement("canvas");
@@ -1132,6 +1142,12 @@ function CursorLine({ n, c }: { n: number; c: CursorRead }) {
       </span>{" "}
       {z && <strong>{readText(z)}</strong>} at {rest.map(readText).join(", ")}
       {c.free && <span className="muted small"> (free position; the nearest stored value)</span>}
+      {c.stored && (
+        <span className="muted small">
+          {" "}
+          (stored: {c.stored.label} = {si(c.stored.value, c.stored.unit)})
+        </span>
+      )}
     </div>
   );
 }

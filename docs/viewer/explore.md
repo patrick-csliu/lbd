@@ -127,6 +127,38 @@ back.
 | Esc | Cancels a box being drawn; otherwise removes the cursors. |
 | ? | The list of mouse actions and keys. |
 
+## Operations
+
+The **Operations** section (in the side panel, above Scales) works on the data as shown: add
+operations with **+ Add operation**, in any order and as many as you like. Each runs on the
+result of the ones above it. Explore only: they are remembered with the view on this computer,
+never written into the file; **Figure** always shows the stored data.
+
+| Operation | What it does | Unit |
+|---|---|---|
+| **Subtract the mean** | each trace minus its mean; *along* a map's other axis it removes a background that changes from row to row | as before |
+| **Normalize** | (value − mean) / standard deviation | none (σ) |
+| **Derivative** | d/dx, with the real steps (uneven ones too) | per the axis' unit, e.g. dB/GHz |
+| **Smooth** | running mean over N points; missing points are skipped and stay missing | as before |
+| **Subtract the first trace** / **the previous trace** | across the traces (or a map's rows) | as before |
+| **Average** / **Std of the traces** | one curve from the shown traces | as before |
+| **FFT** | amplitude spectrum, positive frequencies (a sine of amplitude A peaks at A); needs evenly spaced points without gaps | the axis becomes 1/its unit: s → Hz, Hz → s |
+| **Histogram** | counts of the values, in N bins; the value becomes the horizontal axis | counts |
+
+- Each operation runs **along** an axis: the horizontal axis (within each trace, or each row of
+  a map), or **across the traces** (the curves of one curve per …, or along a map's vertical
+  axis). Operations across traces use only the traces you chose.
+- **▲ ▼** move an operation, **×** removes it, its box turns it off; **on** at the top turns
+  them all off, to compare with the stored data.
+- An operation that can't apply where it is (an FFT on uneven steps, "subtract the previous
+  trace" after averaging) turns **red** with the reason; the plot then shows the result of the
+  operations above it.
+- Under the list: what the plot shows now, and in which unit.
+- **Cursors** read the values as shown and, while each shown point is still one stored point,
+  also the stored value: `S21 − mean = 1.07 dB … (stored: S21 = 0.19 dB)`. After an average, an
+  FFT or a histogram the points are new ones, so only the shown value is read, and a cut can't
+  be saved (turn the operations off to save the stored data).
+
 ## Scales, colours and limits
 
 - **Scales:** log horizontal, log vertical, and for maps a log colour scale. Values of 0 or
@@ -170,8 +202,8 @@ Cursor values never come from the picture: they are read from the file's data.
 
 ## What is remembered, and where
 
-The viewer remembers how you explored each file: what was plotted, the chosen traces, colours,
-scales, limits, the zoom and the cursors. Opening the file again shows the same.
+The viewer remembers how you explored each file: what was plotted, the chosen traces, the
+operations, colours, scales, limits, the zoom and the cursors. Opening the file again shows the same.
 
 - This is kept **on this computer**, in the viewer's own database (in its settings folder, see
   [Command line and settings](command-line.md)). **Nothing is written into the data file.** The

@@ -36,7 +36,8 @@ export function si(v: number | null | undefined, unit: string, digits = 7): stri
   if (v === null || v === undefined || !Number.isFinite(v)) return "empty";
   const plain = (n: number) => Number(n.toPrecision(digits)).toString().replace("-", "−");
   if (!unit) return plain(v);
-  if (NO_PREFIX.has(unit) || v === 0) return `${plain(v)} ${unit}`;
+  // a ratio (dB/GHz) is shown as the axis shows it: no further prefix
+  if (NO_PREFIX.has(unit) || unit.includes("/") || v === 0) return `${plain(v)} ${unit}`;
   const a = Math.abs(v);
   for (const [p, f] of PREFIXES) if (a >= f * 0.9999999) return `${plain(v / f)} ${p}${unit}`;
   return `${plain(v)} ${unit}`;

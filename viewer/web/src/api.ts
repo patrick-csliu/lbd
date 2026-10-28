@@ -342,6 +342,34 @@ export interface ExploreFrameMeta {
   draft?: boolean; // the data was drawn at half resolution (while moving)
   ms: { wait: number; reduce: number; draw: number; encode: number; total?: number }; // server time; total: the whole request
   notes?: string[]; // about the view settings, e.g. chosen positions that no longer exist
+  ops?: OpsInfo | null; // the operations' state (operations.py), when there are any
+}
+
+/** One operation of the Explore view (operations.py); the list is a view setting. */
+export type OpName =
+  | "subtract_mean"
+  | "normalize"
+  | "derivative"
+  | "smooth"
+  | "subtract_first"
+  | "subtract_previous"
+  | "average"
+  | "std"
+  | "fft"
+  | "histogram";
+export interface Op {
+  op: OpName;
+  along?: "x" | "traces";
+  on?: boolean;
+  n?: number; // smooth: points
+  bins?: number; // histogram
+}
+export interface OpsInfo {
+  notes: (string | null)[]; // per operation: null (applied), "off", or why not
+  applied: number;
+  shows?: string; // what the plot shows now, e.g. "dS21/dFrequency"
+  unit?: string; // in which unit, e.g. "dB/GHz"
+  one_to_one?: boolean; // each shown point is still a stored point
 }
 
 export interface ExploreFrame {
@@ -384,6 +412,7 @@ export interface CursorRead {
   items: ReadItem[];
   table?: { rows: { trace: number; label: string; value: number | null; x: number | null }[]; more: number; label: string; unit: string };
   line?: ([number, number] | null)[]; // the trace as drawn (plot units), to highlight it
+  stored?: { label: string; unit: string; value: number | null }; // with operations on: the stored value behind it
   cell?: [number, number, number, number]; // maps: the cell, x0 y0 x1 y1 (plot units)
 }
 

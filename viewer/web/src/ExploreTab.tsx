@@ -1,6 +1,7 @@
 import { MouseEvent, ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import NumberRange from "./NumberRange";
-import { api, CursorsAnswer, ExploreOpen, FileInfo, PlotSpec, ReduceStat, ValueInfo } from "./api";
+import { api, CursorsAnswer, ExploreOpen, FileInfo, OpsInfo, PlotSpec, ReduceStat, ValueInfo } from "./api";
+import Operations from "./Operations";
 import Contrast from "./Contrast";
 import CursorPanel from "./CursorPanel";
 import { CursorsState, NO_CURSORS } from "./cursors";
@@ -173,6 +174,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
   );
   const onCursors = useCallback((cursors: CursorsState) => setShown((s) => s && { ...s, cursors }), []);
   const [reading, setReading] = useState<CursorsAnswer | null>(null);
+  const [opsInfo, setOpsInfo] = useState<OpsInfo | null>(null);
   const actions = useRef<ExploreActions | null>(null);
   const resolvedRef = useRef(resolved);
   resolvedRef.current = resolved;
@@ -272,6 +274,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
             resolved={resolved}
             settings={shown.settings}
             listOpen={shown.listOpen}
+            opsInfo={opsInfo}
             onListOpen={(listOpen) => setShown((s) => s && { ...s, listOpen })}
             updateSpec={updateSpec}
             updateSettings={updateSettings}
@@ -315,6 +318,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
             actions={actions}
             onStepSlider={onStepSlider}
             onShowCut={onShowCut}
+            onOpsInfo={setOpsInfo}
           />
         </div>
       )}
@@ -335,12 +339,13 @@ interface ControlsProps {
   contrast?: ReactNode;
   listOpen?: boolean;
   onListOpen: (open: boolean) => void;
+  opsInfo: OpsInfo | null;
 }
 
 /** Axes of a value with more than one point (the ones that can be drawn along). */
 const swept = (info: FileInfo, v: ValueInfo) => v.axes.filter((a, i) => v.shape[i] > 1 && info.axes.some((x) => x.name === a));
 
-function ExploreControls({ info, resolved, settings, updateSpec, updateSettings, children, contrast, listOpen, onListOpen }: ControlsProps) {
+function ExploreControls({ info, resolved, settings, updateSpec, updateSettings, children, contrast, listOpen, onListOpen, opsInfo }: ControlsProps) {
   if (!resolved) return <div className="controls muted small">Opening…</div>;
   const r = resolved.spec;
   const kind = resolved.kind;
@@ -486,6 +491,17 @@ function ExploreControls({ info, resolved, settings, updateSpec, updateSettings,
           onOpen={onListOpen}
         />
       )}
+
+      <Operations
+        kind={kind}
+        xLabel={label(along ?? r.x ?? "x")}
+        tracesLabel={kind === "heatmap" ? label(r.y ?? "") : traceAxis && traceAxis !== "none" && values.length === 1 ? label(traceAxis) : null}
+        ops={settings.ops ?? []}
+        on={settings.ops_on !== false}
+        info={opsInfo}
+        onChange={(ops) => updateSettings({ ops: ops.length ? ops : undefined, ...(ops.length ? {} : { ops_on: undefined }) })}
+        onOn={(on) => updateSettings({ ops_on: on ? undefined : false })}
+      />
 
       <fieldset className="field">
         <legend>Scales</legend>

@@ -21,6 +21,7 @@ Renders share lbd.plot's RENDER_LOCK: matplotlib's settings are global.
 from __future__ import annotations
 
 import io
+import json
 import secrets
 import threading
 import time
@@ -38,6 +39,8 @@ import lbd
 from lbd.plot import render as rnd
 from lbd.plot.reduce import STATS, CurvePyramid, MapPyramid, cell_edges, curve_minmax, thin_in_order
 from lbd.plot.style import Style
+
+from . import operations as ops_mod
 
 KINDS = ("curve", "heatmap")
 UNSORTED_LIMIT = 200_000   # a curve with unsorted x and more points than this is thinned for drawing
@@ -140,7 +143,24 @@ class ExploreSession:
         if new["kind"] not in KINDS:
             raise ExploreError(f"the Explore view shows curves and heat maps, not {new['kind']} plots; "
                                "use the Figure view for this plot")
-        self.spec, self.kind = new, new["kind"]
+        self.spec, self.base_kind = new, new["kind"]
+        # The plot as prepared from the data; operations (view setting "ops") draw a model made
+        # from it (operations.py), the base model stays for the stored values.
+        prepare = rnd.prepare_curves if self.base_kind == "curve" else rnd.prepare_map
+        with rnd.RENDER_LOCK, matplotlib.rc_context(self.style.to_rcparams()):
+            self._check_open()
+            self.base_model = prepare(self.data, self.spec, self.style)
+        self.model = self.base_model
+        self.ops_key: Optional[str] = None
+        self.ops_result: Optional[ops_mod.Result] = None
+        self.ops_shown: Optional[ops_mod.Shown] = None
+        self.ops_list: List[Dict[str, Any]] = []
+        self.settings: Dict[str, Any] = {}               # view settings (apply), reset with the plot
+        self._build()
+
+    def _build(self) -> None:
+        """Set the figure up for `self.model` (the base model, or the one after operations)."""
+        self.kind = "curve" if isinstance(self.model, rnd.CurveModel) else "heatmap"
         with rnd.RENDER_LOCK, matplotlib.rc_context(self.style.to_rcparams()):
             self._check_open()
             self.fig.clear()
@@ -150,7 +170,6 @@ class ExploreSession:
                 self._setup_curves()
             else:
                 self._setup_map()
-            self.settings: Dict[str, Any] = {}           # view settings (apply), reset with the plot
             self.visible = [True] * (len(self.model.lines) if self.kind == "curve" else 0)
             self.base_scales = (self.ax.get_xscale(), self.ax.get_yscale())
             self.full = self._full_view()
@@ -180,7 +199,7 @@ class ExploreSession:
     # -- setup
 
     def _setup_curves(self):
-        m = self.model = rnd.prepare_curves(self.data, self.spec, self.style)
+        m = self.model
         # Lines that share one x (x is an axis) are reduced and picked together; with a value as x
         # each line has its own. Unsorted x (e.g. one value against another) is drawn as stored.
         groups: Dict[int, Tuple[np.ndarray, List[int]]] = {}
@@ -205,7 +224,7 @@ class ExploreSession:
                      else self._padded(_finite_range([y for y, _ in m.lines])))
 
     def _setup_map(self):
-        m = self.model = rnd.prepare_map(self.data, self.spec, self.style)
+        m = self.model
         xe, ye = cell_edges(m.x), cell_edges(m.y)
         try:
             self.pyramid = MapPyramid(m.z, xe, ye)
@@ -265,10 +284,21 @@ class ExploreSession:
             if len(kept) < len(positions):
                 notes.append(f"{len(positions) - len(kept)} chosen positions of '{name}' no longer exist; left out")
             chosen = set(kept)
+        try:
+            op_list = ops_mod.check(settings.get("ops"))
+            if settings.get("ops_on") is False:          # the section's switch: all off, the list kept
+                op_list = [{**op, "on": False} for op in op_list]
+            changed = self._apply_ops(op_list, chosen)
+        except ops_mod.BadOps as e:
+            raise ExploreError(str(e)) from None
+        if changed:
+            self.settings = {}                           # a new figure: every setting again
         with rnd.RENDER_LOCK, matplotlib.rc_context(self.style.to_rcparams()):
             self._check_open()
             if self.kind == "curve":
                 per = len(self.data.axes[axis].data) if axis else 1
+                if len(self.model.lines) != len(self.base_model.lines):
+                    per, chosen = 1, None                # fewer traces after an operation: all shown
                 self.visible = [chosen is None or k % per in chosen for k in range(len(self.model.lines))]
                 for artist, shown in zip(self.lines, self.visible):
                     artist.set_visible(shown)
@@ -279,6 +309,38 @@ class ExploreSession:
             self.full = self._full_view()
         self.settings = settings
         return notes
+
+    def _apply_ops(self, ops: List[Dict[str, Any]], chosen: Optional[set]) -> bool:
+        """Run the operations (on the chosen traces) when they or the choice changed; True when
+        the figure was set up again for another model."""
+        key = json.dumps([ops, sorted(chosen) if chosen is not None else None])
+        if key == self.ops_key:
+            return False
+        self.ops_key, self.ops_list = key, ops
+        model, result, shown = self.base_model, None, None
+        if any(op["on"] for op in ops):
+            base = ops_mod.grid_of(self, chosen)
+            result = ops_mod.run(base, ops)
+            if result.applied:
+                model, shown = ops_mod.model_of(self, base, result.grid)
+        self.ops_result, self.ops_shown = result, shown
+        if model is self.model:
+            return False
+        self.model = model
+        self._build()
+        return True
+
+    def ops_info(self) -> Optional[Dict[str, Any]]:
+        """For the page: each operation's state (None: applied, "off", or why not) and what is shown."""
+        if not self.ops_list:
+            return None
+        r = self.ops_result
+        info: Dict[str, Any] = {"notes": r.notes if r else ["off"] * len(self.ops_list), "applied": r.applied if r else 0}
+        if r is not None and r.applied and self.ops_shown is not None:
+            info["shows"] = r.grid.value.label
+            info["unit"] = self.ops_shown.value_unit
+            info["one_to_one"] = r.grid.one_to_one
+        return info
 
     def _apply_map(self, settings: Dict[str, Any], chosen: Optional[set], clim) -> None:
         old = (self.settings.get("select") or {}).get(self.spec["y"])
@@ -556,7 +618,7 @@ class ExploreSession:
             "plot": [left, top, w, h], "xlim": list(xlim), "ylim": list(ylim),
             "xscale": self.ax.get_xscale(), "yscale": self.ax.get_yscale(),
             "full": [list(self.full[0]), list(self.full[1])],
-            "note": note, "reduced": reduced, "stat": stat, "draft": draft,
+            "note": note, "reduced": reduced, "stat": stat, "draft": draft, "ops": self.ops_info(),
             "ms": {"wait": round((t1 - t0) * 1000, 1), "reduce": round((t2 - t1) * 1000, 1),
                    "draw": round((t3 - t2) * 1000, 1), "encode": round((t4 - t3) * 1000, 1)},
         }

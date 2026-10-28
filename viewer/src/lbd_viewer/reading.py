@@ -68,6 +68,38 @@ def _plotted(s: "ExploreSession", name: str) -> Tuple[str, str]:
     return label, unit
 
 
+def _operated(s: "ExploreSession") -> bool:
+    """Operations are on and change what is shown (explore.py `_apply_ops`)."""
+    return s.ops_result is not None and s.ops_result.applied > 0 and s.ops_shown is not None
+
+
+def _value_item(s: "ExploreSession", role: str, name: str, plot_value) -> Dict[str, Any]:
+    """A shown value read out, in its own unit; after operations as they made it (a ratio such as
+    dB/GHz as shown, so it reads like the axis)."""
+    factor = s.model.zf if s.kind == "heatmap" else s.model.yf
+    if _operated(s):
+        q, sh = s.ops_result.grid.value, s.ops_shown
+        if "/" in sh.value_unit:
+            return {"role": role, "name": name, "label": q.label, "unit": sh.value_unit, "value": _num(plot_value)}
+        return {"role": role, "name": name, "label": q.label, "unit": q.unit, "value": _num(plot_value / factor)}
+    label, unit = _plotted(s, name)
+    return {"role": role, "name": name, "label": label, "unit": unit, "value": _num(plot_value / factor)}
+
+
+def _model_axis_item(s: "ExploreSession", role: str, q, plot_value, factor: float, i: int) -> Dict[str, Any]:
+    """An axis the operations made (FFT: frequency; histogram: the value): no stored axis."""
+    return {"role": role, "name": q.label, "label": q.label, "unit": q.unit, "index": int(i),
+            "value": _num(plot_value / factor)}
+
+
+def _stored(s: "ExploreSession", name: str, base_value, factor: float) -> Optional[Dict[str, Any]]:
+    """The stored value behind a shown point (operations that keep points), or None."""
+    if not _operated(s) or not s.ops_result.grid.one_to_one:
+        return None
+    label, unit = _plotted(s, name)
+    return {"label": label, "unit": unit, "value": _num(base_value / factor)}
+
+
 def _axis_item(s: "ExploreSession", role: str, axis: str, i: int) -> Dict[str, Any]:
     a = s.data.axes[axis]
     return {"role": role, "name": axis, "label": a.label or axis, "unit": a.unit, "index": int(i),
@@ -176,12 +208,19 @@ def _map_cursor(s: "ExploreSession", c: Dict[str, Any], kind: str) -> Optional[D
     py = y if free or kind == "vertical" else float(m.y[j])
     z = _map_z(s)[j, i]
     name = s.spec["values"][0]
-    label, unit = _plotted(s, name)
-    return {"x": px, "y": py, "free": free, "index": {s.spec["x"]: i, s.spec["y"]: j},
-            "items": [_axis_item(s, "x", s.spec["x"], i), _axis_item(s, "y", s.spec["y"], j),
-                      {"role": "z", "name": name, "label": label, "unit": unit,
-                       "value": _num(z / m.zf) if np.isfinite(z) else None}],
-            "cell": [float(v) for v in _cell_box(m, i, j)]}
+    sh = s.ops_shown if _operated(s) else None
+    g = s.ops_result.grid if sh else None
+    x_item = (_model_axis_item(s, "x", g.xq, m.x[i], m.xf, i) if sh and sh.x_changed
+              else _axis_item(s, "x", s.spec["x"], i))
+    y_item = (_model_axis_item(s, "y", g.tq, m.y[j], m.yf, j) if sh and sh.t_changed
+              else _axis_item(s, "y", s.spec["y"], j))
+    out = {"x": px, "y": py, "free": free, "items": [x_item, y_item, _value_item(s, "z", name, z)],
+           "index": {s.spec["x"]: i, s.spec["y"]: j} if not sh or g.one_to_one else {},
+           "cell": [float(v) for v in _cell_box(m, i, j)]}
+    stored = _stored(s, name, s.base_model.z[j, i], s.base_model.zf) if sh and g.one_to_one else None
+    if stored:
+        out["stored"] = stored
+    return out
 
 
 def _clip_cell(centres: np.ndarray, v: float) -> int:
@@ -235,17 +274,21 @@ def _curve_cursor(s: "ExploreSession", c: Dict[str, Any], kind: str, geo) -> Opt
     if py is None:
         py = y
     name = _trace_value(s, k)
-    label, unit = _plotted(s, name)
-    items = [_curve_x_item(s, k, i), {"role": "y", "name": name, "label": label, "unit": unit,
-                                      "value": _num(ys_k[i] / m.yf)}]
+    items = [_curve_x_item(s, k, i), _value_item(s, "y", name, ys_k[i])]
     series = s.spec.get("series")
     index = {s.spec.get("along", s.spec["x"]): int(i)}
-    if series:
+    same_traces = len(m.lines) == len(s.base_model.lines)
+    if series and same_traces:
         j = k % _per_value(s)
         items.append(_axis_item(s, "series", series, j))
         index[series] = int(j)
-    out = {"x": px, "y": py, "free": free, "trace": int(k), "label": m.lines[k][1], "index": index,
-           "items": items}
+    one_to_one = not _operated(s) or s.ops_result.grid.one_to_one
+    out = {"x": px, "y": py, "free": free, "trace": int(k), "label": m.lines[k][1],
+           "index": index if one_to_one else {}, "items": items}
+    if _operated(s) and one_to_one:
+        stored = _stored(s, name, s.base_model.lines[k][0][i], s.base_model.yf)
+        if stored:
+            out["stored"] = stored
     if kind == "vertical":
         out["table"] = _table(s, k, i, shown)
     return out
@@ -253,6 +296,8 @@ def _curve_cursor(s: "ExploreSession", c: Dict[str, Any], kind: str, geo) -> Opt
 
 def _curve_x_item(s: "ExploreSession", k: int, i: int) -> Dict[str, Any]:
     m = s.model
+    if _operated(s) and s.ops_shown.x_changed:       # FFT, histogram: an axis the operations made
+        return _model_axis_item(s, "x", s.ops_result.grid.xq, m.xs[k][i], m.xf, i)
     if s.spec["x"] in s.data.values:                 # a value as x: its stored number at this point
         xv = s.data.values[s.spec["x"]]
         return {"role": "x", "name": xv.name, "label": xv.label or xv.name, "unit": xv.unit, "index": int(i),
@@ -319,10 +364,11 @@ def _table(s: "ExploreSession", k: int, i: int, shown: List[int]) -> Dict[str, A
     for t in order[:TABLE_LIMIT]:
         xs = m.xs[t]
         it = i if xs is m.xs[k] else _nearest(xs, x0)
-        rows.append({"trace": int(t), "label": m.lines[t][1], "value": _num(m.lines[t][0][it] / m.yf),
+        rows.append({"trace": int(t), "label": m.lines[t][1], "value": _value_item(s, "y", _trace_value(s, t), m.lines[t][0][it])["value"],
                      "x": _num(xs[it] / m.xf)})
     name = _trace_value(s, k)
-    label, unit = _plotted(s, name)
+    shown_item = _value_item(s, "y", name, 0.0)
+    label, unit = shown_item["label"], shown_item["unit"]
     return {"rows": rows, "more": max(len(order) - TABLE_LIMIT, 0), "label": label, "unit": unit}
 
 
@@ -447,6 +493,9 @@ def histogram(s: "ExploreSession", bins: int = HIST_BINS) -> Dict[str, Any]:
 
 def cut_plan(s: "ExploreSession", which: str, index: Dict[str, int], trace: Optional[int] = None):
     """What a cut keeps and fixes: (kept axis, {fixed axis: index}, value names)."""
+    if _operated(s) and not s.ops_result.grid.one_to_one:
+        raise ExploreError("after this operation the shown points aren't stored ones; turn the operations "
+                           "off to save the stored data of a cut")
     spec = s.spec
     fixed = dict(spec.get("index") or {})
     if s.kind == "heatmap":

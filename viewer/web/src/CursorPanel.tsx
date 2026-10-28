@@ -107,12 +107,21 @@ function CursorNumbers({ n, c, kind, type, actions }: { n: number; c: CursorRead
           {series.label} = {si(series.value, series.unit)}
         </div>
       )}
-      <div className="muted small">
-        stored at{" "}
-        {Object.entries(c.index)
-          .map(([a, i]) => `${a}[${i}]`)
-          .join(", ")}
-      </div>
+      {c.stored && (
+        <div className="cursor-value muted small">
+          stored: {c.stored.label} = {si(c.stored.value, c.stored.unit)}
+        </div>
+      )}
+      {Object.keys(c.index).length > 0 ? (
+        <div className="muted small">
+          stored at{" "}
+          {Object.entries(c.index)
+            .map(([a, i]) => `${a}[${i}]`)
+            .join(", ")}
+        </div>
+      ) : (
+        <div className="muted small">a shown point (made by the operations), not a stored one</div>
+      )}
     </div>
   );
 }
