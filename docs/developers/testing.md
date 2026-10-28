@@ -13,7 +13,8 @@ uv run python scripts/test_all.py --fast   # without the cross-language matrix a
 5. the documentation: a strict site build (broken links, missing anchors or bad API
    references fail it) and every code example in the docs;
 6. the cross-language matrix;
-7. the viewer in a real browser (see [Several viewer pages](#several-viewer-pages)).
+7. the viewer in a real browser (see [Several viewer pages](#several-viewer-pages));
+8. the Explore benchmark, only when the drawing code changed (see [Performance](#performance)).
 
 A suite whose program (e.g. `matlab`, or Playwright's Chromium) is missing is reported as
 skipped, not failed.
@@ -46,6 +47,37 @@ To run single suites:
 
 The fixture content is defined in [the cross-language fixture](#cross-language-fixture).
 Run the cross-language matrix after any change to a module or the spec.
+
+## Performance
+
+The Explore view must stay fast on large data. That is checked in two ways:
+
+| What | How | When |
+|---|---|---|
+| **Why it is fast**: each view is drawn once (no second layout, also deep in and with an axis offset), drafts reduce half the pixels with the same axes, maps and many curves are read from their pyramids, many curves are one picture with one axis | ordinary tests in `viewer/tests/test_explore.py`: exact, and the same on every computer | every test run |
+| **How fast it is**: times of opening, the full view, zooming and panning (drafts), the sharp picture and picking, on 1000 traces × 10 000 points, a 4001 × 4001 map and a curve of 1 000 000 points | `scripts/benchmark_explore.py`: prints a table and compares it with earlier runs **on the same computer** | when the drawing code changed since the last run on this computer, before a release, or when asked |
+
+```bash
+uv run python scripts/test_all.py --perf               # everything, and the benchmark whatever changed
+uv run python scripts/benchmark_explore.py             # the benchmark alone
+uv run python scripts/benchmark_explore.py --history   # earlier runs on this computer
+```
+
+`test_all.py` runs the benchmark by itself when a file of the drawing code
+(`lbd/plot/`, the viewer's `explore.py`, `uv.lock`) changed since the benchmark's last run on this
+computer; otherwise it reports "not needed". `--fast` skips it, and GitHub never runs it: shared
+machines vary too much for times to mean anything there.
+
+Each time is the fastest of three repeats (a busy computer only adds time, so the fastest is the
+steadiest). The baseline is the median of this computer's last five
+passed runs, kept in `.benchmarks/explore.jsonl` (not committed; one line per run, with its
+commit). A time more than 30 % **and** 10 ms slower than the baseline fails the run, and a failed
+run doesn't become part of the baseline. When a run fails:
+
+- the table's note says whether plain matplotlib was slower too: then the computer was busy, so
+  run it again;
+- if the slowdown is the price of a wanted change, `--accept` makes this run the new baseline;
+- otherwise `--history` lists the runs and their commits, to find the change.
 
 ## Rules the Python tests follow
 

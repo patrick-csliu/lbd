@@ -337,6 +337,73 @@ def test_test_all_annotates_failures_on_github(load_module, monkeypatch, capsys)
     assert "::error title=Viewer tests failed::line 1%0A50%25 done, a: b" in errors
 
 
+def test_test_all_runs_the_benchmark_only_when_needed(load_module, monkeypatch, capsys):
+    ta = load_module("scripts/test_all.py")
+    bench = load_module("scripts/benchmark_explore.py")
+    ran = []
+
+    class R:
+        returncode, stdout, stderr = 0, "", ""
+
+    def run(cmd, cwd):
+        ran.append(" ".join(map(str, cmd)))
+        return R()
+
+    monkeypatch.setattr(ta, "run", run)
+    monkeypatch.setattr(ta.shutil, "which", lambda name: None)
+    monkeypatch.setattr(ta, "discover", lambda: [])
+    monkeypatch.setattr(ta, "_e2e_missing", lambda: "not here")
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.setattr(bench, "why_run", lambda: None)               # drawing code unchanged
+    assert ta.main([]) == 0
+    assert not any("benchmark_explore" in c for c in ran) and "not needed" in capsys.readouterr().out
+    assert ta.main(["--fast", "--perf"]) == 0                          # asked for: runs anyway
+    assert any("benchmark_explore" in c for c in ran)
+    ran.clear()
+    monkeypatch.setattr(bench, "why_run", lambda: "drawing code changed")
+    assert ta.main(["--fast"]) == 0                                    # --fast never runs it
+    assert not any("benchmark_explore" in c for c in ran)
+    assert ta.main([]) == 0
+    assert any("benchmark_explore" in c for c in ran)
+    ran.clear()
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")                       # shared machines: never
+    ta.main(["--perf"])
+    assert not any("benchmark_explore" in c for c in ran)
+
+
+def test_benchmark_baseline_is_this_computers_recent_passed_runs(load_module):
+    bench = load_module("scripts/benchmark_explore.py")
+
+    def run(t, passed=True, accepted=False):
+        return {"times": {"full view": t}, "passed": passed, "accepted": accepted}
+
+    runs = [run(500), run(100), run(110), run(999, passed=False), run(90), run(100), run(105), run(95)]
+    assert bench.baseline(runs) == {"full view": 100}      # the last 5 passed; the failed one left out
+    runs.append(run(200, passed=False, accepted=True))     # a wanted slowdown, accepted
+    assert bench.baseline(runs) == {"full view": 200}
+    assert bench.baseline([]) == {}
+
+
+def test_benchmark_runs_when_drawing_code_changed(load_module, monkeypatch, tmp_path):
+    bench = load_module("scripts/benchmark_explore.py")
+    monkeypatch.setattr(bench, "HISTORY", tmp_path / "explore.jsonl")
+    assert bench.why_run() == "no earlier run on this computer"
+    other = {"machine": "another computer", "commit": "abc", "times": {}}
+    bench.HISTORY.write_text(json.dumps(other) + "\n", encoding="utf-8")
+    assert bench.why_run() == "no earlier run on this computer"        # other computers don't count
+    here = {"machine": bench.machine(), "commit": "abc", "times": {}}
+    bench.HISTORY.write_text(json.dumps(other) + "\n" + json.dumps(here) + "\n", encoding="utf-8")
+    answers = {"cat-file": "", "diff": "", "ls-files": ""}
+    monkeypatch.setattr(bench, "git", lambda *args: answers[args[0]])
+    assert bench.why_run() is None
+    answers["diff"] = "viewer/src/lbd_viewer/explore.py"
+    assert "explore.py" in bench.why_run()
+    answers["diff"], answers["ls-files"] = "", "languages/python/src/lbd/plot/new.py"   # a new file
+    assert "new.py" in bench.why_run()
+    answers["cat-file"] = None                                         # e.g. after a rebase
+    assert bench.why_run() == "the last run's commit is unknown here"
+
+
 # ---- crosslang runner ----------------------------------------------------------------------------
 
 

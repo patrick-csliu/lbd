@@ -51,3 +51,6 @@ site/
 
 # Claude Code project notes (local only, never committed)
 CLAUDE.md
+
+# Explore benchmark results, per computer (scripts/benchmark_explore.py)
+.benchmarks/

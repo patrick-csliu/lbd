@@ -2,6 +2,7 @@
 the data, and points read back from the full data."""
 
 import json
+import sys
 import time
 
 import numpy as np
@@ -293,3 +294,102 @@ def test_painted_lines_keep_order_and_gaps():
     assert list(img[10, 20]) == blue                                  # the later curve on top
     assert list(img[10, 50]) == red                                   # in its gap the earlier shows
     assert img[0, 0, 3] == 0                                          # elsewhere: transparent
+
+
+# ---- why it is fast ------------------------------------------------------------------------------
+# Machine-independent checks of what keeps the Explore view fast; the times themselves are measured
+# by scripts/benchmark_explore.py (see docs/developers/testing.md, "Performance").
+
+
+def count_calls(monkeypatch, obj, name):
+    """Count the calls of obj.name (still calling it)."""
+    calls = []
+    real = getattr(obj, name)
+
+    def counted(*args, **kwargs):
+        calls.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(obj, name, counted)
+    return calls
+
+
+@pytest.fixture()
+def many_curves(data_dir):
+    """60 curves of 20 000 points on one x: drawn as one picture, from their pyramid."""
+    x = np.linspace(0, 1, 20_000)
+    d = lbd.Dataset(title="many")
+    d.add_axis("k", np.arange(60.0))
+    d.add_axis("t", x)
+    d.add_value("v", np.add.outer(np.arange(60.0), np.sin(40 * x)), axes=["k", "t"])
+    path = data_dir / "many_long.lbd"
+    d.save(path)
+    return path
+
+
+def test_each_view_is_drawn_once(client, data_dir, big_map, many_curves, monkeypatch):
+    """Zooming, panning and drafts never lay the plot out again or draw twice, also deep in, with an
+    offset ("1e-8") on an axis: a relayout costs a second full draw per picture."""
+    d = lbd.Dataset(title="tiny")
+    d.add_axis("t", np.linspace(0, 1e-6, 5000))
+    d.add_value("v", 1e-8 * np.sin(np.linspace(0, 30, 5000)) + 3e-6, axes="t")
+    d.save(data_dir / "tiny.lbd")
+    for path, spec in ((big_map, None), (many_curves, {"kind": "curve", "x": "t", "series": "k"}),
+                       (data_dir / "tiny.lbd", None)):
+        o = open_view(client, path, spec=spec)
+        sess = client.app.state.lbd.explore.get(o["session"])
+        render(client, o["session"])
+        draws = count_calls(monkeypatch, sess.fig.canvas, "draw")
+        layouts = count_calls(monkeypatch, sess, "_lay_out")
+        (x0, x1), (y0, y1) = o["full"]
+        views = []
+        for k in (1, 5, 20, 60, 120):                 # down to a millionth of the full view
+            f = 0.9 ** k
+            views.append(([x0 + 0.3 * (x1 - x0) * (1 - f), x0 + (x1 - x0) * (0.3 + 0.7 * f)],
+                          [y0 + 0.6 * (y1 - y0) * (1 - f), y0 + (y1 - y0) * (0.6 + 0.4 * f)]))
+        for xlim, ylim in views:
+            for draft in (True, False):
+                render(client, o["session"], xlim=xlim, ylim=ylim, draft=draft)
+        assert len(draws) == 2 * len(views), (path.name, len(draws))
+        assert not layouts, path.name
+
+
+def test_drafts_reduce_half_the_pixels_with_the_same_axes(client, big_map, many_curves):
+    """A draft (while moving) reduces the data to half the pixels each way; its axes are those of
+    the sharp picture, so the two match."""
+    o = open_view(client, big_map, width=640, height=420)
+    sess = client.app.state.lbd.explore.get(o["session"])
+    sharp, _ = render(client, o["session"])
+    w, h = sharp["plot"][2:]
+    assert sess.image.get_array().shape == (h, w)
+    draft, _ = render(client, o["session"], draft=True)
+    assert draft["draft"] and sess.image.get_array().shape == (h // 2, w // 2)
+    assert (draft["plot"], draft["xlim"], draft["ylim"]) == (sharp["plot"], sharp["xlim"], sharp["ylim"])
+
+    o = open_view(client, many_curves, spec={"kind": "curve", "x": "t", "series": "k"}, width=640, height=420)
+    sess = client.app.state.lbd.explore.get(o["session"])
+    draft, _ = render(client, o["session"], draft=True)
+    w, h = draft["plot"][2:]
+    assert sess.line_image.get_array().shape[:2] == (h // 2, w // 2)
+
+
+def test_large_data_is_read_from_the_pyramids(client, big_map, many_curves, monkeypatch):
+    """At a wide view, maps and many curves are reduced from their pyramids (blocks made once),
+    not from every stored number; zoomed in to the stored points, nothing is reduced."""
+    o = open_view(client, big_map, width=640, height=420)
+    sess = client.app.state.lbd.explore.get(o["session"])
+    levels = []
+    real = sess.pyramid.raster
+    monkeypatch.setattr(sess.pyramid, "raster", lambda *a, **k: levels.append(real(*a, **k).level) or real(*a, **k))
+    render(client, o["session"])                      # 1001 cells on ~550 pixels
+    render(client, o["session"], draft=True)          # on ~275 pixels: a coarser level
+    render(client, o["session"], xlim=[0.5, 0.52], ylim=[0, 0.02])
+    assert levels[1] >= 1 and levels[1] > levels[0] and levels[2] == 0, levels
+
+    o = open_view(client, many_curves, spec={"kind": "curve", "x": "t", "series": "k"}, width=640, height=420)
+    sess = client.app.state.lbd.explore.get(o["session"])
+    every_point = count_calls(monkeypatch, sys.modules["lbd_viewer.explore"], "curve_minmax")
+    meta, _ = render(client, o["session"])            # 20 000 points on ~550 columns
+    assert sess.spans is not None and meta["reduced"] and not every_point
+    meta, _ = render(client, o["session"], xlim=[0.5, 0.501])
+    assert sess.spans is None and meta["note"] == "every point shown"

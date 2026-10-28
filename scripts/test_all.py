@@ -7,7 +7,9 @@ Runs, in order:
   2. the viewer's Python tests, the tests of scripts/ and packaging/, and the web UI type check,
   3. the documentation: strict site build and every code example (scripts/check_doc_examples.py),
   4. the cross-language round-trip matrix and the viewer's end-to-end tests in a real browser
-     (viewer/tests/e2e/, Playwright with Chromium), both skipped with --fast.
+     (viewer/tests/e2e/, Playwright with Chromium), both skipped with --fast,
+  5. the Explore benchmark (scripts/benchmark_explore.py), only when the drawing code changed since
+     its last run on this computer, or always with --perf; never with --fast or on GitHub.
 A suite whose required program (e.g. matlab, or Playwright's Chromium) is missing is reported as skipped.
 """
 
@@ -58,6 +60,7 @@ def main(argv=None) -> int:
             stream.reconfigure(errors="replace")
     ap = argparse.ArgumentParser()
     ap.add_argument("--fast", action="store_true", help="skip the cross-language matrix and the browser tests")
+    ap.add_argument("--perf", action="store_true", help="also run the Explore benchmark, changed drawing code or not")
     args = ap.parse_args(argv)
 
     results = []  # (suite, status, seconds, output)
@@ -137,13 +140,29 @@ def main(argv=None) -> int:
 
         record("Viewer in a browser (e2e)", viewer_e2e)
 
+    def benchmark():
+        import benchmark_explore
+
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            return ("skipped", "not on GitHub: its shared machines vary too much")
+        why = "asked for (--perf)" if args.perf else benchmark_explore.why_run()
+        if why is None:
+            return ("not needed", "drawing code unchanged since the last run here; --perf runs it anyway")
+        print(f"    ({why})", flush=True)
+        r = run([sys.executable, "scripts/benchmark_explore.py"], REPO)
+        print(r.stdout, flush=True)                 # its table, passed or not
+        return ("passed" if r.returncode == 0 else "FAILED", r.stdout + r.stderr)
+
+    if args.perf or not args.fast:
+        record("Explore benchmark", benchmark)
+
     print()
     width = max(len(s) for s, *_ in results)
     for suite, status, secs, out in results:
         note = ""
-        if status == "skipped" and out:
+        if status in ("skipped", "not needed") and out:
             note = f"  ({out})"
-        print(f"  {suite:{width}s}  {status:8s} {secs:6.1f}s{note}")
+        print(f"  {suite:{width}s}  {status:10s} {secs:6.1f}s{note}")
     failed = [r for r in results if r[1] == "FAILED"]
     skipped = [r for r in results if r[1] == "skipped"]
     for suite, _, _, out in failed:
