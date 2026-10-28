@@ -3,7 +3,7 @@ import NumberRange from "./NumberRange";
 import { api, CursorsAnswer, ExploreOpen, FileInfo, OpsInfo, PlotSpec, ReduceStat, SyncKeys, ValueInfo } from "./api";
 import Operations from "./Operations";
 import Contrast from "./Contrast";
-import CursorPanel from "./CursorPanel";
+import CursorPanel, { OtherPanel } from "./CursorPanel";
 import { CursorsState, NO_CURSORS } from "./cursors";
 import ExploreView, { ExploreActions, Follow, View, ViewSettings } from "./ExploreView";
 import AxisSelect from "./AxisSelect";
@@ -252,6 +252,35 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
     [],
   );
 
+  /** With x synchronized, the cursors are shared: the active panel leads, and the panels with
+   * the same x get its cursors' x (type, on, which is active); each keeps its own y or trace and
+   * snaps the cursor to its own data. What the others report back changes only themselves. */
+  const sharedKey = useRef("");
+  const shareCursors = useCallback((id: string, c: CursorsState) => {
+    const r = recRef.current, me = liveRef.current[id]?.sync;
+    if (!r || r.panels.length < 2 || !r.sync.x || r.panels[r.active]?.id !== id || !me) return;
+    const key = JSON.stringify({ id, type: c.type, on: c.on, active: c.active, xs: c.at.map((a) => a.x) });
+    if (key === sharedKey.current) return;
+    sharedKey.current = key;
+    setRec((rr) => {
+      if (!rr) return rr;
+      let changed = false;
+      const panels = rr.panels.map((q) => {
+        const theirs = liveRef.current[q.id];
+        if (q.id === id || theirs?.sync?.x !== me.x) return q;
+        const own = q.cursors.at, curve = theirs.resolved?.kind !== "heatmap";
+        const mid = q.view ? (q.view.ylim[0] + q.view.ylim[1]) / 2 : 0;
+        const at = c.at.map((a, k) => {
+          const trace = own[k]?.trace ?? (curve ? 0 : undefined); // curves: on a trace, so the x is kept
+          return { x: a.x, y: own[k]?.y ?? mid, ...(trace !== undefined ? { trace } : {}) };
+        });
+        changed = true;
+        return { ...q, cursors: { ...q.cursors, type: c.type, on: c.on, active: c.active, at } };
+      });
+      return changed ? { ...rr, panels } : rr;
+    });
+  }, []);
+
   /** What a panel's controls and view change in it. */
   const panelApi = useCallback(
     (id: string) => {
@@ -291,7 +320,10 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
       return {
         updateSpec,
         updateSettings: (patch: ViewSettings) => updatePanel(id, (s) => ({ ...s, settings: { ...s.settings, ...patch } })),
-        onCursors: (cursors: CursorsState) => updatePanel(id, (s) => ({ ...s, cursors })),
+        onCursors: (cursors: CursorsState) => {
+          updatePanel(id, (s) => ({ ...s, cursors }));
+          shareCursors(id, cursors);
+        },
         onView: (view: View) => updatePanel(id, (s) => (JSON.stringify(s.view) !== JSON.stringify(view) ? { ...s, view } : s)),
         onStat: (stat: ReduceStat) => updatePanel(id, (s) => ({ ...s, stat })),
         onListOpen: (listOpen: boolean) => updatePanel(id, (s) => ({ ...s, listOpen })),
@@ -323,7 +355,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
         },
       };
     },
-    [updatePanel, restart],
+    [updatePanel, restart, shareCursors],
   );
 
   // ---- the panels: add, remove, duplicate, reorder, make active
@@ -441,6 +473,11 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
       })
       .join(", ");
   const full = n >= MAX_PANELS;
+  // The other panels at the same x as the active one (their read-outs at the shared cursor).
+  const othersAtX: OtherPanel[] = rec.panels
+    .map((p, i) => ({ p, i }))
+    .filter(({ p }) => p.id !== act.id && live[p.id]?.sync && live[p.id]?.sync?.x === live[act.id]?.sync?.x)
+    .map(({ p, i }) => ({ n: i + 1, title: titleOf(p), reading: live[p.id]?.reading ?? null }));
   /** Why panel p doesn't follow the active panel's zoom, if it doesn't. */
   const notSynced = (p: PanelState): string | null => {
     const mine = live[p.id]?.sync?.x, theirs = live[act.id]?.sync?.x;
@@ -568,6 +605,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
                 reading={actLive.reading}
                 actions={actActions}
                 onBack={act.back ? actApi.onBack : null}
+                others={rec.sync.x ? othersAtX : []}
               />
             )}
           </ExploreControls>

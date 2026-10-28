@@ -193,3 +193,73 @@ def test_sliders_of_the_same_axis_move_together_unless_switched_off(values_files
     per_panel(page, lambda: shown(page).get_by_role("slider").press("Home"))
     shown(page).locator(".panel-title").nth(0).click()
     expect(shown(page).get_by_role("slider")).to_have_value("2")            # kept its own
+
+
+def cursor_answers(page, action, panels: int = 1, quiet_ms: int = 600):
+    """Do `action`; returns each session's last /cursors answer, once `panels` sessions answered
+    and no more answers come for a moment."""
+    import re
+
+    got = {}
+
+    def collect(r):
+        m = re.search(r"/api/explore/([^/]+)/cursors$", r.url)
+        if m and r.ok:
+            got[m.group(1)] = r.json()
+
+    page.on("response", collect)
+    try:
+        action()
+        for _ in range(100):
+            if len(got) >= panels:
+                break
+            page.wait_for_timeout(100)
+        seen = None
+        while seen != len(got) or seen is None:
+            seen = len(got)
+            page.wait_for_timeout(quiet_ms)
+    finally:
+        page.remove_listener("response", collect)
+    return got
+
+
+def test_one_cursor_at_the_same_x_in_every_panel(values_files, new_page):
+    import pytest
+
+    page = new_page("Explore")
+    per_panel(page, lambda: row(page, "6 rabi.lbd").dblclick(), panels=4)
+    box = shown(page).locator(".panel .explore-overlay").nth(0).bounding_box()
+    answers = cursor_answers(page, lambda: page.mouse.click(box["x"] + box["width"] * 0.5, box["y"] + box["height"] * 0.5), panels=4)
+    xs = [a["cursors"][0]["x"] for a in answers.values()]
+    assert len(xs) == 4 and all(x == pytest.approx(xs[0]) for x in xs)      # every panel, the same x
+    others = shown(page).get_by_label("The other panels at the same x")
+    expect(others.locator("tr")).to_have_count(3)
+    expect(others).not_to_contain_text("—")                                 # each has its value there
+    # the panel clicked in leads: panel 2's cursor moves the others
+    box2 = shown(page).locator(".panel .explore-overlay").nth(1).bounding_box()
+    answers = cursor_answers(page, lambda: page.mouse.click(box2["x"] + box2["width"] * 0.3, box2["y"] + box2["height"] * 0.5), panels=4)
+    xs2 = [a["cursors"][0]["x"] for a in answers.values()]
+    assert all(x == pytest.approx(xs2[0]) for x in xs2) and xs2[0] != pytest.approx(xs[0])
+    expect(shown(page).locator(".panel-heading")).to_contain_text("Panel 2:")
+    # Max in the active panel moves all of them
+    answers = cursor_answers(page, lambda: shown(page).get_by_role("button", name="Max").click(), panels=4)
+    xs3 = [a["cursors"][0]["x"] for a in answers.values()]
+    assert all(x == pytest.approx(xs3[0]) for x in xs3)
+    # sync x off: each panel its own cursors
+    shown(page).get_by_label("Sync x").uncheck()
+    answers = cursor_answers(page, lambda: page.mouse.click(box2["x"] + box2["width"] * 0.7, box2["y"] + box2["height"] * 0.5))
+    assert len(answers) == 1
+    expect(shown(page).get_by_label("The other panels at the same x")).to_have_count(0)
+
+
+def test_a_map_and_a_curve_share_the_cursor_x(values_files, new_page):
+    import pytest
+
+    page = new_page("Explore")
+    per_panel(page, lambda: row(page, "8 mixed axes.lbd").dblclick(), panels=4)
+    shown(page).locator(".panel-title").nth(1).click()                      # the map over frequency
+    box = shown(page).locator(".panel .explore-overlay").nth(1).bounding_box()
+    answers = cursor_answers(page, lambda: page.mouse.click(box["x"] + box["width"] * 0.4, box["y"] + box["height"] * 0.5), panels=2)
+    assert len(answers) == 2                                                 # the map and S21_ref; not the curves vs power
+    xs = [a["cursors"][0]["x"] for a in answers.values()]
+    assert xs[0] == pytest.approx(xs[1], rel=1e-3)

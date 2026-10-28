@@ -17,6 +17,50 @@ interface Props {
   actions: MutableRefObject<ExploreActions | null>;
   /** Shown after "Show row / column as curve": go back to the map. */
   onBack: (() => void) | null;
+  /** Several panels with the cursor shared: the other panels' read-outs at the same x. */
+  others?: OtherPanel[];
+}
+
+/** Another panel's read-out at the shared cursor. */
+export interface OtherPanel {
+  n: number; // its number
+  title: string;
+  reading: CursorsAnswer | null;
+}
+
+/** A panel's value at a cursor: the trace's y (curves) or the cell's z (maps). */
+const valueOf = (c: CursorRead | null) => (c ? item(c, "z") ?? item(c, "y") : undefined);
+
+function OtherPanels({ others, two }: { others: OtherPanel[]; two: boolean }) {
+  return (
+    <div className="cursor-others small" aria-label="The other panels at the same x">
+      <div className="muted">The other panels at the same x:</div>
+      <table>
+        <tbody>
+          {others.map((o) => {
+            const a = o.reading?.cursors[0] ?? null, b = o.reading?.cursors[1] ?? null;
+            const va = valueOf(a), vb = valueOf(b);
+            return (
+              <tr key={o.n}>
+                <th>
+                  {o.n} {o.title}
+                </th>
+                <td>
+                  <span className="cursor-tag c1">1</span> {va ? si(va.value, va.unit) : "—"}
+                </td>
+                {two && (
+                  <td>
+                    <span className="cursor-tag c2">2</span> {vb ? si(vb.value, vb.unit) : "—"}
+                    {va && vb && va.value !== null && vb.value !== null && va.unit === vb.unit && <> · Δ {si(vb.value - va.value, va.unit)}</>}
+                  </td>
+                )}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 const TYPES: [CursorType, string, string][] = [
@@ -126,7 +170,7 @@ function CursorNumbers({ n, c, kind, type, actions }: { n: number; c: CursorRead
   );
 }
 
-export default function CursorPanel({ kind, cursors, onCursors, reading, actions, onBack }: Props) {
+export default function CursorPanel({ kind, cursors, onCursors, reading, actions, onBack, others = [] }: Props) {
   const list = reading?.cursors ?? [];
   const [c1, c2] = [list[0] ?? null, list[1] ?? null];
   const act = (fn: (a: ExploreActions) => void) => () => actions.current && fn(actions.current);
@@ -186,6 +230,7 @@ export default function CursorPanel({ kind, cursors, onCursors, reading, actions
           </tbody>
         </table>
       )}
+      {c1 && others.length > 0 && <OtherPanels others={others} two={!!c2} />}
       {c1?.table && (
         <div className="cursor-table small" aria-label="Every trace at the cursor">
           <table>
