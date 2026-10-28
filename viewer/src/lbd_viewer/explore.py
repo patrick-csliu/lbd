@@ -36,11 +36,16 @@ from matplotlib.figure import Figure
 
 import lbd
 from lbd.plot import render as rnd
-from lbd.plot.reduce import STATS, MapPyramid, cell_edges, curve_minmax, thin_in_order
+from lbd.plot.reduce import STATS, MapPyramid, cell_edges, curve_minmax, raster_columns, raster_lines, thin_in_order
 from lbd.plot.style import Style
 
 KINDS = ("curve", "heatmap")
 UNSORTED_LIMIT = 200_000   # a curve with unsorted x and more points than this is thinned for drawing
+# Above this many curves on screen, they are drawn as one picture (reduce.raster_lines) instead of
+# line by line: matplotlib needs ~0.7 ms per line, so 1000 curves would take most of a second.
+RASTER_ABOVE = 30
+# Tick labels the layout makes room for, so zooming (more digits) never needs a new layout.
+WIDEST_TICK = "\u22128.888888"
 MAX_DPR = 2.0
 PICK_RADIUS_PX = 12.0
 FORMATS = ("raw", "png")
@@ -120,13 +125,26 @@ class ExploreSession:
             self.visible = [True] * (len(self.model.lines) if self.kind == "curve" else 0)
             self.base_scales = (self.ax.get_xscale(), self.ax.get_yscale())
             self.full = self._full_view()
-            # The layout is made for the whole data's tick labels (usually the widest)
             self.ax.set_xlim(*self.full[0])
             self.ax.set_ylim(*self.full[1])
-            self.fig.canvas.draw()                    # lays the figure out once ...
-            self.fig.set_layout_engine("none")        # ... and keeps it, so zooming doesn't move the plot
+            self._lay_out()
         self.highlight: Optional[int] = None
         self.last_lines: Optional[List[Tuple[np.ndarray, np.ndarray]]] = None
+
+    def _lay_out(self) -> None:
+        """Place the plot area once, with room for tick labels as wide as zooming in can make
+        them; then keep it, so the plot doesn't move while zooming and no zoom step needs a new
+        layout (that would cost a second drawing). Call under the render lock."""
+        from matplotlib.ticker import FuncFormatter
+
+        kept = [(a, a.get_major_formatter()) for a in (self.ax.xaxis, self.ax.yaxis)]
+        for a, _ in kept:
+            a.set_major_formatter(FuncFormatter(lambda v, pos: WIDEST_TICK))
+        self.fig.set_layout_engine("constrained")
+        self.fig.canvas.draw()
+        self.fig.set_layout_engine("none")
+        for a, formatter in kept:
+            a.set_major_formatter(formatter)
 
     # -- setup
 
@@ -138,8 +156,16 @@ class ExploreSession:
         for k, x in enumerate(m.xs):
             groups.setdefault(id(x), (np.asarray(x, dtype=float), []))[1].append(k)
         self.x_groups = [(x, ks, _is_sorted(x)) for x, ks in groups.values()]
+        # One vertical axis: the traces are named in the list and when clicked, so the figure's
+        # colour bar for many series (a second axis) is left out here.
+        m.series_bar = None
         self.lines = rnd.draw_curves(self.fig, self.ax, m, self.data, self.spec, self.style,
                                      data=[(x[:0], y[:0]) for x, (y, _) in zip(m.xs, m.lines)])
+        # Many curves are drawn as one picture over the plot area (see render).
+        self.line_image = self.ax.imshow(np.zeros((1, 1, 4), np.uint8), extent=(0, 1, 0, 1), transform=self.ax.transAxes,
+                                         interpolation="nearest", aspect="auto", zorder=2, visible=False)
+        self.line_colors = np.array([[*mcolors.to_rgba_array(a.get_color())[0][:3] * 255, 255] for a in self.lines],
+                                    dtype=np.uint8).reshape(-1, 4)
         self.full = (_finite_range([x for x, _, _ in self.x_groups]), m.ylim if m.ylim and None not in m.ylim
                      else self._padded(_finite_range([y for y, _ in m.lines])))
 
@@ -269,6 +295,29 @@ class ExploreSession:
 
     # -- drawing
 
+    def _raster(self, lines, shown: List[int], w: int, h: int) -> None:
+        """Draw the curves `shown` into one picture of the plot area (w × h pixels), in their
+        colours, later curves on top, as matplotlib would draw them (without antialiasing)."""
+        def to_px(v, lim, scale, size):
+            f = (lambda a: np.log10(np.where(a > 0, a, np.nan))) if scale == "log" else (lambda a: a)
+            a, b = f(np.asarray(lim, dtype=float))
+            return (f(np.asarray(v, dtype=float)) - a) / (b - a) * size
+
+        xs, ys = self.ax.get_xscale(), self.ax.get_yscale()
+        xl, yl = self.ax.get_xlim(), self.ax.get_ylim()
+        width = self.lines[shown[0]].get_linewidth() * self.fig.dpi / 72 if shown else 1.0
+        groups = [ks for _, ks, ok in self.x_groups if ok and any(k in shown for k in ks)]
+        if len(groups) == 1 and all(len(lines[k][0]) == len(lines[shown[0]][0]) for k in shown):
+            # the usual case: the curves share one sorted x, so they are drawn column by column
+            x = to_px(lines[shown[0]][0], xl, xs, w)
+            y = h - to_px(np.stack([lines[k][1] for k in shown]), yl, ys, h)
+            owner = raster_columns(x, y, w, h, width)
+        else:
+            px = [(to_px(lines[k][0], xl, xs, w), h - to_px(lines[k][1], yl, ys, h)) for k in shown]
+            owner = raster_lines(px, w, h, width)
+        table = np.vstack([self.line_colors[shown], [[0, 0, 0, 0]]])     # -1: transparent
+        self.line_image.set_data(table[owner])
+
     def _plot_area(self) -> Tuple[int, int, int, int]:
         """The axes' box in image pixels: left, top, width, height (top-left origin)."""
         bb = self.ax.get_window_extent()
@@ -283,8 +332,9 @@ class ExploreSession:
         box = self.fig.bbox
         for a in self.fig.axes:
             tb = a.get_tightbbox(r)
-            if tb is not None and (tb.x0 < box.x0 - 0.5 or tb.y0 < box.y0 - 0.5 or
-                                   tb.x1 > box.x1 + 0.5 or tb.y1 > box.y1 + 0.5):
+            # a few pixels over the edge are harmless (antialiased glyph edges, the top tick label)
+            if tb is not None and (tb.x0 < box.x0 - 4 or tb.y0 < box.y0 - 4 or
+                                   tb.x1 > box.x1 + 4 or tb.y1 > box.y1 + 4):
                 return True
         return False
 
@@ -312,9 +362,7 @@ class ExploreSession:
             self.fig.set_size_inches(width / 96, height / 96)
             self.ax.set_xlim(*self.full[0])
             self.ax.set_ylim(*self.full[1])
-            self.fig.set_layout_engine("constrained")
-            self.fig.canvas.draw()
-            self.fig.set_layout_engine("none")
+            self._lay_out()
 
     def render(self, xlim: Optional[Tuple[float, float]], ylim: Optional[Tuple[float, float]],
                stat: str = "max", fmt: str = "raw", _again: bool = False) -> Tuple[bytes, Dict[str, Any]]:
@@ -361,8 +409,14 @@ class ExploreSession:
                             out = [(x, ys[k]) for k in ks]
                     for k, xy in zip(ks, out):
                         lines[k] = xy
-                for artist, (x, y) in zip(self.lines, lines):
+                shown = [k for k, v in enumerate(self.visible) if v]
+                as_picture = len(shown) > RASTER_ABOVE
+                for k, (artist, (x, y)) in enumerate(zip(self.lines, lines)):
                     artist.set_data(x, y)
+                    artist.set_visible(self.visible[k] and not as_picture)
+                self.line_image.set_visible(as_picture)
+                if as_picture:
+                    self._raster(lines, shown, w, h)
                 self.last_lines = lines
                 note = "min and max per pixel column" if reduced else "every point shown"
                 if unsorted:
@@ -371,10 +425,9 @@ class ExploreSession:
             t2 = time.perf_counter()
             self.fig.canvas.draw()
             if not _again and self._spills():
-                # Longer tick labels (zoomed in: more digits) no longer fit: lay out again, once.
-                self.fig.set_layout_engine("constrained")
-                self.fig.canvas.draw()
-                self.fig.set_layout_engine("none")
+                # Text that still doesn't fit (rare: the layout leaves room for wide tick labels):
+                # lay out again, once.
+                self._lay_out()
                 left, top, w, h = self._plot_area()
                 if (w, h) != (len(pxe) - 1, len(pye) - 1):        # the plot area changed size
                     return self.render(xlim, ylim, stat, fmt, _again=True)

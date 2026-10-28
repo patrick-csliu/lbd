@@ -732,11 +732,13 @@ def create_app(state: AppState) -> FastAPI:
         """The picture of a view: raw RGBA pixels (or PNG), and in the X-LBD-Frame header (JSON)
         the mapping between its pixels and the data, the reduction used and the timings."""
         s = _session(session_id)
+        started = time.perf_counter()
         if body.width is not None and body.height is not None:
             s.resize(body.width, body.height, body.dpr if body.dpr is not None else s.dpr)
         notes = s.apply(body.settings) if body.settings is not None else []
         data, meta = s.render(body.xlim, body.ylim, body.stat, body.format)
         meta["notes"] = notes
+        meta["ms"]["total"] = round((time.perf_counter() - started) * 1000, 1)   # all of it, on the server
         media = "image/png" if meta["format"] == "png" else "application/octet-stream"
         return Response(content=data, media_type=media,
                         headers={"X-LBD-Frame": json.dumps(meta), "Cache-Control": "no-store"})

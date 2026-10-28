@@ -339,7 +339,7 @@ export interface ExploreFrameMeta {
   note: string; // how the data was reduced, e.g. "max of 6×6 cells per pixel"
   reduced: boolean;
   stat: ReduceStat;
-  ms: { wait: number; reduce: number; draw: number; encode: number };
+  ms: { wait: number; reduce: number; draw: number; encode: number; total?: number }; // server time; total: the whole request
   notes?: string[]; // about the view settings, e.g. chosen positions that no longer exist
 }
 

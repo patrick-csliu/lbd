@@ -300,7 +300,7 @@ export default function ExploreView({ info, spec, version, onOpened, onError, se
         setStatus("");
         const ms = f.meta.ms;
         setTiming(
-          `reduce ${ms.reduce} ms · draw ${ms.draw} ms · encode ${ms.encode} ms · waited ${ms.wait} ms · ` +
+          `server ${ms.total ?? "?"} ms (reduce ${ms.reduce} · draw ${ms.draw} · encode ${ms.encode} · waited ${ms.wait}) · ` +
             `asked → shown ${Math.round(f.roundTripMs)} ms · ${f.meta.width}×${f.meta.height} px`,
         );
       })

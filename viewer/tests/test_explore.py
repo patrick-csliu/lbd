@@ -55,7 +55,7 @@ def test_a_picture_comes_with_its_mapping(client, data_dir):
     assert meta["xlim"] == o["full"][0] and meta["note"] == "every point shown"
     left, top, w, h = meta["plot"]
     assert 0 < left and 0 <= top and left + w <= meta["width"] and top + h <= meta["height"]
-    assert set(meta["ms"]) == {"wait", "reduce", "draw", "encode"}
+    assert set(meta["ms"]) == {"wait", "reduce", "draw", "encode", "total"}
 
 
 def test_a_known_point_is_drawn_where_the_mapping_says(client, data_dir):
@@ -253,3 +253,30 @@ def test_colour_map_scales_and_limits(client, big_map):
                        ({"cscale": "log", "clim": [-1, 2]}, "above 0"), ({"xscale": "ln"}, "'linear' or 'log'")):
         r = client.post(f"/api/explore/{o['session']}/render", json={"settings": bad})
         assert r.status_code == 400 and match in r.json()["detail"], (bad, r.json())
+
+
+def test_many_curves_are_one_picture_with_one_axis(client, data_dir):
+    """Above 30 curves on screen they are drawn as one picture (fast); there is no colour bar for
+    the traces in Explore, so the plot has a single vertical axis."""
+    d = lbd.Dataset(title="many")
+    d.add_axis("k", np.arange(60.0))
+    d.add_axis("t", np.arange(200.0))
+    d.add_value("v", np.add.outer(np.arange(60.0), np.sin(np.arange(200.0) / 10)), axes=["k", "t"])
+    d.save(data_dir / "many.lbd")
+    o = open_view(client, data_dir / "many.lbd", spec={"kind": "curve", "x": "t", "series": "k"})
+    render(client, o["session"])
+    sess = client.app.state.lbd.explore.get(o["session"])
+    assert len(sess.fig.axes) == 1                                  # no colour bar
+    assert sess.line_image.get_visible() and not any(line.get_visible() for line in sess.lines)
+    render(client, o["session"], settings={"select": {"k": [3, 7]}})   # few: drawn line by line
+    assert not sess.line_image.get_visible() and sum(line.get_visible() for line in sess.lines) == 2
+
+
+def test_zooming_needs_no_new_layout(client, big_map):
+    """The layout leaves room for long tick labels, so a zoom step draws once (no relayout)."""
+    o = open_view(client, big_map)
+    sess = client.app.state.lbd.explore.get(o["session"])
+    area = sess._plot_area()
+    for lim in ([0.3, 0.30001], [0.123456, 0.123457], [0, 1]):
+        render(client, o["session"], xlim=lim, ylim=[-0.000011, -0.00001])
+        assert sess._plot_area() == area

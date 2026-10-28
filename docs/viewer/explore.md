@@ -75,6 +75,9 @@ pixel shows, and says so in the note above the plot:
   (the overall look; a single odd cell fades).
 - **Curves:** each pixel column keeps the lowest and highest point in it, so a spike of one point
   still shows.
+- **Many curves** (more than 30 on screen) are drawn together as one picture, which is much faster;
+  their lines are then not smoothed (antialiased), so they look a little sharper-edged. Choose a
+  few traces to see them drawn as in a figure.
 - Zoomed in far enough, every cell or point is drawn as stored ("every cell shown").
 
 Clicked values never come from the picture: they are read from the file's data.

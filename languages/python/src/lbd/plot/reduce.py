@@ -282,16 +282,15 @@ def curve_minmax(x: np.ndarray, ys: Sequence[np.ndarray], px_x_edges: Sequence[f
     centres = np.where((ids >= 0) & (ids < w), (pxe[np.clip(ids, 0, w - 1)] + pxe[np.clip(ids + 1, 0, w)]) / 2,
                        xv[starts])                     # the points just outside keep their own x
     xx = np.repeat(centres, 2)
-    for y in ys:
-        yv = np.asarray(y, dtype=float)
-        yv = (yv[::-1] if flip else yv)[i0:i1]
-        lo = np.fmin.reduceat(yv, starts)
-        hi = np.fmax.reduceat(yv, starts)
-        yy = np.empty(2 * len(starts))
-        yy[0::2], yy[1::2] = lo, hi
-        out.append((xx, yy))
-        reduced = True
-    return out, reduced
+    # all curves at once (one row each): one reduceat instead of one per curve
+    yv = np.stack([np.asarray(y, dtype=float) for y in ys])
+    yv = (yv[:, ::-1] if flip else yv)[:, i0:i1]
+    lo = np.fmin.reduceat(yv, starts, axis=1)
+    hi = np.fmax.reduceat(yv, starts, axis=1)
+    yy = np.empty((len(ys), 2 * len(starts)))
+    yy[:, 0::2], yy[:, 1::2] = lo, hi
+    out = [(xx, row) for row in yy]
+    return out, len(out) > 0
 
 
 def nearest_point(x: np.ndarray, ys: Sequence[np.ndarray], to_px, click: Tuple[float, float],
@@ -329,3 +328,116 @@ def thin_in_order(x: np.ndarray, y: np.ndarray, n_out: int) -> Tuple[np.ndarray,
     idx = np.stack([starts + first, starts + second], axis=1).ravel()
     idx = idx[np.repeat(ok, 2)]
     return x[idx], y[idx]
+
+
+def raster_lines(lines: Sequence[Tuple[np.ndarray, np.ndarray]], width: int, height: int,
+                 thickness: float = 1.0) -> np.ndarray:
+    """Draw polylines into a picture of width × height pixels: for each pixel, the index of the
+    last line through it (later lines on top, as when drawn in order), or -1.
+
+    `lines` are (px, py) in pixels of the picture (x to the right, y down); NaN breaks a line.
+    Each line is `thickness` pixels wide. Used instead of drawing many lines one by one: numpy
+    covers every pixel a segment passes, column by column, without antialiasing.
+    """
+    owner = np.full(height * width, -1, dtype=np.int32)
+    pad = max(thickness, 1.0) / 2
+    xa_all, ya_all, xb_all, yb_all, ids = [], [], [], [], []
+    for k, (px, py) in enumerate(lines):
+        px, py = np.asarray(px, dtype=float), np.asarray(py, dtype=float)
+        if px.size == 1:                                  # a single point: a dot
+            px, py = np.repeat(px, 2), np.repeat(py, 2)
+        ok = np.isfinite(px[:-1]) & np.isfinite(py[:-1]) & np.isfinite(px[1:]) & np.isfinite(py[1:])
+        xa_all.append(px[:-1][ok]), ya_all.append(py[:-1][ok]), xb_all.append(px[1:][ok]), yb_all.append(py[1:][ok])
+        ids.append(np.full(int(ok.sum()), k, dtype=np.int32))
+    if not ids or not sum(len(i) for i in ids):
+        return owner.reshape(height, width)
+    xa, ya, xb, yb, k = (np.concatenate(v) for v in (xa_all, ya_all, xb_all, yb_all, ids))
+    swap = xb < xa                                        # every segment left to right
+    xa, xb = np.where(swap, xb, xa), np.where(swap, xa, xb)
+    ya, yb = np.where(swap, yb, ya), np.where(swap, ya, yb)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        slope = np.where(xb > xa, (yb - ya) / (xb - xa), 0.0)
+    # only the part inside the picture (plus a pixel), with y where the segment is cut
+    x0, x1 = np.maximum(xa, -1.0), np.minimum(xb, width + 1.0)
+    keep = x0 <= x1
+    xa, ya, x0, x1, slope, k, yb = xa[keep], ya[keep], x0[keep], x1[keep], slope[keep], k[keep], yb[keep]
+    vertical = x0 == x1
+    y0 = np.where(vertical, ya, ya + slope * (x0 - xa))
+    y1 = np.where(vertical, yb, ya + slope * (x1 - xa))
+    # one entry per pixel column a segment touches
+    c0, c1 = np.floor(x0).astype(np.int64), np.floor(x1).astype(np.int64)
+    n = c1 - c0 + 1
+    seg = np.repeat(np.arange(len(c0)), n)
+    col = c0[seg] + (np.arange(seg.size) - np.repeat(np.cumsum(n) - n, n))
+    xl, xr = np.maximum(x0[seg], col), np.minimum(x1[seg], col + 1)
+    yl = np.where(vertical[seg], y0[seg], y0[seg] + slope[seg] * (xl - x0[seg]))
+    yr = np.where(vertical[seg], y1[seg], y0[seg] + slope[seg] * (xr - x0[seg]))
+    r0 = np.floor(np.minimum(yl, yr) - pad + 0.5).astype(np.int64)
+    r1 = np.floor(np.maximum(yl, yr) + pad - 0.5).astype(np.int64)
+    r1 = np.maximum(r1, r0)
+    inside = (col >= 0) & (col < width) & (r1 >= 0) & (r0 < height)
+    col, line = col[inside], k[seg][inside]
+    r0, r1 = np.clip(r0[inside], 0, height - 1), np.clip(r1[inside], 0, height - 1)
+    # A line is continuous, so in one column it covers one run of rows: merge its pieces there.
+    key = line.astype(np.int64) * width + col
+    lo = np.full(len(lines) * width, height, dtype=np.int32)
+    hi = np.full(len(lines) * width, -1, dtype=np.int32)
+    np.minimum.at(lo, key, r0.astype(np.int32))
+    np.maximum.at(hi, key, r1.astype(np.int32))
+    used = np.flatnonzero(hi >= lo)
+    lo, hi = lo[used], hi[used]
+    col, line = (used % width).astype(np.int32), (used // width).astype(np.int32)
+    # one entry per pixel: the column's rows from lo to hi
+    m = hi - lo + 1
+    rep = np.repeat(np.arange(len(col), dtype=np.int32), m)
+    rows = lo[rep] + (np.arange(rep.size, dtype=np.int32) - np.repeat((np.cumsum(m) - m).astype(np.int32), m))
+    np.maximum.at(owner, rows * width + col[rep], line[rep])
+    return owner.reshape(height, width)
+
+
+def raster_columns(x: np.ndarray, ys: np.ndarray, width: int, height: int, thickness: float = 1.0) -> np.ndarray:
+    """Like raster_lines, for many curves that share one increasing x (the usual case: a sweep
+    with one curve per step), and much faster: the work is per pixel column, for all curves at
+    once, however many points they have.
+
+    `x` (n,) and `ys` (curves, n) are in pixels of the picture (x to the right, y down); NaN breaks
+    a curve. In each column a curve covers the rows between its values at the column's two edges
+    and every stored point inside it."""
+    x = np.asarray(x, dtype=float)
+    ys = np.atleast_2d(np.asarray(ys, dtype=float))
+    k = ys.shape[0]
+    owner = np.full(height * width, -1, dtype=np.int32)
+    if x.size < 2 or k == 0:
+        return owner.reshape(height, width)
+    # values at the column edges (linear between neighbouring points; NaN next to a gap)
+    edges = np.arange(width + 1, dtype=float)
+    i = np.clip(np.searchsorted(x, edges, side="right") - 1, 0, x.size - 2)
+    t = (edges - x[i]) / np.where(x[i + 1] > x[i], x[i + 1] - x[i], 1.0)
+    outside = (edges < x[0]) | (edges > x[-1])
+    at_edges = ys[:, i] * (1 - t) + ys[:, i + 1] * t
+    at_edges[:, outside] = np.nan
+    lo = np.fmin(at_edges[:, :-1], at_edges[:, 1:])
+    hi = np.fmax(at_edges[:, :-1], at_edges[:, 1:])
+    # the stored points inside each column
+    col = np.floor(x).astype(np.int64)
+    inside = (col >= 0) & (col < width)
+    if inside.any():
+        xs_col, yv = col[inside], ys[:, inside]
+        starts = np.flatnonzero(np.r_[True, xs_col[1:] != xs_col[:-1]])
+        cols = xs_col[starts]
+        lo[:, cols] = np.fmin(lo[:, cols], np.fmin.reduceat(yv, starts, axis=1))
+        hi[:, cols] = np.fmax(hi[:, cols], np.fmax.reduceat(yv, starts, axis=1))
+    pad = max(thickness, 1.0) / 2
+    ok = np.isfinite(lo) & np.isfinite(hi)
+    r0 = np.floor(np.where(ok, lo, 0) - pad + 0.5)
+    r1 = np.floor(np.where(ok, hi, -1) + pad - 0.5)
+    ok &= (r1 >= 0) & (r0 < height)
+    r0 = np.clip(r0, 0, height - 1).astype(np.int32)
+    r1 = np.maximum(np.clip(r1, 0, height - 1).astype(np.int32), r0)
+    line, c = np.nonzero(ok)                              # curve-major: later curves come later
+    a, b = r0[line, c], r1[line, c]
+    m = b - a + 1
+    rep = np.repeat(np.arange(len(c), dtype=np.int32), m)
+    rows = a[rep] + (np.arange(rep.size, dtype=np.int32) - np.repeat((np.cumsum(m) - m).astype(np.int32), m))
+    np.maximum.at(owner, rows * width + c[rep].astype(np.int32), line[rep].astype(np.int32))
+    return owner.reshape(height, width)
