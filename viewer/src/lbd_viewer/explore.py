@@ -27,7 +27,7 @@ import threading
 import time
 import warnings
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import matplotlib
 import matplotlib.colors as mcolors
@@ -150,6 +150,8 @@ class ExploreSession:
         with rnd.RENDER_LOCK, matplotlib.rc_context(self.style.to_rcparams()):
             self._check_open()
             self.base_model = prepare(self.data, self.spec, self.style)
+        self.raw_model = self.base_model                 # the file's data: read-outs' stored values
+        self.complex_key: Optional[str] = None
         self.model = self.base_model
         self.ops_key: Optional[str] = None
         self.ops_result: Optional[ops_mod.Result] = None
@@ -272,12 +274,12 @@ class ExploreSession:
         if None not in clim and clim[0] >= clim[1]:
             raise ExploreError("the colour range needs 'from' lower than 'to'")
         notes: List[str] = []
-        axis = self.spec.get("series") if self.kind == "curve" else self.spec.get("y")
+        axis = self.spec.get("series") if self.base_kind == "curve" else self.spec.get("y")
         select = settings.get("select") or {}
         chosen: Optional[set] = None
         for name, positions in select.items():
             if name != axis:
-                where = "the series axis" if self.kind == "curve" else "the map's vertical axis"
+                where = "the series axis" if self.base_kind == "curve" else "the map's vertical axis"
                 raise ExploreError(f"traces can be chosen along {where} ('{axis}') only, not '{name}'")
             n = len(self.data.axes[name].data)
             kept = [i for i in positions if isinstance(i, int) and 0 <= i < n]
@@ -303,7 +305,7 @@ class ExploreSession:
                 for artist, shown in zip(self.lines, self.visible):
                     artist.set_visible(shown)
             else:
-                self._apply_map(settings, chosen, clim)
+                self._apply_map(settings, chosen if self.base_kind == "heatmap" else None, clim)
             self.ax.set_xscale(settings.get("xscale", self.base_scales[0]))
             self.ax.set_yscale(settings.get("yscale", self.base_scales[1]))
             self.full = self._full_view()
@@ -317,10 +319,19 @@ class ExploreSession:
         if key == self.ops_key:
             return False
         self.ops_key, self.ops_list = key, ops
+        self._apply_complex(ops)
         model, result, shown = self.base_model, None, None
         if any(op["on"] for op in ops):
             base = ops_mod.grid_of(self, chosen)
-            result = ops_mod.run(base, ops)
+            iq = next((op for op in ops if op["op"] == "iq_histogram" and op["on"]), None)
+            start = base
+            if iq is not None:
+                try:
+                    start = ops_mod.iq_grid(self.complex_data, self.spec, self.base_kind, chosen, iq["bins"])
+                except ops_mod.OpError as e:
+                    result = ops_mod.Result(base, [str(e) if o is iq else None for o in ops], 0)
+            if result is None:
+                result = ops_mod.run(start, ops, iq_done=start is not base)
             if result.applied:
                 model, shown = ops_mod.model_of(self, base, result.grid)
         self.ops_result, self.ops_shown = result, shown
@@ -329,6 +340,46 @@ class ExploreSession:
         self.model = model
         self._build()
         return True
+
+    def _per_value(self) -> int:
+        series = self.spec.get("series")
+        return len(self.data.axes[series].data) if series else 1
+
+    def _apply_complex(self, ops: List[Dict[str, Any]]) -> None:
+        """Delay, rotation, auto-rotate: the plot prepared again from the corrected complex values
+        (only when they changed); then the other operations start from it."""
+        cx = [op for op in ops if op["op"] in ("delay", "rotation", "auto_rotate") and op["on"]]
+        key = json.dumps(cx)
+        if key == self.complex_key:
+            return
+        self.complex_key = key
+        self.complex_data = ops_mod.complex_data(self.data, self.spec, cx)
+        if self.complex_data is self.data:
+            self.base_model = self.raw_model
+            return
+        prepare = rnd.prepare_curves if self.base_kind == "curve" else rnd.prepare_map
+        with rnd.RENDER_LOCK, matplotlib.rc_context(self.style.to_rcparams()), warnings.catch_warnings():
+            warnings.simplefilter("ignore", rnd.RenderWarning)     # the same data, warned about at opening
+            self._check_open()
+            self.base_model = prepare(self.complex_data, self.spec, self.style)
+
+    def calculate(self, what: str, index: int, xlim: Sequence[float], trace: Optional[int]) -> Dict[str, Any]:
+        """Delay or rotation for operation `index` from the data in x range `xlim` (plot units) of
+        cursor 1's trace (or all shown traces); see operations.calculate."""
+        ops = self.ops_list
+        if not 0 <= index < len(ops) or ops[index]["op"] != what:
+            raise ExploreError(f"operation {index + 1} is not a {what}")
+        m = self.raw_model
+        xf = m.xf
+        traces = None
+        if trace is not None and self.base_kind == "curve":
+            traces = [int(trace) % self._per_value()]
+        try:
+            out = ops_mod.calculate(self.data, self.spec, self.base_kind, ops, index, what,
+                                    [v / xf for v in xlim], traces)
+        except ops_mod.BadOps as e:
+            raise ExploreError(str(e)) from None
+        return out
 
     def ops_info(self) -> Optional[Dict[str, Any]]:
         """For the page: each operation's state (None: applied, "off", or why not) and what is shown."""
@@ -343,7 +394,7 @@ class ExploreSession:
         return info
 
     def _apply_map(self, settings: Dict[str, Any], chosen: Optional[set], clim) -> None:
-        old = (self.settings.get("select") or {}).get(self.spec["y"])
+        old = (self.settings.get("select") or {}).get(self.spec.get("y"))
         if (None if old is None else set(old)) != chosen or not hasattr(self, "pyramid"):
             z = self.model.z
             if chosen is not None:                       # left-out rows are empty, in their place

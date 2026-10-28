@@ -55,7 +55,7 @@ The Explore view must stay fast on large data. That is checked in two ways:
 | What | How | When |
 |---|---|---|
 | **Why it is fast**: each view is drawn once (no second layout, also deep in and with an axis offset), drafts reduce half the pixels with the same axes, maps and many curves are read from their pyramids, many curves are one picture with one axis | ordinary tests in `viewer/tests/test_explore.py`: exact, and the same on every computer | every test run |
-| **How fast it is**: times of opening, the full view, zooming and panning (drafts), the sharp picture and picking, on 1000 traces × 10 000 points, a 4001 × 4001 map and a curve of 1 000 000 points | `scripts/benchmark_explore.py`: prints a table and compares it with earlier runs **on the same computer** | when the drawing code changed since the last run on this computer, before a release, or when asked |
+| **How fast it is**: times of opening, the full view, zooming and panning (drafts), the sharp picture, picking, moving a cursor and applying operations, on 1000 traces × 10 000 points, a 4001 × 4001 map and a curve of 1 000 000 points | `scripts/benchmark_explore.py`: prints a table and compares it with earlier runs **on the same computer** | when the drawing code changed since the last run on this computer, before a release, or when asked |
 
 ```bash
 uv run python scripts/test_all.py --perf               # everything, and the benchmark whatever changed

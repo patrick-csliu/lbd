@@ -275,6 +275,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
             settings={shown.settings}
             listOpen={shown.listOpen}
             opsInfo={opsInfo}
+            calculate={(what, index) => actions.current?.calculate(what, index) ?? Promise.reject(new Error("the plot isn't open yet"))}
             onListOpen={(listOpen) => setShown((s) => s && { ...s, listOpen })}
             updateSpec={updateSpec}
             updateSettings={updateSettings}
@@ -340,12 +341,13 @@ interface ControlsProps {
   listOpen?: boolean;
   onListOpen: (open: boolean) => void;
   opsInfo: OpsInfo | null;
+  calculate: (what: "delay" | "rotation", index: number) => Promise<number>;
 }
 
 /** Axes of a value with more than one point (the ones that can be drawn along). */
 const swept = (info: FileInfo, v: ValueInfo) => v.axes.filter((a, i) => v.shape[i] > 1 && info.axes.some((x) => x.name === a));
 
-function ExploreControls({ info, resolved, settings, updateSpec, updateSettings, children, contrast, listOpen, onListOpen, opsInfo }: ControlsProps) {
+function ExploreControls({ info, resolved, settings, updateSpec, updateSettings, children, contrast, listOpen, onListOpen, opsInfo, calculate }: ControlsProps) {
   if (!resolved) return <div className="controls muted small">Opening…</div>;
   const r = resolved.spec;
   const kind = resolved.kind;
@@ -501,6 +503,8 @@ function ExploreControls({ info, resolved, settings, updateSpec, updateSettings,
         info={opsInfo}
         onChange={(ops) => updateSettings({ ops: ops.length ? ops : undefined, ...(ops.length ? {} : { ops_on: undefined }) })}
         onOn={(on) => updateSettings({ ops_on: on ? undefined : false })}
+        complexValues={anyComplex}
+        calculate={calculate}
       />
 
       <fieldset className="field">

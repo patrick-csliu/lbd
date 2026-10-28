@@ -356,13 +356,19 @@ export type OpName =
   | "average"
   | "std"
   | "fft"
-  | "histogram";
+  | "histogram"
+  | "delay"
+  | "rotation"
+  | "auto_rotate"
+  | "iq_histogram";
 export interface Op {
   op: OpName;
   along?: "x" | "traces";
   on?: boolean;
   n?: number; // smooth: points
-  bins?: number; // histogram
+  bins?: number; // histogram, I/Q histogram
+  tau?: number; // electrical delay, s
+  phi?: number; // rotation, degrees
 }
 export interface OpsInfo {
   notes: (string | null)[]; // per operation: null (applied), "off", or why not
@@ -414,6 +420,7 @@ export interface CursorRead {
   line?: ([number, number] | null)[]; // the trace as drawn (plot units), to highlight it
   stored?: { label: string; unit: string; value: number | null }; // with operations on: the stored value behind it
   cell?: [number, number, number, number]; // maps: the cell, x0 y0 x1 y1 (plot units)
+  at?: [number, number]; // maps: the cell's column and row in the map as shown
 }
 
 /** A cut through a map: positions (plot units) and values (plot units) along one axis. */
@@ -487,6 +494,9 @@ export const api = {
   /** The map's values counted, with these view settings (chosen rows, colour scale). */
   exploreHistogram: (session: string, settings: object) =>
     call<Histogram>("POST", `/api/explore/${encodeURIComponent(session)}/histogram`, { settings }),
+  /** The delay (s) or rotation (degrees) that straightens the data in an x range (plot units). */
+  exploreCalculate: (session: string, what: "delay" | "rotation", index: number, xlim: number[], trace?: number) =>
+    call<{ value: number; unit: string }>("POST", `/api/explore/${encodeURIComponent(session)}/calculate`, { what, index, xlim, trace }),
   /** Save a cut as a new .lbd file; without a path, only suggest one. */
   exploreSaveCut: (session: string, which: "row" | "column" | "trace", index: Record<string, number>, trace?: number, path?: string) =>
     call<{ path: string }>("POST", `/api/explore/${encodeURIComponent(session)}/save-cut`, { which, index, trace, path: path ?? null }),

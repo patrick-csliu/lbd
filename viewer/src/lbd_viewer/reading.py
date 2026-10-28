@@ -69,7 +69,8 @@ def _plotted(s: "ExploreSession", name: str) -> Tuple[str, str]:
 
 
 def _operated(s: "ExploreSession") -> bool:
-    """Operations are on and change what is shown (explore.py `_apply_ops`)."""
+    """Operations are on and change what is shown (explore.py `_apply_ops`; complex corrections
+    alone count too: their result is shown, the file's value is the stored one)."""
     return s.ops_result is not None and s.ops_result.applied > 0 and s.ops_shown is not None
 
 
@@ -93,8 +94,11 @@ def _model_axis_item(s: "ExploreSession", role: str, q, plot_value, factor: floa
 
 
 def _stored(s: "ExploreSession", name: str, base_value, factor: float) -> Optional[Dict[str, Any]]:
-    """The stored value behind a shown point (operations that keep points), or None."""
-    if not _operated(s) or not s.ops_result.grid.one_to_one:
+    """The stored value behind a shown point (the file's, as plotted) when operations or complex
+    corrections changed what is shown and the point is still a stored one; else None."""
+    if _operated(s) and not s.ops_result.grid.one_to_one:
+        return None
+    if not _operated(s) and s.base_model is s.raw_model:
         return None
     label, unit = _plotted(s, name)
     return {"label": label, "unit": unit, "value": _num(base_value / factor)}
@@ -216,8 +220,8 @@ def _map_cursor(s: "ExploreSession", c: Dict[str, Any], kind: str) -> Optional[D
               else _axis_item(s, "y", s.spec["y"], j))
     out = {"x": px, "y": py, "free": free, "items": [x_item, y_item, _value_item(s, "z", name, z)],
            "index": {s.spec["x"]: i, s.spec["y"]: j} if not sh or g.one_to_one else {},
-           "cell": [float(v) for v in _cell_box(m, i, j)]}
-    stored = _stored(s, name, s.base_model.z[j, i], s.base_model.zf) if sh and g.one_to_one else None
+           "cell": [float(v) for v in _cell_box(m, i, j)], "at": [i, j]}
+    stored = _stored(s, name, s.raw_model.z[j, i], s.raw_model.zf) if s.kind == s.base_kind else None
     if stored:
         out["stored"] = stored
     return out
@@ -285,8 +289,8 @@ def _curve_cursor(s: "ExploreSession", c: Dict[str, Any], kind: str, geo) -> Opt
     one_to_one = not _operated(s) or s.ops_result.grid.one_to_one
     out = {"x": px, "y": py, "free": free, "trace": int(k), "label": m.lines[k][1],
            "index": index if one_to_one else {}, "items": items}
-    if _operated(s) and one_to_one:
-        stored = _stored(s, name, s.base_model.lines[k][0][i], s.base_model.yf)
+    if one_to_one and len(m.lines) == len(s.raw_model.lines):
+        stored = _stored(s, name, s.raw_model.lines[k][0][i], s.raw_model.yf)
         if stored:
             out["stored"] = stored
     if kind == "vertical":
@@ -380,12 +384,12 @@ def _cuts(s: "ExploreSession", cur: Dict[str, Any], kind: str, geo) -> Dict[str,
     xlim, ylim, w, h, (xscale, yscale) = geo
     m = s.model
     z = _map_z(s)
-    i, j = cur["index"][s.spec["x"]], cur["index"][s.spec["y"]]
+    i, j = cur["at"]                                  # the cell shown (a stored one, or made by an operation)
     out: Dict[str, Any] = {"zf": m.zf}
     if kind != "vertical":
-        out["row"] = _cut(m.x, z[j, :], xlim, xscale, w, s.spec["y"], j)
+        out["row"] = _cut(m.x, z[j, :], xlim, xscale, w, s.spec.get("y") or "y", j)
     if kind != "horizontal":
-        out["column"] = _cut(m.y, z[:, i], ylim, yscale, h, s.spec["x"], i)
+        out["column"] = _cut(m.y, z[:, i], ylim, yscale, h, s.spec.get("x") or "x", i)
     return out
 
 
@@ -493,7 +497,7 @@ def histogram(s: "ExploreSession", bins: int = HIST_BINS) -> Dict[str, Any]:
 
 def cut_plan(s: "ExploreSession", which: str, index: Dict[str, int], trace: Optional[int] = None):
     """What a cut keeps and fixes: (kept axis, {fixed axis: index}, value names)."""
-    if _operated(s) and not s.ops_result.grid.one_to_one:
+    if _operated(s) and not s.ops_result.grid.one_to_one or s.kind != s.base_kind:
         raise ExploreError("after this operation the shown points aren't stored ones; turn the operations "
                            "off to save the stored data of a cut")
     spec = s.spec

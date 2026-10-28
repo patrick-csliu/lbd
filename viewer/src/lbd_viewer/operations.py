@@ -1,5 +1,6 @@
-"""Operations on the data the Explore view shows: subtract the mean, normalize, d/dx, smoothing,
-between traces, FFT, histogram (and, in step 3 and 4, complex corrections and the I/Q histogram).
+"""Operations on the data the Explore view shows: corrections of complex values (electrical
+delay, rotation, auto-rotate), then on the values as shown: subtract the mean, normalize, d/dx,
+smoothing, between traces, FFT, histogram; and the I/Q histogram of complex values.
 
 They are a viewing tool: the viewer computes them from the full data and remembers the list with
 the Explore view in its database, never in the file (docs/viewer/explore.md, "Operations").
@@ -13,6 +14,12 @@ trace (a value as x) only allow operations along x.
 Each operation is a small function from a grid to a grid, NaN-aware, working in stored units
 (as plotted: e.g. |S21| in dB); the result knows its label and unit, and whether each shown
 point still comes from one stored point (`one_to_one`), so read-outs can name the stored value.
+
+**Complex operations** work on the complex values before the complex mode (magnitude, dB, phase
+…) makes numbers of them, so they come first in the list: `complex_data` applies them to a copy
+of the plotted values, and the plot is then prepared from that copy as usual (lbd.plot is not
+changed). The **I/Q histogram** counts the complex points in the I/Q plane: a map, the last
+operation.
 """
 
 from __future__ import annotations
@@ -51,6 +58,7 @@ class Grid:
     ragged: bool = False
     one_to_one: bool = True          # each point is still the stored point at the same indices
     labels: Optional[List[str]] = None   # the traces' names (curves)
+    kind: str = "curve"              # drawn as curves or as a map (rows = traces, along t)
 
 
 class OpError(Exception):
@@ -251,6 +259,10 @@ OPS: Dict[str, Tuple[Callable[..., Grid], Tuple[str, ...], Dict[str, Any]]] = {
     "fft": (fft, ALONG, {}),
     "histogram": (histogram, ALONG, {"bins": 50}),
 }
+# Operations on the complex values (complex_data), and the I/Q histogram (iq_grid): first in the
+# list, in this group's order as given. Parameters: number defaults (float).
+COMPLEX_OPS: Dict[str, Dict[str, float]] = {"delay": {"tau": 0.0}, "rotation": {"phi": 0.0},
+                                            "auto_rotate": {}, "iq_histogram": {"bins": 100}}
 
 
 def check(ops: Any) -> List[Dict[str, Any]]:
@@ -260,9 +272,25 @@ def check(ops: Any) -> List[Dict[str, Any]]:
     if not isinstance(ops, list):
         raise BadOps("operations are a list")
     out = []
+    seen_real = False
     for i, op in enumerate(ops):
+        if isinstance(op, dict) and op.get("op") in COMPLEX_OPS:
+            if seen_real:
+                raise BadOps(f"operation {i + 1} ({op['op']}) works on the complex values: it must come "
+                             "before the operations on the values as shown")
+            clean = {"op": op["op"], "on": op.get("on", True) is not False}
+            for k, default in COMPLEX_OPS[op["op"]].items():
+                v = op.get(k, default)
+                if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+                    raise BadOps(f"operation {i + 1} ({op['op']}): {k} must be a number")
+                clean[k] = int(v) if k == "bins" else float(v)
+            if op["op"] == "iq_histogram" and not 2 <= clean["bins"] <= 2000:
+                raise BadOps(f"operation {i + 1} (iq_histogram): 2 to 2000 bins")
+            out.append(clean)
+            continue
         if not isinstance(op, dict) or op.get("op") not in OPS:
-            raise BadOps(f"operation {i + 1}: unknown; use one of {', '.join(OPS)}")
+            raise BadOps(f"operation {i + 1}: unknown; use one of {', '.join([*COMPLEX_OPS, *OPS])}")
+        seen_real = True
         _, alongs, params = OPS[op["op"]]
         along = op.get("along", alongs[0])
         if along not in alongs:
@@ -284,7 +312,7 @@ class Result:
     applied: int                     # how many were applied
 
 
-def run(g: Grid, ops: Sequence[Dict[str, Any]]) -> Result:
+def run(g: Grid, ops: Sequence[Dict[str, Any]], iq_done: bool = False) -> Result:
     """Apply the operations that are on, in order. One that can't apply stops the chain there:
     its row says why, the rows after it say they weren't applied, and the result is the grid
     before it (never a silent half-result)."""
@@ -293,6 +321,12 @@ def run(g: Grid, ops: Sequence[Dict[str, Any]]) -> Result:
     for i, op in enumerate(ops):
         if not op.get("on", True):
             notes[i] = "off"
+            continue
+        if op["op"] in COMPLEX_OPS:                  # applied before the grid was made (complex_data, iq_grid)
+            applied += op["op"] == "iq_histogram" and iq_done
+            continue
+        if iq_done:
+            notes[i] = "not applied: the I/Q histogram is the last operation"
             continue
         fn, _, params = OPS[op["op"]]
         try:
@@ -383,7 +417,8 @@ def grid_of(s, chosen: Optional[set]) -> Grid:
             a[[j for j in range(a.shape[0]) if j not in chosen], :] = np.nan
         label, unit = _plotted(s, spec["values"][0])
         return Grid(a=a, x=m.x / m.xf, t=m.y / m.yf, value=Quantity(label, unit),
-                    xq=Quantity(xa.label or xa.name, xa.unit), tq=Quantity(ya.label or ya.name, ya.unit))
+                    xq=Quantity(xa.label or xa.name, xa.unit), tq=Quantity(ya.label or ya.name, ya.unit),
+                    kind="heatmap")
     shared = all(x is m.xs[0] for x in m.xs)
     ys = [np.asarray(y, dtype=float) / m.yf for y, _ in m.lines]
     a = np.array(ys) if shared or len({y.size for y in ys}) == 1 else None
@@ -418,7 +453,9 @@ def model_of(s, base: Grid, g: Grid) -> Tuple[Any, Shown]:
     x_changed = g.x is not base.x
     t_changed = g.t is not base.t
     vf, vu, vlabel = shown(g.a, g.value, fmt)
-    if s.base_kind == "heatmap":
+    if g.kind == "heatmap":
+        x_changed = x_changed or s.base_kind != "heatmap"     # curves turned into a map
+        t_changed = t_changed or s.base_kind != "heatmap"
         if x_changed:
             xf, _, xlabel = shown(np.asarray(g.x), g.xq, fmt)
         else:
@@ -428,7 +465,8 @@ def model_of(s, base: Grid, g: Grid) -> Tuple[Any, Shown]:
         else:
             tf, tlabel = m.yf, m.y_label
         model = MapModel(x=np.asarray(g.x, dtype=float) * xf, y=np.asarray(g.t, dtype=float) * tf, z=g.a * vf,
-                         xf=xf, yf=tf, zf=vf, norm=Normalize(), cmap=m.cmap, x_label=xlabel, y_label=tlabel,
+                         xf=xf, yf=tf, zf=vf, norm=Normalize(), cmap=getattr(m, "cmap", "viridis"),
+                         x_label=xlabel, y_label=tlabel,
                          z_label=vlabel, x_scale="linear" if x_changed else m.x_scale,
                          y_scale="linear" if t_changed else m.y_scale, auto_axes=[])
         return model, Shown(vf, vu, x_changed, t_changed)
@@ -450,3 +488,127 @@ def model_of(s, base: Grid, g: Grid) -> Tuple[Any, Shown]:
                        y_label=vlabel, x_scale="linear" if x_changed else m.x_scale,
                        y_scale="linear", ylim=None, series_bar=None, auto_axes=[])
     return model, Shown(vf, vu, x_changed, t_changed)
+
+
+# -- complex values: electrical delay, rotation, auto-rotate; Calculate; the I/Q histogram -----------
+
+def _principal_angle(z: np.ndarray) -> float:
+    """The direction of the I/Q points' main spread (radians), turned so the mean lies at Re > 0
+    after rotating by minus it."""
+    z = z[np.isfinite(z)]
+    if z.size < 2:
+        return 0.0
+    re, im = z.real - z.real.mean(), z.imag - z.imag.mean()
+    theta = 0.5 * math.atan2(2 * float(np.mean(re * im)), float(np.mean(re * re) - np.mean(im * im)))
+    if (z.mean() * np.exp(-1j * theta)).real < 0:
+        theta += math.pi
+    return theta
+
+
+def complex_data(d, spec: Dict[str, Any], ops: Sequence[Dict[str, Any]], upto: Optional[int] = None):
+    """A copy of dataset `d` whose plotted complex values have the complex operations (that are on,
+    before `upto`) applied; `d` itself when there are none. Delay multiplies by e^(+i·2π·f·τ) along
+    the plot's horizontal axis f; rotation by e^(iφ); auto-rotate turns each trace (each line along
+    the horizontal axis) by minus its principal angle."""
+    import copy
+    from dataclasses import replace as dc_replace
+
+    todo = [op for op in list(ops)[:upto] if op["op"] in ("delay", "rotation", "auto_rotate") and op.get("on", True)]
+    if not todo:
+        return d
+    along = spec.get("along", spec["x"])
+    out = copy.copy(d)
+    out.values = dict(d.values)
+    for name in spec["values"]:
+        v = d.values[name]
+        if v.data is None or not np.iscomplexobj(v.data):
+            continue
+        z = np.asarray(v.data, dtype=complex)
+        if along not in v.axes:
+            raise BadOps(f"'{name}' doesn't run along '{along}', the horizontal axis")
+        ax = v.axes.index(along)
+        shape = [1] * z.ndim
+        shape[ax] = -1
+        f = np.asarray(d.axes[along].data, dtype=float).reshape(shape)
+        for op in todo:
+            if op["op"] == "delay":
+                z = z * np.exp(2j * np.pi * f * op["tau"])
+            elif op["op"] == "rotation":
+                z = z * np.exp(1j * np.radians(op["phi"]))
+            else:                                          # each line along the horizontal axis
+                moved = np.moveaxis(z, ax, -1)
+                flat = moved.reshape(-1, moved.shape[-1])
+                turned = np.array([row * np.exp(-1j * _principal_angle(row)) for row in flat])
+                z = np.moveaxis(turned.reshape(moved.shape), -1, ax)
+        out.values[name] = dc_replace(v, data=z)
+    return out
+
+
+def traces_of(d, spec: Dict[str, Any], kind: str) -> Tuple[np.ndarray, np.ndarray]:
+    """The plotted (first) value as complex traces × points, and the points' x (stored units)."""
+    from lbd.plot.render import _take
+
+    v = d.values[spec["values"][0]]
+    if kind == "heatmap":
+        z = _take(v, [spec["y"], spec["x"]], spec["index"])
+        x = np.asarray(d.axes[spec["x"]].data, dtype=float)
+    else:
+        along = spec.get("along", spec["x"])
+        keep = [along] + ([spec["series"]] if spec.get("series") else [])
+        z = _take(v, keep, spec["index"])
+        z = z.T if z.ndim == 2 else z[None, :]
+        x = np.asarray(d.axes[along].data, dtype=float)
+    return np.atleast_2d(np.asarray(z, dtype=complex)), x
+
+
+def calculate(d, spec: Dict[str, Any], kind: str, ops: Sequence[Dict[str, Any]], index: int, what: str,
+              xlim: Sequence[float], traces: Optional[List[int]]) -> Dict[str, Any]:
+    """The value for operation `index` (delay τ in s, rotation φ in degrees) that straightens the
+    data in x range `xlim` (stored units) of `traces` (None: all), with the complex operations
+    above it applied: delay from the slope of the unwrapped phase, rotation from the I/Q points'
+    main direction (so the spread lies along Re)."""
+    if what not in ("delay", "rotation"):
+        raise BadOps("Calculate is for the delay or the rotation")
+    data = complex_data(d, spec, ops, upto=index)
+    z, x = traces_of(data, spec, kind)
+    if not np.iscomplexobj(d.values[spec["values"][0]].data):
+        raise BadOps("Calculate needs complex values")
+    lo, hi = sorted(float(v) for v in xlim)
+    cols = np.flatnonzero((x >= lo) & (x <= hi))
+    rows = list(range(z.shape[0])) if traces is None else [t for t in traces if 0 <= t < z.shape[0]]
+    part = z[np.ix_(rows, cols)] if rows and cols.size else np.empty((0, 0), complex)
+    if not np.isfinite(part).any() or cols.size < 2:
+        raise BadOps("not enough points in this range to calculate from")
+    if what == "rotation":
+        return {"value": -math.degrees(_principal_angle(part.ravel())), "unit": "°"}
+    slopes = []
+    for row in part:
+        ok = np.isfinite(row)
+        if ok.sum() >= 2:
+            phase = np.unwrap(np.angle(row[ok]))
+            slopes.append(np.polyfit(x[cols][ok], phase, 1)[0])
+    if not slopes:
+        raise BadOps("not enough points in this range to calculate from")
+    return {"value": -float(np.mean(slopes)) / (2 * math.pi), "unit": "s"}
+
+
+def iq_grid(d, spec: Dict[str, Any], kind: str, chosen_rows: Optional[set], bins: int) -> Grid:
+    """The complex points of all shown traces counted in the I/Q plane: a map of counts (rows: Q)."""
+    v = d.values[spec["values"][0]]
+    if not np.iscomplexobj(v.data):
+        raise OpError("the I/Q histogram needs complex values")
+    z, _ = traces_of(d, spec, kind)
+    if chosen_rows is not None:
+        z = z[[k for k in range(z.shape[0]) if k in chosen_rows]]
+    z = z[np.isfinite(z)]
+    if not z.size:
+        raise OpError("no points to count")
+    span = lambda a: (float(a.min()), float(a.max())) if a.max() > a.min() else (float(a.min()) - 0.5, float(a.min()) + 0.5)
+    (r0, r1), (i0, i1) = span(z.real), span(z.imag)
+    counts, re_edges, im_edges = np.histogram2d(z.real, z.imag, bins=bins, range=[[r0, r1], [i0, i1]])
+    counts = counts.T                                    # rows: Q (imaginary), columns: I (real)
+    counts[counts == 0] = np.nan                         # empty bins show as empty
+    label = v.label or v.name
+    return Grid(a=counts, x=(re_edges[:-1] + re_edges[1:]) / 2, t=(im_edges[:-1] + im_edges[1:]) / 2,
+                value=Quantity("Counts", ""), xq=Quantity(f"Re {label} (I)", v.unit),
+                tq=Quantity(f"Im {label} (Q)", v.unit), one_to_one=False, kind="heatmap")

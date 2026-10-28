@@ -129,10 +129,29 @@ back.
 
 ## Operations
 
+![Operations: a background removed along the power axis](img/operations.png)
+
+1. **The operations**, in order; here one: the mean along Power subtracted from each frequency
+   column, which removes the background and leaves what changes with power.
+2. **The plot** shows the result; its colour bar says what: |S21| − mean, in dB.
+
 The **Operations** section (in the side panel, above Scales) works on the data as shown: add
 operations with **+ Add operation**, in any order and as many as you like. Each runs on the
 result of the ones above it. Explore only: they are remembered with the view on this computer,
 never written into the file; **Figure** always shows the stored data.
+
+**For complex values**, the first operations work on the complex numbers themselves, before
+**Complex values** (magnitude, dB, phase …) turns them into numbers to plot. They stay at the
+top of the list:
+
+| Operation | What it does |
+|---|---|
+| **Electrical delay** τ | × e^(i·2π·f·τ) along the horizontal axis (a frequency): removes the phase slope of a cable. **Calculate** finds τ from the slope of the phase between the two cursors (otherwise in view), on cursor 1's trace (otherwise all shown traces). |
+| **Rotation** φ | × e^(iφ). **Calculate** finds the angle that puts the spread of the I/Q points onto the real axis (between the cursors, or in view). |
+| **Auto-rotate each trace** | turns each trace by its own such angle, so they line up. |
+| **I/Q histogram** | counts the complex points of all shown traces in the I/Q plane (N × N bins): a map, with I and Q as its axes. It is the last operation; ones after it say so. |
+
+**On the values as shown:**
 
 | Operation | What it does | Unit |
 |---|---|---|

@@ -46,3 +46,23 @@ def test_operations_are_added_reordered_switched_off_and_remembered(sweep, new_p
     frames(page, lambda: row(page, "sweep.lbd").dblclick())
     expect(ops(page).locator(".op-list li")).to_have_count(2)
     expect(ops(page)).to_contain_text("The plot shows")
+
+
+def test_calculate_fills_the_delay_and_flattens_the_phase(viewer, new_page):
+    import lbd
+    import numpy as np
+
+    f = np.linspace(4e9, 4.1e9, 401)
+    d = lbd.Dataset(title="VNA")
+    d.add_axis("power", [-20.0, -10.0])
+    d.add_axis("f", f, unit="Hz")
+    d.add_value("S21", np.ones((2, 1)) * np.exp(-2j * np.pi * f[None, :] * 60e-9), axes=["power", "f"])
+    d.plot = {"kind": "curve", "x": "f", "series": "power", "complex": "phase_deg"}
+    d.save(viewer.data / "vna.lbd")
+    page = new_page("Explore")
+    frames(page, lambda: row(page, "vna.lbd").dblclick())
+    add(page, "Electrical delay")
+    expect(ops(page)).to_contain_text("on the complex values")
+    frames(page, lambda: ops(page).get_by_role("button", name="Calculate").click())
+    expect(ops(page).get_by_label("Delay in ns")).to_have_value("60")
+    expect(ops(page).locator(".op-list li.bad")).to_have_count(0)

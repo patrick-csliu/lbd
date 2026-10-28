@@ -160,6 +160,9 @@ export interface ExploreActions {
   remove: () => void;
   /** A map's values counted with these view settings (the contrast control). */
   histogram: (settings: ViewSettings) => Promise<Histogram | null>;
+  /** Operation `index`'s delay (s) or rotation (°), from the data between the cursors (else in
+   *  view), on cursor 1's trace (else all shown). */
+  calculate: (what: "delay" | "rotation", index: number) => Promise<number>;
 }
 
 const CURSOR_COLORS = ["#e0001b", "#0057d9"];
@@ -891,6 +894,14 @@ export default function ExploreView({
     },
     remove: clearCursors,
     histogram: (st) => (session.current ? api.exploreHistogram(session.current, st) : Promise.resolve(null)),
+    calculate: async (what, index) => {
+      const sid = session.current, m = current(), r = readingRef.current;
+      if (!sid || !m) throw new Error("the plot isn't open yet");
+      const [c1, c2] = r?.cursors ?? [];
+      const xlim = c1 && c2 ? [Math.min(c1.x, c2.x), Math.max(c1.x, c2.x)] : [...m.view.xlim];
+      const res = await api.exploreCalculate(sid, what, index, xlim, kindRef.current === "curve" ? c1?.trace : undefined);
+      return res.value;
+    },
   };
 
   const openMenu = (clientX: number, clientY: number, x: number, y: number) => {

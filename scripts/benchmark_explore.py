@@ -149,6 +149,15 @@ def measure_file(name: str, path: Path, repeats: int) -> Dict[str, float]:
                     for _ in range(repeats)) for k in range(20)]
 
     cursor_cross, cursor_vertical = drag("cross"), drag("vertical")
+    # operations: smoothing then a derivative along x, applied (the plot set up again) and drawn
+    with_ops = {"ops": [{"op": "smooth", "n": 5}, {"op": "derivative"}]}
+
+    def apply_ops():
+        s.apply({})
+        s.apply(with_ops)
+        s.render(None, None)
+    ops_apply = min(timed(apply_ops) for _ in range(2))
+    s.apply({})
     per_step = [min(col) for col in zip(*steps)]     # each step: its fastest repeat
     per_pan = [min(col) for col in zip(*panned)]
     del lbd
@@ -163,6 +172,7 @@ def measure_file(name: str, path: Path, repeats: int) -> Dict[str, float]:
         "pick": pick,
         "cursor move": statistics.median(cursor_cross),
         "vertical cursor move": statistics.median(cursor_vertical),
+        "operations apply": ops_apply,
     }
 
 

@@ -310,6 +310,13 @@ class HistogramBody(_Body):
     settings: Optional[Dict[str, Any]] = None   # the view settings to count with (selection, colour scale)
 
 
+class CalculateBody(_Body):
+    what: str                             # "delay" or "rotation"
+    index: int                            # the operation's place in the list (0-based)
+    xlim: List[float]                     # the x range to use (plot units): between the cursors, or the view
+    trace: Optional[int] = None           # curves: cursor 1's trace (else all shown traces)
+
+
 class SaveCutBody(_Body):
     which: str                            # "row" or "column" (maps), "trace" (curves)
     index: Dict[str, int]                 # the cursor's stored indices
@@ -847,6 +854,11 @@ def create_app(state: AppState) -> FastAPI:
         if body.settings is not None:
             s.apply(body.settings)
         return reading.histogram(s)
+
+    @app.post("/api/explore/{session_id}/calculate")
+    def explore_calculate(session_id: str, body: CalculateBody):
+        """The delay (s) or rotation (degrees) that straightens the data in a range."""
+        return _session(session_id).calculate(body.what, body.index, body.xlim, body.trace)
 
     @app.post("/api/explore/{session_id}/save-cut")
     def explore_save_cut(session_id: str, body: SaveCutBody):

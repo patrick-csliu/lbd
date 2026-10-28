@@ -299,6 +299,28 @@ def explore_reading(page: Page, url: str, ctx) -> None:
 
 
 @shot
+def explore_operations(page: Page, url: str, ctx) -> None:
+    fresh(page, url, "Explore")
+    page.locator(".row-label", has_text="sweep.lbd").first.dblclick()
+    area = page.locator("main:not([hidden])")
+    page.locator("main:not([hidden]) .explore-readout .mono").wait_for()
+    area.get_by_label("Plot type").select_option("heatmap")
+    page.wait_for_timeout(1200)
+    area.get_by_label("Complex values").select_option("db")
+    page.wait_for_timeout(1200)
+    area.locator(".operations").get_by_role("button", name="+ Add operation ▾").click()
+    page.locator(".context-menu").get_by_role("menuitem", name="Subtract the mean", exact=True).click()
+    page.wait_for_timeout(1000)
+    area.get_by_label("Subtract the mean: along").select_option("traces")      # along Power: the background
+    page.wait_for_timeout(2000)
+    mark(page, [
+        (1, "main:not([hidden]) .operations", 0, "r"),
+        (2, "main:not([hidden]) .explore-host", 0, "tr"),
+    ])
+    save(page, VIEWER_IMG / "operations.png")
+
+
+@shot
 def library(page: Page, url: str, ctx) -> None:
     fresh(page, url, "Library")
     page.locator(".library-folders .row-label", has_text="sweep.lbd").first.click()

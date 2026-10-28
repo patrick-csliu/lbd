@@ -384,3 +384,5 @@ details.group fieldset > .group-fields { margin-top: -4px; }
 .op-name { font-weight: 600; font-size: 13px; }
 .op-settings { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 3px; }
 .op-settings input[type="number"] { width: 5em; }
+.op-list li.complex { border-style: dashed; }
+.op-number { width: 7em; }

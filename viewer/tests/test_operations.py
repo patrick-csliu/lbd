@@ -193,3 +193,105 @@ def test_a_maps_background_is_removed_along_its_vertical_axis(client, data_dir):
     assert sess.kind == "heatmap" and sess.model.z / sess.model.zf == pytest.approx(np.tile([-2.0, -1, 0, 1, 2], (4, 1)))
     render(client, o, {"ops": [{"op": "fft", "along": "x"}]})
     assert sess.ax.get_xlabel() == "Time (ms)" and sess.ops_shown.x_changed          # FFT of Hz: time
+
+
+# ---- complex values: delay, rotation, auto-rotate, Calculate; the I/Q histogram ---------------------
+
+@pytest.fixture()
+def vna(data_dir):
+    """S21 of 2 traces with a 60 ns cable delay and a phase offset of 30°, magnitude 0.5 and 1."""
+    f = np.linspace(4e9, 4.1e9, 401)
+    s21 = np.array([[0.5], [1.0]]) * np.exp(-2j * np.pi * f[None, :] * 60e-9 + 1j * np.radians(30))
+    d = lbd.Dataset(title="vna")
+    d.add_axis("power", np.array([-20.0, -10.0]), unit="dBm")
+    d.add_axis("f", f, unit="Hz", label="Frequency")
+    d.add_value("S21", s21, axes=["power", "f"])
+    path = data_dir / "vna.lbd"
+    d.save(path)
+    return path
+
+
+VNA = {"kind": "curve", "x": "f", "series": "power", "complex": "phase_deg"}
+
+
+def calculate(client, o, what, index, xlim, trace=None):
+    r = client.post(f"/api/explore/{o['session']}/calculate", json={"what": what, "index": index, "xlim": xlim, "trace": trace})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_calculate_finds_the_delay_and_removing_it_flattens_the_phase(client, vna):
+    o = open_view(client, vna, VNA)
+    render(client, o, {"ops": [{"op": "delay", "tau": 0}]})
+    tau = calculate(client, o, "delay", 0, [4.0, 4.1])            # x in plot units (GHz)
+    assert tau["value"] == pytest.approx(60e-9, rel=1e-6) and tau["unit"] == "s"
+    render(client, o, {"ops": [{"op": "delay", "tau": tau["value"]}]})
+    sess = client.app.state.lbd.explore.get(o["session"])
+    phase = sess.model.lines[0][0] / sess.model.yf
+    assert np.ptp(phase) < 1e-6 and phase[0] == pytest.approx(30, abs=1e-4)   # flat, at the offset
+    c = client.post(f"/api/explore/{o['session']}/cursors",
+                    json={"cursors": [{"x": 4.05, "y": 30, "trace": 1}], "xlim": [4, 4.1], "ylim": [0, 60],
+                          "width": 500, "height": 300}).json()["cursors"][0]
+    assert "stored" in c                                           # the file's phase, before the correction
+
+
+def test_calculate_finds_the_rotation_that_puts_the_spread_on_re(client, data_dir):
+    rng = np.random.default_rng(0)
+    z = (rng.normal(0, 1, 500) + 1j * rng.normal(0, 0.05, 500) + 2) * np.exp(1j * np.radians(40))
+    d = lbd.Dataset(title="iq")
+    d.add_axis("n", np.arange(500.0))
+    d.add_value("v", z, axes="n")
+    d.save(data_dir / "iq.lbd")
+    o = open_view(client, data_dir / "iq.lbd", {"kind": "curve", "x": "n", "complex": "imag"})
+    render(client, o, {"ops": [{"op": "rotation", "phi": 0}]})
+    phi = calculate(client, o, "rotation", 0, [0, 500])
+    assert phi["value"] == pytest.approx(-40, abs=1) and phi["unit"] == "°"
+    render(client, o, {"ops": [{"op": "rotation", "phi": phi["value"]}]})
+    sess = client.app.state.lbd.explore.get(o["session"])
+    assert np.std(sess.model.lines[0][0] / sess.model.yf) < 0.1      # the imaginary part: only the narrow spread
+
+
+def test_auto_rotate_lines_up_each_trace(client, data_dir):
+    angles = np.radians([10.0, 70.0, -50.0])
+    t = np.linspace(-1, 1, 200)
+    z = (t[None, :] + 3) * np.exp(1j * angles[:, None])
+    d = lbd.Dataset(title="rot")
+    d.add_axis("k", np.arange(3.0))
+    d.add_axis("t", t)
+    d.add_value("v", z, axes=["k", "t"])
+    d.save(data_dir / "rot.lbd")
+    o = open_view(client, data_dir / "rot.lbd", {"kind": "curve", "x": "t", "series": "k", "complex": "imag"})
+    render(client, o, {"ops": [{"op": "auto_rotate"}]})
+    sess = client.app.state.lbd.explore.get(o["session"])
+    assert all(np.max(np.abs(y)) < 1e-9 for y, _ in sess.model.lines)   # every trace on the real axis
+
+
+def test_the_iq_histogram_turns_curves_into_a_map_of_counts(client, data_dir):
+    rng = np.random.default_rng(1)
+    shots = np.where(rng.random((4, 2000)) < 0.5, 1 + 1j, -1 - 1j) + 0.1 * (rng.normal(size=(4, 2000)) + 1j * rng.normal(size=(4, 2000)))
+    d = lbd.Dataset(title="shots")
+    d.add_axis("rep", np.arange(4.0))
+    d.add_axis("shot", np.arange(2000.0))
+    d.add_value("v", shots, axes=["rep", "shot"], unit="V")
+    d.save(data_dir / "shots.lbd")
+    o = open_view(client, data_dir / "shots.lbd", {"kind": "curve", "x": "shot", "series": "rep"})
+    meta = render(client, o, {"ops": [{"op": "iq_histogram", "bins": 40}, {"op": "derivative"}]})
+    sess = client.app.state.lbd.explore.get(o["session"])
+    assert sess.kind == "heatmap" and meta["ops"]["notes"][0] is None and "last operation" in meta["ops"]["notes"][1]
+    counts = np.nan_to_num(sess.model.z / sess.model.zf)
+    assert counts.sum() == 4 * 2000 and sess.ax.get_xlabel().startswith("Re v (I)")
+    top = np.unravel_index(np.argsort(counts, axis=None)[-2:], counts.shape)   # the two blobs
+    assert {np.sign(sess.model.x[top[1][0]]), np.sign(sess.model.x[top[1][1]])} == {-1.0, 1.0}
+    c = client.post(f"/api/explore/{o['session']}/cursors",
+                    json={"cursors": [{"x": 1, "y": 1}], "xlim": [-1.5, 1.5], "ylim": [-1.5, 1.5],
+                          "width": 400, "height": 400}).json()["cursors"][0]
+    assert c["index"] == {} and next(i for i in c["items"] if i["role"] == "z")["label"] == "Counts"
+    meta = render(client, o, {"select": {"rep": [0]}, "ops": [{"op": "iq_histogram", "bins": 40}]})
+    assert np.nansum(sess.model.z / sess.model.zf) == 2000          # only the chosen trace counted
+
+
+def test_complex_operations_come_first(client, vna):
+    o = open_view(client, vna, VNA)
+    r = client.post(f"/api/explore/{o['session']}/render",
+                    json={"settings": {"ops": [{"op": "smooth"}, {"op": "delay", "tau": 1e-9}]}})
+    assert r.status_code == 400 and "before the operations on the values as shown" in r.json()["detail"]
