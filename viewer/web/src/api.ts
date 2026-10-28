@@ -339,6 +339,7 @@ export interface ExploreFrameMeta {
   note: string; // how the data was reduced, e.g. "max of 6×6 cells per pixel"
   reduced: boolean;
   stat: ReduceStat;
+  draft?: boolean; // the data was drawn at half resolution (while moving)
   ms: { wait: number; reduce: number; draw: number; encode: number; total?: number }; // server time; total: the whole request
   notes?: string[]; // about the view settings, e.g. chosen positions that no longer exist
 }
@@ -384,6 +385,7 @@ async function exploreRender(
     ylim?: [number, number] | null;
     stat: ReduceStat;
     format?: "raw" | "png";
+    draft?: boolean; // while zooming or panning: the data at half resolution (faster)
     settings?: object; // how the data is shown: ViewSettings in ExploreView.tsx
     width?: number; // the panel's size now (CSS pixels), when it changed since opening
     height?: number;

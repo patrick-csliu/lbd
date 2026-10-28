@@ -29,7 +29,9 @@ The file format has its own version (`lbd_version`, currently 1.0).
   the viewer's own database on this computer, never in the file. **Forget this view** starts
   afresh. A file that grows while it is shown (a running measurement) keeps the zoom and choices.
 - **Library**: your folders, and what is inside the file you click; open it in Explore or
-  Figure. The folder panel's right-click menu has **Open in Explore** and **Open in Figure**.
+  Figure.
+- After the viewer is updated, the browser loads the new viewer page at once (it no longer keeps
+  an old copy of the page). The folder panel's right-click menu has **Open in Explore** and **Open in Figure**.
 
 **Plotting (Figure, `lbd.plot`)**
 

@@ -266,6 +266,7 @@ class ExploreRenderBody(_Body):
     ylim: Optional[List[float]] = None
     stat: str = "max"                     # how a pixel shows several map cells: max, min, mean
     format: str = "raw"                   # "raw" RGBA pixels or "png"
+    draft: bool = False                   # while zooming or panning: data at half resolution (faster)
     settings: Optional[Dict[str, Any]] = None   # view settings: select, cmap, invert, scales, clim (explore.py)
     width: Optional[int] = None           # the panel's size now, if it changed since opening
     height: Optional[int] = None
@@ -488,6 +489,18 @@ def deliver_files(state: AppState, files: List[str], dirs: List[str]) -> Dict[st
         page = state.pages.attention()
         return {"delivered": page is not None, "shown": [], "busy": [], "unplaced": []}
     return {"delivered": not unplaced, "shown": offer.shown, "busy": offer.busy, "unplaced": unplaced}
+
+
+class _UiFiles(StaticFiles):
+    """The built web UI. Its page (index.html) is checked again on every load, so a browser never
+    keeps showing an older viewer after an update; the scripts it names have a content hash in
+    their file names, so they may be kept."""
+
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        if not path.replace("\\", "/").startswith("assets/"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
 
 
 # ---- app ---------------------------------------------------------------------------------
@@ -736,7 +749,7 @@ def create_app(state: AppState) -> FastAPI:
         if body.width is not None and body.height is not None:
             s.resize(body.width, body.height, body.dpr if body.dpr is not None else s.dpr)
         notes = s.apply(body.settings) if body.settings is not None else []
-        data, meta = s.render(body.xlim, body.ylim, body.stat, body.format)
+        data, meta = s.render(body.xlim, body.ylim, body.stat, body.format, body.draft)
         meta["notes"] = notes
         meta["ms"]["total"] = round((time.perf_counter() - started) * 1000, 1)   # all of it, on the server
         media = "image/png" if meta["format"] == "png" else "application/octet-stream"
@@ -1129,7 +1142,7 @@ def create_app(state: AppState) -> FastAPI:
     # -- web UI
 
     if (STATIC_DIR / "index.html").is_file():
-        app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
+        app.mount("/", _UiFiles(directory=STATIC_DIR, html=True), name="static")
     else:
         @app.get("/", response_class=HTMLResponse)
         def no_ui():

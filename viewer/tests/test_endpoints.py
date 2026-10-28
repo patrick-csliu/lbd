@@ -553,3 +553,15 @@ def test_file_summary_has_the_matplotlib_version(client, data_dir):
     assert client.get("/api/file", params={"path": p}).json()["matplotlib"] is None
     client.put("/api/file/plot", json={"path": p, "spec": {"kind": "curve"}}).raise_for_status()
     assert client.get("/api/file", params={"path": p}).json()["matplotlib"]
+
+
+def test_the_page_is_never_kept_stale_by_the_browser(client):
+    """After an update, the browser must load the new page (its scripts have hashed names)."""
+    from lbd_viewer.server import STATIC_DIR
+
+    if not (STATIC_DIR / "index.html").is_file():
+        pytest.skip("the web UI is not built")
+    r = client.get("/")
+    assert r.status_code == 200 and r.headers["cache-control"] == "no-cache"
+    script = next(p.name for p in (STATIC_DIR / "assets").glob("*.js"))
+    assert "no-cache" not in client.get(f"/assets/{script}").headers.get("cache-control", "")

@@ -31,8 +31,9 @@ opens it here. For a figure to export, use **Figure** (one click away, see below
 | Click | Reads the nearest point (curves) or the cell (maps): its value as stored in the file, where it is, and which trace. The trace is highlighted. |
 | Type in **Horizontal** / **Vertical** *from … to* | Shows exactly that range. Empty boxes mean "to the end of the data". |
 
-The view follows the mouse at once; the sharp picture follows a moment later (it is drawn by the
-same engine as the figures, so Explore and Figure look alike).
+Every picture is complete: its axes always match its data. While you zoom or pan, the data is
+drawn at half resolution, which is faster; as soon as the mouse rests, the sharp picture follows.
+Pictures are drawn by the same engine as the figures, so Explore and Figure look alike.
 
 ## Choosing traces
 

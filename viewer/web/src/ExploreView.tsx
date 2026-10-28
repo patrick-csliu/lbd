@@ -163,13 +163,16 @@ export default function ExploreView({ info, spec, version, onOpened, onError, se
   const pan = useRef<{ x: number; y: number; view: View } | null>(null);
   const down = useRef<{ x: number; y: number } | null>(null);
 
-  // The mapping of what is on screen now: the last picture's plot area, showing the wanted view.
+  // The mapping of what is on screen: the last picture, whose axes and data always belong
+  // together (pictures are shown whole, never stretched ahead of the server).
   const current = useCallback((): Mapping | null => {
     const f = frame.current;
-    if (!f) return null;
-    const m = frameMapping(f.meta);
-    return wanted.current ? { ...m, view: wanted.current } : m;
+    return f ? frameMapping(f.meta) : null;
   }, []);
+  // While the user zooms or pans, pictures are drafts (data at half resolution: faster); the
+  // sharp picture is asked for once the mouse rests.
+  const moving = useRef(false);
+  const restTimer = useRef(0);
 
   // ---- drawing (picture: the server's picture, moved to the wanted view; overlay: our marks)
 
@@ -240,28 +243,6 @@ export default function ExploreView({ info, spec, version, onOpened, onError, se
     }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.drawImage(src, 0, 0);
-    const v = wanted.current;
-    if (v && !same(v, { xlim: f.meta.xlim, ylim: f.meta.ylim })) {
-      // Preview: the plot area of the last picture, stretched and moved to the wanted view.
-      const m = f.meta;
-      const [l, t, w, h] = m.plot;
-      const a0 = fwd(m.xscale, m.xlim[0]), a1 = fwd(m.xscale, m.xlim[1]);
-      const b0 = fwd(m.xscale, v.xlim[0]), b1 = fwd(m.xscale, v.xlim[1]);
-      const c0 = fwd(m.yscale, m.ylim[0]), c1 = fwd(m.yscale, m.ylim[1]);
-      const d0 = fwd(m.yscale, v.ylim[0]), d1 = fwd(m.yscale, v.ylim[1]);
-      const dx = l + ((a0 - b0) / (b1 - b0)) * w, dw = ((a1 - a0) / (b1 - b0)) * w;
-      const dy = t + ((d1 - c1) / (d1 - d0)) * h, dh = ((c1 - c0) / (d1 - d0)) * h;
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(l, t, w, h);
-      ctx.clip();
-      const bg = src.getContext("2d")!.getImageData(Math.max(l - 2, 0), Math.max(t - 2, 0), 1, 1).data;
-      ctx.fillStyle = `rgb(${bg[0]},${bg[1]},${bg[2]})`;
-      ctx.fillRect(l, t, w, h);
-      ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(src, l, t, w, h, dx, dy, dw, dh);
-      ctx.restore();
-    }
     paintOverlay();
   }, [paintOverlay]);
 
@@ -276,7 +257,14 @@ export default function ExploreView({ info, spec, version, onOpened, onError, se
     const sizeNow = sz ? { width: sz.w, height: sz.h, dpr: window.devicePixelRatio || 1 } : {};
     const view = all || !v ? { xlim: null, ylim: null } : { xlim: v.xlim, ylim: v.ylim };
     api
-      .exploreRender(sid, { ...view, stat: statRef.current, format: formatRef.current, settings: settingsRef.current, ...sizeNow })
+      .exploreRender(sid, {
+        ...view,
+        stat: statRef.current,
+        format: formatRef.current,
+        settings: settingsRef.current,
+        draft: moving.current,
+        ...sizeNow,
+      })
       .then((f) => {
         if (session.current !== sid) return;
         frame.current = f;
@@ -315,10 +303,25 @@ export default function ExploreView({ info, spec, version, onOpened, onError, se
         inflight.current = false;
         const f = frame.current, sz = sizeRef.current;
         const stale =
-          f && (!same(wanted.current, { xlim: f.meta.xlim, ylim: f.meta.ylim }) || (sz && Math.abs(f.meta.width / f.meta.dpr - sz.w) > 1));
+          f &&
+          (!same(wanted.current, { xlim: f.meta.xlim, ylim: f.meta.ylim }) ||
+            (sz && Math.abs(f.meta.width / f.meta.dpr - sz.w) > 1) ||
+            (f.meta.draft && !moving.current)); // a draft, and the mouse rests: the sharp picture
         if (session.current === sid && (wanted.current || showAll.current) && (stale || dirty.current || showAll.current)) request();
       });
   }, [paint]);
+
+  /** The user is zooming or panning: drafts until the mouse rests for a moment. */
+  const markMoving = useCallback(() => {
+    moving.current = true;
+    window.clearTimeout(restTimer.current);
+    restTimer.current = window.setTimeout(() => {
+      moving.current = false;
+      dirty.current = true;
+      request();
+    }, 150);
+  }, [request]);
+  useEffect(() => () => window.clearTimeout(restTimer.current), []);
 
   /** Show this view, or all the data (null). */
   const setView = useCallback(
@@ -480,6 +483,7 @@ export default function ExploreView({ info, spec, version, onOpened, onError, se
       const [x, y] = toData(m, px, py);
       const f = Math.exp(e.deltaY * 0.0015);
       const v = wanted.current;
+      markMoving();
       setView({
         xlim: e.altKey ? v.xlim : zoomRange(v.xlim, x, f, m.xscale),
         ylim: e.shiftKey ? v.ylim : zoomRange(v.ylim, y, f, m.yscale),
@@ -487,7 +491,7 @@ export default function ExploreView({ info, spec, version, onOpened, onError, se
     };
     c.addEventListener("wheel", onWheel, { passive: false });
     return () => c.removeEventListener("wheel", onWheel);
-  }, [current, setView]);
+  }, [current, setView, markMoving]);
 
   const onPointerDown = (e: ReactPointerEvent<HTMLCanvasElement>) => {
     const [x, y] = cssPoint(e);
@@ -512,6 +516,7 @@ export default function ExploreView({ info, spec, version, onOpened, onError, se
       const p = pan.current, [, , w, h] = m.plot;
       const vx = fwd(m.xscale, p.view.xlim[1]) - fwd(m.xscale, p.view.xlim[0]);
       const vy = fwd(m.yscale, p.view.ylim[1]) - fwd(m.yscale, p.view.ylim[0]);
+      markMoving();
       setView({
         xlim: shiftRange(p.view.xlim, (-(x - p.x) / w) * vx, m.xscale),
         ylim: shiftRange(p.view.ylim, ((y - p.y) / h) * vy, m.yscale),

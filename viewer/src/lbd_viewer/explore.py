@@ -139,7 +139,9 @@ class ExploreSession:
 
         kept = [(a, a.get_major_formatter()) for a in (self.ax.xaxis, self.ax.yaxis)]
         for a, _ in kept:
-            a.set_major_formatter(FuncFormatter(lambda v, pos: WIDEST_TICK))
+            wide = FuncFormatter(lambda v, pos: WIDEST_TICK)
+            wide.set_offset_string("1e−8")              # room for a multiplier too (tiny ranges)
+            a.set_major_formatter(wide)
         self.fig.set_layout_engine("constrained")
         self.fig.canvas.draw()
         self.fig.set_layout_engine("none")
@@ -295,9 +297,22 @@ class ExploreSession:
 
     # -- drawing
 
-    def _raster(self, lines, shown: List[int], w: int, h: int) -> None:
-        """Draw the curves `shown` into one picture of the plot area (w × h pixels), in their
-        colours, later curves on top, as matplotlib would draw them (without antialiasing)."""
+    def _plain_tick_numbers(self) -> None:
+        """Tick numbers as plain text, not math text: they look the same, but every new label
+        (each zoom step makes some) would otherwise be parsed as math, ~50 ms per picture. Log
+        axes keep their math text (10 to a power), whose few labels repeat."""
+        from matplotlib.ticker import ScalarFormatter
+
+        for ax in self.fig.axes:
+            for axis in (ax.xaxis, ax.yaxis):
+                f = axis.get_major_formatter()
+                if isinstance(f, ScalarFormatter) and f.get_useMathText():
+                    f.set_useMathText(False)
+
+    def _raster(self, lines, shown: List[int], w: int, h: int, scale: float = 1.0) -> None:
+        """Draw the curves `shown` into one picture of the plot area (w × h pixels; `scale`: its
+        pixels per screen pixel, below 1 for a draft), in their colours, later curves on top, as
+        matplotlib would draw them (without antialiasing)."""
         def to_px(v, lim, scale, size):
             f = (lambda a: np.log10(np.where(a > 0, a, np.nan))) if scale == "log" else (lambda a: a)
             a, b = f(np.asarray(lim, dtype=float))
@@ -305,7 +320,7 @@ class ExploreSession:
 
         xs, ys = self.ax.get_xscale(), self.ax.get_yscale()
         xl, yl = self.ax.get_xlim(), self.ax.get_ylim()
-        width = self.lines[shown[0]].get_linewidth() * self.fig.dpi / 72 if shown else 1.0
+        width = (self.lines[shown[0]].get_linewidth() * self.fig.dpi / 72 if shown else 1.0) * scale
         groups = [ks for _, ks, ok in self.x_groups if ok and any(k in shown for k in ks)]
         if len(groups) == 1 and all(len(lines[k][0]) == len(lines[shown[0]][0]) for k in shown):
             # the usual case: the curves share one sorted x, so they are drawn column by column
@@ -365,7 +380,12 @@ class ExploreSession:
             self._lay_out()
 
     def render(self, xlim: Optional[Tuple[float, float]], ylim: Optional[Tuple[float, float]],
-               stat: str = "max", fmt: str = "raw", _again: bool = False) -> Tuple[bytes, Dict[str, Any]]:
+               stat: str = "max", fmt: str = "raw", draft: bool = False,
+               _again: bool = False) -> Tuple[bytes, Dict[str, Any]]:
+        """A picture of a view. `draft` (while the user zooms or pans): the data is reduced to half
+        the pixels each way, which is about four times less work; the axes and text are drawn as
+        always, so the picture is complete and its axes match its data. The sharp picture follows
+        when the user stops."""
         if stat not in STATS:
             raise ExploreError(f"unknown reduction {stat!r}; use one of {', '.join(STATS)}")
         if fmt not in FORMATS:
@@ -381,8 +401,10 @@ class ExploreSession:
             self.last_used = time.monotonic()
             self.ax.set_xlim(*xlim)
             self.ax.set_ylim(*ylim)
+            self._plain_tick_numbers()
             left, top, w, h = self._plot_area()
-            pxe, pye = self._pixel_edges(w, h)
+            dw, dh = (max(w // 2, 1), max(h // 2, 1)) if draft else (w, h)
+            pxe, pye = self._pixel_edges(dw, dh)
             if self.kind == "heatmap":
                 r = self.pyramid.raster(pxe, pye, stat)
                 self.image.set_data(r.image)
@@ -416,7 +438,7 @@ class ExploreSession:
                     artist.set_visible(self.visible[k] and not as_picture)
                 self.line_image.set_visible(as_picture)
                 if as_picture:
-                    self._raster(lines, shown, w, h)
+                    self._raster(lines, shown, dw, dh, 0.5 if draft else 1.0)
                 self.last_lines = lines
                 note = "min and max per pixel column" if reduced else "every point shown"
                 if unsorted:
@@ -430,7 +452,7 @@ class ExploreSession:
                 self._lay_out()
                 left, top, w, h = self._plot_area()
                 if (w, h) != (len(pxe) - 1, len(pye) - 1):        # the plot area changed size
-                    return self.render(xlim, ylim, stat, fmt, _again=True)
+                    return self.render(xlim, ylim, stat, fmt, draft, _again=True)
             rgba = np.asarray(self.fig.canvas.buffer_rgba())
             t3 = time.perf_counter()
         height, width = rgba.shape[:2]
@@ -448,7 +470,7 @@ class ExploreSession:
             "plot": [left, top, w, h], "xlim": list(xlim), "ylim": list(ylim),
             "xscale": self.ax.get_xscale(), "yscale": self.ax.get_yscale(),
             "full": [list(self.full[0]), list(self.full[1])],
-            "note": note, "reduced": reduced, "stat": stat,
+            "note": note, "reduced": reduced, "stat": stat, "draft": draft,
             "ms": {"wait": round((t1 - t0) * 1000, 1), "reduce": round((t2 - t1) * 1000, 1),
                    "draw": round((t3 - t2) * 1000, 1), "encode": round((t4 - t3) * 1000, 1)},
         }
