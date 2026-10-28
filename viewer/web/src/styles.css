@@ -388,3 +388,10 @@ details.group fieldset > .group-fields { margin-top: -4px; }
 .op-number { width: 7em; }
 .explore-hidden { font-size: 12px; color: var(--text); background: var(--accent-soft); border-radius: var(--radius); padding: 3px 8px; }
 .explore-empty { position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%); max-width: 70%; text-align: center; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 14px; z-index: 1; }
+.equations { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; border-top: 1px solid var(--border); padding-top: 6px; }
+.eq-title { font-weight: 600; font-size: 13px; }
+.eq-legend { display: flex; flex-direction: column; gap: 2px; }
+.eq-legend code, .eq-field code { font-size: 12px; }
+.eq-field label { display: grid; grid-template-columns: 2.4em 1fr; align-items: center; gap: 4px; }
+.eq-field input { font-family: ui-monospace, Consolas, monospace; min-width: 0; }
+.eq-field.bad input { border-color: var(--danger); }

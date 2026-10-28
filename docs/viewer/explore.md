@@ -183,6 +183,44 @@ top of the list:
   FFT or a histogram the points are new ones, so only the shown value is read, and a cut can't
   be saved (turn the operations off to save the stored data).
 
+## Equations
+
+![Equations, with the names they can use](img/equations.png)
+
+1. **The legend:** what each name stands for, in stored units.
+2. **An equation:** here each power's row of |S21| against its own maximum.
+
+Below the operations are **equation** fields, as in Labber: `x =` and `y =` (for a map also
+`z =`). They work on the data after the operations; an empty field leaves that part as it is.
+Type a formula and press Enter (Esc puts the old one back).
+
+Above the fields, a **legend** says what each name stands for, and in which unit. The numbers
+are in **stored units**: Hz, not GHz, so `x * 1e-9` gives GHz.
+
+- `x`, `y` — the horizontal axis and the value as shown (after the complex mode and the
+  operations); for a map `x`, `y` are its axes and `z` its value.
+- Every other value of the file with the same axes, as stored (complex values stay complex:
+  `abs(S21_ref)`), and every axis, by name. An axis held by a slider is its one value. Names that
+  aren't plain words go in backticks: `` `S21 (ref)` ``.
+- `pi`, `e`; `+ − * / **` and parentheses; the functions `sin cos tan arcsin arccos arctan
+  arctan2 sinh cosh tanh exp log log10 log2 sqrt abs real imag angle conj floor ceil round clip`,
+  and per trace `mean median std min max` (so `y - mean(y)` subtracts each trace's mean).
+
+Examples: `y - 0.5 * power`, `abs(S21) / abs(S21_ref)`, `x * 1e-9`, `10 * log10(y)`.
+
+- The result has **no unit**; the axis is labelled with the equation.
+- Only formulas are read: LBD checks every part itself and never runs what is typed as a
+  program.
+- A field that can't be used turns red and says why (a typing mistake and where it is, a name
+  that doesn't exist with the names that do, a complex result: take `abs()`, `real()` …); the
+  plot then leaves that field out.
+- Points without a value (`sqrt` of a negative number, `log` of 0, 0/0) become gaps, and a note
+  under the field counts them.
+- `x =` may give each trace its own x, or an order that isn't sorted (curves are then drawn
+  point after point). A map's axes must stay sorted.
+- Like the operations, equations are remembered with the view on this computer, never written
+  into the file, and turned off with the operations' **on** switch.
+
 ## Scales, colours and limits
 
 - **Scales:** log horizontal, log vertical, and for maps a log colour scale. Values of 0 or
@@ -227,7 +265,7 @@ Cursor values never come from the picture: they are read from the file's data.
 ## What is remembered, and where
 
 The viewer remembers how you explored each file: what was plotted, the chosen traces, the
-operations, colours, scales, limits, the zoom and the cursors. Opening the file again shows the same.
+operations and equations, colours, scales, limits, the zoom and the cursors. Opening the file again shows the same.
 
 - This is kept **on this computer**, in the viewer's own database (in its settings folder, see
   [Command line and settings](command-line.md)). **Nothing is written into the data file.** The

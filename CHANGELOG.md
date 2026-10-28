@@ -42,6 +42,11 @@ The file format has its own version (`lbd_version`, currently 1.0).
   operation that can't apply says why. For complex values: electrical delay and rotation, each
   with **Calculate** (from the data between the cursors), auto-rotate each trace, and an I/Q
   histogram (a map of counts). Explore only: never written into the file.
+- **Equations in Explore**, as in Labber: `x =`, `y =` (maps also `z =`) after the operations,
+  using the other values and axes of the file by name, `pi`, `e`, and functions such as `sqrt`,
+  `log10`, `abs` and per-trace `mean`. A legend above the fields says what each name stands for
+  and in which unit. Only formulas are read (never run as a program); a field that can't be used
+  says why; points without a value become gaps and are counted.
 - Nothing in Explore is hidden silently: points a log scale can't show are counted in a note above
   the plot, a log scale with nothing above 0 stays linear and says so, an empty result says why,
   and an unexpected error says it's a bug and where the details are (`viewer.log`, next to LBD's

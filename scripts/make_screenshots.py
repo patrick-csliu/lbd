@@ -321,6 +321,27 @@ def explore_operations(page: Page, url: str, ctx) -> None:
 
 
 @shot
+def explore_equations(page: Page, url: str, ctx) -> None:
+    fresh(page, url, "Explore")
+    page.locator(".row-label", has_text="sweep.lbd").first.dblclick()
+    area = page.locator("main:not([hidden])")
+    page.locator("main:not([hidden]) .explore-readout .mono").wait_for()
+    area.get_by_label("Complex values").select_option("db")
+    page.wait_for_timeout(1200)
+    box = area.get_by_label("Equation for z")
+    box.fill("z - max(z)")                      # each power's row against its own maximum
+    box.press("Enter")
+    page.wait_for_timeout(1500)
+    area.locator(".equations").scroll_into_view_if_needed()
+    page.wait_for_timeout(300)
+    mark(page, [
+        (1, "main:not([hidden]) .eq-legend", 0, "r"),
+        (2, "main:not([hidden]) .eq-field", 2, "r"),
+    ])
+    save(page, VIEWER_IMG / "equations.png", clip=region(page, "main:not([hidden]) .operations", pad=16, extra_right=40))
+
+
+@shot
 def library(page: Page, url: str, ctx) -> None:
     fresh(page, url, "Library")
     page.locator(".library-folders .row-label", has_text="sweep.lbd").first.click()

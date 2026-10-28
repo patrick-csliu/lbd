@@ -66,3 +66,24 @@ def test_calculate_fills_the_delay_and_flattens_the_phase(viewer, new_page):
     frames(page, lambda: ops(page).get_by_role("button", name="Calculate").click())
     expect(ops(page).get_by_label("Delay in ns")).to_have_value("60")
     expect(ops(page).locator(".op-list li.bad")).to_have_count(0)
+
+
+def test_equations_with_their_legend_and_messages(sweep, new_page):
+    page = new_page("Explore")
+    frames(page, lambda: row(page, "sweep.lbd").dblclick())
+    legend = ops(page).locator(".eq-legend")
+    expect(legend).to_contain_text("x = t")                           # what the names stand for
+    expect(legend).to_contain_text("y = v")
+    expect(legend).to_contain_text("power = power, an axis: one per trace")
+    box = ops(page).get_by_label("Equation for y")
+    box.fill("y * 2 + power")
+    frames(page, lambda: box.press("Enter"))
+    expect(ops(page)).to_contain_text("The plot shows y * 2 + power")
+    bad = ops(page).get_by_label("Equation for x")
+    bad.fill("x +* 2")
+    frames(page, lambda: bad.press("Enter"))
+    expect(ops(page).locator(".eq-field.bad")).to_contain_text("isn't a formula LBD can read")
+    page.wait_for_timeout(1500)                                        # remembered a moment later
+    page.reload()
+    frames(page, lambda: row(page, "sweep.lbd").dblclick())
+    expect(ops(page).get_by_label("Equation for y")).to_have_value("y * 2 + power")

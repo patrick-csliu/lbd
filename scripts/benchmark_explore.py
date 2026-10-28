@@ -150,7 +150,8 @@ def measure_file(name: str, path: Path, repeats: int) -> Dict[str, float]:
 
     cursor_cross, cursor_vertical = drag("cross"), drag("vertical")
     # operations: smoothing then a derivative along x, applied (the plot set up again) and drawn
-    with_ops = {"ops": [{"op": "smooth", "n": 5}, {"op": "derivative"}]}
+    with_ops = {"ops": [{"op": "smooth", "n": 5}, {"op": "smooth", "method": "gaussian", "sigma": 2.0},
+                        {"op": "derivative"}], "equations": {"y": "y - mean(y)"}}
 
     def apply_ops():
         s.apply({})

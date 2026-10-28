@@ -86,7 +86,8 @@ def test_the_contrast_sets_the_colour_range(small_map, new_page):
 def test_a_vertical_cursor_lists_every_trace(sweep, new_page):
     page = new_page("Explore")
     meta = frames(page, lambda: row(page, "sweep.lbd").dblclick())
-    explore(page).get_by_role("button", name="Vertical").click()
+    explore(page).get_by_role("button", name="Vertical").click()     # far down the side panel: the page scrolls
+    explore(page).locator(".explore-overlay").scroll_into_view_if_needed()
     a = cursor_answer(page, lambda: page.mouse.click(*at(page, meta, 25, 2.1)))
     assert a["cursors"][0]["trace"] == 2 and len(a["cursors"][0]["table"]["rows"]) == 5
     expect(explore(page).locator(".cursor-table tr")).to_have_count(5)

@@ -9,6 +9,9 @@ import { ContextMenu, MenuAt, MenuEntry } from "./menu";
  * can't apply is red, and the plot shows the result of the ones above it. A switch turns them all
  * off to compare with the stored data. Explore only: remembered with the view, never in the file.
  *
+ * Below the list, equations like Labber's: `x =`, `y =` (maps also `z =`), applied after the
+ * operations, with a legend above them of what each name stands for (and in which stored unit).
+ *
  * For complex values, a first group works on the complex numbers before the complex mode (dB,
  * phase …): electrical delay and rotation (each with Calculate, from the data between the cursors
  * or in view), auto-rotate, and the I/Q histogram (a map of counts; the last operation).
@@ -27,7 +30,12 @@ interface Props {
   /** The plotted value is complex: the complex group is offered. */
   complexValues: boolean;
   calculate: (what: "delay" | "rotation", index: number) => Promise<number>;
+  equations: { x?: string; y?: string; z?: string };
+  onEquations: (e: { x?: string; y?: string; z?: string }) => void;
 }
+
+const EQ_FUNCTIONS = "sin cos tan arcsin arccos arctan arctan2 sinh cosh tanh exp log log10 log2 sqrt abs real imag angle conj floor ceil round clip";
+const EQ_PER_TRACE = "mean median std min max";
 
 const COMPLEX: { op: OpName; name: string; tip: string }[] = [
   { op: "delay", name: "Electrical delay", tip: "× e^(i·2π·f·τ): removes a cable's phase slope. Calculate: from the phase between the cursors (else in view)" },
@@ -51,7 +59,7 @@ const KINDS: { op: OpName; name: string; tip: string; along: ("x" | "traces")[];
 ];
 const byOp = new Map(KINDS.map((k) => [k.op, k]));
 
-export default function Operations({ kind, xLabel, tracesLabel, ops, on, info, onChange, onOn, complexValues, calculate }: Props) {
+export default function Operations({ kind, xLabel, tracesLabel, ops, on, info, onChange, onOn, complexValues, calculate, equations, onEquations }: Props) {
   const [menu, setMenu] = useState<MenuAt | null>(null);
   const [calcNote, setCalcNote] = useState<{ i: number; text: string } | null>(null);
   const runCalc = (i: number, what: "delay" | "rotation") => {
@@ -251,6 +259,13 @@ export default function Operations({ kind, xLabel, tracesLabel, ops, on, info, o
         })}
       </ol>
       <button onClick={add}>+ Add operation ▾</button>
+      <Equations
+        kind={kind}
+        equations={equations}
+        info={info}
+        on={on}
+        onChange={onEquations}
+      />
       {on && info?.shows && (
         <div className="small">
           The plot shows <strong>{info.shows}</strong>
@@ -289,5 +304,85 @@ function NumberBox({ value, label, onSet }: { value: number; label: string; onSe
       onBlur={apply}
       onKeyDown={(e: KeyboardEvent) => e.key === "Enter" && apply()}
     />
+  );
+}
+
+/** The equation fields, after the operations, with the legend of names above them. */
+function Equations({ kind, equations, info, on, onChange }: {
+  kind: "curve" | "heatmap";
+  equations: { x?: string; y?: string; z?: string };
+  info: OpsInfo | null;
+  on: boolean;
+  onChange: (e: { x?: string; y?: string; z?: string }) => void;
+}) {
+  const fields = (kind === "heatmap" ? ["x", "y", "z"] : ["x", "y"]) as ("x" | "y" | "z")[];
+  const names = info?.names ?? [];
+  const main = names.filter((n) => fields.includes(n.name as "x" | "y" | "z"));
+  const others = names.filter((n) => !fields.includes(n.name as "x" | "y" | "z"));
+  return (
+    <div className="equations">
+      <div className="eq-title">Equations (after the operations)</div>
+      <div className="eq-legend small" aria-label="What the names stand for">
+        {main.map((n) => (
+          <div key={n.name}>
+            <code>{n.name}</code> = {n.means}
+          </div>
+        ))}
+        {others.map((n) => (
+          <div key={n.name} className="muted">
+            <code>{n.name}</code> = {n.means}
+          </div>
+        ))}
+        <div className="muted">
+          in stored units · <code>pi</code> <code>e</code> · {EQ_FUNCTIONS} · per trace: {EQ_PER_TRACE}
+        </div>
+      </div>
+      {fields.map((f) => {
+        const st = info?.equations?.[f];
+        return (
+          <EquationBox
+            key={f}
+            field={f}
+            value={equations[f] ?? ""}
+            error={on ? st?.error : undefined}
+            note={on ? st?.note : undefined}
+            onSet={(v) => {
+              const next = { ...equations, [f]: v || undefined };
+              onChange(next);
+            }}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function EquationBox({ field, value, error, note, onSet }: { field: string; value: string; error?: string; note?: string; onSet: (v: string) => void }) {
+  const [text, setText] = useState(value);
+  useEffect(() => setText(value), [value]);
+  const apply = () => {
+    if (text.trim() !== value) onSet(text.trim());
+  };
+  return (
+    <div className={"eq-field" + (error ? " bad" : "")}>
+      <label>
+        <code>{field} =</code>
+        <input
+          value={text}
+          spellCheck={false}
+          placeholder={`(none: ${field} as it is)`}
+          aria-label={`Equation for ${field}`}
+          aria-invalid={!!error}
+          onChange={(e) => setText(e.target.value)}
+          onBlur={apply}
+          onKeyDown={(e: KeyboardEvent) => {
+            if (e.key === "Enter") apply();
+            if (e.key === "Escape") setText(value);
+          }}
+        />
+      </label>
+      {error && <div className="field-error">{error}</div>}
+      {note && <div className="muted small">{note}</div>}
+    </div>
   );
 }

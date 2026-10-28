@@ -27,6 +27,8 @@ COMPLEX_OPS = [[{"op": "delay", "tau": 1e-9}], [{"op": "rotation", "phi": 30}], 
                [{"op": "iq_histogram", "bins": 10}], [{"op": "delay", "tau": 1e-9}, {"op": "derivative"}],
                [{"op": "iq_histogram", "bins": 10}, {"op": "smooth"}]]
 SCALES = [{}, {"yscale": "log"}, {"xscale": "log", "yscale": "log"}]     # log x alone: covered by both
+EQUATIONS = [{"y": "1/y"}, {"y": "log(y)"}, {"y": "sqrt(y) - mean(y)"}, {"x": "x * 2", "y": "y * 0"},
+             {"x": "-x"}, {"y": "y +"}, {"z": "z / max(z)", "x": "x ** 2"}]
 
 
 @pytest.fixture()
@@ -89,9 +91,11 @@ def test_every_operation_on_every_kind_of_data_answers_properly(cfg, data_dir, m
         sess = client.app.state.lbd.explore.get(o["session"])
         ops_lists = REAL_OPS + (COMPLEX_OPS if value == "c" else [])
         scales = SCALES + ([{"cscale": "log"}] if kind == "heatmap" else [])
-        for ops, scale in itertools.product(ops_lists, scales):
-            settings = {**scale, "ops": ops}
-            where = (kind, value, axes, ops, scale)
+        combos = [{**scale, "ops": ops} for ops, scale in itertools.product(ops_lists, scales)]
+        combos += [{**scale, "equations": e, "ops": ops} for e in EQUATIONS for scale in SCALES[:2]
+                   for ops in ([], [{"op": "smooth", "n": 3}])]
+        for settings in combos:
+            where = (kind, value, axes, settings)
             try:
                 r = client.post(f"/api/explore/{o['session']}/render", json={"settings": settings})
             except Exception as e:                    # a crash (or a warning made an error): name the case

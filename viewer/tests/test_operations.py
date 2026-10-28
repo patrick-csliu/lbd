@@ -170,7 +170,7 @@ def test_operations_off_show_the_stored_data_again(client, sweep):
     assert sess.model is not sess.base_model
     meta = render(client, o, {"ops": [{"op": "subtract_mean", "on": False}]})
     assert sess.model is sess.base_model and meta["ops"]["notes"] == ["off"]
-    assert render(client, o, {})["ops"] is None
+    assert render(client, o, {})["ops"]["notes"] == []                 # no operations; the names are there
 
 
 def test_a_bad_operation_is_a_clear_error(client, sweep):

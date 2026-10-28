@@ -505,6 +505,8 @@ function ExploreControls({ info, resolved, settings, updateSpec, updateSettings,
         onOn={(on) => updateSettings({ ops_on: on ? undefined : false })}
         complexValues={anyComplex}
         calculate={calculate}
+        equations={settings.equations ?? {}}
+        onEquations={(e) => updateSettings({ equations: e.x || e.y || e.z ? e : undefined })}
       />
 
       <fieldset className="field">

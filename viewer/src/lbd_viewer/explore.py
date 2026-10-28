@@ -40,6 +40,7 @@ from lbd.plot import render as rnd
 from lbd.plot.reduce import STATS, CurvePyramid, MapPyramid, cell_edges, curve_minmax, thin_in_order
 from lbd.plot.style import Style
 
+from . import equations
 from . import operations as ops_mod
 
 KINDS = ("curve", "heatmap")
@@ -157,6 +158,8 @@ class ExploreSession:
         self.ops_result: Optional[ops_mod.Result] = None
         self.ops_shown: Optional[ops_mod.Shown] = None
         self.ops_list: List[Dict[str, Any]] = []
+        self.eq_legend: Optional[List[Dict[str, str]]] = None
+        self.eq_state: Dict[str, Dict[str, str]] = {}
         self.settings: Dict[str, Any] = {}               # view settings (apply), reset with the plot
         self._build()
 
@@ -290,7 +293,12 @@ class ExploreSession:
             op_list = ops_mod.check(settings.get("ops"))
             if settings.get("ops_on") is False:          # the section's switch: all off, the list kept
                 op_list = [{**op, "on": False} for op in op_list]
-            changed = self._apply_ops(op_list, chosen)
+            eqs = settings.get("equations") or {}
+            if not isinstance(eqs, dict) or any(k not in ("x", "y", "z") or not isinstance(v, str) for k, v in eqs.items()):
+                raise ExploreError("equations are {x, y, z}: text each")
+            if settings.get("ops_on") is False:          # off with the operations
+                eqs = {}
+            changed = self._apply_ops(op_list, chosen, {k: v for k, v in eqs.items() if v.strip()})
         except ops_mod.BadOps as e:
             raise ExploreError(str(e)) from None
         if changed:
@@ -373,16 +381,17 @@ class ExploreSession:
                     "it so (e.g. Normalize of a constant trace); change them, or turn them off for the stored data.")
         return f"Nothing to show: no {what} of the data shown has a value (they are all missing)."
 
-    def _apply_ops(self, ops: List[Dict[str, Any]], chosen: Optional[set]) -> bool:
-        """Run the operations (on the chosen traces) when they or the choice changed; True when
-        the figure was set up again for another model."""
-        key = json.dumps([ops, sorted(chosen) if chosen is not None else None])
+    def _apply_ops(self, ops: List[Dict[str, Any]], chosen: Optional[set], eqs: Dict[str, str]) -> bool:
+        """Run the operations (on the chosen traces), then the equations, when any of them or the
+        choice changed; True when the figure was set up again for another model."""
+        key = json.dumps([ops, sorted(chosen) if chosen is not None else None, eqs])
         if key == self.ops_key:
             return False
         self.ops_key, self.ops_list = None, ops
         self._apply_complex(ops)
         model, result, shown = self.base_model, None, None
-        if any(op["on"] for op in ops):
+        self.eq_state: Dict[str, Dict[str, str]] = {}
+        if any(op["on"] for op in ops) or eqs:
             base = ops_mod.grid_of(self, chosen)
             iq = next((op for op in ops if op["op"] == "iq_histogram" and op["on"]), None)
             start = base
@@ -393,8 +402,17 @@ class ExploreSession:
                     result = ops_mod.Result(base, [str(e) if o is iq else None for o in ops], 0)
             if result is None:
                 result = ops_mod.run(start, ops, iq_done=start is not base)
+            before = result.grid if result.applied else base
+            self.eq_legend = equations.names_of(self, before, arrays=False)[1]
+            if eqs:
+                after, self.eq_state, _ = equations.apply(self, before, eqs)
+                done = sum(1 for f in eqs if f in self.eq_state and "error" not in self.eq_state[f])
+                if done:
+                    result = ops_mod.Result(after, result.notes, result.applied + done)
             if result.applied:
                 model, shown = ops_mod.model_of(self, base, result.grid)
+        else:
+            self.eq_legend = None                        # worked out when asked for (ops_info)
         self.ops_result, self.ops_shown = result, shown
         if model is self.model:
             self.ops_key = key
@@ -444,12 +462,14 @@ class ExploreSession:
             raise ExploreError(str(e)) from None
         return out
 
-    def ops_info(self) -> Optional[Dict[str, Any]]:
-        """For the page: each operation's state (None: applied, "off", or why not) and what is shown."""
-        if not self.ops_list:
-            return None
+    def ops_info(self) -> Dict[str, Any]:
+        """For the page: each operation's state (None: applied, "off", or why not), each equation
+        field's (error or note), what is shown, and the names equations can use (the legend)."""
         r = self.ops_result
-        info: Dict[str, Any] = {"notes": r.notes if r else ["off"] * len(self.ops_list), "applied": r.applied if r else 0}
+        if getattr(self, "eq_legend", None) is None:      # nothing applied: the legend of the plain plot
+            self.eq_legend = equations.names_of(self, ops_mod.grid_of(self, None), arrays=False)[1]
+        info: Dict[str, Any] = {"notes": r.notes if r else ["off"] * len(self.ops_list), "applied": r.applied if r else 0,
+                                "equations": getattr(self, "eq_state", {}), "names": self.eq_legend}
         if r is not None and r.applied and self.ops_shown is not None:
             info["shows"] = r.grid.value.label
             info["unit"] = self.ops_shown.value_unit

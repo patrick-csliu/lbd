@@ -380,6 +380,8 @@ export interface OpsInfo {
   shows?: string; // what the plot shows now, e.g. "dS21/dFrequency"
   unit?: string; // in which unit, e.g. "dB/GHz"
   one_to_one?: boolean; // each shown point is still a stored point
+  equations?: Record<string, { error?: string; note?: string }>; // per field (x, y, z)
+  names?: { name: string; means: string }[]; // what each name in an equation stands for
 }
 
 export interface ExploreFrame {

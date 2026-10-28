@@ -62,6 +62,7 @@ export interface ViewSettings {
   clim?: [number | null, number | null];
   ops?: Op[]; // operations on the data shown (operations.py), in order
   ops_on?: boolean; // false: all of them off (the list kept)
+  equations?: { x?: string; y?: string; z?: string }; // after the operations (equations.py)
 }
 interface Size {
   w: number;
