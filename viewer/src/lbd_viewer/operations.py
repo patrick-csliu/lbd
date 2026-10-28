@@ -141,9 +141,19 @@ def derivative(g: Grid, along: str = "x") -> Grid:
     return replace(g, a=a, value=Quantity(f"d{g.value.label}/d{q.label}", ""))     # another unit: none shown
 
 
-def smooth(g: Grid, along: str = "x", n: int = 5) -> Grid:
+SMOOTH_METHODS = ("mean", "gaussian", "median")
+
+
+def smooth(g: Grid, along: str = "x", n: int = 5, method: str = "mean", sigma: float = 2.0) -> Grid:
+    """Smoothing along a row: a running mean over n points, a Gaussian of width σ points (to ±3σ),
+    or the median of n points (n odd; a one-point spike goes, an edge stays sharp). Missing points
+    are left out of every window and stay missing; windows shrink at the ends."""
+    if method == "gaussian":
+        return _gaussian(g, along, sigma)
     if not isinstance(n, int) or n < 2:
         raise OpError("smoothing needs a whole number of points, 2 or more")
+    if method == "median":
+        return _median(g, along, n)
 
     def f(r, _):
         ok = np.isfinite(r)
@@ -156,6 +166,40 @@ def smooth(g: Grid, along: str = "x", n: int = 5) -> Grid:
         out[~ok] = np.nan                                                 # gaps stay gaps
         return out
     return replace(g, a=_per_row(g, along, f), value=Quantity(f"{g.value.label} (smoothed over {n})", g.value.unit))
+
+
+def _gaussian(g: Grid, along: str, sigma: float) -> Grid:
+    if not 0 < sigma <= 1000:
+        raise OpError("the Gaussian's σ is a number of points above 0 (up to 1000)")
+    half = int(math.ceil(3 * sigma))
+    kernel = np.exp(-0.5 * (np.arange(-half, half + 1) / sigma) ** 2)
+
+    def f(r, _):
+        ok = np.isfinite(r)
+        win_v = np.lib.stride_tricks.sliding_window_view(np.pad(np.where(ok, r, 0.0), half), kernel.size)
+        win_c = np.lib.stride_tricks.sliding_window_view(np.pad(ok.astype(float), half), kernel.size)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            out = (win_v @ kernel) / (win_c @ kernel)      # weights of the points present only
+        out[~ok] = np.nan
+        return out
+    label = f"{g.value.label} (Gaussian, σ = {sigma:g} points)"
+    return replace(g, a=_per_row(g, along, f), value=Quantity(label, g.value.unit))
+
+
+def _median(g: Grid, along: str, n: int) -> Grid:
+    if n % 2 == 0:
+        raise OpError("the median filter needs an odd number of points (e.g. 5)")
+    half = n // 2
+
+    def f(r, _):
+        windows = np.lib.stride_tricks.sliding_window_view(np.pad(np.asarray(r, dtype=float), half,
+                                                                  constant_values=np.nan), n)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)     # a window of missing points: missing
+            out = np.nanmedian(windows, axis=1)
+        out[~np.isfinite(r)] = np.nan
+        return out
+    return replace(g, a=_per_row(g, along, f), value=Quantity(f"{g.value.label} (median of {n})", g.value.unit))
 
 
 def _first_rows(g: Grid) -> np.ndarray:
@@ -252,7 +296,7 @@ OPS: Dict[str, Tuple[Callable[..., Grid], Tuple[str, ...], Dict[str, Any]]] = {
     "subtract_mean": (subtract_mean, ALONG, {}),
     "normalize": (normalize, ALONG, {}),
     "derivative": (derivative, ALONG, {}),
-    "smooth": (smooth, ALONG, {"n": 5}),
+    "smooth": (smooth, ALONG, {"n": 5, "method": "mean", "sigma": 2.0}),
     "subtract_first": (subtract_first, ("traces",), {}),
     "subtract_previous": (subtract_previous, ("traces",), {}),
     "average": (average, ("traces",), {}),
@@ -299,7 +343,14 @@ def check(ops: Any) -> List[Dict[str, Any]]:
         clean = {"op": op["op"], "along": along, "on": op.get("on", True) is not False}
         for k, default in params.items():
             v = op.get(k, default)
-            if not isinstance(v, int) or isinstance(v, bool):
+            if isinstance(default, str):
+                if v not in SMOOTH_METHODS:
+                    raise BadOps(f"operation {i + 1} ({op['op']}): {k} must be one of {', '.join(SMOOTH_METHODS)}")
+            elif isinstance(default, float):
+                if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+                    raise BadOps(f"operation {i + 1} ({op['op']}): {k} must be a number")
+                v = float(v)
+            elif not isinstance(v, int) or isinstance(v, bool):
                 raise BadOps(f"operation {i + 1} ({op['op']}): {k} must be a whole number")
             clean[k] = v
         out.append(clean)

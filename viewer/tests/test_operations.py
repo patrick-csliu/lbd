@@ -294,3 +294,24 @@ def test_complex_operations_come_first(client, vna):
     r = client.post(f"/api/explore/{o['session']}/render",
                     json={"settings": {"ops": [{"op": "smooth"}, {"op": "delay", "tau": 1e-9}]}})
     assert r.status_code == 400 and "before the operations on the values as shown" in r.json()["detail"]
+
+
+def test_a_gaussian_smooths_symmetrically_and_skips_gaps():
+    step = grid([[0.0] * 10 + [1.0] * 10])
+    out = run(step, ("smooth", {"method": "gaussian", "sigma": 2.0})).grid.a[0]
+    assert out[9] + out[10] == pytest.approx(1.0) and out[0] == pytest.approx(0) and out[-1] == pytest.approx(1)
+    assert np.all(np.diff(out) >= -1e-12)                       # still a rising step
+    gap = run(grid([[1.0, 1, np.nan, 1, 1]]), ("smooth", {"method": "gaussian", "sigma": 1.0})).grid.a[0]
+    assert np.isnan(gap[2]) and gap[[0, 1, 3, 4]] == pytest.approx([1, 1, 1, 1])
+    assert run(step, ("smooth", {"method": "gaussian", "sigma": 2.0})).grid.value == Quantity("v (Gaussian, σ = 2 points)", "V")
+
+
+def test_a_median_removes_a_spike_the_mean_spreads():
+    spike = grid([[0, 0, 0, 9, 0, 0, 0]])
+    med = run(spike, ("smooth", {"method": "median", "n": 3})).grid.a[0]
+    mean = run(spike, ("smooth", {"method": "mean", "n": 3})).grid.a[0]
+    assert med.tolist() == [0] * 7 and mean[2] == pytest.approx(3) and mean[3] == pytest.approx(3)
+    even = run(spike, ("smooth", {"method": "median", "n": 4}))
+    assert even.applied == 0 and "odd number" in even.notes[0]
+    with pytest.raises(ops.BadOps, match="one of mean, gaussian, median"):
+        ops.check([{"op": "smooth", "method": "boxcar"}])

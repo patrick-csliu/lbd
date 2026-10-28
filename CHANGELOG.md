@@ -34,13 +34,14 @@ The file format has its own version (`lbd_version`, currently 1.0).
   histogram with draggable limits sets a map's colour range (**Auto** leaves out outliers).
   Keys for all of it; **?** lists every mouse action and key. Clicking the chosen cursor type again
   (or key K) switches cursors off, so a click does nothing.
-- **Operations in Explore**: subtract the mean, normalize, derivative, smoothing, subtract the
-  first or previous trace, average or std of the traces, FFT and histogram, in any order, along
-  the horizontal axis or across the traces (a map's background along its other axis). Units
-  follow (d/dx in dB/GHz, an FFT of time in Hz); cursors read the shown value and the stored one.
-  An operation that can't apply says why. For complex values: electrical delay and rotation,
-  each with **Calculate** (from the data between the cursors), auto-rotate each trace, and an
-  I/Q histogram (a map of counts). Explore only: never written into the file.
+- **Operations in Explore**: subtract the mean, normalize, derivative, smoothing (running mean,
+  Gaussian or median), subtract the first or previous trace, average or std of the traces, FFT
+  and histogram, in any order, along the horizontal axis or across the traces (a map's
+  background along its other axis). A unit stays where the operation keeps it; otherwise none is
+  shown and the label says what was done. Cursors read the shown value and the stored one. An
+  operation that can't apply says why. For complex values: electrical delay and rotation, each
+  with **Calculate** (from the data between the cursors), auto-rotate each trace, and an I/Q
+  histogram (a map of counts). Explore only: never written into the file.
 - Nothing in Explore is hidden silently: points a log scale can't show are counted in a note above
   the plot, a log scale with nothing above 0 stays linear and says so, an empty result says why,
   and an unexpected error says it's a bug and where the details are (`viewer.log`, next to LBD's

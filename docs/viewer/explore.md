@@ -158,7 +158,7 @@ top of the list:
 | **Subtract the mean** | each trace minus its mean; *along* a map's other axis it removes a background that changes from row to row | as before |
 | **Normalize** | (value − mean) / standard deviation | none (σ) |
 | **Derivative** | d/dx, with the real steps (uneven ones too) | none: the label says what it is (dS21/dFrequency) |
-| **Smooth** | running mean over N points; missing points are skipped and stay missing | as before |
+| **Smooth** | a **running mean** over N points; a **Gaussian** of width σ points (it reaches ±3σ); or the **median** of N points (N odd: a one-point spike goes, a step stays sharp). Missing points are skipped and stay missing | as before |
 | **Subtract the first trace** / **the previous trace** | across the traces (or a map's rows) | as before |
 | **Average** / **Std of the traces** | one curve from the shown traces | as before |
 | **FFT** | amplitude spectrum, positive frequencies (a sine of amplitude A peaks at A); needs evenly spaced points without gaps | as before; the new axis has none (its label says Frequency, Time, or 1/…) |

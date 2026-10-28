@@ -367,7 +367,9 @@ export interface Op {
   op: OpName;
   along?: "x" | "traces";
   on?: boolean;
-  n?: number; // smooth: points
+  n?: number; // smooth (mean, median): points
+  method?: "mean" | "gaussian" | "median"; // smooth
+  sigma?: number; // smooth, Gaussian: width in points
   bins?: number; // histogram, I/Q histogram
   tau?: number; // electrical delay, s
   phi?: number; // rotation, degrees

@@ -19,7 +19,8 @@ from lbd_viewer.server import AppState, create_app
 
 REAL_OPS = [[], [{"op": "subtract_mean"}], [{"op": "subtract_mean", "along": "traces"}], [{"op": "normalize"}],
             [{"op": "derivative"}], [{"op": "derivative", "along": "traces"}], [{"op": "smooth", "n": 3}],
-            [{"op": "smooth", "n": 500}], [{"op": "subtract_first"}], [{"op": "subtract_previous"}],
+            [{"op": "smooth", "n": 500}], [{"op": "smooth", "method": "gaussian", "sigma": 1.5}],
+            [{"op": "smooth", "method": "median", "n": 5, "along": "traces"}], [{"op": "subtract_first"}], [{"op": "subtract_previous"}],
             [{"op": "average"}], [{"op": "std"}], [{"op": "fft"}], [{"op": "histogram", "bins": 7}],
             [{"op": "histogram", "along": "traces"}], [{"op": "average"}, {"op": "subtract_previous"}]]
 COMPLEX_OPS = [[{"op": "delay", "tau": 1e-9}], [{"op": "rotation", "phi": 30}], [{"op": "auto_rotate"}],

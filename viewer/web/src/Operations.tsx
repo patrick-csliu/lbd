@@ -41,7 +41,7 @@ const KINDS: { op: OpName; name: string; tip: string; along: ("x" | "traces")[];
   { op: "subtract_mean", name: "Subtract the mean", tip: "Each trace minus its mean (along the other axis: a background)", along: ["x", "traces"] },
   { op: "normalize", name: "Normalize", tip: "(value − mean) / standard deviation", along: ["x", "traces"] },
   { op: "derivative", name: "Derivative", tip: "d/dx, with the real steps (uneven ones too)", along: ["x", "traces"] },
-  { op: "smooth", name: "Smooth", tip: "Running mean over N points (missing points skipped)", along: ["x", "traces"], n: 5 },
+  { op: "smooth", name: "Smooth", tip: "Running mean, Gaussian or median over a few points (missing points skipped)", along: ["x", "traces"], n: 5 },
   { op: "subtract_first", name: "Subtract the first trace", tip: "Each trace minus the first shown one", along: ["traces"] },
   { op: "subtract_previous", name: "Subtract the previous trace", tip: "Each trace minus the one before it", along: ["traces"] },
   { op: "average", name: "Average of the traces", tip: "One curve: the mean of the shown traces", along: ["traces"] },
@@ -206,16 +206,29 @@ export default function Operations({ kind, xLabel, tracesLabel, ops, on, info, o
                   <span className="muted small">{alongText(o.along ?? k?.along[0] ?? "x")}</span>
                 )}
                 {o.op === "smooth" && (
-                  <label className="small">
+                  <select aria-label="Smooth: method" value={o.method ?? "mean"} onChange={(e) => set(i, { method: e.target.value as Op["method"] })}>
+                    <option value="mean">running mean</option>
+                    <option value="gaussian">Gaussian</option>
+                    <option value="median">median</option>
+                  </select>
+                )}
+                {o.op === "smooth" && (o.method ?? "mean") !== "gaussian" && (
+                  <label className="small" title={o.method === "median" ? "An odd number: the median of each window" : undefined}>
                     over{" "}
                     <input
                       type="number"
                       min={2}
+                      step={o.method === "median" ? 2 : 1}
                       value={o.n ?? 5}
                       aria-label="Smooth: points"
                       onChange={(e) => set(i, { n: Math.max(2, Math.round(Number(e.target.value) || 2)) })}
                     />{" "}
                     points
+                  </label>
+                )}
+                {o.op === "smooth" && o.method === "gaussian" && (
+                  <label className="small" title="The Gaussian's width in points (it reaches ±3σ)">
+                    σ <NumberBox value={o.sigma ?? 2} label="Smooth: σ in points" onSet={(v) => set(i, { sigma: v })} /> points
                   </label>
                 )}
                 {o.op === "histogram" && (
