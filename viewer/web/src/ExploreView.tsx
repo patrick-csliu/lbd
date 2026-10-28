@@ -149,6 +149,9 @@ interface Props {
   onShowCut: (which: "row" | "column", index: Record<string, number>) => void;
   /** The operations' state with each picture (which applied, what the plot shows). */
   onOpsInfo: (info: OpsInfo | null) => void;
+  /** One of several panels: the typed limits fold behind a button, the read-out is one line
+   *  (the active panel's numbers are in the Cursors section). */
+  compact?: boolean;
 }
 
 /** What the Cursors section (and the menu) can ask the view to do. */
@@ -197,7 +200,9 @@ export default function ExploreView({
   onStepSlider,
   onShowCut,
   onOpsInfo,
+  compact = false,
 }: Props) {
+  const [limitsOpen, setLimitsOpen] = useState(false);
   // Pictures travel as raw pixels (fastest on this computer; "png" is the server's other choice).
   const format = "raw" as const;
   const [size, setSize] = useState<Size | null>(null);
@@ -993,6 +998,11 @@ export default function ExploreView({
         <button onClick={() => setView(null)} title="Show all the data (or double-click the plot)">
           Reset view
         </button>
+        {compact && (
+          <button aria-expanded={limitsOpen} onClick={() => setLimitsOpen((o) => !o)} title="Type the limits of the view">
+            Limits {limitsOpen ? "▴" : "▾"}
+          </button>
+        )}
         {opened?.kind === "heatmap" && (
           <label className="check" title="The row and column through cursor 1, beside the map (key C)">
             <input
@@ -1011,7 +1021,7 @@ export default function ExploreView({
           </span>
         )}
       </div>
-      {meta && (
+      {meta && (!compact || limitsOpen) && (
         <div className="explore-limits">
           <NumberRange
             label="Horizontal"
@@ -1101,9 +1111,10 @@ export default function ExploreView({
           </div>
         )}
       </div>
-      <div className="explore-readout">
+      <div className={"explore-readout" + (compact ? " compact" : "")}>
         <div className="muted small">
-          {cursors.on ? "Click: cursor · Shift+click: second cursor · " : ""}drag: zoom · right-drag: pan ·{" "}
+          {compact ? "" : cursors.on ? "Click: cursor · Shift+click: second cursor · " : ""}
+          {compact ? "" : "drag: zoom · right-drag: pan · "}
           <button className="link" onClick={() => setHelp((h) => !h)}>
             ? all mouse actions and keys
           </button>
@@ -1114,13 +1125,13 @@ export default function ExploreView({
             </>
           )}
         </div>
-        {c1 ? (
+        {compact ? null : c1 ? (
           <CursorLine n={1} c={c1} />
         ) : (
           <div className="muted small">{cursors.on ? "Click the plot to read a stored value." : "No cursor type chosen: a click does nothing (choose one in the Cursors section, or press K)."}</div>
         )}
-        {c2 && <CursorLine n={2} c={c2} />}
-        {c1 && c2 && (
+        {!compact && c2 && <CursorLine n={2} c={c2} />}
+        {!compact && c1 && c2 && (
           <div className="explore-pick small">
             {between(c1, c2).map((d) => (
               <span key={d.role} className="range-part">
@@ -1138,7 +1149,7 @@ export default function ExploreView({
             </button>
           </div>
         )}
-        {timing && <div className="muted small mono">{timing}</div>}
+        {timing && !compact && <div className="muted small mono">{timing}</div>}
       </div>
       {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} />}
       {confirm && <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />}

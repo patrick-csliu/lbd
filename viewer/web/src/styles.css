@@ -395,3 +395,21 @@ details.group fieldset > .group-fields { margin-top: -4px; }
 .eq-field label { display: grid; grid-template-columns: 2.4em 1fr; align-items: center; gap: 4px; }
 .eq-field input { font-family: ui-monospace, Consolas, monospace; min-width: 0; }
 .eq-field.bad input { border-color: var(--danger); }
+
+/* Explore: several values in panels (plan 4) */
+.panels { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.panel-bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; min-height: 28px; }
+.panel-layout { display: flex; gap: 10px; font-size: 13px; }
+.panel-grid { display: grid; gap: 10px; }
+.panel { min-width: 0; }
+.panel-grid.several .panel { border: 1px solid var(--border); border-radius: var(--radius); padding: 4px 8px 6px; }
+.panel-grid.several .panel.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.panel-grid.several .explore { margin-top: 4px; gap: 4px; }
+.panel-grid.several .explore-host { height: max(170px, calc((100vh - 330px) / var(--rows) - 90px)); }
+.panel-title { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: grab; user-select: none; }
+.panel-title .panel-num { font-weight: 700; color: var(--muted); }
+.panel.active .panel-title .panel-num { color: var(--accent); }
+.panel-title .panel-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.panel-title button { font-size: 16px; line-height: 1; }
+.panel-heading { font-size: 14px; margin: 0; }
+.explore-readout.compact { min-height: 0; }

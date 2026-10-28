@@ -1,4 +1,4 @@
-import { MouseEvent, ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { DragEvent, KeyboardEvent, MouseEvent, MutableRefObject, ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import NumberRange from "./NumberRange";
 import { api, CursorsAnswer, ExploreOpen, FileInfo, OpsInfo, PlotSpec, ReduceStat, ValueInfo } from "./api";
 import Operations from "./Operations";
@@ -9,6 +9,7 @@ import ExploreView, { ExploreActions, View, ViewSettings } from "./ExploreView";
 import AxisSelect from "./AxisSelect";
 import { COMPLEX_MODES, SliceControl } from "./FileView";
 import { useDiskVersion } from "./watch";
+import { ContextMenu, MenuAt, menuAt } from "./menu";
 
 /**
  * One file in the Explore workspace: its header, what to plot (values, kind, axes, slices,
@@ -31,6 +32,8 @@ interface Props {
 
 /** One panel's plot, as remembered. */
 export interface PanelState {
+  /** Stable while the panel exists (React key, sync and cursor bookkeeping). */
+  id: string;
   spec: PlotSpec;
   settings: ViewSettings;
   stat: ReduceStat;
@@ -53,18 +56,53 @@ export interface Remembered {
   sync: { x: boolean; y: boolean; sliders: boolean };
 }
 
-const freshPanel = (spec: PlotSpec): PanelState => ({ spec, settings: {}, stat: "max", view: null, cursors: NO_CURSORS });
-const fresh = (info: FileInfo): Remembered => ({
-  version: 2,
-  panels: [freshPanel(startSpec(info))],
-  active: 0,
-  layout: "side",
-  sync: { x: true, y: false, sliders: true },
-});
+/** At most this many panels (each is a plot drawn by the server); a new file opens with up to FIRST_PANELS. */
+export const MAX_PANELS = 6;
+const FIRST_PANELS = 4;
+// Drag and drop: a value from the side bar, a panel by its title bar.
+const DRAG_VALUE = "application/x-lbd-value";
+const DRAG_PANEL = "application/x-lbd-panel";
+
+const newId = () => Math.random().toString(36).slice(2, 10);
+const freshPanel = (spec: PlotSpec): PanelState => ({ id: newId(), spec, settings: {}, stat: "max", view: null, cursors: NO_CURSORS });
+
+/** A file opened for the first time: panel 1 from the file's saved figure view, then one panel
+ * per other value with axes (up to FIRST_PANELS), like Labber's panels for its log channels. */
+function fresh(info: FileInfo): Remembered {
+  const first = startSpec(info);
+  const names = info.values.filter((v) => v.shape.length > 0).map((v) => v.name);
+  if (names.length > 1 && !first.values) first.values = [names[0]];
+  const inFirst = first.values ?? names.slice(0, 1); // the server's default: the first value with axes
+  const rest = names.filter((name) => !inFirst.includes(name)).slice(0, FIRST_PANELS - 1);
+  return {
+    version: 2,
+    panels: [freshPanel(first), ...rest.map((name) => freshPanel({ values: [name] }))],
+    active: 0,
+    layout: "side",
+    sync: { x: true, y: false, sliders: true },
+  };
+}
+
+/** Rows and columns of the panel grid. */
+function gridOf(n: number, layout: Remembered["layout"]): [number, number] {
+  if (n <= 1) return [1, 1];
+  if (n <= 3) return layout === "side" ? [1, n] : [n, 1];
+  if (n === 4) return [2, 2];
+  return layout === "side" ? [2, 3] : [3, 2];
+}
+
+/** What a panel's view reports while it is open (not remembered). */
+interface Live {
+  resolved: ExploreOpen | null;
+  reading: CursorsAnswer | null;
+  opsInfo: OpsInfo | null;
+}
+const NO_LIVE: Live = { resolved: null, reading: null, opsInfo: null };
 
 /** A remembered panel with the keys a later LBD added filled in. */
 function filledPanel(st: Partial<PanelState>): PanelState {
   return {
+    id: st.id ?? newId(),
     spec: st.spec ?? {},
     settings: st.settings ?? {},
     stat: st.stat ?? "max",
@@ -103,14 +141,16 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
   const [loadError, setLoadError] = useState<string | null>(null);
   const [updating, setUpdating] = useState<string | null>(null);
   const [rec, setRec] = useState<Remembered | null>(null); // what the view shows (remembered)
-  const shown = rec ? rec.panels[rec.active] ?? rec.panels[0] : null;
-  /** Change the active panel. */
-  const setShown = useCallback(
-    (f: (p: PanelState) => PanelState) => setRec((r) => r && { ...r, panels: r.panels.map((p, i) => (i === r.active ? f(p) : p)) }),
-    [],
-  );
-  const [resolved, setResolved] = useState<ExploreOpen | null>(null);
-  const [viewKey, setViewKey] = useState(0); // a new one starts the view afresh
+  // What each panel's view reports while it is open (not remembered), by panel id.
+  const [live, setLiveMap] = useState<Record<string, Live>>({});
+  const liveRef = useRef(live);
+  liveRef.current = live;
+  const setLive = useCallback((id: string, patch: Partial<Live>) => setLiveMap((m) => ({ ...m, [id]: { ...(m[id] ?? NO_LIVE), ...patch } })), []);
+  const [viewKey, setViewKey] = useState(0); // a new one starts every panel's view afresh
+  const [panelKeys, setPanelKeys] = useState<Record<string, number>>({}); // … or one panel's
+  const restart = useCallback((id: string) => setPanelKeys((k) => ({ ...k, [id]: (k[id] ?? 0) + 1 })), []);
+  const actionRefs = useRef<Record<string, MutableRefObject<ExploreActions | null>>>({});
+  const actionsOf = (id: string) => (actionRefs.current[id] ??= { current: null });
   const disk = useDiskVersion("file", path);
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
@@ -185,62 +225,127 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
     [path],
   );
 
-  const updateSpec = useCallback(
-    (patch: PlotSpec) =>
-      setShown((s) => {
-        if (!s) return s;
-        const spec = { ...s.spec, ...patch };
-        const reset = RESETS_SELECTION.some((k) => k in patch);
-        return {
-          ...s,
-          spec,
-          settings: reset ? { ...s.settings, select: undefined } : s.settings,
-          cursors: reset ? { ...s.cursors, at: [], active: 0 } : s.cursors,
-          back: reset ? undefined : s.back,
-        };
+  /** Change one panel (by id); the same object back means no change (nothing to remember). */
+  const updatePanel = useCallback(
+    (id: string, f: (p: PanelState) => PanelState) =>
+      setRec((r) => {
+        if (!r) return r;
+        let changed = false;
+        const panels = r.panels.map((p) => {
+          if (p.id !== id) return p;
+          const q = f(p);
+          changed ||= q !== p;
+          return q;
+        });
+        return changed ? { ...r, panels } : r;
       }),
     [],
   );
-  const onCursors = useCallback((cursors: CursorsState) => setShown((s) => s && { ...s, cursors }), []);
-  const [reading, setReading] = useState<CursorsAnswer | null>(null);
-  const [opsInfo, setOpsInfo] = useState<OpsInfo | null>(null);
-  const actions = useRef<ExploreActions | null>(null);
-  const resolvedRef = useRef(resolved);
-  resolvedRef.current = resolved;
-  // Keys [ and ]: the first slider one step.
-  const onStepSlider = useCallback(
-    (by: number) => {
-      const r = resolvedRef.current?.spec, sl = r?.slices?.[0];
-      if (!r || !sl) return;
-      const i = Math.min(Math.max(sl.index + by, 0), sl.length - 1);
-      if (i !== sl.index) updateSpec({ index: { ...(r.index ?? {}), [sl.axis]: i } });
+
+  /** What a panel's controls and view change in it. */
+  const panelApi = useCallback(
+    (id: string) => {
+      const updateSpec = (patch: PlotSpec) =>
+        updatePanel(id, (s) => {
+          const reset = RESETS_SELECTION.some((k) => k in patch);
+          return {
+            ...s,
+            spec: { ...s.spec, ...patch },
+            settings: reset ? { ...s.settings, select: undefined } : s.settings,
+            cursors: reset ? { ...s.cursors, at: [], active: 0 } : s.cursors,
+            back: reset ? undefined : s.back,
+          };
+        });
+      return {
+        updateSpec,
+        updateSettings: (patch: ViewSettings) => updatePanel(id, (s) => ({ ...s, settings: { ...s.settings, ...patch } })),
+        onCursors: (cursors: CursorsState) => updatePanel(id, (s) => ({ ...s, cursors })),
+        onView: (view: View) => updatePanel(id, (s) => (JSON.stringify(s.view) !== JSON.stringify(view) ? { ...s, view } : s)),
+        onStat: (stat: ReduceStat) => updatePanel(id, (s) => ({ ...s, stat })),
+        onListOpen: (listOpen: boolean) => updatePanel(id, (s) => ({ ...s, listOpen })),
+        // Keys [ and ]: the first slider one step.
+        onStepSlider: (by: number) => {
+          const r = liveRef.current[id]?.resolved?.spec, sl = r?.slices?.[0];
+          if (!r || !sl) return;
+          const i = Math.min(Math.max(sl.index + by, 0), sl.length - 1);
+          if (i !== sl.index) updateSpec({ index: { ...(r.index ?? {}), [sl.axis]: i } });
+        },
+        // A map's row or column through cursor 1, as a curve in this panel (the map is kept to go back to).
+        onShowCut: (which: "row" | "column", index: Record<string, number>) => {
+          const r = liveRef.current[id]?.resolved?.spec;
+          if (!r?.x || !r.y) return;
+          const fixed = which === "row" ? r.y : r.x;
+          updatePanel(id, (s) => ({
+            ...s,
+            back: s.spec,
+            spec: { ...s.spec, kind: "curve", x: which === "row" ? r.x : r.y, y: undefined, series: "none", index: { ...(r.index ?? {}), [fixed]: index[fixed] } },
+            settings: { ...s.settings, select: undefined },
+            cursors: { ...s.cursors, at: [], active: 0 },
+            view: null,
+          }));
+          restart(id);
+        },
+        onBack: () => {
+          updatePanel(id, (s) => (s.back ? { ...s, spec: s.back, back: undefined, cursors: { ...s.cursors, at: [], active: 0 }, view: null } : s));
+          restart(id);
+        },
+      };
     },
-    [updateSpec],
+    [updatePanel, restart],
   );
-  // A map's row or column through cursor 1, as a curve in this tab (the map is kept to go back to).
-  const onShowCut = useCallback((which: "row" | "column", index: Record<string, number>) => {
-    const r = resolvedRef.current?.spec;
-    if (!r?.x || !r.y) return;
-    const fixed = which === "row" ? r.y : r.x;
-    setShown((s) =>
-      s && {
-        ...s,
-        back: s.spec,
-        spec: { ...s.spec, kind: "curve", x: which === "row" ? r.x : r.y, y: undefined, series: "none", index: { ...(r.index ?? {}), [fixed]: index[fixed] } },
-        settings: { ...s.settings, select: undefined },
-        cursors: { ...s.cursors, at: [], active: 0 },
-        view: null,
-      },
-    );
-    setViewKey((k) => k + 1);
-  }, []);
-  const onBack = useCallback(() => {
-    setShown((s) => (s?.back ? { ...s, spec: s.back, back: undefined, cursors: { ...s.cursors, at: [], active: 0 }, view: null } : s));
-    setViewKey((k) => k + 1);
-  }, []);
-  const updateSettings = useCallback((patch: ViewSettings) => setShown((s) => s && { ...s, settings: { ...s.settings, ...patch } }), []);
-  const onView = useCallback((view: View) => setShown((s) => (s && JSON.stringify(s.view) !== JSON.stringify(view) ? { ...s, view } : s)), []);
-  const onStat = useCallback((stat: ReduceStat) => setShown((s) => s && { ...s, stat }), []);
+
+  // ---- the panels: add, remove, duplicate, reorder, make active
+
+  const setActive = useCallback((i: number) => setRec((r) => (r && r.active !== i && i < r.panels.length ? { ...r, active: i } : r)), []);
+  const addPanel = useCallback(
+    (spec: PlotSpec) =>
+      setRec((r) => (r && r.panels.length < MAX_PANELS ? { ...r, panels: [...r.panels, freshPanel(spec)], active: r.panels.length } : r)),
+    [],
+  );
+  const removePanel = useCallback(
+    (i: number) =>
+      setRec((r) => {
+        if (!r || r.panels.length <= 1) return r;
+        const active = r.active > i ? r.active - 1 : Math.min(r.active, r.panels.length - 2);
+        return { ...r, panels: r.panels.filter((_, k) => k !== i), active };
+      }),
+    [],
+  );
+  const duplicatePanel = useCallback(
+    (i: number) =>
+      setRec((r) => {
+        if (!r || r.panels.length >= MAX_PANELS) return r;
+        const copy = { ...r.panels[i], id: newId() };
+        return { ...r, panels: [...r.panels.slice(0, i + 1), copy, ...r.panels.slice(i + 1)], active: i + 1 };
+      }),
+    [],
+  );
+  const movePanel = useCallback(
+    (from: number, to: number) =>
+      setRec((r) => {
+        if (!r || from === to) return r;
+        const activeId = r.panels[r.active].id;
+        const panels = [...r.panels];
+        const [p] = panels.splice(from, 1);
+        panels.splice(to, 0, p);
+        return { ...r, panels, active: panels.findIndex((q) => q.id === activeId) };
+      }),
+    [],
+  );
+  /** A value added to panel i (curves: drawn with the others; maps: shown instead). */
+  const valueToPanel = useCallback(
+    (name: string, i: number) => {
+      const r = recRef.current, p = r?.panels[i];
+      if (!p) return;
+      const kind = liveRef.current[p.id]?.resolved?.kind;
+      const values = liveRef.current[p.id]?.resolved?.spec.values ?? p.spec.values ?? [];
+      if (values.includes(name)) return;
+      panelApi(p.id).updateSpec(kind === "heatmap" ? { values: [name], x: undefined, y: undefined } : { values: [...values, name] });
+      setActive(i);
+    },
+    [panelApi, setActive],
+  );
+  const [menu, setMenu] = useState<MenuAt | null>(null);
 
   const forget = async () => {
     if (!info) return;
@@ -258,11 +363,81 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
       </div>
     );
   }
-  if (!info || !shown) return <div className="file-view muted pad">Loading…</div>;
+  if (!info || !rec) return <div className="file-view muted pad">Loading…</div>;
   const plottable = info.values.filter((v) => v.shape.length > 0);
+  const n = rec.panels.length;
+  const several = n > 1;
+  const act = rec.panels[rec.active] ?? rec.panels[0];
+  const actLive = live[act.id] ?? NO_LIVE;
+  const actApi = panelApi(act.id);
+  const actActions = actionsOf(act.id);
+  const resolved = actLive.resolved;
+  const [rows, cols] = gridOf(n, rec.layout);
+  const byName = new Map(info.values.map((v) => [v.name, v]));
+  const titleOf = (p: PanelState) =>
+    (live[p.id]?.resolved?.spec.values ?? p.spec.values ?? [plottable[0]?.name ?? ""])
+      .map((name) => {
+        const v = byName.get(name);
+        return v ? `${v.label || v.name}${v.unit ? ` (${v.unit})` : ""}` : name;
+      })
+      .join(", ");
+  const full = n >= MAX_PANELS;
+  const addMenu = (e: MouseEvent) => {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setMenu({
+      x: r.left,
+      y: r.bottom,
+      items: plottable.map((v) => ({
+        label: `${v.label || v.name}${v.unit ? ` (${v.unit})` : ""}`,
+        disabled: full,
+        onClick: () => addPanel({ values: [v.name] }),
+      })),
+    });
+  };
+  const panelMenu = (e: MouseEvent, i: number) => {
+    e.preventDefault();
+    setMenu(
+      menuAt(e, [
+        { label: "Duplicate panel", onClick: () => duplicatePanel(i), disabled: full },
+        { label: "Remove panel", onClick: () => removePanel(i), disabled: n <= 1, danger: true },
+      ]),
+    );
+  };
+  const valueMenu = (e: MouseEvent, name: string) => {
+    e.preventDefault();
+    setMenu(
+      menuAt(e, [
+        { label: "Show in a new panel", onClick: () => addPanel({ values: [name] }), disabled: full },
+        { label: "Show only this value here", onClick: () => actApi.updateSpec({ values: [name], x: undefined, y: undefined, series: undefined }) },
+      ]),
+    );
+  };
+  // Keys 1–6 make a panel active (when no box has the focus).
+  const onKeyDown = (e: KeyboardEvent) => {
+    const t = e.target as HTMLElement;
+    if (!several || /^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName) || e.ctrlKey || e.metaKey || e.altKey) return;
+    const k = Number(e.key);
+    if (Number.isInteger(k) && k >= 1 && k <= n) {
+      setActive(k - 1);
+      (document.querySelectorAll(`[data-panel-index="${k - 1}"] .explore-overlay`)[0] as HTMLElement | undefined)?.focus();
+      e.preventDefault();
+    }
+  };
+  const dropOn = (e: DragEvent, i: number | null) => {
+    const value = e.dataTransfer.getData(DRAG_VALUE), from = e.dataTransfer.getData(DRAG_PANEL);
+    if (!value && from === "") return;
+    e.preventDefault();
+    if (value) {
+      if (i === null) addPanel({ values: [value] });
+      else valueToPanel(value, i);
+    } else if (i !== null) movePanel(Number(from), i);
+  };
+  const allowDrop = (e: DragEvent) => {
+    if (e.dataTransfer.types.includes(DRAG_VALUE) || e.dataTransfer.types.includes(DRAG_PANEL)) e.preventDefault();
+  };
 
   return (
-    <div className="file-view explore-tab">
+    <div className="file-view explore-tab" onKeyDown={onKeyDown}>
       <div className="file-head" onContextMenu={onMenu}>
         <div>
           <h1>{info.title || info.name}</h1>
@@ -299,22 +474,24 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
       ) : (
         <div className="plot-area">
           <ExploreControls
+            heading={several ? `Panel ${rec.active + 1}: ${titleOf(act)}` : null}
             info={info}
             resolved={resolved}
-            settings={shown.settings}
-            listOpen={shown.listOpen}
-            opsInfo={opsInfo}
-            calculate={(what, index) => actions.current?.calculate(what, index) ?? Promise.reject(new Error("the plot isn't open yet"))}
-            onListOpen={(listOpen) => setShown((s) => s && { ...s, listOpen })}
-            updateSpec={updateSpec}
-            updateSettings={updateSettings}
+            settings={act.settings}
+            listOpen={act.listOpen}
+            opsInfo={actLive.opsInfo}
+            calculate={(what, index) => actActions.current?.calculate(what, index) ?? Promise.reject(new Error("the plot isn't open yet"))}
+            onListOpen={actApi.onListOpen}
+            updateSpec={actApi.updateSpec}
+            updateSettings={actApi.updateSettings}
+            onValueMenu={valueMenu}
             contrast={
               resolved?.kind === "heatmap" ? (
                 <Contrast
-                  load={() => actions.current?.histogram(shown.settings) ?? Promise.resolve(null)}
-                  loadKey={JSON.stringify([resolved.session, resolved.spec, shown.settings.select ?? null, shown.settings.cscale ?? null, info.version])}
-                  clim={shown.settings.clim ?? [null, null]}
-                  onClim={(c) => updateSettings({ clim: c })}
+                  load={() => actActions.current?.histogram(act.settings) ?? Promise.resolve(null)}
+                  loadKey={JSON.stringify([resolved.session, resolved.spec, act.settings.select ?? null, act.settings.cscale ?? null, info.version])}
+                  clim={act.settings.clim ?? [null, null]}
+                  onClim={(c) => actApi.updateSettings({ clim: c })}
                 />
               ) : null
             }
@@ -322,36 +499,88 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
             {resolved && (
               <CursorPanel
                 kind={resolved.kind}
-                cursors={shown.cursors}
-                onCursors={onCursors}
-                reading={reading}
-                actions={actions}
-                onBack={shown.back ? onBack : null}
+                cursors={act.cursors}
+                onCursors={actApi.onCursors}
+                reading={actLive.reading}
+                actions={actActions}
+                onBack={act.back ? actApi.onBack : null}
               />
             )}
           </ExploreControls>
-          <ExploreView
-            key={viewKey}
-            info={info}
-            spec={shown.spec}
-            version={info.version}
-            onOpened={setResolved}
-            onError={onError}
-            settings={shown.settings}
-            stat={shown.stat}
-            onStat={onStat}
-            initialView={shown.view}
-            onView={onView}
-            cursors={shown.cursors}
-            onCursors={onCursors}
-            onReading={setReading}
-            actions={actions}
-            onStepSlider={onStepSlider}
-            onShowCut={onShowCut}
-            onOpsInfo={setOpsInfo}
-          />
+          <div className="panels">
+            <div className="panel-bar" onDragOver={allowDrop} onDrop={(e) => dropOn(e, null)}>
+              <button onClick={addMenu} title={full ? `At most ${MAX_PANELS} panels` : "Show a value in a new panel (or drag a value here)"}>
+                + Panel ▾
+              </button>
+              {several && (
+                <span className="panel-layout" role="radiogroup" aria-label="Layout">
+                  {(["side", "stacked"] as const).map((l) => (
+                    <label key={l} className="check">
+                      <input type="radio" name={`layout-${path}`} checked={rec.layout === l} onChange={() => setRec((r) => r && { ...r, layout: l })} />
+                      {l === "side" ? "side by side" : "stacked"}
+                    </label>
+                  ))}
+                </span>
+              )}
+            </div>
+            <div className={"panel-grid" + (several ? " several" : "")} style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, ["--rows" as string]: rows }}>
+              {rec.panels.map((p, i) => {
+                const pa = panelApi(p.id);
+                return (
+                  <section
+                    key={p.id}
+                    className={"panel" + (several && i === rec.active ? " active" : "")}
+                    data-panel-index={i}
+                    aria-label={several ? `Panel ${i + 1}` : undefined}
+                    onPointerDownCapture={() => setActive(i)}
+                    onDragOver={allowDrop}
+                    onDrop={(e) => dropOn(e, i)}
+                  >
+                    {several && (
+                      <div
+                        className="panel-title"
+                        draggable
+                        onDragStart={(e) => e.dataTransfer.setData(DRAG_PANEL, String(i))}
+                        onContextMenu={(e) => panelMenu(e, i)}
+                        title="Drag to move this panel; right-click for more"
+                      >
+                        <span className="panel-num">{i + 1}</span>
+                        <span className="panel-name">{titleOf(p)}</span>
+                        <span className="spacer" />
+                        <button className="link" aria-label={`Remove panel ${i + 1}`} title="Remove this panel" onClick={() => removePanel(i)}>
+                          ×
+                        </button>
+                      </div>
+                    )}
+                    <ExploreView
+                      key={`${viewKey}-${panelKeys[p.id] ?? 0}`}
+                      compact={several}
+                      info={info}
+                      spec={p.spec}
+                      version={info.version}
+                      onOpened={(o) => setLive(p.id, { resolved: o })}
+                      onError={(m) => onError(several ? `Panel ${i + 1}: ${m}` : m)}
+                      settings={p.settings}
+                      stat={p.stat}
+                      onStat={pa.onStat}
+                      initialView={p.view}
+                      onView={pa.onView}
+                      cursors={p.cursors}
+                      onCursors={pa.onCursors}
+                      onReading={(a) => setLive(p.id, { reading: a })}
+                      actions={actionsOf(p.id)}
+                      onStepSlider={pa.onStepSlider}
+                      onShowCut={pa.onShowCut}
+                      onOpsInfo={(o) => setLive(p.id, { opsInfo: o })}
+                    />
+                  </section>
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
+      {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} />}
     </div>
   );
 }
@@ -359,6 +588,8 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
 // ---- what to plot, and how ------------------------------------------------------------------------
 
 interface ControlsProps {
+  /** "Panel 2: Q" when there are several panels. */
+  heading: string | null;
   info: FileInfo;
   resolved: ExploreOpen | null;
   settings: ViewSettings;
@@ -371,12 +602,14 @@ interface ControlsProps {
   onListOpen: (open: boolean) => void;
   opsInfo: OpsInfo | null;
   calculate: (what: "delay" | "rotation", index: number) => Promise<number>;
+  /** A value's right-click menu (new panel, only this value). */
+  onValueMenu: (e: MouseEvent, name: string) => void;
 }
 
 /** Axes of a value with more than one point (the ones that can be drawn along). */
 const swept = (info: FileInfo, v: ValueInfo) => v.axes.filter((a, i) => v.shape[i] > 1 && info.axes.some((x) => x.name === a));
 
-function ExploreControls({ info, resolved, settings, updateSpec, updateSettings, children, contrast, listOpen, onListOpen, opsInfo, calculate }: ControlsProps) {
+function ExploreControls({ heading, info, resolved, settings, updateSpec, updateSettings, children, contrast, listOpen, onListOpen, opsInfo, calculate, onValueMenu }: ControlsProps) {
   if (!resolved) return <div className="controls muted small">Opening…</div>;
   const r = resolved.spec;
   const kind = resolved.kind;
@@ -409,6 +642,7 @@ function ExploreControls({ info, resolved, settings, updateSpec, updateSettings,
 
   return (
     <div className="controls">
+      {heading && <h2 className="panel-heading">{heading}</h2>}
       <label className="field">
         <span>Plot</span>
         <select aria-label="Plot type" value={kind} onChange={(e) => updateSpec({ kind: e.target.value as PlotSpec["kind"], x: undefined, y: undefined, series: undefined })}>
@@ -425,7 +659,14 @@ function ExploreControls({ info, resolved, settings, updateSpec, updateSettings,
           const on = values.includes(v.name);
           const fits = !first || v.name === first.name || (kind === "curve" && v.axes.includes(along ?? ""));
           return (
-            <label key={v.name} className="check">
+            <label
+              key={v.name}
+              className="check"
+              draggable
+              onDragStart={(e) => e.dataTransfer.setData(DRAG_VALUE, v.name)}
+              onContextMenu={(e) => onValueMenu(e, v.name)}
+              title="Drag onto a panel to show it there; right-click for more"
+            >
               <input
                 type={kind === "heatmap" ? "radio" : "checkbox"}
                 name="explore-values"
