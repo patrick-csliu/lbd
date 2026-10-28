@@ -6,7 +6,8 @@ import { api, AxisValues } from "./api";
  *
  * A click on a value shows only that one; Shift-click: everything from the last clicked value to
  * this one; Ctrl/⌘-click or the box: add or remove one. "All" and "None" at the top. `chosen` is
- * null when all are shown.
+ * null when all are shown. The list folds away under its title (which still says how many are
+ * shown); unless `open` says otherwise, it is folded while all are shown.
  */
 interface Props {
   path: string;
@@ -15,9 +16,12 @@ interface Props {
   title: string;
   chosen: number[] | null;
   onChange: (chosen: number[] | null) => void;
+  /** Unfolded or not (remembered by the caller); undefined: folded while all are shown. */
+  open?: boolean;
+  onOpen?: (open: boolean) => void;
 }
 
-export default function AxisSelect({ path, version, axis, title, chosen, onChange }: Props) {
+export default function AxisSelect({ path, version, axis, title, chosen, onChange, open, onOpen }: Props) {
   const [values, setValues] = useState<AxisValues | null>(null);
   const [error, setError] = useState<string | null>(null);
   const anchor = useRef<number | null>(null);
@@ -62,11 +66,20 @@ export default function AxisSelect({ path, version, axis, title, chosen, onChang
     anchor.current = i;
   };
 
+  const unfolded = open ?? chosen !== null;
+  const legend = (
+    <legend>
+      <button className="link fold" aria-expanded={unfolded} onClick={() => onOpen?.(!unfolded)} title={unfolded ? "Fold the list" : "Show the list"}>
+        {unfolded ? "▾" : "▸"} {title}
+      </button>{" "}
+      <span className="muted small">{on.size === n ? `all ${n}` : `${on.size} of ${n}`}</span>
+    </legend>
+  );
+  if (!unfolded) return <fieldset className="field axis-select folded">{legend}</fieldset>;
+
   return (
     <fieldset className="field axis-select">
-      <legend>
-        {title} <span className="muted small">{on.size === n ? `all ${n}` : `${on.size} of ${n}`}</span>
-      </legend>
+      {legend}
       <div className="row-controls">
         <button onClick={() => onChange(null)} disabled={on.size === n}>
           All

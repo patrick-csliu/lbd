@@ -12,7 +12,8 @@ several repeats: a busy computer only ever adds time, so the fastest is the stea
 
 Times depend on the computer, so each run is compared only with earlier runs on the same computer
 (their median, kept in .benchmarks/explore.jsonl, which isn't committed). A time more than 30 %
-and 10 ms slower than that fails the run. A failed run isn't used as a baseline; run it again
+and 10 ms slower than that, also when its file is measured once more, fails the run. A failed
+run isn't used as a baseline; run it again
 when the computer was busy, and use --accept when the slowdown is the price of a wanted change.
 
 `scripts/test_all.py` runs this when the drawing code changed since the last run here (see
@@ -276,6 +277,18 @@ def main(argv=None) -> int:
 
     runs = history()
     base = baseline(runs)
+
+    def too_slow(k: str, v: float) -> bool:
+        b = base.get(k)
+        return b is not None and k != "reference work" and v > b * SLOWER and v - b > AT_LEAST_MS
+
+    # A single frame's time jumps now and then: a file with a time over the limit is measured
+    # once more, and each time keeps its faster value, so only a slowdown that repeats fails.
+    again = sorted({k.split(":")[0] for k, v in times.items() if too_slow(k, v)})
+    for name in again:
+        print(f"... {name} again (a time over the limit: measuring once more)", flush=True)
+        for k, v in measure_file(name, files[name], args.repeats).items():
+            times[f"{name}: {k}"] = min(times[f"{name}: {k}"], v)
     slower = []
     print(f"\nExplore benchmark on {machine()}, plot {WIDTH} x {HEIGHT} px (ms; baseline: median of "
           f"{min(len(runs), BASELINE_RUNS)} earlier run(s) here)\n")
@@ -286,7 +299,7 @@ def main(argv=None) -> int:
             print(f"  {k:34} {v:8.1f} {'-':>9} {'':>8}")
             continue
         change = (v - b) / b * 100 if b else 0.0
-        bad = k != "reference work" and v > b * SLOWER and v - b > AT_LEAST_MS
+        bad = too_slow(k, v)
         if bad:
             slower.append(k)
         print(f"  {k:34} {v:8.1f} {b:9.1f} {change:+7.0f}%{'  SLOWER' if bad else ''}")

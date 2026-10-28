@@ -161,8 +161,8 @@ const GRAB_PX = 7; // how near a cursor the mouse must be to drag it
 const CUT_PX = 96; // the cuts' strips: height above the map, width beside it
 
 const askOf = (c: CursorRead): CursorAsk => ({ x: c.x, y: c.y, ...(c.trace !== undefined ? { trace: c.trace } : {}), ...(c.free ? { free: true } : {}) });
-const cursorsKey = (type: string, at: CursorAsk[], cuts: boolean) =>
-  JSON.stringify({ type, cuts, at: at.map((a) => [a.x, a.y, a.trace ?? null, !!a.free]) });
+const cursorsKey = (type: string, at: CursorAsk[], cuts: boolean, on: boolean) =>
+  JSON.stringify({ type, cuts, on, at: at.map((a) => [a.x, a.y, a.trace ?? null, !!a.free]) });
 
 /** Two plot settings that differ only in the slider positions (the view is kept then). */
 function onlySlicesDiffer(a: PlotSpec, b: PlotSpec): boolean {
@@ -388,7 +388,7 @@ export default function ExploreView({
       .then(async (f) => {
         if (session.current !== sid) return;
         const at = cursorsRef.current.at;
-        if (at.length) {
+        if (at.length && cursorsRef.current.on) {
           // the cursors for this picture's view: shown together with it (cuts follow the view)
           await askCursors(at, frameMapping(f.meta)).catch(() => undefined);
           if (session.current !== sid) return;
@@ -452,8 +452,8 @@ export default function ExploreView({
         setReading(a);
         onReadingRef.current(a);
         const snapped = a.cursors.filter((c): c is CursorRead => !!c).map(askOf);
-        answered.current = cursorsKey(st.type, snapped, st.cuts);
-        if (cursorsKey(st.type, at, st.cuts) !== answered.current || st.at.length !== snapped.length)
+        answered.current = cursorsKey(st.type, snapped, st.cuts, st.on);
+        if (cursorsKey(st.type, at, st.cuts, st.on) !== answered.current || st.at.length !== snapped.length)
           onCursorsRef.current({ ...cursorsRef.current, at: snapped, active: Math.min(cursorsRef.current.active, Math.max(snapped.length - 1, 0)) as 0 | 1 });
       });
   }, []);
@@ -484,7 +484,7 @@ export default function ExploreView({
   const clearCursors = useCallback(() => {
     cursorNext.current = null;
     readingRef.current = null;
-    answered.current = cursorsKey(cursorsRef.current.type, [], cursorsRef.current.cuts);
+    answered.current = cursorsKey(cursorsRef.current.type, [], cursorsRef.current.cuts, cursorsRef.current.on);
     setReading(null);
     onReadingRef.current(null);
     onCursorsRef.current({ ...cursorsRef.current, at: [], active: 0 });
@@ -494,17 +494,28 @@ export default function ExploreView({
   // A view that ends (another plot, back to the map) takes its read-outs with it.
   useEffect(() => () => onReadingRef.current(null), []);
 
-  // Cursors set elsewhere (remembered, typed, another type, cuts on or off): ask for them.
-  const cursorsNow = cursorsKey(cursors.type, cursors.at, cursors.cuts);
+  // Cursors set elsewhere (remembered, typed, another type, cuts or cursors on or off): ask for
+  // them. Off: hidden, but kept, so they come back as they were.
+  const cursorsNow = cursorsKey(cursors.type, cursors.at, cursors.cuts, cursors.on);
   const haveFrame = !!meta;
   useEffect(() => {
     if (!haveFrame || cursorsNow === answered.current) return;
-    if (!cursorsRef.current.at.length) {
+    const st = cursorsRef.current;
+    if (!st.on) {
+      cursorNext.current = null;
+      readingRef.current = null;
+      answered.current = cursorsNow;
+      setReading(null);
+      onReadingRef.current(null);
+      paintOverlay();
+      return;
+    }
+    if (!st.at.length) {
       if (readingRef.current) clearCursors();
       return;
     }
     moveCursors(cursorsRef.current.at);
-  }, [cursorsNow, haveFrame, moveCursors, clearCursors]);
+  }, [cursorsNow, haveFrame, moveCursors, clearCursors, paintOverlay]);
 
   /** The user is zooming or panning: drafts until the mouse rests for a moment. */
   const markMoving = useCallback(() => {
@@ -704,7 +715,7 @@ export default function ExploreView({
   /** Cursor i to the mouse position (snapped by the server; Alt: free). Cursor 2 needs cursor 1. */
   const placeCursor = (i: number, x: number, y: number, free: boolean, keepTrace: boolean) => {
     const m = current();
-    if (!m) return;
+    if (!m || !cursorsRef.current.on) return; // cursors off: a click does nothing
     const [dx, dy] = toData(m, x, y);
     const r = readingRef.current;
     const now = (r?.cursors ?? []).filter((c): c is CursorRead => !!c).map(askOf);
@@ -923,6 +934,7 @@ export default function ExploreView({
       setView({ xlim: zoomRange(v.xlim, ax, f, m.xscale), ylim: zoomRange(v.ylim, ay, f, m.yscale) });
     } else if (k === "Home" || k === "0") setView(null);
     else if ((k === "c" || k === "C") && kindRef.current === "heatmap") onCursorsRef.current({ ...st, cuts: !st.cuts });
+    else if (k === "k" || k === "K") onCursorsRef.current({ ...st, on: !st.on });
     else if (k === "Escape") {
       if (box.current) {
         box.current = null;
@@ -939,7 +951,7 @@ export default function ExploreView({
   // ---- layout
 
   const cssSize: CSSProperties = meta ? { width: meta.width / meta.dpr, height: meta.height / meta.dpr } : {};
-  const showCuts = opened?.kind === "heatmap" && cursors.cuts;
+  const showCuts = opened?.kind === "heatmap" && cursors.cuts && cursors.on;
   const plotCss = meta ? meta.plot.map((v) => v / meta.dpr) : null;
   const c1 = reading?.cursors[0] ?? null, c2 = reading?.cursors[1] ?? null;
 
@@ -959,6 +971,21 @@ export default function ExploreView({
         <button onClick={() => setView(null)} title="Show all the data (or double-click the plot)">
           Reset view
         </button>
+        <label className="check" title="Off: a click places no cursor (key K)">
+          <input type="checkbox" checked={cursors.on} onChange={(e) => onCursorsRef.current({ ...cursorsRef.current, on: e.target.checked })} />
+          Cursors
+        </label>
+        {opened?.kind === "heatmap" && (
+          <label className="check" title="The row and column through cursor 1, beside the map (key C)">
+            <input
+              type="checkbox"
+              checked={cursors.cuts}
+              disabled={!cursors.on}
+              onChange={(e) => onCursorsRef.current({ ...cursorsRef.current, cuts: e.target.checked })}
+            />
+            Cuts
+          </label>
+        )}
         <span className="spacer" />
         {meta && (
           <span className={"explore-note" + (meta.reduced ? " reduced" : "")} title="How the data fits the screen's pixels">
@@ -1046,7 +1073,7 @@ export default function ExploreView({
       </div>
       <div className="explore-readout">
         <div className="muted small">
-          Click: cursor · Shift+click: second cursor · drag: zoom · right-drag: pan ·{" "}
+          {cursors.on ? "Click: cursor · Shift+click: second cursor · " : ""}drag: zoom · right-drag: pan ·{" "}
           <button className="link" onClick={() => setHelp((h) => !h)}>
             ? all mouse actions and keys
           </button>
@@ -1057,7 +1084,11 @@ export default function ExploreView({
             </>
           )}
         </div>
-        {c1 ? <CursorLine n={1} c={c1} /> : <div className="muted small">Click the plot to read a stored value.</div>}
+        {c1 ? (
+          <CursorLine n={1} c={c1} />
+        ) : (
+          <div className="muted small">{cursors.on ? "Click the plot to read a stored value." : "Cursors are off: a click does nothing (K or Cursors above the plot turns them on)."}</div>
+        )}
         {c2 && <CursorLine n={2} c={c2} />}
         {c1 && c2 && (
           <div className="explore-pick small">

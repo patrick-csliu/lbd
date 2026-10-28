@@ -11,9 +11,10 @@ export interface CursorsState {
   at: CursorAsk[]; // 0, 1 or 2 cursors
   active: 0 | 1; // the one the keys move
   cuts: boolean; // maps: the row and column through cursor 1
+  on: boolean; // off: a click places no cursor; the cursors are kept, hidden, for when they are on again
 }
 
-export const NO_CURSORS: CursorsState = { type: "cross", at: [], active: 0, cuts: true };
+export const NO_CURSORS: CursorsState = { type: "cross", at: [], active: 0, cuts: true, on: true };
 
 // Units that take no SI prefix.
 const NO_PREFIX = new Set(["dB", "dBm", "dBc", "°", "%", "deg", "K"]);
@@ -79,6 +80,7 @@ export const HELP: [string, string][] = [
   ["+  −", "zoom in / out around cursor 1"],
   ["Home or 0", "show everything"],
   ["C", "cuts on / off (maps)"],
+  ["K", "cursors on / off (off: a click does nothing)"],
   ["Esc", "cancel a box; else remove the cursors"],
   ["?", "this list"],
 ];

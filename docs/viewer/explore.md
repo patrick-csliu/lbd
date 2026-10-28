@@ -42,7 +42,8 @@ Pictures are drawn by the same engine as the figures, so Explore and Figure look
 ## Choosing traces
 
 Under the controls, a list shows each position of the axis that makes the traces: **Curves
-shown** (one curve per …) or **Rows in the map** (the map's vertical axis).
+shown** (one curve per …) or **Rows in the map** (the map's vertical axis). While every trace
+is shown, the list is folded under its title ("all 4001"); click the title to open it.
 
 - Click a value: only that trace. **Shift**-click: every trace from the last one you clicked to
   this one. **Ctrl**-click (**⌘** on macOS) or the box: add or remove one.
@@ -93,7 +94,11 @@ not the picture.
 **Cuts** (maps): the row and the column through cursor 1 are drawn above and beside the map, on
 exactly the map's axes, and follow the cursor while you drag it. Their value axis fits the part
 in view; when a cut has more points than pixels, each pixel shows its lowest and highest value.
-Hover a cut to read it. **Cuts beside the map** (or the key **C**) turns them off.
+Hover a cut to read it. **Cuts** above the plot (or the key **C**) turns them off.
+
+**Cursors** above the plot (or the key **K**) switches the cursors off: a click then does
+nothing, and the cursors, cuts and values are hidden. Switched on again, the same cursors come
+back.
 
 **Taking a cut out:**
 
@@ -118,6 +123,7 @@ Hover a cut to read it. **Cuts beside the map** (or the key **C**) turns them of
 | + − | Zooms in or out around cursor 1. |
 | Home or 0 | Shows everything. |
 | C | Cuts on or off (maps). |
+| K | Cursors on or off (off: a click does nothing). |
 | Esc | Cancels a box being drawn; otherwise removes the cursors. |
 | ? | The list of mouse actions and keys. |
 

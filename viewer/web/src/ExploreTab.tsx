@@ -35,6 +35,8 @@ interface Remembered {
   stat: ReduceStat;
   view: View | null;
   cursors: CursorsState;
+  /** The list of traces / rows unfolded (undefined: folded while all are shown). */
+  listOpen?: boolean;
   /** After "row / column as curve": the map to go back to. */
   back?: PlotSpec;
 }
@@ -95,6 +97,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
                 stat: st.stat ?? "max",
                 view: st.view ?? null,
                 cursors: { ...NO_CURSORS, ...(st.cursors ?? {}) },
+                ...(st.listOpen !== undefined ? { listOpen: st.listOpen } : {}),
                 ...(st.back ? { back: st.back } : {}),
               }
             : fresh(i),
@@ -268,6 +271,8 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
             info={info}
             resolved={resolved}
             settings={shown.settings}
+            listOpen={shown.listOpen}
+            onListOpen={(listOpen) => setShown((s) => s && { ...s, listOpen })}
             updateSpec={updateSpec}
             updateSettings={updateSettings}
             contrast={
@@ -328,12 +333,14 @@ interface ControlsProps {
   children?: ReactNode;
   /** The contrast control (maps), in the Colour section. */
   contrast?: ReactNode;
+  listOpen?: boolean;
+  onListOpen: (open: boolean) => void;
 }
 
 /** Axes of a value with more than one point (the ones that can be drawn along). */
 const swept = (info: FileInfo, v: ValueInfo) => v.axes.filter((a, i) => v.shape[i] > 1 && info.axes.some((x) => x.name === a));
 
-function ExploreControls({ info, resolved, settings, updateSpec, updateSettings, children, contrast }: ControlsProps) {
+function ExploreControls({ info, resolved, settings, updateSpec, updateSettings, children, contrast, listOpen, onListOpen }: ControlsProps) {
   if (!resolved) return <div className="controls muted small">Opening…</div>;
   const r = resolved.spec;
   const kind = resolved.kind;
@@ -475,6 +482,8 @@ function ExploreControls({ info, resolved, settings, updateSpec, updateSettings,
           title={kind === "curve" ? `Curves shown (${label(traceAxis)})` : `Rows in the map (${label(traceAxis)})`}
           chosen={settings.select?.[traceAxis] ?? null}
           onChange={(chosen) => updateSettings({ select: chosen === null ? undefined : { [traceAxis]: chosen } })}
+          open={listOpen}
+          onOpen={onListOpen}
         />
       )}
 

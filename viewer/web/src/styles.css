@@ -371,3 +371,5 @@ details.group fieldset > .group-fields { margin-top: -4px; }
 .segmented button.on { background: var(--accent-soft); border-color: var(--accent); position: relative; }
 .contrast { display: flex; flex-direction: column; gap: 4px; }
 .contrast-hist { width: 100%; color: var(--text); cursor: ew-resize; touch-action: none; border: 1px solid var(--border); border-radius: var(--radius); }
+.axis-select.folded { padding-bottom: 2px; }
+.axis-select legend .fold { font-weight: 600; color: var(--text); }

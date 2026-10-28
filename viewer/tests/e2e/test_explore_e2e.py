@@ -144,6 +144,7 @@ def sweep(viewer):
 def test_chosen_traces_typed_limits_and_a_swap(sweep, small_map, new_page):
     page = new_page("Explore")
     frames(page, lambda: row(page, "sweep.lbd").dblclick())
+    explore(page).locator(".axis-select .fold").click()                # the list is folded while all are shown
     values = explore(page).locator(".axis-values span")
     frames(page, lambda: values.nth(1).click())                       # only power -30
     frames(page, lambda: values.nth(3).click(modifiers=["ControlOrMeta"]))
@@ -161,6 +162,7 @@ def test_chosen_traces_typed_limits_and_a_swap(sweep, small_map, new_page):
 def test_reopening_a_file_shows_what_was_explored(sweep, viewer, new_page):
     page = new_page("Explore")
     frames(page, lambda: row(page, "sweep.lbd").dblclick())
+    explore(page).locator(".axis-select .fold").click()
     frames(page, lambda: explore(page).locator(".axis-values span").nth(4).click())
     page.wait_for_timeout(1500)                                       # remembered a moment later
     page.reload()

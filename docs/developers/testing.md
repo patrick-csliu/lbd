@@ -71,7 +71,8 @@ machines vary too much for times to mean anything there.
 Each time is the fastest of three repeats (a busy computer only adds time, so the fastest is the
 steadiest). The baseline is the median of this computer's last five
 passed runs, kept in `.benchmarks/explore.jsonl` (not committed; one line per run, with its
-commit). A time more than 30 % **and** 10 ms slower than the baseline fails the run, and a failed
+commit). A time more than 30 % **and** 10 ms slower than the baseline, also when its file is measured
+once more (single frames jump now and then), fails the run, and a failed
 run doesn't become part of the baseline. When a run fails:
 
 - the table's note says whether the reference work (numpy and matplotlib doing what a frame does,

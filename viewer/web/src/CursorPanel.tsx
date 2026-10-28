@@ -121,14 +121,29 @@ export default function CursorPanel({ kind, cursors, onCursors, reading, actions
   const list = reading?.cursors ?? [];
   const [c1, c2] = [list[0] ?? null, list[1] ?? null];
   const act = (fn: (a: ExploreActions) => void) => () => actions.current && fn(actions.current);
+  const back = onBack && (
+    <button onClick={onBack} title="Back to the map this curve was taken from">
+      ◂ Back to the map
+    </button>
+  );
+  if (!cursors.on) {
+    return (
+      <fieldset className="field cursor-panel">
+        <legend>Cursors</legend>
+        {back}
+        <div className="row-controls">
+          <span className="muted small">Off: a click does nothing.</span>
+          <button onClick={() => onCursors({ ...cursors, on: true })} title="Key K">
+            Turn on
+          </button>
+        </div>
+      </fieldset>
+    );
+  }
   return (
     <fieldset className="field cursor-panel">
       <legend>Cursors</legend>
-      {onBack && (
-        <button onClick={onBack} title="Back to the map this curve was taken from">
-          ◂ Back to the map
-        </button>
-      )}
+      {back}
       <div className="segmented" role="radiogroup" aria-label="Cursor type">
         {TYPES.map(([t, text, tip]) => (
           <button
@@ -194,10 +209,6 @@ export default function CursorPanel({ kind, cursors, onCursors, reading, actions
       </div>
       {kind === "heatmap" && (
         <>
-          <label className="check">
-            <input type="checkbox" checked={cursors.cuts} onChange={(e) => onCursors({ ...cursors, cuts: e.target.checked })} />
-            Cuts beside the map (key C)
-          </label>
           <div className="row-controls">
             <button disabled={!c1} onClick={act((a) => a.showCut("row"))} title="This tab then shows the row as a curve">
               Row as curve

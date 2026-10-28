@@ -91,3 +91,30 @@ def test_a_vertical_cursor_lists_every_trace(sweep, new_page):
     assert a["cursors"][0]["trace"] == 2 and len(a["cursors"][0]["table"]["rows"]) == 5
     expect(explore(page).locator(".cursor-table tr")).to_have_count(5)
     expect(explore(page).locator(".cursor-table tr.on")).to_contain_text("2")
+
+
+def test_cursors_can_be_switched_off_and_back_on(small_map, new_page):
+    page = new_page("Explore")
+    meta = frames(page, lambda: row(page, "small_map.lbd").dblclick())
+    cursor_answer(page, lambda: page.mouse.click(*at(page, meta, 8, 30)))
+    expect(readout(page).first).to_contain_text("value = 13")
+    page.keyboard.press("k")                                          # off: hidden, a click does nothing
+    expect(explore(page).locator(".explore-readout")).to_contain_text("Cursors are off")
+    expect(explore(page).locator(".explore-cut-top")).to_have_count(0)
+    asked = []
+    page.on("request", lambda r: asked.append(r) if r.url.endswith("/cursors") else None)
+    page.mouse.click(*at(page, meta, 2, 10))
+    page.wait_for_timeout(500)
+    assert not asked
+    cursor_answer(page, lambda: explore(page).get_by_role("checkbox", name="Cursors").check())
+    expect(readout(page).first).to_contain_text("value = 13 at x = 8, y = 30")   # the same cursor again
+
+
+def test_the_list_of_rows_folds(small_map, new_page):
+    page = new_page("Explore")
+    frames(page, lambda: row(page, "small_map.lbd").dblclick())
+    select = explore(page).locator(".axis-select")
+    expect(select).to_contain_text("all 4")
+    expect(select.locator(".axis-values")).to_have_count(0)            # folded while all are shown
+    select.locator(".fold").click()
+    expect(select.locator(".axis-values li")).to_have_count(4)
