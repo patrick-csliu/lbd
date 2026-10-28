@@ -42,7 +42,8 @@ from lbd.plot.units import prefix_scale  # noqa: E402
 from . import VERSION  # noqa: E402
 from . import files, images, scan, sdk  # noqa: E402
 from .catalog import Catalog, catalog_dir, misfit, structure  # noqa: E402
-from .explore import ExploreError, ExploreSession, Sessions  # noqa: E402
+from . import reading  # noqa: E402
+from .explore import ExploreClosed, ExploreError, ExploreSession, Sessions  # noqa: E402
 from .pages import PageError, Pages, UnknownPage  # noqa: E402
 from .config import Config, ConfigError, Style, StyleError, from_dict  # noqa: E402
 
@@ -285,6 +286,35 @@ class ExploreSpecBody(_Body):
 class ExplorePickBody(_Body):
     x: float                              # a pixel of the last picture (top-left origin)
     y: float
+
+
+class CursorsBody(_Body):
+    cursors: List[Dict[str, Any]]         # 1 or 2: {x, y} in plot units, trace?, free?, step? (reading.py)
+    type: str = "cross"                   # cross, vertical or horizontal
+    xlim: List[float]                     # the view the page shows, and its plot area in CSS pixels
+    ylim: List[float]
+    width: int
+    height: int
+    cuts: bool = True                     # maps: the row and column through cursor 1
+    lines: bool = True                    # curves: each cursor's trace as drawn (to highlight it)
+
+
+class FindBody(_Body):
+    what: str                             # max, min or peak
+    xlim: List[float]                     # where to search (the view, or between the cursors)
+    ylim: List[float]
+    trace: Optional[int] = None           # curves: only this trace
+
+
+class HistogramBody(_Body):
+    settings: Optional[Dict[str, Any]] = None   # the view settings to count with (selection, colour scale)
+
+
+class SaveCutBody(_Body):
+    which: str                            # "row" or "column" (maps), "trace" (curves)
+    index: Dict[str, int]                 # the cursor's stored indices
+    trace: Optional[int] = None
+    path: Optional[str] = None            # None: only suggest a file name
 
 
 def canonical(path: str) -> str:
@@ -540,7 +570,8 @@ def create_app(state: AppState) -> FastAPI:
 
     @app.exception_handler(ExploreError)
     async def _explore_error(request: Request, exc: ExploreError):
-        return JSONResponse({"detail": str(exc)}, status_code=400)
+        # a session closed while this request used it: like an unknown session, the page reopens it
+        return JSONResponse({"detail": str(exc)}, status_code=404 if isinstance(exc, ExploreClosed) else 400)
 
     @app.exception_handler(images.ImageError)
     async def _image_error(request: Request, exc: images.ImageError):
@@ -794,6 +825,43 @@ def create_app(state: AppState) -> FastAPI:
     def explore_pick(session_id: str, body: ExplorePickBody):
         """The stored point or cell at a pixel of the last picture, read from the full data."""
         return {"pick": _session(session_id).pick(body.x, body.y)}
+
+    @app.post("/api/explore/{session_id}/cursors")
+    def explore_cursors(session_id: str, body: CursorsBody):
+        """The cursors snapped to the stored data, their read-outs and (maps) the cuts through
+        cursor 1: everything the page draws for one cursor state (reading.py)."""
+        s = _session(session_id)
+        s.last_used = time.monotonic()
+        return reading.cursors(s, body.cursors, body.type, {"xlim": body.xlim, "ylim": body.ylim},
+                               (body.width, body.height), body.cuts, body.lines)
+
+    @app.post("/api/explore/{session_id}/find")
+    def explore_find(session_id: str, body: FindBody):
+        """Where the maximum, minimum or peak is, in a range of the stored data."""
+        return reading.find(_session(session_id), body.what, body.xlim, body.ylim, body.trace)
+
+    @app.post("/api/explore/{session_id}/histogram")
+    def explore_histogram(session_id: str, body: HistogramBody):
+        """The map's values counted (with these view settings), for the contrast control."""
+        s = _session(session_id)
+        if body.settings is not None:
+            s.apply(body.settings)
+        return reading.histogram(s)
+
+    @app.post("/api/explore/{session_id}/save-cut")
+    def explore_save_cut(session_id: str, body: SaveCutBody):
+        """Save a cut (a map's row or column, or a trace) as a new .lbd file; without a path,
+        suggest one next to the file."""
+        s = _session(session_id)
+        if body.path is None:
+            return {"path": str(reading.suggest_cut_path(s, body.which, body.index, body.trace))}
+        target = Path(body.path).expanduser().resolve()
+        if target.parent != s.path.resolve().parent:          # next to its file is always allowed
+            state.check_allowed(str(target.parent))
+        saved = reading.save_cut(s, body.which, body.index, target, body.trace)
+        if _key(s.path.resolve()) in state.opened:              # a file opened by double-click: so is its cut
+            state.opened.add(_key(saved))
+        return {"path": str(saved)}
 
     @app.delete("/api/explore/{session_id}")
     def explore_close(session_id: str):

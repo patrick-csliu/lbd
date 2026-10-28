@@ -351,31 +351,66 @@ export interface ExploreFrame {
   roundTripMs: number;
 }
 
-export interface StoredAt {
-  axis: string;
-  value: number;
-  unit: string;
-  label: string;
+// ---- reading values (server: reading.py) ----
+
+export type CursorType = "cross" | "vertical" | "horizontal";
+
+/** A cursor's position (plot units) as the page asks for it; the server snaps it to the data. */
+export interface CursorAsk {
+  x: number;
+  y: number;
+  trace?: number; // curves: stay on this trace
+  free?: boolean; // keep this position (not on the data)
+  step?: [number, number]; // move by stored points: along x, along y (maps) or traces (curves)
 }
 
-export interface ExplorePick {
-  kind: "point" | "cell";
-  index: Record<string, number>;
-  x: StoredAt;
-  // a point: its trace and value as plotted (complex modes and units applied)
+/** One number of a read-out, as stored (curves: as plotted, e.g. |S21| in dB). */
+export interface ReadItem {
+  role: "x" | "y" | "z" | "series";
+  name: string;
+  label: string;
+  unit: string;
+  value: number | null; // null: empty (missing data)
+  index?: number;
+}
+
+export interface CursorRead {
+  x: number; // snapped position, plot units
+  y: number;
+  free: boolean;
   trace?: number;
-  label?: string;
-  value_name?: string;
-  y?: number | StoredAt;
-  y_unit?: string;
-  series?: StoredAt;
-  at?: [number, number]; // image pixels
-  line?: ([number, number] | null)[]; // the picked trace as drawn, image pixels (null: a gap)
-  // a cell
-  value?: number | null;
-  value_unit?: string;
-  rect?: [number, number, number, number]; // image pixels: left, top, width, height
-  shown: { x: number; y: number; value?: number | null };
+  label?: string; // the trace's name
+  index: Record<string, number>; // stored indices
+  items: ReadItem[];
+  table?: { rows: { trace: number; label: string; value: number | null; x: number | null }[]; more: number; label: string; unit: string };
+  line?: ([number, number] | null)[]; // the trace as drawn (plot units), to highlight it
+  cell?: [number, number, number, number]; // maps: the cell, x0 y0 x1 y1 (plot units)
+}
+
+/** A cut through a map: positions (plot units) and values (plot units) along one axis. */
+export interface Cut {
+  pos: number[];
+  z: (number | null)[];
+  range: [number | null, number | null];
+  fixed: string; // the axis held fixed
+  index: number;
+}
+
+export interface CursorsAnswer {
+  type: CursorType;
+  factors: { x: number; y: number; z: number }; // plot units per stored unit
+  cursors: (CursorRead | null)[];
+  cuts?: { row?: Cut; column?: Cut; zf: number };
+}
+
+export interface Histogram {
+  edges: number[]; // plot units (log-spaced on a log colour scale)
+  counts: number[];
+  lowest: number;
+  highest: number;
+  auto: [number, number];
+  log: boolean;
+  cells: number;
 }
 
 async function exploreRender(
@@ -411,9 +446,21 @@ export const api = {
   exploreOpen: (path: string, spec: PlotSpec | null, width: number, height: number, dpr: number) =>
     call<ExploreOpen>("POST", "/api/explore", { path, spec, width: Math.round(width), height: Math.round(height), dpr }),
   exploreRender,
-  explorePick: (session: string, x: number, y: number) =>
-    call<{ pick: ExplorePick | null }>("POST", `/api/explore/${encodeURIComponent(session)}/pick`, { x, y }),
   exploreClose: (session: string) => call<{ ok: boolean }>("DELETE", `/api/explore/${encodeURIComponent(session)}`),
+  /** Cursors snapped to the stored data, their read-outs and (maps) the cuts through cursor 1. */
+  exploreCursors: (
+    session: string,
+    body: { cursors: CursorAsk[]; type: CursorType; xlim: number[]; ylim: number[]; width: number; height: number; cuts: boolean },
+  ) => call<CursorsAnswer>("POST", `/api/explore/${encodeURIComponent(session)}/cursors`, body),
+  /** Where the max, min or peak (farthest from the median) is, in a range of the stored data. */
+  exploreFind: (session: string, what: "max" | "min" | "peak", xlim: number[], ylim: number[], trace?: number) =>
+    call<{ x: number; y: number; trace?: number }>("POST", `/api/explore/${encodeURIComponent(session)}/find`, { what, xlim, ylim, trace }),
+  /** The map's values counted, with these view settings (chosen rows, colour scale). */
+  exploreHistogram: (session: string, settings: object) =>
+    call<Histogram>("POST", `/api/explore/${encodeURIComponent(session)}/histogram`, { settings }),
+  /** Save a cut as a new .lbd file; without a path, only suggest one. */
+  exploreSaveCut: (session: string, which: "row" | "column" | "trace", index: Record<string, number>, trace?: number, path?: string) =>
+    call<{ path: string }>("POST", `/api/explore/${encodeURIComponent(session)}/save-cut`, { which, index, trace, path: path ?? null }),
   /** The Explore view LBD remembers for a file (its database, never the file); `note` says why
    *  a remembered view no longer fits. */
   remembered: (path: string) => call<{ state: JsonObject | null; note: string | null }>("GET", "/api/explore/remembered", undefined, { path }),

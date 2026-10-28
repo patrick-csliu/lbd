@@ -1,7 +1,10 @@
-import { MouseEvent, useCallback, useEffect, useRef, useState } from "react";
+import { MouseEvent, ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import NumberRange from "./NumberRange";
-import { api, ExploreOpen, FileInfo, PlotSpec, ReduceStat, ValueInfo } from "./api";
-import ExploreView, { View, ViewSettings } from "./ExploreView";
+import { api, CursorsAnswer, ExploreOpen, FileInfo, PlotSpec, ReduceStat, ValueInfo } from "./api";
+import Contrast from "./Contrast";
+import CursorPanel from "./CursorPanel";
+import { CursorsState, NO_CURSORS } from "./cursors";
+import ExploreView, { ExploreActions, View, ViewSettings } from "./ExploreView";
 import AxisSelect from "./AxisSelect";
 import { COMPLEX_MODES, SliceControl } from "./FileView";
 import { useDiskVersion } from "./watch";
@@ -15,7 +18,7 @@ import { useDiskVersion } from "./watch";
  * file's saved figure settings for what to plot (they describe the data).
  *
  * When the file changes on disk and only grew (the same axes and values, more data), the view
- * stays as it is; anything else starts afresh, with a note saying why.
+ * stays as it is (cursors included); anything else starts afresh, with a note saying why.
  */
 
 interface Props {
@@ -31,11 +34,16 @@ interface Remembered {
   settings: ViewSettings;
   stat: ReduceStat;
   view: View | null;
+  cursors: CursorsState;
+  /** After "row / column as curve": the map to go back to. */
+  back?: PlotSpec;
 }
+
+const fresh = (info: FileInfo): Remembered => ({ spec: startSpec(info), settings: {}, stat: "max", view: null, cursors: NO_CURSORS });
 
 const START_KEYS = ["values", "complex", "x", "y", "series", "index", "kind"] as const;
 const CMAPS = ["viridis", "plasma", "magma", "cividis", "gray", "RdBu", "twilight"];
-// Plot settings after which earlier chosen traces no longer mean the same.
+// Plot settings after which earlier chosen traces (and cursor positions) no longer mean the same.
 const RESETS_SELECTION = ["kind", "values", "x", "y", "series"];
 
 /** What to plot first: the parts of the file's saved figure view that describe the data. */
@@ -81,8 +89,15 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
         const st = r.state as unknown as Partial<Remembered> | null;
         setShown(
           st?.spec
-            ? { spec: st.spec, settings: st.settings ?? {}, stat: st.stat ?? "max", view: st.view ?? null }
-            : { spec: startSpec(i), settings: {}, stat: "max", view: null },
+            ? {
+                spec: st.spec,
+                settings: st.settings ?? {},
+                stat: st.stat ?? "max",
+                view: st.view ?? null,
+                cursors: { ...NO_CURSORS, ...(st.cursors ?? {}) },
+                ...(st.back ? { back: st.back } : {}),
+              }
+            : fresh(i),
         );
       } catch (e) {
         if (live) setLoadError((e as Error).message);
@@ -106,7 +121,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
         setUpdating(null);
         if (!grewOnly(info, now)) {
           onErrorRef.current(`${now.name} was rewritten with other contents, so its Explore view starts afresh.`);
-          setShown({ spec: startSpec(now), settings: {}, stat: "max", view: null });
+          setShown(fresh(now));
           setViewKey((k) => k + 1);
         }
         setInfo(now);
@@ -143,10 +158,52 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
         if (!s) return s;
         const spec = { ...s.spec, ...patch };
         const reset = RESETS_SELECTION.some((k) => k in patch);
-        return { ...s, spec, settings: reset ? { ...s.settings, select: undefined } : s.settings };
+        return {
+          ...s,
+          spec,
+          settings: reset ? { ...s.settings, select: undefined } : s.settings,
+          cursors: reset ? { ...s.cursors, at: [], active: 0 } : s.cursors,
+          back: reset ? undefined : s.back,
+        };
       }),
     [],
   );
+  const onCursors = useCallback((cursors: CursorsState) => setShown((s) => s && { ...s, cursors }), []);
+  const [reading, setReading] = useState<CursorsAnswer | null>(null);
+  const actions = useRef<ExploreActions | null>(null);
+  const resolvedRef = useRef(resolved);
+  resolvedRef.current = resolved;
+  // Keys [ and ]: the first slider one step.
+  const onStepSlider = useCallback(
+    (by: number) => {
+      const r = resolvedRef.current?.spec, sl = r?.slices?.[0];
+      if (!r || !sl) return;
+      const i = Math.min(Math.max(sl.index + by, 0), sl.length - 1);
+      if (i !== sl.index) updateSpec({ index: { ...(r.index ?? {}), [sl.axis]: i } });
+    },
+    [updateSpec],
+  );
+  // A map's row or column through cursor 1, as a curve in this tab (the map is kept to go back to).
+  const onShowCut = useCallback((which: "row" | "column", index: Record<string, number>) => {
+    const r = resolvedRef.current?.spec;
+    if (!r?.x || !r.y) return;
+    const fixed = which === "row" ? r.y : r.x;
+    setShown((s) =>
+      s && {
+        ...s,
+        back: s.spec,
+        spec: { ...s.spec, kind: "curve", x: which === "row" ? r.x : r.y, y: undefined, series: "none", index: { ...(r.index ?? {}), [fixed]: index[fixed] } },
+        settings: { ...s.settings, select: undefined },
+        cursors: { ...s.cursors, at: [], active: 0 },
+        view: null,
+      },
+    );
+    setViewKey((k) => k + 1);
+  }, []);
+  const onBack = useCallback(() => {
+    setShown((s) => (s?.back ? { ...s, spec: s.back, back: undefined, cursors: { ...s.cursors, at: [], active: 0 }, view: null } : s));
+    setViewKey((k) => k + 1);
+  }, []);
   const updateSettings = useCallback((patch: ViewSettings) => setShown((s) => s && { ...s, settings: { ...s.settings, ...patch } }), []);
   const onView = useCallback((view: View) => setShown((s) => (s && JSON.stringify(s.view) !== JSON.stringify(view) ? { ...s, view } : s)), []);
   const onStat = useCallback((stat: ReduceStat) => setShown((s) => s && { ...s, stat }), []);
@@ -154,7 +211,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
   const forget = async () => {
     if (!info) return;
     await api.forget(path).catch((e) => onError((e as Error).message));
-    setShown({ spec: startSpec(info), settings: {}, stat: "max", view: null });
+    setShown(fresh(info));
     setViewKey((k) => k + 1);
   };
 
@@ -207,7 +264,34 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
         </div>
       ) : (
         <div className="plot-area">
-          <ExploreControls info={info} resolved={resolved} settings={shown.settings} updateSpec={updateSpec} updateSettings={updateSettings} />
+          <ExploreControls
+            info={info}
+            resolved={resolved}
+            settings={shown.settings}
+            updateSpec={updateSpec}
+            updateSettings={updateSettings}
+            contrast={
+              resolved?.kind === "heatmap" ? (
+                <Contrast
+                  load={() => actions.current?.histogram(shown.settings) ?? Promise.resolve(null)}
+                  loadKey={JSON.stringify([resolved.session, resolved.spec, shown.settings.select ?? null, shown.settings.cscale ?? null, info.version])}
+                  clim={shown.settings.clim ?? [null, null]}
+                  onClim={(c) => updateSettings({ clim: c })}
+                />
+              ) : null
+            }
+          >
+            {resolved && (
+              <CursorPanel
+                kind={resolved.kind}
+                cursors={shown.cursors}
+                onCursors={onCursors}
+                reading={reading}
+                actions={actions}
+                onBack={shown.back ? onBack : null}
+              />
+            )}
+          </ExploreControls>
           <ExploreView
             key={viewKey}
             info={info}
@@ -220,6 +304,12 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
             onStat={onStat}
             initialView={shown.view}
             onView={onView}
+            cursors={shown.cursors}
+            onCursors={onCursors}
+            onReading={setReading}
+            actions={actions}
+            onStepSlider={onStepSlider}
+            onShowCut={onShowCut}
           />
         </div>
       )}
@@ -235,12 +325,15 @@ interface ControlsProps {
   settings: ViewSettings;
   updateSpec: (patch: PlotSpec) => void;
   updateSettings: (patch: ViewSettings) => void;
+  children?: ReactNode;
+  /** The contrast control (maps), in the Colour section. */
+  contrast?: ReactNode;
 }
 
 /** Axes of a value with more than one point (the ones that can be drawn along). */
 const swept = (info: FileInfo, v: ValueInfo) => v.axes.filter((a, i) => v.shape[i] > 1 && info.axes.some((x) => x.name === a));
 
-function ExploreControls({ info, resolved, settings, updateSpec, updateSettings }: ControlsProps) {
+function ExploreControls({ info, resolved, settings, updateSpec, updateSettings, children, contrast }: ControlsProps) {
   if (!resolved) return <div className="controls muted small">Opening…</div>;
   const r = resolved.spec;
   const kind = resolved.kind;
@@ -426,8 +519,10 @@ function ExploreControls({ info, resolved, settings, updateSpec, updateSettings 
             log={settings.cscale === "log"}
             onChange={(v) => updateSettings({ clim: v[0] === null && v[1] === null ? undefined : v })}
           />
+          {contrast}
         </fieldset>
       )}
+      {children}
     </div>
   );
 }

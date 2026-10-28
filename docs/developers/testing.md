@@ -74,8 +74,8 @@ passed runs, kept in `.benchmarks/explore.jsonl` (not committed; one line per ru
 commit). A time more than 30 % **and** 10 ms slower than the baseline fails the run, and a failed
 run doesn't become part of the baseline. When a run fails:
 
-- the table's note says whether plain matplotlib was slower too: then the computer was busy, so
-  run it again;
+- the table's note says whether the reference work (numpy and matplotlib doing what a frame does,
+  without LBD's code) was slower too: then the computer was busy or slowed, so run it again;
 - if the slowdown is the price of a wanted change, `--accept` makes this run the new baseline;
 - otherwise `--history` lists the runs and their commits, to find the change.
 

@@ -59,6 +59,10 @@ class ExploreError(ValueError):
     """A request the Explore view can't do; the message says what to do instead."""
 
 
+class ExploreClosed(ExploreError):
+    """The session was closed (unused for a while, or its page moved on) while a request used it."""
+
+
 def paint_lines(lines, colors: np.ndarray, width: int, height: int, thickness: float) -> np.ndarray:
     """Paint polylines into an RGBA picture (height × width), in order, later lines on top.
 
@@ -138,6 +142,7 @@ class ExploreSession:
                                "use the Figure view for this plot")
         self.spec, self.kind = new, new["kind"]
         with rnd.RENDER_LOCK, matplotlib.rc_context(self.style.to_rcparams()):
+            self._check_open()
             self.fig.clear()
             self.fig.set_layout_engine("constrained")
             self.ax = self.fig.add_subplot()
@@ -261,6 +266,7 @@ class ExploreSession:
                 notes.append(f"{len(positions) - len(kept)} chosen positions of '{name}' no longer exist; left out")
             chosen = set(kept)
         with rnd.RENDER_LOCK, matplotlib.rc_context(self.style.to_rcparams()):
+            self._check_open()
             if self.kind == "curve":
                 per = len(self.data.axes[axis].data) if axis else 1
                 self.visible = [chosen is None or k % per in chosen for k in range(len(self.model.lines))]
@@ -439,10 +445,12 @@ class ExploreSession:
         if width < 50 or height < 50:
             raise ExploreError(f"the plot area is too small ({width}×{height} px); make the window larger")
         dpr = float(min(max(dpr, 1.0), MAX_DPR))
+        self._check_open()
         w, h = self.fig.get_size_inches()
         if (round(w * 96), round(h * 96), self.dpr) == (width, height, dpr):
             return
         with rnd.RENDER_LOCK, matplotlib.rc_context(self.style.to_rcparams()):
+            self._check_open()
             self.dpr = dpr
             self.fig.set_dpi(96 * dpr)
             self.fig.set_size_inches(width / 96, height / 96)
@@ -468,6 +476,7 @@ class ExploreSession:
                 raise ExploreError(f"the {name} range {lim} is not valid: it needs two numbers, lowest first")
         t0 = time.perf_counter()
         with rnd.RENDER_LOCK, matplotlib.rc_context(self.style.to_rcparams()):
+            self._check_open()
             t1 = time.perf_counter()
             self.last_used = time.monotonic()
             self.ax.set_xlim(*xlim)
@@ -564,6 +573,7 @@ class ExploreSession:
         """The stored point (curves) or cell (maps) at image pixel (px, py), from the full data."""
         self.last_used = time.monotonic()
         with rnd.RENDER_LOCK:
+            self._check_open()
             disp = (px, self.fig.bbox.height - py)
             xd, yd = self.ax.transData.inverted().transform([disp])[0]
             if self.kind == "heatmap":
@@ -662,8 +672,15 @@ class ExploreSession:
             out["line"] = [[float(a), float(b)] if np.isfinite(b) else None for a, b in zip(hx, hy)]
         return out
 
+    def _check_open(self) -> None:
+        if self.fig is None:
+            raise ExploreClosed("this Explore view was closed on the server (unused for a while, or the "
+                                "viewer restarted); it reopens by itself")
+
     def close(self):
-        self.fig = None
+        """Free the figure; a request still using the session then gets ExploreClosed."""
+        with rnd.RENDER_LOCK:
+            self.fig = None
 
 
 class Sessions:

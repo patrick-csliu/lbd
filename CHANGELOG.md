@@ -25,7 +25,15 @@ The file format has its own version (`lbd_version`, currently 1.0).
   max, min or mean of the cells under each pixel (chosen above the plot; a single hot cell stays
   visible with max), and curves keep the lowest and highest point of each pixel column, so a
   one-point spike shows. The note above the plot says what is shown.
-- Explore remembers, per file, what you showed (plot, chosen traces, colours, scales, zoom), in
+- **Reading values in Explore**: a click puts a cursor on the nearest stored point or cell
+  (Alt: anywhere), Shift+click a second one with differences and means. Crosshair, vertical
+  (every trace's value at one x) or horizontal cursors; positions can be typed. **Max**, **Min**
+  and **Peak** (farthest from the median: a dip or a spike), between the cursors or in view.
+  Beside a map, the row and column through the cursor follow it while you drag. A row, column
+  or trace can be shown as a curve or saved as its own `.lbd` file (with where it came from). A
+  histogram with draggable limits sets a map's colour range (**Auto** leaves out outliers).
+  Keys for all of it; **?** lists every mouse action and key.
+- Explore remembers, per file, what you showed (plot, chosen traces, colours, scales, zoom, cursors), in
   the viewer's own database on this computer, never in the file. **Forget this view** starts
   afresh. A file that grows while it is shown (a running measurement) keeps the zoom and choices.
 - **Library**: your folders, and what is inside the file you click; open it in Explore or

@@ -7,7 +7,7 @@
 Three files are made once (in the temp folder) and drawn as the Explore view draws them: 1000
 traces of 10 000 points, a 4001 × 4001 map, and one curve of 1 000 000 points. For each, the times
 of opening it, the full view, zooming in (drafts, as while the mouse moves), the sharp picture at
-the end, panning and picking a point (milliseconds, each the fastest of
+the end, panning, picking a point, and moving a cursor (on maps with the cuts beside it) (milliseconds, each the fastest of
 several repeats: a busy computer only ever adds time, so the fastest is the steadiest).
 
 Times depend on the computer, so each run is compared only with earlier runs on the same computer
@@ -113,6 +113,7 @@ def zoom_views(full, steps: int):
 def measure_file(name: str, path: Path, repeats: int) -> Dict[str, float]:
     import lbd
     from lbd.plot.style import Style
+    from lbd_viewer import reading
     from lbd_viewer.explore import ExploreSession
 
     def open_it():
@@ -135,6 +136,18 @@ def measure_file(name: str, path: Path, repeats: int) -> Dict[str, float]:
     _, meta = s.render(*mid)
     left, top, w, h = meta["plot"]
     pick = min(timed(lambda: s.pick(left + w * 0.4, top + h * 0.6)) for _ in range(5))
+    # a cursor dragged across the view (plot area 800 x 500): one answer per mouse position
+    (vx0, vx1), (vy0, vy1) = mid
+    first = reading.cursors(s, [{"x": vx0 + 0.3 * (vx1 - vx0), "y": (vy0 + vy1) / 2}], "cross",
+                            {"xlim": [vx0, vx1], "ylim": [vy0, vy1]}, (800, 500))["cursors"][0]
+
+    def drag(kind):
+        return [min(timed(lambda k=k: reading.cursors(
+            s, [{"x": vx0 + (0.3 + 0.02 * k) * (vx1 - vx0), "y": vy0 + (0.5 + 0.01 * k) * (vy1 - vy0),
+                 "trace": first.get("trace")}], kind, {"xlim": [vx0, vx1], "ylim": [vy0, vy1]}, (800, 500)))
+                    for _ in range(repeats)) for k in range(20)]
+
+    cursor_cross, cursor_vertical = drag("cross"), drag("vertical")
     per_step = [min(col) for col in zip(*steps)]     # each step: its fastest repeat
     per_pan = [min(col) for col in zip(*panned)]
     del lbd
@@ -147,20 +160,32 @@ def measure_file(name: str, path: Path, repeats: int) -> Dict[str, float]:
         "deep zoom sharp": min(sharp_end),
         "pan draft median": statistics.median(per_pan),
         "pick": pick,
+        "cursor move": statistics.median(cursor_cross),
+        "vertical cursor move": statistics.median(cursor_vertical),
     }
 
 
 def reference_ms() -> float:
-    """This computer's speed: matplotlib drawing an empty plot of the same size (fastest of 20)."""
+    """This computer's speed now, from work like a frame's but without LBD's code: reducing 4 M
+    numbers with numpy, then matplotlib drawing an image and a line of 4000 points at the same size
+    (fastest of 10). Slower than usual means the computer is busy (or slowed), not LBD."""
     from matplotlib.backends.backend_agg import FigureCanvasAgg
     from matplotlib.figure import Figure
 
+    rng = np.random.default_rng(1)
+    data = rng.random((2000, 2000))
     fig = Figure(figsize=(WIDTH / 96, HEIGHT / 96), dpi=96)
     FigureCanvasAgg(fig)
     ax = fig.add_subplot()
-    ax.plot([0, 1], [0, 1])
-    fig.canvas.draw()
-    return min(timed(fig.canvas.draw) for _ in range(20))
+    image = ax.imshow(np.zeros((500, 800)), aspect="auto", interpolation="nearest")
+    ax.plot(np.linspace(0, 800, 4000), 250 + 200 * rng.random(4000), lw=0.8)
+
+    def work():
+        image.set_data(np.fmax.reduceat(np.fmax.reduceat(data, np.arange(0, 2000, 4), axis=0), np.arange(0, 2000, 2.5).astype(int), axis=1)[:500, :800])
+        fig.canvas.draw()
+
+    work()
+    return min(timed(work) for _ in range(10))
 
 
 # -- history --------------------------------------------------------------------------------------
@@ -243,7 +268,7 @@ def main(argv=None) -> int:
 
     files = make_data()
     ref = reference_ms()
-    times: Dict[str, float] = {"reference draw": ref}
+    times: Dict[str, float] = {"reference work": ref}
     for name, path in files.items():
         print(f"... {name}", flush=True)
         for k, v in measure_file(name, path, args.repeats).items():
@@ -261,13 +286,13 @@ def main(argv=None) -> int:
             print(f"  {k:34} {v:8.1f} {'-':>9} {'':>8}")
             continue
         change = (v - b) / b * 100 if b else 0.0
-        bad = k != "reference draw" and v > b * SLOWER and v - b > AT_LEAST_MS
+        bad = k != "reference work" and v > b * SLOWER and v - b > AT_LEAST_MS
         if bad:
             slower.append(k)
         print(f"  {k:34} {v:8.1f} {b:9.1f} {change:+7.0f}%{'  SLOWER' if bad else ''}")
-    rb = base.get("reference draw")
-    if rb and abs(ref - rb) / rb > 0.2:
-        print(f"\nNote: plain matplotlib is {(ref - rb) / rb * 100:+.0f}% compared with earlier runs: the "
+    rb = base.get("reference work")
+    if rb and abs(ref - rb) / rb > 0.1:
+        print(f"\nNote: the reference work (numpy and matplotlib without LBD's code) is {(ref - rb) / rb * 100:+.0f}% compared with earlier runs: the "
               "computer is busier or faster than usual, so every time is affected.")
 
     passed = not slower

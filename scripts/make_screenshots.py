@@ -257,7 +257,8 @@ def explore(page: Page, url: str, ctx) -> None:
     box = host.bounding_box()
     page.mouse.click(box["x"] + box["width"] * 0.45, box["y"] + box["height"] * 0.5)   # read a cell
     page.locator("main:not([hidden]) .explore-pick").wait_for()
-    page.wait_for_timeout(500)
+    page.keyboard.press("c")                    # without the cuts (shown in reading.png): all fits
+    page.wait_for_timeout(1500)
     mark(page, [
         (1, ".pages", 0, "b"),
         (2, "main:not([hidden]) .tabs .tab", 0, "b"),
@@ -268,6 +269,33 @@ def explore(page: Page, url: str, ctx) -> None:
         (7, "main:not([hidden]) .explore-pick", 0, "b"),
     ])
     save(page, VIEWER_IMG / "explore.png")
+
+
+@shot
+def explore_reading(page: Page, url: str, ctx) -> None:
+    fresh(page, url, "Explore")
+    page.locator(".row-label", has_text="sweep.lbd").first.dblclick()
+    host = page.locator("main:not([hidden]) .explore-overlay")
+    page.locator("main:not([hidden]) .explore-readout .mono").wait_for()
+    explore_area = page.locator("main:not([hidden])")
+    explore_area.get_by_label("Plot type").select_option("heatmap")               # the sweep as a map
+    page.wait_for_timeout(1200)
+    explore_area.get_by_label("Complex values").select_option("db")
+    page.wait_for_timeout(1500)
+    box = host.bounding_box()
+    page.mouse.click(box["x"] + box["width"] * 0.35, box["y"] + box["height"] * 0.45)      # cursor 1
+    page.locator("main:not([hidden]) .explore-pick").first.wait_for()
+    page.keyboard.down("Shift")
+    page.mouse.click(box["x"] + box["width"] * 0.6, box["y"] + box["height"] * 0.7)        # cursor 2
+    page.keyboard.up("Shift")
+    page.locator("main:not([hidden]) .explore-pick").nth(1).wait_for()
+    page.wait_for_timeout(600)
+    mark(page, [
+        (1, "main:not([hidden]) .explore-cut-top", 0, "l"),
+        (2, "main:not([hidden]) .explore-cut-right", 0, "t"),
+        (3, "main:not([hidden]) .explore-host", 0, "tr"),
+    ])
+    save(page, VIEWER_IMG / "reading.png")
 
 
 @shot

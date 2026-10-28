@@ -29,11 +29,29 @@ def explore(page: Page):
     return page.locator("main:not([hidden])")
 
 
-def frames(page: Page, action):
-    """Do `action` and return the mapping (X-LBD-Frame) of the picture it brings."""
-    with page.expect_response(lambda r: "/api/explore/" in r.url and r.url.endswith("/render")) as resp:
-        action()
-    return json.loads(resp.value.headers["x-lbd-frame"])
+def frames(page: Page, action, quiet_ms: int = 400):
+    """Do `action` and return the mapping (X-LBD-Frame) of the last picture it brings: a picture
+    asked for before may still arrive first, so this waits until no more come for a moment."""
+    def is_picture(r):
+        return "/api/explore/" in r.url and r.url.endswith("/render") and r.ok
+
+    got = []
+
+    def collect(r):
+        if is_picture(r):
+            got.append(r)
+
+    page.on("response", collect)
+    try:
+        with page.expect_response(is_picture):
+            action()
+        seen = -1
+        while seen != len(got):
+            seen = len(got)
+            page.wait_for_timeout(quiet_ms)
+    finally:
+        page.remove_listener("response", collect)
+    return json.loads(got[-1].headers["x-lbd-frame"])
 
 
 def at(page: Page, meta, x, y):

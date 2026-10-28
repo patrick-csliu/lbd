@@ -18,7 +18,10 @@ opens it here. For a figure to export, use **Figure** (one click away, see below
 5. **How the data fits the screen:** for example "max of 6×8 cells per pixel" (see
    [Large data](#large-data)).
 6. **The plot.** Zoom, pan and click on it, see [Moving around](#moving-around).
-7. **The value you clicked**, as stored in the file.
+7. **The cursors' values**, as stored in the file, see [Reading values](#reading-values).
+
+Below the side panel's colours is the **Cursors** section (see [Reading values](#reading-values)).
+Click **?** under the plot (or press **?** on it) for every mouse action and key.
 
 ## Moving around
 
@@ -28,7 +31,8 @@ opens it here. For a figure to export, use **Figure** (one click away, see below
 | Drag with the left button | Zooms to the box you drew. A flat box zooms one axis only. |
 | Drag with the right or middle button | Moves the view. |
 | Double-click | Shows all the data again (also **Reset view**). |
-| Click | Reads the nearest point (curves) or the cell (maps): its value as stored in the file, where it is, and which trace. The trace is highlighted. |
+| Click | Puts cursor 1 on the nearest stored point (curves) or on the cell (maps), see [Reading values](#reading-values). |
+| Right-click | A menu: cursors, Max, Min, Peak, cuts, show everything. |
 | Type in **Horizontal** / **Vertical** *from … to* | Shows exactly that range. Empty boxes mean "to the end of the data". |
 
 Every picture is complete: its axes always match its data. While you zoom or pan, the data is
@@ -47,6 +51,76 @@ shown** (one curve per …) or **Rows in the map** (the map's vertical axis).
 In a map, rows you leave out stay **empty, in their place**: the vertical axis always tells the
 truth. (Packing the chosen rows together would move them.)
 
+## Reading values
+
+![Two cursors on a map, with its cuts](img/reading.png)
+
+1. **The row** through cursor 1, on the map's horizontal axis.
+2. **The column** through cursor 1, on the map's vertical axis.
+3. **Cursor 1** (red) on a cell, **cursor 2** (blue), and the range between them.
+
+Under the plot are their values, as stored, and the differences and means between them. The
+**Cursors** section of the side panel (below the colours) has the same and more: the cursor
+type, typed positions, Max · Min · Peak, the cuts, and taking a cut out.
+
+Cursors sit **on the stored data**: a click puts cursor 1 on the nearest point of the nearest
+trace (curves) or on the cell (maps), and every number shown is the value stored in the file,
+with its index ("stored at freq[4031], trace[12]"). Values are as plotted, for example |S21| in
+dB for a complex value shown in dB.
+
+| Do | What happens |
+|---|---|
+| Click | Cursor 1 there. |
+| **Shift** + click | Cursor 2: a range, shaded, with the differences (Δ) and means between the two cursors. |
+| Drag a cursor | Moves it. A cursor on a trace stays on that trace and follows it. |
+| **Alt** + click or drag | A free position, not on the data; the read-out then gives the nearest stored value. |
+| **Esc** | Removes the cursors. |
+
+**Cursor types**, in the Cursors section:
+
+- **Crosshair** (the default): a point of one trace, or a cell.
+- **Vertical:** a line at one x; the section lists **every visible trace's value there**, the
+  cursor's own trace first.
+- **Horizontal:** a line at one height, for example to compare peaks with a level.
+
+**The Cursors section** shows each cursor's numbers. Positions can be typed (with a prefix if you
+like: `5.12 GHz`); the cursor then moves to the nearest stored point. **Max**, **Min** and
+**Peak** move cursor 1 to the highest, the lowest, or the point farthest from the median (a dip
+or a spike, whichever stands out more): between the two cursors when there are two, otherwise in
+what is in view; on curves, on cursor 1's trace if it is on one. They search the stored data,
+not the picture.
+
+**Cuts** (maps): the row and the column through cursor 1 are drawn above and beside the map, on
+exactly the map's axes, and follow the cursor while you drag it. Their value axis fits the part
+in view; when a cut has more points than pixels, each pixel shows its lowest and highest value.
+Hover a cut to read it. **Cuts beside the map** (or the key **C**) turns them off.
+
+**Taking a cut out:**
+
+- **Row as curve** / **Column as curve** shows that row or column as a curve in the same tab;
+  **◂ Back to the map** returns.
+- **Save row…**, **Save column…** (maps) and **Save trace…** (curves) write a new `.lbd` file in
+  the same folder, with a suggested name you can change. It holds the stored data (complex
+  values stay complex), its axis and units, and in its metadata where it came from: the source
+  file, and the index and value of each fixed axis (`cut_from`, `cut_index`, `cut_at`; the
+  source's own metadata under `source_meta`). The source file is not changed, and an existing
+  file is never overwritten.
+
+**Keys**, after clicking the plot:
+
+| Key | Does |
+|---|---|
+| ← → | Moves the active cursor one stored point (**Shift**: 10). |
+| ↑ ↓ | Curves: the next or previous trace; maps: one row. |
+| Tab | Switches the active cursor (1 ↔ 2). |
+| M, N, P | Max, Min, Peak. |
+| [ ] | The first slider one step back or on. |
+| + − | Zooms in or out around cursor 1. |
+| Home or 0 | Shows everything. |
+| C | Cuts on or off (maps). |
+| Esc | Cancels a box being drawn; otherwise removes the cursors. |
+| ? | The list of mouse actions and keys. |
+
 ## Scales, colours and limits
 
 - **Scales:** log horizontal, log vertical, and for maps a log colour scale. Values of 0 or
@@ -54,6 +128,11 @@ truth. (Packing the chosen rows together would move them.)
 - **Colour** (maps): a colour map (*viridis*, *plasma*, *magma* and *cividis* are even to the
   eye; *gray*; *RdBu* for values around zero; *twilight* for phases, which wrap around),
   **Invert**, and the **Colour range** (empty: from the data).
+- **Contrast** (maps): a histogram of the map's values (all its cells, not only the view) with
+  the colour range as two lines. Drag a line to move that end, or drag between them to move the
+  range. **Auto** leaves out the outliers (0.5 % of the cells at each end), **Full** spans every
+  value, **Style** goes back to the style's own range. The colour range stays the same while
+  you zoom.
 - **Complex values:** magnitude, dB, phase in radians or degrees, the phase **unwrapped** (its
   2π jumps along the horizontal axis removed), real or imaginary part.
 
@@ -81,12 +160,12 @@ pixel shows, and says so in the note above the plot:
   few traces to see them drawn as in a figure.
 - Zoomed in far enough, every cell or point is drawn as stored ("every cell shown").
 
-Clicked values never come from the picture: they are read from the file's data.
+Cursor values never come from the picture: they are read from the file's data.
 
 ## What is remembered, and where
 
 The viewer remembers how you explored each file: what was plotted, the chosen traces, colours,
-scales, limits and the zoom. Opening the file again shows the same.
+scales, limits, the zoom and the cursors. Opening the file again shows the same.
 
 - This is kept **on this computer**, in the viewer's own database (in its settings folder, see
   [Command line and settings](command-line.md)). **Nothing is written into the data file.** The
@@ -100,7 +179,8 @@ scales, limits and the zoom. Opening the file again shows the same.
 ## Files that change
 
 When the program writing a file adds data (a measurement or a simulation that runs), Explore
-shows the new data within about two seconds and **keeps your zoom and choices**. If all the data
+shows the new data within about two seconds and **keeps your zoom, choices and cursors** (their
+values are read again). If all the data
 was shown, the view grows with it. If the file was rewritten with other contents (other axes or
 values), Explore starts afresh and a note says why. A file that is still being written shows
 "Updating…" until it can be read.
