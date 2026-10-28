@@ -748,6 +748,9 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
   const plottable = info.values.filter((v) => v.shape.length > 0);
   const canMap = !!first && swept(info, first).length >= 2;
   const anyComplex = values.some((n) => byName.get(n)?.complex);
+  // a value's unit as plotted (complex values: as the complex mode makes it)
+  const unitOf = (v: ValueInfo) => (v.complex ? `${r.complex ?? "abs"} of ${v.unit}` : v.unit);
+  const units = new Set(values.map((n) => byName.get(n)).filter((v): v is ValueInfo => !!v).map(unitOf));
   // x: an axis of the plotted value, or (curves) a real value with the same axes
   const xChoices = first
     ? [
@@ -783,6 +786,8 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
         {plottable.map((v) => {
           const on = values.includes(v.name);
           const fits = !first || v.name === first.name || (kind === "curve" && v.axes.includes(along ?? ""));
+          // a panel shows two units (left and right axis); a third goes in another panel
+          const third = kind === "curve" && !on && units.size >= 2 && !units.has(unitOf(v));
           return (
             <label
               key={v.name}
@@ -790,13 +795,13 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
               draggable
               onDragStart={(e) => e.dataTransfer.setData(DRAG_VALUE, v.name)}
               onContextMenu={(e) => onValueMenu(e, v.name)}
-              title="Drag onto a panel to show it there; right-click for more"
+              title={third ? "A third unit: show it in another panel (right-click)" : "Drag onto a panel to show it there; right-click for more"}
             >
               <input
                 type={kind === "heatmap" ? "radio" : "checkbox"}
                 name="explore-values"
                 checked={on}
-                disabled={!fits && !on}
+                disabled={(!fits && !on) || third}
                 onChange={() => {
                   if (kind === "heatmap") updateSpec({ values: [v.name], x: undefined, y: undefined });
                   else if (on && values.length > 1) updateSpec({ values: values.filter((n) => n !== v.name) });

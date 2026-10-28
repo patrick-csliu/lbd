@@ -21,6 +21,7 @@ Renders share lbd.plot's RENDER_LOCK: matplotlib's settings are global.
 from __future__ import annotations
 
 import io
+import dataclasses
 import json
 import re
 import secrets
@@ -40,6 +41,7 @@ import lbd
 from lbd.plot import render as rnd
 from lbd.plot.reduce import STATS, CurvePyramid, MapPyramid, cell_edges, curve_minmax, thin_in_order
 from lbd.plot.style import Style
+from lbd.plot.units import prefix_scale
 
 from . import equations
 from . import operations as ops_mod
@@ -173,6 +175,7 @@ class ExploreSession:
             self.fig.set_layout_engine("constrained")
             self.ax = self.fig.add_subplot()
             if self.kind == "curve":
+                self.model = self._units_apart(self.model)
                 self._setup_curves()
             else:
                 self._setup_map()
@@ -204,6 +207,61 @@ class ExploreSession:
 
     # -- setup
 
+    def _units_apart(self, m: "rnd.CurveModel") -> "rnd.CurveModel":
+        """Values of two units in one plot (plan 4): the second unit's curves get a right-hand
+        axis. They are drawn scaled onto the left axis (so zooming, picking and cursors work on
+        one axis) and the right axis shows their own numbers. The model returned carries
+        `units_apart`: per line (scale, offset) with drawn = stored × scale + offset, the right
+        axis' lines, label and mapping; None when the plot has one unit. A third unit can't be
+        shown (an ExploreError says to use another panel). Operations and equations give one
+        quantity (no unit), so they show one axis."""
+        if getattr(m, "units_apart", None):
+            return m                                     # already worked out for this model
+        values = self.spec["values"]
+        operated = self.ops_result is not None and self.ops_result.applied > 0
+        if len(values) < 2 or len(m.lines) != len(values) or operated:
+            return m
+        units = [self._plotted_unit(v) for v in values]
+        distinct = list(dict.fromkeys(units))
+        if len(distinct) < 2:
+            return m
+        if len(distinct) > 2:
+            raise ExploreError(f"these values have three units ({', '.join(u or 'no unit' for u in distinct)}); a panel "
+                               "shows two (left and right axis): show the third value in another panel")
+        stored = [np.asarray(y, dtype=float) / m.yf for y, _ in m.lines]
+        groups = [[k for k, u in enumerate(units) if u == g] for g in distinct]
+        scaled, names = [], []
+        for g, unit in zip(groups, distinct):
+            allv = np.concatenate([stored[k] for k in g])
+            f, shown_unit = prefix_scale(allv[np.isfinite(allv)], unit, "auto", warn=False)
+            scaled.append((f, shown_unit))
+            names.append(", ".join(m.lines[k][1] for k in g))
+        (f1, u1), (f2, u2) = scaled
+        left = np.concatenate([stored[k] * f1 for k in groups[0]])
+        right = np.concatenate([stored[k] * f2 for k in groups[1]])
+        left, right = left[np.isfinite(left)], right[np.isfinite(right)]
+        a, b = 1.0, 0.0
+        if left.size and right.size:
+            if left.min() > 0 and right.min() > 0:       # ratios kept: a log scale shows both
+                a = float(np.sqrt(left.min() * left.max()) / np.sqrt(right.min() * right.max()))
+            else:                                        # the right's range over the left's
+                span_l, span_r = np.ptp(left) or 1.0, np.ptp(right) or 1.0
+                a = float(span_l / span_r)
+                b = float(left.min() - a * right.min())
+        per_line = [(f1, 0.0) if k in groups[0] else (f2 * a, b) for k in range(len(m.lines))]
+        lines = [(stored[k] * sc + off, label) for k, ((_, label), (sc, off)) in enumerate(zip(m.lines, per_line))]
+        out = dataclasses.replace(m, lines=lines, yf=f1, ylim=None,
+                                  y_label=f"{names[0]} ({u1})" if u1 else names[0])
+        out.units_apart = {"per_line": per_line, "right": groups[1], "a": a, "b": b, "f2": f2,
+                           "label": f"{names[1]} ({u2})" if u2 else names[1]}
+        return out
+
+    def _plotted_unit(self, name: str) -> str:
+        """A value's unit as plotted (after the complex mode: dB, rad …)."""
+        v = self.data.values[name]
+        probe = np.array([1 + 1j]) if np.iscomplexobj(v.data) else np.array([1.0])
+        return rnd.apply_complex(probe, v.label or v.name, v.unit, self.spec["complex"])[2]
+
     def _setup_curves(self):
         m = self.model
         # Lines that share one x (x is an axis) are reduced and picked together; with a value as x
@@ -226,6 +284,20 @@ class ExploreSession:
                                          interpolation="nearest", aspect="auto", zorder=2, visible=False)
         self.line_colors = np.array([[*mcolors.to_rgba_array(a.get_color())[0][:3] * 255, 255] for a in self.lines],
                                     dtype=np.uint8).reshape(-1, 4)
+        apart = getattr(m, "units_apart", None)
+        if apart:
+            a, b = apart["a"], apart["b"]
+            right = self.ax.secondary_yaxis("right", functions=(lambda d: (d - b) / a, lambda r: r * a + b))
+            colour = self.lines[apart["right"][0]].get_color()
+            right.set_ylabel(apart["label"], color=colour)
+            right.tick_params(colors=colour)
+            for k in apart["right"]:
+                self.lines[k].set_linestyle("--")
+            legend = self.ax.get_legend()
+            right_labels = {m.lines[k][1] for k in apart["right"]}
+            for handle, text in zip(legend.legend_handles if legend else [], legend.get_texts() if legend else []):
+                if text.get_text() in right_labels:
+                    handle.set_linestyle("--")
         self.full = (_finite_range([x for x, _, _ in self.x_groups]), m.ylim if m.ylim and None not in m.ylim
                      else self._padded(_finite_range([y for y, _ in m.lines])))
 
@@ -905,9 +977,10 @@ class ExploreSession:
 
 class Sessions:
     """The open Explore sessions, by id. Old ones are closed after `idle` seconds without use,
-    and at most `limit` are open (each holds a file's data and a figure)."""
+    and at most `limit` are open (each holds a file's data and a figure; each panel of a file is
+    one session, so a few files with four panels each fit). A closed one reopens when used."""
 
-    def __init__(self, limit: int = 12, idle: float = 600.0):
+    def __init__(self, limit: int = 24, idle: float = 600.0):
         self.limit, self.idle = limit, idle
         self._by_id: Dict[str, ExploreSession] = {}
         self._lock = threading.Lock()

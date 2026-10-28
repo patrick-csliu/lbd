@@ -74,9 +74,15 @@ def _operated(s: "ExploreSession") -> bool:
     return s.ops_result is not None and s.ops_result.applied > 0 and s.ops_shown is not None
 
 
-def _value_item(s: "ExploreSession", role: str, name: str, plot_value) -> Dict[str, Any]:
+def _value_item(s: "ExploreSession", role: str, name: str, plot_value, line: Optional[int] = None) -> Dict[str, Any]:
     """A shown value read out, in its own unit; after operations as they made it (a ratio such as
-    dB/GHz as shown, so it reads like the axis)."""
+    dB/GHz as shown, so it reads like the axis). `line`: the curve it is on, when values of two
+    units share the plot (each line then has its own scale: explore.py `_units_apart`)."""
+    apart = getattr(s.model, "units_apart", None) if s.kind == "curve" else None
+    if apart and line is not None:
+        scale, offset = apart["per_line"][line]
+        label, unit = _plotted(s, name)
+        return {"role": role, "name": name, "label": label, "unit": unit, "value": _num((plot_value - offset) / scale)}
     factor = s.model.zf if s.kind == "heatmap" else s.model.yf
     if _operated(s):
         q, sh = s.ops_result.grid.value, s.ops_shown
@@ -280,7 +286,7 @@ def _curve_cursor(s: "ExploreSession", c: Dict[str, Any], kind: str, geo) -> Opt
     if py is None:
         py = y
     name = _trace_value(s, k)
-    items = [_curve_x_item(s, k, i), _value_item(s, "y", name, ys_k[i])]
+    items = [_curve_x_item(s, k, i), _value_item(s, "y", name, ys_k[i], k)]
     series = s.spec.get("series")
     index = {s.spec.get("along", s.spec["x"]): int(i)}
     same_traces = s.base_kind == "curve" and len(m.lines) == len(s.base_model.lines)   # the file's traces still
@@ -370,10 +376,11 @@ def _table(s: "ExploreSession", k: int, i: int, shown: List[int]) -> Dict[str, A
     for t in order[:TABLE_LIMIT]:
         xs = m.xs[t]
         it = i if xs is m.xs[k] else _nearest(xs, x0)
-        rows.append({"trace": int(t), "label": m.lines[t][1], "value": _value_item(s, "y", _trace_value(s, t), m.lines[t][0][it])["value"],
+        row_item = _value_item(s, "y", _trace_value(s, t), m.lines[t][0][it], t)
+        rows.append({"trace": int(t), "label": m.lines[t][1], "value": row_item["value"], "unit": row_item["unit"],
                      "x": _num(xs[it] / m.xf)})
     name = _trace_value(s, k)
-    shown_item = _value_item(s, "y", name, 0.0)
+    shown_item = _value_item(s, "y", name, 0.0, k)
     label, unit = shown_item["label"], shown_item["unit"]
     return {"rows": rows, "more": max(len(order) - TABLE_LIMIT, 0), "label": label, "unit": unit}
 

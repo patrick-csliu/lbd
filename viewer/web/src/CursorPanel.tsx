@@ -238,7 +238,7 @@ export default function CursorPanel({ kind, cursors, onCursors, reading, actions
               {c1.table.rows.map((r) => (
                 <tr key={r.trace} className={r.trace === c1.trace ? "on" : ""}>
                   <th>{r.label}</th>
-                  <td>{si(r.value, c1.table!.unit)}</td>
+                  <td>{si(r.value, r.unit ?? c1.table!.unit)}</td>
                 </tr>
               ))}
             </tbody>

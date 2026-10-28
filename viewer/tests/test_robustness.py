@@ -54,7 +54,8 @@ def matrix_file(data_dir):
 CASES = [("curve", "v", {"x": "f", "series": "k"}), ("heatmap", "v", {"x": "f", "y": "k"}),
          ("curve", "c", {"x": "f", "series": "k", "complex": "db"}), ("heatmap", "c", {"x": "f", "y": "k", "complex": "abs"}),
          ("curve", "const", {"x": "f", "series": "k"}), ("curve", "v", {"x": "w", "series": "k"}),
-         ("curve", "v", {"x": "f", "series": "k", "index": {"k": 1}})]
+         ("curve", "v", {"x": "f", "series": "k", "index": {"k": 1}}),
+         ("curve", ["v", "const"], {"x": "f", "index": {"k": 3}})]     # two units: a right-hand axis
 
 
 def check_shown(sess, meta, settings):
@@ -86,7 +87,8 @@ def test_every_operation_on_every_kind_of_data_answers_properly(cfg, data_dir, m
     client.post("/api/roots", json={"path": str(data_dir)}).raise_for_status()
     checked = 0
     for kind, value, axes in CASES:
-        o = client.post("/api/explore", json={"path": str(matrix_file), "spec": {"kind": kind, "values": [value], **axes},
+        values = value if isinstance(value, list) else [value]
+        o = client.post("/api/explore", json={"path": str(matrix_file), "spec": {"kind": kind, "values": values, **axes},
                                               "width": 300, "height": 200}).json()
         sess = client.app.state.lbd.explore.get(o["session"])
         ops_lists = REAL_OPS + (COMPLEX_OPS if value == "c" else [])

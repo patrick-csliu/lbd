@@ -429,7 +429,7 @@ export interface CursorRead {
   label?: string; // the trace's name
   index: Record<string, number>; // stored indices
   items: ReadItem[];
-  table?: { rows: { trace: number; label: string; value: number | null; x: number | null }[]; more: number; label: string; unit: string };
+  table?: { rows: { trace: number; label: string; value: number | null; unit?: string; x: number | null }[]; more: number; label: string; unit: string };
   line?: ([number, number] | null)[]; // the trace as drawn (plot units), to highlight it
   stored?: { label: string; unit: string; value: number | null }; // with operations on: the stored value behind it
   cell?: [number, number, number, number]; // maps: the cell, x0 y0 x1 y1 (plot units)
