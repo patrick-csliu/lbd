@@ -239,3 +239,16 @@ def test_a_closed_session_answers_closed_not_a_crash(client, traces):
     r = client.post(f"/api/explore/{o['session']}/cursors",
                     json={"cursors": [{"x": 0, "y": 0}], "xlim": [0, 1], "ylim": [0, 1], "width": 9, "height": 9})
     assert r.status_code == 404
+
+
+def test_only_one_of_several_traces_is_highlighted(client, traces, data_dir):
+    o = open_view(client, traces, spec=SPEC)
+    client.post(f"/api/explore/{o['session']}/render", json={}).raise_for_status()
+    assert "line" in cursors(client, o, [{"x": 0.5, "y": 10}])["cursors"][0]
+    d = lbd.Dataset(title="one")
+    d.add_axis("t", np.linspace(0, 1, 50))
+    d.add_value("v", np.sin(np.linspace(0, 3, 50)), axes="t")
+    d.save(data_dir / "one.lbd")
+    o = open_view(client, data_dir / "one.lbd")
+    client.post(f"/api/explore/{o['session']}/render", json={}).raise_for_status()
+    assert "line" not in cursors(client, o, [{"x": 0.5, "y": 0.5}])["cursors"][0]   # nothing to tell apart

@@ -144,7 +144,7 @@ def cursors(s: "ExploreSession", items: List[Dict[str, Any]], kind: str, view: D
             out["cuts"] = _cuts(s, first, kind, geo)
     else:
         out["cursors"] = [_curve_cursor(s, c, kind, geo) for c in items]
-        if lines:
+        if lines and len(_visible(s)) > 1:          # a single curve needs no highlight: it would only cover it
             for c in out["cursors"]:
                 drawn = s._drawn(c["trace"]) if c else None
                 if drawn is not None:
