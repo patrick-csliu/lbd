@@ -56,3 +56,11 @@ def client(cfg, data_dir):
     c.headers["X-LBD-Token"] = "t0k"
     c.post("/api/roots", json={"path": str(data_dir)}).raise_for_status()
     return c
+
+
+@pytest.fixture()
+def values_files(data_dir):
+    """The mock files with several values (mock_values.py, small), in the data folder."""
+    import mock_values
+
+    return mock_values.write_all(data_dir, small=True)
