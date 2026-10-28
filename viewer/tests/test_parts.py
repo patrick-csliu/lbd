@@ -20,7 +20,8 @@ from lbd_viewer.config import Config, ConfigError
 
 def test_config_settings_roundtrip(tmp_path):
     cfg = Config(tmp_path / "c")
-    assert cfg.settings() == {"roots": [], "default_style": "default", "open_files_in": "viewer", "theme": "system"}
+    assert cfg.settings() == {"roots": [], "default_style": "default", "open_files_in": "viewer",
+                              "open_data_in": "explore", "theme": "system"}
     assert cfg.problems() == []
     folder = tmp_path / "data"
     folder.mkdir()
@@ -40,6 +41,7 @@ def test_config_settings_roundtrip(tmp_path):
     (json.dumps({"roots": [1]}), "'roots' must be a list"),
     (json.dumps({"default_style": 3}), "'default_style' must be text"),
     (json.dumps({"open_files_in": "window"}), "'open_files_in' must be one of viewer, browser-tab"),
+    (json.dumps({"open_data_in": "graph"}), "'open_data_in' must be one of explore, figure"),
     (json.dumps({"theme": "blue"}), "'theme' must be one of system, light, dark"),
 ])
 def test_config_broken_settings(tmp_path, content, match):
@@ -57,6 +59,15 @@ def test_config_open_files_in(tmp_path):
     assert Config(tmp_path / "c").settings()["open_files_in"] == "browser-tab"
     with pytest.raises(ConfigError, match="one of viewer, browser-tab"):
         cfg.set_open_files_in("popup")
+
+
+def test_config_open_data_in(tmp_path):
+    cfg = Config(tmp_path / "c")
+    assert cfg.settings()["open_data_in"] == "explore"                # the default workspace
+    cfg.set_open_data_in("figure")
+    assert Config(tmp_path / "c").settings()["open_data_in"] == "figure"
+    with pytest.raises(ConfigError, match="one of explore, figure"):
+        cfg.set_open_data_in("library")
 
 
 def test_config_theme(tmp_path):

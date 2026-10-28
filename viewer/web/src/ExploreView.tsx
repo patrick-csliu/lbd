@@ -1,6 +1,6 @@
 import { CSSProperties, PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from "react";
+import NumberRange from "./NumberRange";
 import { api, ApiError, ExploreFrame, ExploreFrameMeta, ExploreOpen, ExplorePick, FileInfo, PlotSpec, ReduceStat, StoredAt } from "./api";
-import { COMPLEX_MODES } from "./FileView";
 
 /**
  * The Explore view (preview): a file's plot drawn by the server's matplotlib (explore.py), made
@@ -15,9 +15,21 @@ import { COMPLEX_MODES } from "./FileView";
  */
 
 type Lim = [number, number];
-interface View {
+/** What part of the data the view shows (its zoom). */
+export interface View {
   xlim: Lim;
   ylim: Lim;
+}
+
+/** How the data is shown, never what (explore.py `apply`): kept in LBD's database, not the file. */
+export interface ViewSettings {
+  select?: Record<string, number[]>; // the traces drawn (curves) or making the map; absent: all
+  cmap?: string;
+  invert?: boolean;
+  xscale?: "linear" | "log";
+  yscale?: "linear" | "log";
+  cscale?: "linear" | "log";
+  clim?: [number | null, number | null];
 }
 interface Size {
   w: number;
@@ -82,23 +94,32 @@ interface Picked {
 
 interface Props {
   info: FileInfo;
-  spec: PlotSpec | undefined; // the Figure view's settings, to start from
+  /** What to plot (values, kind, axes, slices, complex mode): changing it redraws in the same session. */
+  spec: PlotSpec;
+  /** The file's version on disk: a new one reads the file again. */
+  version: string | null;
+  /** The plot settings as the server resolved them (defaults filled in, slices described). */
+  onOpened: (o: ExploreOpen) => void;
   onError: (msg: string) => void;
+  /** How the data is shown: chosen traces, colour map, scales, colour range. */
+  settings: ViewSettings;
+  /** How a pixel shows several map cells. */
+  stat: ReduceStat;
+  onStat: (s: ReduceStat) => void;
+  /** The zoom to start with (remembered), or null: all the data. */
+  initialView: View | null;
+  /** The view now (each new picture), to be remembered. */
+  onView: (v: View) => void;
 }
 
-const SPEC_KEYS = ["kind", "values", "complex", "x", "y", "series", "index"] as const;
+/** Two plot settings that differ only in the slider positions (the view is kept then). */
+function onlySlicesDiffer(a: PlotSpec, b: PlotSpec): boolean {
+  return JSON.stringify({ ...a, index: undefined }) === JSON.stringify({ ...b, index: undefined });
+}
 
-export default function ExploreView({ info, spec, onError }: Props) {
-  // The settings to start from, taken once: later changes in the Figure view don't reopen this view.
-  const [startSpec] = useState<PlotSpec>(() => {
-    const s: PlotSpec = {};
-    for (const k of SPEC_KEYS) if (spec && spec[k] !== undefined) (s as Record<string, unknown>)[k] = spec[k];
-    return s;
-  });
-  const [kind, setKind] = useState<string | undefined>(startSpec.kind === "scatter" ? "curve" : startSpec.kind);
-  const [complex, setComplex] = useState<string | undefined>(startSpec.complex);
-  const [stat, setStat] = useState<ReduceStat>("max");
-  const [format, setFormat] = useState<"raw" | "png">("raw");
+export default function ExploreView({ info, spec, version, onOpened, onError, settings, stat, onStat, initialView, onView }: Props) {
+  // Pictures travel as raw pixels (fastest on this computer; "png" is the server's other choice).
+  const format = "raw" as const;
   const [size, setSize] = useState<Size | null>(null);
   const sizeRef = useRef(size);
   sizeRef.current = size;
@@ -112,6 +133,16 @@ export default function ExploreView({ info, spec, onError }: Props) {
 
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
+  const onOpenedRef = useRef(onOpened);
+  onOpenedRef.current = onOpened;
+  const specRef = useRef(spec);
+  specRef.current = spec;
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+  const onViewRef = useRef(onView);
+  onViewRef.current = onView;
+  const initialViewRef = useRef(initialView); // used by the first opening only
+  const showAll = useRef(false); // the next picture shows all the data (its limits come from the server)
   const host = useRef<HTMLDivElement>(null);
   const picture = useRef<HTMLCanvasElement>(null);
   const overlay = useRef<HTMLCanvasElement>(null);
@@ -120,6 +151,7 @@ export default function ExploreView({ info, spec, onError }: Props) {
   const session = useRef<string | null>(null);
   const wanted = useRef<View | null>(null);
   const inflight = useRef(false);
+  const dirty = useRef(false); // a picture is needed although the view didn't change
   const reopen = useRef<() => void>(() => {});
   const statRef = useRef(stat);
   statRef.current = stat;
@@ -237,14 +269,24 @@ export default function ExploreView({ info, spec, onError }: Props) {
 
   const request = useCallback(() => {
     const sid = session.current, v = wanted.current, sz = sizeRef.current;
-    if (inflight.current || !sid || !v) return;
+    if (inflight.current || !sid || (!v && !showAll.current)) return;
     inflight.current = true;
+    dirty.current = false;
+    const all = showAll.current;
     const sizeNow = sz ? { width: sz.w, height: sz.h, dpr: window.devicePixelRatio || 1 } : {};
+    const view = all || !v ? { xlim: null, ylim: null } : { xlim: v.xlim, ylim: v.ylim };
     api
-      .exploreRender(sid, { xlim: v.xlim, ylim: v.ylim, stat: statRef.current, format: formatRef.current, ...sizeNow })
+      .exploreRender(sid, { ...view, stat: statRef.current, format: formatRef.current, settings: settingsRef.current, ...sizeNow })
       .then((f) => {
         if (session.current !== sid) return;
         frame.current = f;
+        if (all && showAll.current) {
+          // all the data was asked for: the server said where that is
+          showAll.current = false;
+          wanted.current = { xlim: f.meta.xlim, ylim: f.meta.ylim };
+        }
+        onViewRef.current({ xlim: f.meta.xlim, ylim: f.meta.ylim });
+        if (f.meta.notes?.length) onErrorRef.current(f.meta.notes.join(" "));
         let src = frameCanvas.current;
         if (!src) src = frameCanvas.current = document.createElement("canvas");
         src.width = f.meta.width;
@@ -274,10 +316,11 @@ export default function ExploreView({ info, spec, onError }: Props) {
         const f = frame.current, sz = sizeRef.current;
         const stale =
           f && (!same(wanted.current, { xlim: f.meta.xlim, ylim: f.meta.ylim }) || (sz && Math.abs(f.meta.width / f.meta.dpr - sz.w) > 1));
-        if (session.current === sid && wanted.current && stale) request();
+        if (session.current === sid && (wanted.current || showAll.current) && (stale || dirty.current || showAll.current)) request();
       });
   }, [paint]);
 
+  /** Show this view, or all the data (null). */
   const setView = useCallback(
     (v: View | null) => {
       const full = frame.current?.meta.full;
@@ -315,17 +358,23 @@ export default function ExploreView({ info, spec, onError }: Props) {
     };
   }, []);
 
-  const specKey = JSON.stringify({ ...startSpec, kind, complex });
+  const specKey = JSON.stringify(spec);
+  const openedSpecKey = useRef<string | null>(null); // the plot settings the session shows
   const haveSize = !!size && size.w >= 50 && size.h >= 50;
   useEffect(() => {
     const size = sizeRef.current;
     if (!haveSize || !size) return;
     let cancelled = false;
     let sid: string | null = null;
-    const keepView = wanted.current;
+    // A new version of the file: keep the zoom, or, if all the data was shown, show all of the new data.
+    const f = frame.current;
+    const wasAll = !!f && !!wanted.current && same(wanted.current, { xlim: f.meta.full[0], ylim: f.meta.full[1] });
+    const keepView = wasAll ? null : wanted.current ?? initialViewRef.current;
+    initialViewRef.current = null;
     const open = () => {
       setStatus("Opening… (large files take a moment: the data is read and prepared once)");
-      const s: PlotSpec = { ...JSON.parse(specKey) };
+      const s = specRef.current;
+      openedSpecKey.current = JSON.stringify(s);
       api
         .exploreOpen(info.path, s, size.w, size.h, window.devicePixelRatio || 1)
         .then((o) => {
@@ -336,8 +385,11 @@ export default function ExploreView({ info, spec, onError }: Props) {
           sid = o.session;
           session.current = o.session;
           setOpened(o);
+          onOpenedRef.current(o);
           if (o.warnings.length) onErrorRef.current(o.warnings.join(" "));
-          wanted.current = keepView ?? { xlim: o.full[0], ylim: o.full[1] };
+          // the zoom to keep, else all the data as the server finds it (with the view settings applied)
+          wanted.current = keepView;
+          showAll.current = !keepView;
           request();
         })
         .catch((e) => {
@@ -355,8 +407,49 @@ export default function ExploreView({ info, spec, onError }: Props) {
       frame.current = null;
       if (sid) api.exploreClose(sid).catch(() => {});
     };
-    // The view (zoom) is kept across reopening; a different file or plot opens a new session.
-  }, [info.path, specKey, haveSize, request]);
+    // The view (zoom) is kept when the file is read again (a new version on disk).
+  }, [info.path, version, haveSize, request]);
+
+  // Other plot settings: the same session draws them. Moving a slider keeps the zoom; anything
+  // else (another value, kind, axis, complex mode) starts from the whole data.
+  useEffect(() => {
+    const sid = session.current;
+    if (!sid || openedSpecKey.current === specKey) return;
+    const before = JSON.parse(openedSpecKey.current ?? "{}") as PlotSpec;
+    openedSpecKey.current = specKey;
+    setStatus("Drawing…");
+    api
+      .exploreSpec(sid, specRef.current)
+      .then((o) => {
+        if (session.current !== sid) return;
+        setOpened(o);
+        onOpenedRef.current(o);
+        if (o.warnings.length) onErrorRef.current(o.warnings.join(" "));
+        setPicked(null);
+        const keep = onlySlicesDiffer(before, specRef.current) && wanted.current;
+        wanted.current = keep || { xlim: o.full[0], ylim: o.full[1] };
+        dirty.current = true; // the last picture shows the old settings, even where the view is the same
+        request();
+      })
+      .catch((e) => {
+        setError(e instanceof Error ? e.message : String(e));
+        setStatus("");
+      });
+  }, [specKey, request]);
+
+  // Other view settings (chosen traces, colours, scales): the same session draws them. A new
+  // x or y scale shows all the data (the old limits may not exist on a log axis).
+  const settingsKey = JSON.stringify(settings);
+  const shownSettings = useRef(settingsKey);
+  useEffect(() => {
+    if (shownSettings.current === settingsKey) return;
+    const before = JSON.parse(shownSettings.current) as ViewSettings;
+    shownSettings.current = settingsKey;
+    if ((before.xscale ?? "linear") !== (settings.xscale ?? "linear") || (before.yscale ?? "linear") !== (settings.yscale ?? "linear"))
+      showAll.current = true;
+    dirty.current = true;
+    if (session.current) request();
+  }, [settingsKey, settings, request]);
 
   // A new panel size: the same view, drawn for it.
   useEffect(() => {
@@ -365,6 +458,7 @@ export default function ExploreView({ info, spec, onError }: Props) {
 
   // A new reduction or picture format: the same view again.
   useEffect(() => {
+    dirty.current = true;
     if (session.current) request();
   }, [stat, format, request]);
 
@@ -479,36 +573,15 @@ export default function ExploreView({ info, spec, onError }: Props) {
 
   // ---- layout
 
-  const valueInfo = info.values.find((v) => v.name === (opened?.spec.values ?? [])[0]);
-  const isComplex = !!valueInfo?.complex;
   const cssSize: CSSProperties = meta ? { width: meta.width / meta.dpr, height: meta.height / meta.dpr } : {};
 
   return (
     <div className="explore">
       <div className="explore-toolbar">
-        <label>
-          Plot{" "}
-          <select value={kind ?? opened?.kind ?? "curve"} onChange={(e) => setKind(e.target.value)}>
-            <option value="curve">Curves</option>
-            <option value="heatmap">Map</option>
-          </select>
-        </label>
-        {isComplex && (
-          <label>
-            Complex{" "}
-            <select value={complex ?? opened?.spec.complex ?? "abs"} onChange={(e) => setComplex(e.target.value)}>
-              {COMPLEX_MODES.filter(([v]) => v !== "iq").map(([v, l]) => (
-                <option key={v} value={v}>
-                  {l}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
         {opened?.kind === "heatmap" && (
           <label title="When a screen pixel stands for several cells, what it shows">
             Several cells per pixel{" "}
-            <select value={stat} onChange={(e) => setStat(e.target.value as ReduceStat)}>
+            <select value={stat} onChange={(e) => onStat(e.target.value as ReduceStat)}>
               <option value="max">max (peaks stay)</option>
               <option value="min">min (dips stay)</option>
               <option value="mean">mean</option>
@@ -518,13 +591,6 @@ export default function ExploreView({ info, spec, onError }: Props) {
         <button onClick={() => setView(null)} title="Show all the data (or double-click the plot)">
           Reset view
         </button>
-        <label title="How pictures travel from the server (for the speed test)">
-          Picture{" "}
-          <select value={format} onChange={(e) => setFormat(e.target.value as "raw" | "png")}>
-            <option value="raw">raw pixels</option>
-            <option value="png">PNG</option>
-          </select>
-        </label>
         <span className="spacer" />
         {meta && (
           <span className={"explore-note" + (meta.reduced ? " reduced" : "")} title="How the data fits the screen's pixels">
@@ -532,6 +598,22 @@ export default function ExploreView({ info, spec, onError }: Props) {
           </span>
         )}
       </div>
+      {meta && (
+        <div className="explore-limits">
+          <NumberRange
+            label="Horizontal"
+            value={meta.xlim}
+            log={meta.xscale === "log"}
+            onChange={(v) => setView({ xlim: [v[0] ?? meta.full[0][0], v[1] ?? meta.full[0][1]], ylim: wanted.current?.ylim ?? meta.ylim })}
+          />
+          <NumberRange
+            label="Vertical"
+            value={meta.ylim}
+            log={meta.yscale === "log"}
+            onChange={(v) => setView({ xlim: wanted.current?.xlim ?? meta.xlim, ylim: [v[0] ?? meta.full[1][0], v[1] ?? meta.full[1][1]] })}
+          />
+        </div>
+      )}
       {error && <div className="error-box">{error}</div>}
       <div className="explore-host" ref={host}>
         {status && <div className="explore-status muted">{status}</div>}

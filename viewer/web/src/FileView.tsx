@@ -5,7 +5,6 @@ import { ConfirmDialog, ConfirmRequest } from "./menu";
 import { useToast } from "./toast";
 import { HelpLink } from "./help";
 import { useDiskVersion } from "./watch";
-import ExploreView from "./ExploreView";
 
 interface Props {
   path: string;
@@ -23,6 +22,8 @@ interface Props {
   locked?: string | null;
   /** Right-click on the file's header: the same menu as its tab. */
   onMenu?: (e: MouseEvent) => void;
+  /** Open this file in the Explore workspace. */
+  onOpenInExplore?: () => void;
 }
 
 export const COMPLEX_MODES: [string, string][] = [
@@ -30,6 +31,8 @@ export const COMPLEX_MODES: [string, string][] = [
   ["db", "Magnitude (dB)"],
   ["phase", "Phase (rad)"],
   ["phase_deg", "Phase (°)"],
+  ["phase_unwrap", "Phase, unwrapped (rad)"],
+  ["phase_deg_unwrap", "Phase, unwrapped (°)"],
   ["real", "Real part"],
   ["imag", "Imaginary part"],
   ["iq", "I/Q plane (real vs imaginary)"],
@@ -47,7 +50,7 @@ const MM_TO_PX = 96 / 25.4;
 const GIVE_UP_AFTER = 10_000;
 
 export default function FileView(props: Props) {
-  const { path, plotted, onPlot, styles, defaultStyle, styleRevision, onError, initialState, onStateChange, locked, onMenu } = props;
+  const { path, plotted, onPlot, styles, defaultStyle, styleRevision, onError, initialState, onStateChange, locked, onMenu, onOpenInExplore } = props;
   const toast = useToast();
   const [info, setInfo] = useState<FileInfo | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -72,7 +75,6 @@ export default function FileView(props: Props) {
   const [busy, setBusy] = useState(false);
   const [zoom, setZoom] = useState("fit");
   const [showInfo, setShowInfo] = useState(true);
-  const [exploring, setExploring] = useState(false);
   const renderSeq = useRef(0);
 
   const loadInfo = useCallback(async () => {
@@ -335,14 +337,9 @@ export default function FileView(props: Props) {
               Plot
             </button>
           )}
-          {plotted && !onlyNumbers && (
-            <button
-              aria-pressed={exploring}
-              className={exploring ? "primary" : ""}
-              onClick={() => setExploring((x) => !x)}
-              title="Explore this file interactively: zoom, pan, click points (a preview of the coming Explore view)"
-            >
-              {exploring ? "Back to the figure" : "Explore (preview)"}
+          {onOpenInExplore && !onlyNumbers && (
+            <button onClick={onOpenInExplore} title="Explore this file: zoom, pan, read values">
+              Open in Explore
             </button>
           )}
           <button onClick={() => api.reveal(info.path).catch((e) => onError(e.message))}>Show in folder</button>
@@ -367,9 +364,7 @@ export default function FileView(props: Props) {
         </div>
       )}
 
-      {plotted && !onlyNumbers && exploring && <ExploreView info={info} spec={result?.spec ?? spec} onError={(m) => toast(m, "info")} />}
-
-      {plotted && !onlyNumbers && !exploring && (
+      {plotted && !onlyNumbers && (
         <div className="plot-area">
           <PlotControls
             info={info}
@@ -903,7 +898,7 @@ function axisValues(path: string, version: string | null, axis: string): Promise
 
 /** The position on an axis that isn't drawn: a slider, and a box to type the axis value. A typed
  *  value goes to the nearest measured point; the box then shows that point's exact value. */
-function SliceControl({ path, version, slice: s, onIndex }: { path: string; version: string | null; slice: Slice; onIndex: (i: number) => void }) {
+export function SliceControl({ path, version, slice: s, onIndex }: { path: string; version: string | null; slice: Slice; onIndex: (i: number) => void }) {
   const shown = s.value === null ? "" : String(s.value);
   const [text, setText] = useState(shown);
   const [note, setNote] = useState<string | null>(null);
@@ -969,7 +964,7 @@ function SliceControl({ path, version, slice: s, onIndex }: { path: string; vers
   );
 }
 
-function FileDetails({ info }: { info: FileInfo }) {
+export function FileDetails({ info }: { info: FileInfo }) {
   return (
     <div className="details">
       {info.description && <p>{info.description}</p>}

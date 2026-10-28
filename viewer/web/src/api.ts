@@ -11,11 +11,16 @@ export interface AppState {
   warnings: string[];
   /** where files opened from Explorer / Finder appear: the open viewer page, or a new browser tab */
   open_files_in: OpenFilesIn;
+  open_data_in: OpenDataIn;
   /** the viewer's colours: "system" follows the operating system */
   theme: Theme;
 }
 
 export type OpenFilesIn = "viewer" | "browser-tab";
+/** The workspace a data file opened from Explorer / Finder goes to. */
+export type OpenDataIn = "explore" | "figure";
+/** The viewer's main areas: find files, explore data, make figures. */
+export type Workspace = "library" | "explore" | "figure";
 export type Theme = "system" | "light" | "dark";
 
 /** A command for this page from the viewer (lbd_viewer/pages.py). */
@@ -335,6 +340,7 @@ export interface ExploreFrameMeta {
   reduced: boolean;
   stat: ReduceStat;
   ms: { wait: number; reduce: number; draw: number; encode: number };
+  notes?: string[]; // about the view settings, e.g. chosen positions that no longer exist
 }
 
 export interface ExploreFrame {
@@ -378,6 +384,7 @@ async function exploreRender(
     ylim?: [number, number] | null;
     stat: ReduceStat;
     format?: "raw" | "png";
+    settings?: object; // how the data is shown: ViewSettings in ExploreView.tsx
     width?: number; // the panel's size now (CSS pixels), when it changed since opening
     height?: number;
     dpr?: number;
@@ -405,6 +412,13 @@ export const api = {
   explorePick: (session: string, x: number, y: number) =>
     call<{ pick: ExplorePick | null }>("POST", `/api/explore/${encodeURIComponent(session)}/pick`, { x, y }),
   exploreClose: (session: string) => call<{ ok: boolean }>("DELETE", `/api/explore/${encodeURIComponent(session)}`),
+  /** The Explore view LBD remembers for a file (its database, never the file); `note` says why
+   *  a remembered view no longer fits. */
+  remembered: (path: string) => call<{ state: JsonObject | null; note: string | null }>("GET", "/api/explore/remembered", undefined, { path }),
+  remember: (path: string, state: object) => call<{ ok: boolean }>("PUT", "/api/explore/remembered", { path, state }),
+  forget: (path: string) => call<{ ok: boolean }>("DELETE", "/api/explore/remembered", undefined, { path }),
+  /** Other plot settings for an open session; answers like exploreOpen. */
+  exploreSpec: (session: string, spec: PlotSpec) => call<ExploreOpen>("POST", `/api/explore/${encodeURIComponent(session)}/spec`, { spec }),
 
   state: () => call<AppState>("GET", "/api/state"),
   heartbeat: () => call<{ ok: boolean }>("POST", "/api/heartbeat"),
@@ -447,6 +461,7 @@ export const api = {
   styleDefaults: () => call<{ defaults: JsonObject; schema: JsonObject }>("GET", "/api/style-defaults"),
   setDefaultStyle: (name: string) => call<AppState>("PUT", "/api/settings", { default_style: name }),
   setOpenFilesIn: (where: OpenFilesIn) => call<AppState>("PUT", "/api/settings", { open_files_in: where }),
+  setOpenDataIn: (where: OpenDataIn) => call<AppState>("PUT", "/api/settings", { open_data_in: where }),
   setTheme: (theme: Theme) => call<AppState>("PUT", "/api/settings", { theme }),
 
   // ---- pages: this browser tab among the viewer's open pages (lbd_viewer/pages.py)
@@ -542,9 +557,12 @@ async function download(url: string, method: string, body: unknown, fallbackName
 }
 
 /** The address of a new viewer browser tab: with a file to open, or a move to claim. */
-export function viewerUrl(params: { open?: string; claim?: string } = {}): string {
+/** The viewer's address in a new browser tab: opening a file (in Explore or Figure), or taking
+ *  tabs moved from another page. */
+export function viewerUrl(params: { open?: string; claim?: string; in?: Workspace } = {}): string {
   const q = new URLSearchParams({ token });
   if (params.open) q.set("open", params.open);
+  if (params.in) q.set("in", params.in);
   if (params.claim) q.set("claim", params.claim);
   return `${window.location.origin}/?${q}`;
 }

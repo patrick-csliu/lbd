@@ -26,6 +26,8 @@ def tab_names(page: Page) -> list:
 
 
 def open_file(page: Page, name: str):
+    """Open a file as a figure: in the Figure workspace, double-click its row."""
+    page.get_by_role("tab", name="Figure", exact=True).click()
     row(page, name).dblclick()
     expect(tab(page, name)).to_be_visible()
 

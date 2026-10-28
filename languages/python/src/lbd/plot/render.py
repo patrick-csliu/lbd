@@ -33,7 +33,7 @@ from .style import QuantityStyle, Style
 from .units import AUTO_UNITS, UnitWarning, axis_label, mathsafe, prefix_scale
 
 KINDS = ("auto", "curve", "heatmap", "scatter")
-COMPLEX_MODES = ("abs", "db", "phase", "phase_deg", "real", "imag", "iq")
+COMPLEX_MODES = ("abs", "db", "phase", "phase_deg", "phase_unwrap", "phase_deg_unwrap", "real", "imag", "iq")
 SCALES = ("linear", "log")
 FORMATS = {"svg": "image/svg+xml", "pdf": "application/pdf", "png": "image/png", "jpg": "image/jpeg"}
 DISPLAY_RASTER_DPI = 200  # raster layers (heat-map pixels, dense scatter) in the on-screen SVG
@@ -586,10 +586,23 @@ def _coords(d, axis: str, axes_left: List[str], shape: Tuple[int, ...]) -> np.nd
     return np.broadcast_to(data.reshape(view), shape)
 
 
-def apply_complex(arr: np.ndarray, label: str, unit: str, mode: str) -> Tuple[np.ndarray, str, str]:
+def _unwrap(phase: np.ndarray, axis: int) -> np.ndarray:
+    """np.unwrap along `axis`, skipping missing points (np.unwrap would make everything after a
+    NaN missing too)."""
+    p = np.moveaxis(np.array(phase, dtype=float), axis, -1)
+    flat = p.reshape(-1, p.shape[-1]) if p.ndim else p.reshape(1, 1)
+    for row in flat:
+        ok = np.isfinite(row)
+        if ok.sum() > 1:
+            row[ok] = np.unwrap(row[ok])
+    return np.moveaxis(flat.reshape(p.shape), -1, axis)
+
+
+def apply_complex(arr: np.ndarray, label: str, unit: str, mode: str, axis: int = 0) -> Tuple[np.ndarray, str, str]:
     """Turn data into what is plotted for a complex mode: (numbers, label, unit).
 
-    Real data is returned unchanged for every mode (see resolve_spec, which warns).
+    Real data is returned unchanged for every mode (see resolve_spec, which warns). The unwrapped
+    phases remove the 2π jumps along `axis`, the direction of the plot's x (the traces).
     """
     if mode not in COMPLEX_MODES:
         raise RenderError(f"unknown complex mode {mode!r}; use one of {COMPLEX_MODES}")
@@ -607,6 +620,10 @@ def apply_complex(arr: np.ndarray, label: str, unit: str, mode: str) -> Tuple[np
         return np.angle(arr), f"arg {label}", "rad"
     if mode == "phase_deg":
         return np.degrees(np.angle(arr)), f"arg {label}", "°"
+    if mode == "phase_unwrap":
+        return _unwrap(np.angle(arr), axis), f"arg {label}", "rad"
+    if mode == "phase_deg_unwrap":
+        return np.degrees(_unwrap(np.angle(arr), axis)), f"arg {label}", "°"
     if mode == "real":
         return arr.real, f"Re {label}", unit
     return arr.imag, f"Im {label}", unit
@@ -868,7 +885,7 @@ def prepare_map(d, spec, style: Style) -> MapModel:
     v = d.values[name]
     xa, ya = d.axes[spec["x"]], d.axes[spec["y"]]
     z = _take(v, [spec["y"], spec["x"]], spec["index"])     # rows = y, columns = x
-    z, label, unit = apply_complex(z, v.label, v.unit, spec["complex"])
+    z, label, unit = apply_complex(z, v.label, v.unit, spec["complex"], axis=1)      # x runs along rows
     q = find_quantity(style, name, v.label, spec["complex"] if np.iscomplexobj(v.data) else None)
     x_raw = np.asarray(xa.data, dtype=float)
     y_raw = np.asarray(ya.data, dtype=float)

@@ -308,3 +308,24 @@ def nearest_point(x: np.ndarray, ys: Sequence[np.ndarray], to_px, click: Tuple[f
         if d[i] < best_d:
             best, best_d = (k, i), float(d[i])
     return best
+
+
+def thin_in_order(x: np.ndarray, y: np.ndarray, n_out: int) -> Tuple[np.ndarray, np.ndarray]:
+    """A curve whose x isn't sorted (e.g. one value against another), cut to about `n_out` points
+    in stored order: each block of consecutive points keeps its lowest and highest y, in the order
+    they were stored. For drawing only; picks read the full data."""
+    x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
+    n = y.size
+    block = max(1, -(-2 * n // max(n_out, 2)))         # ceil(n / (n_out / 2))
+    if block == 1:
+        return x, y
+    pad = (-n) % block
+    yp = np.concatenate([y, np.full(pad, np.nan)]).reshape(-1, block)
+    ok = np.isfinite(yp).any(axis=1)
+    lo = np.where(ok, np.nanargmin(np.where(np.isfinite(yp), yp, np.inf), axis=1), 0)
+    hi = np.where(ok, np.nanargmax(np.where(np.isfinite(yp), yp, -np.inf), axis=1), 0)
+    first, second = np.minimum(lo, hi), np.maximum(lo, hi)
+    starts = np.arange(yp.shape[0]) * block
+    idx = np.stack([starts + first, starts + second], axis=1).ravel()
+    idx = idx[np.repeat(ok, 2)]
+    return x[idx], y[idx]

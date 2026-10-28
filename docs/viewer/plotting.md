@@ -1,6 +1,7 @@
 # Plotting
 
-Double-click a data file to plot it. The controls are on the left and the figure on the right.
+In the **Figure** workspace, double-click a data file to plot it (from Explore: **Open in
+Figure**). The controls are on the left and the figure on the right.
 Every change redraws the figure straight away. The same settings are available in Python as the
 [plot spec](../styles/plot-settings.md) of [`lbd.plot.plot`][lbd.plot.plot].
 

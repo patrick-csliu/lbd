@@ -41,9 +41,9 @@ UI shows them as notes. They are the messages of Python's `lbd.LBDWarning`s.
 |---|---|---|
 | `GET /api/ping` | | `{app: "lbd-viewer", version, pid}`. Used by `cli.py` to detect a running viewer. |
 | `POST /api/heartbeat` | | `{ok: true}`. Tabs call it every 10 s; the server stops after `--idle-exit` seconds without one. |
-| `GET /api/state` | | `{version, lbd_version, roots, default_style, open_files_in, theme, styles, platform, config_dir, warnings}`. `warnings` also lists folders that no longer exist and a default style that was deleted. |
+| `GET /api/state` | | `{version, lbd_version, roots, default_style, open_files_in, open_data_in, theme, styles, platform, config_dir, warnings}`. `warnings` also lists folders that no longer exist, a default style that was deleted, and (once) a broken database that was put aside. |
 | `POST /api/open` | `{path}` | `{path}` (resolved). Allows reading a file outside the roots. |
-| `PUT /api/settings` | `{default_style?, open_files_in?, theme?}` | Same as `GET /api/state`. `open_files_in`: `"viewer"` (files from Explorer / Finder go to the open page) or `"browser-tab"`. `theme`: `"system"` (follow the operating system), `"light"` or `"dark"`. Every page gets `settings_changed` for these two. 400 if none is given or a value is invalid. |
+| `PUT /api/settings` | `{default_style?, open_files_in?, open_data_in?, theme?}` | Same as `GET /api/state`. `open_files_in`: `"viewer"` (files from Explorer / Finder go to the open page) or `"browser-tab"`. `open_data_in`: the workspace data files from Explorer / Finder open in, `"explore"` or `"figure"`. `theme`: `"system"` (follow the operating system), `"light"` or `"dark"`. Every page gets `settings_changed` for these three. 400 if none is given or a value is invalid. |
 
 ## Folders
 
@@ -93,7 +93,7 @@ Commands a page receives (`kind`, `data`):
 | `transfer_done` | `{id, paths, to}` | this page's tabs arrived in page `to`; close them |
 | `transfer_cancelled` | `{id, paths, reason}` | this page's move was cancelled; unlock the tabs |
 | `pages_changed` | `{pages: [{page, number, files}]}` | the live pages changed: one opened, closed or lost its connection, or opened, closed or took files. The whole list; an older one still queued is replaced |
-| `event` | `{event: "renamed", old, new}`, `{event: "trashed", path}`, `{event: "roots_changed"}`, `{event: "styles_changed"}`, `{event: "settings_changed"}` | a file was renamed or moved to the trash, or the folder list, the presets or the ⚙ settings (`open_files_in`, `theme`) changed |
+| `event` | `{event: "renamed", old, new}`, `{event: "trashed", path}`, `{event: "roots_changed"}`, `{event: "styles_changed"}`, `{event: "settings_changed"}` | a file was renamed or moved to the trash, or the folder list, the presets or the ⚙ settings (`open_files_in`, `open_data_in`, `theme`) changed |
 
 ## Images (view only)
 
@@ -112,6 +112,24 @@ Commands a page receives (`kind`, `data`):
 | `POST /api/render` | `{path, spec?, preset?, style?, style_file?}` | `{svg, spec, preset, size_mm: [w, h], warnings}`. An unknown `preset` is a 400; a file's own `style_name` that doesn't exist falls back to the default with a warning. Plot settings that don't apply to the chosen plot type are ignored without a warning here, because the UI keeps them while switching types. `spec` in the response is the resolved [plot spec](../styles/plot-settings.md), plus `slices: [{axis, index, length, label, unit, value}]`. `preset` names the preset used; `style` holds unsaved UI changes; `style_file` (a `.lbd.json` inside a root) replaces the preset, for previews. |
 | `POST /api/export/save` | as export | Renders, then shows the system "Save as" dialog on this computer (data file's folder, default name filled in) and writes the file there: `{path, warnings}`, `path` is `null` if cancelled. Render errors come before the dialog. 400 if the chosen name has another extension (nothing saved); 501 without a dialog (the UI then uses `/api/export`); 409 if another dialog is open. |
 | `POST /api/export` | as render, plus `format`: `svg`, `pdf`, `png` or `jpg` | The file bytes as a download, with `Content-Disposition: attachment; filename="<file>_<values>.<fmt>"`, and `X-LBD-Warnings` when there are warnings. |
+
+## Explore
+
+The Explore workspace's views (`explore.py`): a session per Explore tab keeps the file's data,
+its reductions to the screen (`lbd.plot.reduce`) and a matplotlib figure the size of the panel.
+Sessions close with their tab, after 10 minutes unused, and beyond 12 at once (the least
+recently used); an unknown session is a 404 and the UI opens a new one.
+
+| Method and path | Body / query | Response |
+|---|---|---|
+| `POST /api/explore` | `{path, spec?, preset?, width, height, dpr?}` | `{session, spec, kind, preset, full: [[x0, x1], [y0, y1]], warnings}`. `width`/`height`: the panel in CSS pixels (at least 50); `dpr`: the screen's pixel ratio (1–2). `spec` as for render; the Explore view shows curves and heat maps (400 for scatter). `spec` in the response is resolved, with `slices`; a value used as x adds `along`, the axis its points run along. |
+| `POST /api/explore/{session}/spec` | `{spec}` | As opening: other plot settings, drawn by the same session (the data already read is kept). |
+| `POST /api/explore/{session}/render` | `{xlim?, ylim?, stat?, format?, settings?, width?, height?, dpr?}` | The picture: raw RGBA pixels (`format: "raw"`, default) or PNG. The `X-LBD-Frame` header (JSON) has `{format, width, height, dpr, plot: [left, top, width, height], xlim, ylim, xscale, yscale, full, note, reduced, stat, ms: {wait, reduce, draw, encode}, notes}`: the plot area in the picture's pixels and its limits map pixels to data. `xlim`/`ylim` absent: all the data. `stat` (`max`, `min`, `mean`): what a pixel shows when it covers several map cells; `note` says how the data was reduced. `settings`: how the data is shown: `select` `{axis: [positions]}` (the traces drawn, or the map's rows; left-out rows stay empty), `cmap`, `invert`, `xscale`/`yscale`/`cscale` (`linear`, `log`), `clim` `[from, to]` (`null`: from the data); `notes` mention chosen positions that no longer exist. A new `width`/`height` redraws the same view at that size. |
+| `POST /api/explore/{session}/pick` | `{x, y}` (pixels of the last picture) | `{pick}`: the stored point (curves) or cell (maps) there, from the full data, or `null`. A point: `{kind: "point", trace, label, value_name, index, x: {axis, value, unit, label}, y, y_unit, series?, shown, at, line}` (`y` as plotted: complex modes applied; `line`: the trace as drawn, in pixels, for highlighting). A cell: `{kind: "cell", index, x, y, value, value_unit, shown, rect}`. |
+| `DELETE /api/explore/{session}` | | `{ok}`. |
+| `GET /api/explore/remembered` | `?path=` | `{state, note}`: the Explore view remembered for the file in LBD's database (`catalog.py`; never in the file), or `null` with a `note` when it no longer fits the file (an axis or value it used is gone or changed). `state` is opaque here: the UI's `{spec, settings, stat, view}`. |
+| `PUT /api/explore/remembered` | `{path, state}` | `{ok}`. The last save wins. Renaming a file (`/api/file/rename`) keeps its remembered view. |
+| `DELETE /api/explore/remembered` | `?path=` | `{ok}`: forgets it. |
 
 ## Styles
 

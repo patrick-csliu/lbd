@@ -197,3 +197,59 @@ def test_a_value_as_x_gives_each_trace_its_own_x(client, data_dir):
     p = client.post(f"/api/explore/{o['session']}/pick", json={"x": float(px[0]), "y": float(py[0])}).json()["pick"]
     assert p["trace"] == 1 and p["index"] == {"point": 8, "power": 1} and p["y"] == 19
     assert p["x"]["axis"] == "freq" and p["x"]["value"] == pytest.approx(f[1, 8]) and p["x"]["unit"] == "Hz"
+
+
+def test_other_plot_settings_reuse_the_session(client, data_dir):
+    o = open_view(client, data_dir / "sub" / "sweep.lbd")
+    assert o["kind"] == "heatmap" and o["spec"]["complex"] == "db"
+    r = client.post(f"/api/explore/{o['session']}/spec",
+                    json={"spec": {"kind": "curve", "x": "freq", "series": "power", "complex": "phase_unwrap"}})
+    r.raise_for_status()
+    assert r.json()["kind"] == "curve" and r.json()["session"] == o["session"]
+    meta, _ = render(client, o["session"])
+    assert meta["note"] == "every point shown"
+    r = client.post(f"/api/explore/{o['session']}/spec", json={"spec": {"kind": "scatter"}})
+    assert r.status_code == 400 and "Figure view" in r.json()["detail"]
+
+
+def test_chosen_traces_are_the_only_ones_drawn_and_picked(client, data_dir):
+    d = lbd.Dataset(title="three traces")
+    d.add_axis("power", [-40.0, -20.0, 0.0])
+    d.add_axis("t", np.arange(20.0))
+    d.add_value("v", np.array([np.zeros(20), np.ones(20) * 5, np.ones(20) * 10]), axes=["power", "t"])
+    d.save(data_dir / "three.lbd")
+    o = open_view(client, data_dir / "three.lbd", spec={"kind": "curve", "x": "t", "series": "power"})
+    meta, _ = render(client, o["session"], settings={"select": {"power": [0, 2, 7]}})
+    assert meta["notes"] == ["1 chosen positions of 'power' no longer exist; left out"]
+    sess = client.app.state.lbd.explore.get(o["session"])
+    assert [line.get_visible() for line in sess.lines] == [True, False, True]
+    px, py = sess._to_px(np.array([10.0]), np.array([5.0]))         # on the left-out trace
+    p = client.post(f"/api/explore/{o['session']}/pick", json={"x": float(px[0]), "y": float(py[0])}).json()["pick"]
+    assert p is None
+    r = client.post(f"/api/explore/{o['session']}/render", json={"settings": {"select": {"t": [1]}}})
+    assert r.status_code == 400 and "series axis ('power')" in r.json()["detail"]
+
+
+def test_a_map_from_chosen_rows_keeps_the_others_empty(client, big_map):
+    o = open_view(client, big_map)
+    meta, pixels = render(client, o["session"], settings={"select": {"y": list(range(0, 500))}})
+    sess = client.app.state.lbd.explore.get(o["session"])
+    img = np.asarray(sess.image.get_array(), dtype=float)
+    h = img.shape[0]
+    assert np.isnan(img[int(h * 0.75):]).all()                     # the upper half: rows left out
+    assert np.isfinite(img[: int(h * 0.45)]).all()
+    assert meta["note"].startswith("max of")
+
+
+def test_colour_map_scales_and_limits(client, big_map):
+    o = open_view(client, big_map)
+    render(client, o["session"], settings={"cmap": "magma", "invert": True, "clim": [-1, 2]})
+    sess = client.app.state.lbd.explore.get(o["session"])
+    assert sess.image.get_cmap().name == "magma_r"
+    assert (sess.image.norm.vmin, sess.image.norm.vmax) == (-1, 2)
+    meta, _ = render(client, o["session"], settings={"xscale": "log"})
+    assert meta["xscale"] == "log" and sess.full[0][0] > 0           # the positive part of x
+    for bad, match in (({"cmap": "nope"}, "unknown colour map"), ({"clim": [3, 1]}, "lower than"),
+                       ({"cscale": "log", "clim": [-1, 2]}, "above 0"), ({"xscale": "ln"}, "'linear' or 'log'")):
+        r = client.post(f"/api/explore/{o['session']}/render", json={"settings": bad})
+        assert r.status_code == 400 and match in r.json()["detail"], (bad, r.json())

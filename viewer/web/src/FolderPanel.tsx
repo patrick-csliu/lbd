@@ -16,6 +16,8 @@ interface Props {
   onOpenInNewBrowserTab: (path: string) => void;
   onRenamed: (oldPath: string, newPath: string) => void;
   onDeleted: (path: string) => void;
+  /** Open a data file in a chosen workspace (its right-click menu). */
+  onOpenIn?: (path: string, where: "explore" | "figure") => void;
 }
 
 /** What a row is, for its right-click menu: only files can be renamed or moved to the trash. */
@@ -41,7 +43,7 @@ function saveExpanded(s: Set<string>) {
 }
 
 export default function FolderPanel(props: Props) {
-  const { roots, activePath, platform, onRootsChanged, onSelect, onOpen, onOpenInNewBrowserTab, onRenamed, onDeleted } = props;
+  const { roots, activePath, platform, onRootsChanged, onSelect, onOpen, onOpenInNewBrowserTab, onRenamed, onDeleted, onOpenIn } = props;
   const toast = useToast();
   const names = systemNames(platform);
   const [expanded, setExpanded] = useState<Set<string>>(() => {
@@ -141,6 +143,12 @@ export default function FolderPanel(props: Props) {
     e.stopPropagation();
     const items: MenuEntry[] = fileEntries(path, platform, toast);
     if (kind === "root") items.push("-", { label: "Remove from list", onClick: () => removeRoot(path) });
+    if (kind === "file" && onOpenIn && fileKind(path) === "lbd")
+      items.unshift(
+        { label: "Open in Explore", onClick: () => onOpenIn(path, "explore") },
+        { label: "Open in Figure", onClick: () => onOpenIn(path, "figure") },
+        "-",
+      );
     if (kind === "file")
       items.push(
         { label: "Open in new browser tab", onClick: () => onOpenInNewBrowserTab(path) },

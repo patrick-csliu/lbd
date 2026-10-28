@@ -6,6 +6,9 @@ files side by side), so these rules decide who may do what (docs/viewer/folders-
 
 1. One owner per open file. A file is open in at most one page, so two pages never hold competing
    unsaved edits of it. `acquire` refuses a file another page owns and names that page.
+   This is about the Figure workspace, whose tabs can save into their file. Explore tabs never
+   write to their file and don't take part: a page shows any file in Explore without acquiring
+   it (a file delivered to Explore is released again by the page).
 2. A page is alive while it polls for commands (`poll`). It is gone after `bye`, after `stale_after`
    seconds without a poll (asleep, frozen), or after `offline_grace` seconds *offline*, unless it
    polls meanwhile. A page is offline from `register` until its first poll, and when its long-poll

@@ -1,7 +1,8 @@
 import { CSSProperties, KeyboardEvent, MouseEvent, PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, ApiError, AppState, baseName, fileKind, OpenFilesIn, PageCommand, PageEntry, TabState, Theme, viewerUrl } from "./api";
+import { api, ApiError, AppState, baseName, fileKind, OpenDataIn, OpenFilesIn, PageCommand, PageEntry, TabState, Theme, viewerUrl, Workspace } from "./api";
 import FolderPanel from "./FolderPanel";
-import FileView from "./FileView";
+import FileView, { FileDetails } from "./FileView";
+import ExploreTab from "./ExploreTab";
 import ImageView from "./ImageView";
 import StyleFileView from "./StyleFileView";
 import StylesPage from "./StylesPage";
@@ -13,7 +14,8 @@ import { docsUrl } from "./help";
 import { applyTheme } from "./theme";
 import { fileEntries, renameRequest } from "./fileActions";
 
-type Page = "data" | "styles" | "sdk";
+// The three workspaces (find files, explore data, make figures), and two pages of settings.
+type Page = Workspace | "styles" | "sdk";
 
 // Width of the Folders panel: dragged by the user, remembered in this browser.
 const SIDEBAR_KEY = "lbd-sidebar-width";
@@ -21,6 +23,17 @@ const SIDEBAR_DEFAULT = 300;
 const SIDEBAR_MIN = 180;
 // Whether this browser tab shows the Folders panel (per tab: hide it in one of two windows).
 const FOLDERS_SHOWN_KEY = "lbd-folders-shown";
+// The workspace this browser tab shows, so reloading the page stays there (per tab).
+const WORKSPACE_KEY = "lbd-workspace";
+
+function loadPage(): Page {
+  try {
+    const p = sessionStorage.getItem(WORKSPACE_KEY);
+    return p === "library" || p === "figure" || p === "styles" || p === "sdk" ? p : "explore";
+  } catch {
+    return "explore";
+  }
+}
 
 function clampSidebar(w: number): number {
   return Math.round(Math.max(SIDEBAR_MIN, Math.min(w, window.innerWidth * 0.6)));
@@ -105,7 +118,20 @@ function Shell() {
   const toast = useToast();
   const [state, setState] = useState<AppState | null>(null);
   const [fatal, setFatal] = useState<string | null>(null);
-  const [page, setPage] = useState<Page>("data");
+  const [page, setPage] = useState<Page>(loadPage);
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(WORKSPACE_KEY, page);
+    } catch {
+      /* storage unavailable: a reload shows Explore */
+    }
+  }, [page]);
+  // Explore tabs: a file shown in Explore. They don't own their file (Explore never writes to it),
+  // so unlike Figure tabs they need no agreement from the other pages.
+  const [exploreTabs, setExploreTabs] = useState<Tab[]>([]);
+  const [exploreActive, setExploreActive] = useState<string | null>(null);
+  const [exploreMenu, setExploreMenu] = useState<{ x: number; y: number; path: string } | null>(null);
+  const [libraryPath, setLibraryPath] = useState<string | null>(null);
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [active, setActive] = useState<string | null>(null);
   const [styleRevision, setStyleRevision] = useState(0);
@@ -135,6 +161,8 @@ function Shell() {
   const tabStates = useRef(new Map<string, TabState>());
   const initialStates = useRef(new Map<string, TabState>());
 
+  const stateRef = useRef(state);
+  stateRef.current = state;
   const shownWarnings = useRef(new Set<string>());
   const refreshState = useCallback(async () => {
     try {
@@ -192,7 +220,7 @@ function Shell() {
 
   /** Add tabs locally (the viewer already agreed this page owns them). */
   const addTabs = useCallback((paths: string[], pinned: boolean) => {
-    setPage("data");
+    setPage("figure");
     setTabs((prev) => {
       let next = prev;
       for (const path of paths) {
@@ -284,8 +312,57 @@ function Shell() {
     [toast],
   );
 
+  // ---- Explore tabs ------------------------------------------------------------------------------
+
+  /** Show data files in Explore (a single click: the preview tab; a double-click: kept). Other
+   *  files (images, style files) open in Figure, which shows them. */
+  const openExplore = useCallback(
+    (paths: string[], pinned: boolean) => {
+      const data = paths.filter((p) => fileKind(p) === "lbd");
+      const other = paths.filter((p) => fileKind(p) !== "lbd");
+      for (const p of other) openTab(p, pinned);
+      if (!data.length) return;
+      setPage("explore");
+      setExploreTabs((prev) => {
+        let next = pinned ? prev : prev.filter((t) => t.pinned || data.includes(t.path));
+        for (const path of data) {
+          next = next.some((t) => t.path === path)
+            ? next.map((t) => (t.path === path ? { ...t, pinned: t.pinned || pinned } : t))
+            : [...next, { path, pinned }];
+        }
+        return next;
+      });
+      setExploreActive(data[data.length - 1]);
+    },
+    [openTab],
+  );
+
+  const closeExplore = useCallback((paths: string[]) => {
+    const gone = new Set(paths);
+    setExploreTabs((prev) => {
+      const next = prev.filter((t) => !gone.has(t.path));
+      setExploreActive((a) => (a && gone.has(a) ? (next.length ? next[next.length - 1].path : null) : a));
+      return next;
+    });
+  }, []);
+
+  /** Open a file in a chosen workspace (menus, "Open in Explore" / "Open in Figure"). */
+  const openIn = useCallback(
+    (path: string, where: "explore" | "figure") => {
+      if (where === "explore") openExplore([path], true);
+      else {
+        setPage("figure");
+        openTab(path, true);
+      }
+    },
+    [openExplore, openTab],
+  );
+
   // A file renamed: its tab, unsaved settings and lock follow the new name.
   const fileRenamed = useCallback((oldPath: string, newPath: string) => {
+    setExploreTabs((prev) => prev.map((t) => (t.path === oldPath ? { ...t, path: newPath } : t)));
+    setExploreActive((a) => (a === oldPath ? newPath : a));
+    setLibraryPath((a) => (a === oldPath ? newPath : a));
     setTabs((prev) => prev.map((t) => (t.path === oldPath ? { ...t, path: newPath } : t)));
     setActive((a) => (a === oldPath ? newPath : a));
     setSelected((prev) => new Set([...prev].map((p) => (p === oldPath ? newPath : p))));
@@ -393,7 +470,13 @@ function Shell() {
             return null;
           });
           if (!result) return;
-          addTabs(result.granted, true);
+          if ((stateRef.current ?? (await api.state())).open_data_in === "explore") {
+            // Explore doesn't keep files: give back what was granted for the data files.
+            const data = result.granted.filter((p) => fileKind(p) === "lbd");
+            for (const p of data) await api.release(page.id, p).catch(() => undefined);
+            addTabs(result.granted.filter((p) => !data.includes(p)), true);
+            openExplore(data, true);
+          } else addTabs(result.granted, true);
           for (const [p, n] of Object.entries(result.elsewhere)) toast(`${baseName(p)} is already open in Page ${n}.`);
           for (const p of result.busy) toast(`${baseName(p)} is being moved between pages; try again in a moment.`, "error");
           if (result.granted.length) attention(`${plural(result.granted.length, "file")} opened`);
@@ -428,6 +511,7 @@ function Shell() {
         case "event":
           if (data.event === "renamed") fileRenamed(data.old as string, data.new as string);
           else if (data.event === "trashed" && tabsRef.current.some((t) => t.path === data.path)) {
+            closeExplore([data.path as string]);
             dropTabs([data.path as string]);
             toast(`${baseName(data.path as string)} was moved to the Recycle Bin / Trash; its tab was closed.`);
           } else if (data.event === "roots_changed" || data.event === "settings_changed") await refreshState();
@@ -437,7 +521,7 @@ function Shell() {
           }
       }
     },
-    [addTabs, dropTabs, fileRenamed, lockTabs, receiveTransfer, refreshState, toast],
+    [addTabs, closeExplore, dropTabs, fileRenamed, lockTabs, openExplore, receiveTransfer, refreshState, toast],
   );
 
   // Registered as a page: open what the address asks for, or (after sleep) re-check the tabs.
@@ -462,13 +546,20 @@ function Shell() {
       const url = new URL(window.location.href);
       const open = url.searchParams.get("open");
       const claim = url.searchParams.get("claim");
+      const where = url.searchParams.get("in");
       url.searchParams.delete("open");
       url.searchParams.delete("claim");
+      url.searchParams.delete("in");
       window.history.replaceState(null, "", url.toString());
       if (claim) await receiveTransfer(page, claim);
-      if (open) await openTab(open, true);
+      if (open) {
+        // A data file goes to the workspace asked for, else to the one set in the settings (Explore by default).
+        const ws = where ?? (stateRef.current ?? (await api.state())).open_data_in;
+        if (ws === "explore" && fileKind(open) === "lbd") openExplore([open], true);
+        else await openTab(open, true);
+      }
     },
-    [lockTabs, openTab, pageReady, receiveTransfer],
+    [lockTabs, openExplore, openTab, pageReady, receiveTransfer],
   );
 
   const onCommandFailed = useCallback(
@@ -600,6 +691,41 @@ function Shell() {
     }
   };
 
+  const setOpenDataIn = async (where: OpenDataIn) => {
+    setState((s) => s && { ...s, open_data_in: where });
+    try {
+      setState(await api.setOpenDataIn(where));
+      toast(`Data files opened from Explorer / Finder now open in ${where === "explore" ? "Explore" : "Figure"}.`);
+    } catch (e) {
+      toast((e as Error).message, "error");
+      await refreshState();
+    }
+  };
+
+  // The Explore tab menu: this tab, all tabs, and its file.
+  const exploreMenuShown = useMemo<MenuAt | null>(() => {
+    if (!exploreMenu) return null;
+    const { path } = exploreMenu;
+    const all = exploreTabs.map((t) => t.path);
+    const items: MenuEntry[] = [
+      { label: "Close", onClick: () => closeExplore([path]) },
+      { label: "Close others", onClick: () => closeExplore(all.filter((p) => p !== path)), disabled: all.length < 2 },
+      { label: "Close all", onClick: () => closeExplore(all) },
+      "-",
+      { label: "Open in Figure", onClick: () => openIn(path, "figure") },
+      {
+        label: "Open in a new browser tab",
+        onClick: () => {
+          if (!window.open(viewerUrl({ open: path, in: "explore" }), "_blank"))
+            toast("The browser blocked the new tab. Allow pop-ups for the viewer.", "error");
+        },
+      },
+      "-",
+      ...fileEntries(path, state?.platform ?? "", toast, () => setConfirm(renameRequest(path, (n) => fileRenamed(path, n), toast))),
+    ];
+    return { x: exploreMenu.x, y: exploreMenu.y, items };
+  }, [exploreMenu, exploreTabs, closeExplore, openIn, state?.platform, toast, fileRenamed]);
+
   // ---- Folders panel width: drag the handle, double-click to fit the longest name
 
   const setWidth = (w: number) => {
@@ -673,20 +799,32 @@ function Shell() {
             </span>
           )}
         </div>
-        <nav className="pages" role="tablist">
+        <nav className="pages" role="tablist" aria-label="Workspaces">
           {(
             [
-              ["data", "Data"],
-              ["styles", "Styles"],
-              ["sdk", "Language modules"],
-            ] as [Page, string][]
-          ).map(([p, label]) => (
-            <button key={p} role="tab" aria-selected={page === p} className={page === p ? "active" : ""} onClick={() => setPage(p)}>
+              ["library", "Library", "Find files: folders, contents"],
+              ["explore", "Explore", "Look at data: zoom, read values"],
+              ["figure", "Figure", "Make figures: styles, export"],
+            ] as [Page, string, string][]
+          ).map(([p, label, title]) => (
+            <button key={p} role="tab" aria-selected={page === p} className={page === p ? "active" : ""} title={title} onClick={() => setPage(p)}>
               {label}
             </button>
           ))}
         </nav>
         <div className="version">{state ? `v${state.version} · format ${state.lbd_version}` : ""}</div>
+        <nav className="pages secondary" aria-label="Settings pages">
+          {(
+            [
+              ["styles", "Styles"],
+              ["sdk", "Language modules"],
+            ] as [Page, string][]
+          ).map(([p, label]) => (
+            <button key={p} aria-current={page === p ? "page" : undefined} className={page === p ? "active" : ""} onClick={() => setPage(p)}>
+              {label}
+            </button>
+          ))}
+        </nav>
         {state && (
           <div className="settings">
             <button className="icon" title="Settings" aria-label="Settings" aria-expanded={settingsOpen} onClick={() => setSettingsOpen((o) => !o)}>
@@ -703,6 +841,18 @@ function Shell() {
                 ).map(([value, label]) => (
                   <label key={value} className="settings-choice">
                     <input type="radio" name="open-files-in" checked={state.open_files_in === value} onChange={() => setOpenFilesIn(value)} />
+                    {label}
+                  </label>
+                ))}
+                <div className="settings-title">Data files opened from Explorer / Finder open in</div>
+                {(
+                  [
+                    ["explore", "Explore (look at the data)"],
+                    ["figure", "Figure (make a figure)"],
+                  ] as [OpenDataIn, string][]
+                ).map(([value, label]) => (
+                  <label key={value} className="settings-choice">
+                    <input type="radio" name="open-data-in" checked={state.open_data_in === value} onChange={() => setOpenDataIn(value)} />
                     {label}
                   </label>
                 ))}
@@ -728,9 +878,42 @@ function Shell() {
         </a>
       </header>
 
+      {page === "library" && state && (
+        <div className="page library">
+          <aside className="library-folders">
+            <FolderPanel
+              roots={state.roots}
+              activePath={libraryPath}
+              platform={state.platform}
+              onRootsChanged={(roots) => setState({ ...state, roots })}
+              onSelect={setLibraryPath}
+              onOpen={(path) => openExplore([path], true)}
+              onOpenInNewBrowserTab={openInNewBrowserTab}
+              onRenamed={fileRenamed}
+              onDeleted={(path) => {
+                closeExplore([path]);
+                closeTabs([path]);
+                setLibraryPath((a) => (a === path ? null : a));
+              }}
+              onOpenIn={openIn}
+            />
+          </aside>
+          <section className="library-detail">
+            {libraryPath ? (
+              <LibraryDetail path={libraryPath} onOpenIn={openIn} />
+            ) : (
+              <div className="empty">
+                <h2>Library</h2>
+                <p>Click a file to see what is inside it; double-click to explore it.</p>
+              </div>
+            )}
+          </section>
+        </div>
+      )}
+
       <div
         className={"page" + (foldersShown ? "" : " no-folders")}
-        hidden={page !== "data"}
+        hidden={page !== "explore" && page !== "figure"}
         ref={pageRef}
         style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}
       >
@@ -738,14 +921,18 @@ function Shell() {
           {state && (
             <FolderPanel
               roots={state.roots}
-              activePath={active}
+              activePath={page === "explore" ? exploreActive : active}
               platform={state.platform}
               onRootsChanged={(roots) => setState({ ...state, roots })}
-              onSelect={selectFile}
-              onOpen={openFile}
+              onSelect={page === "explore" ? (path) => openExplore([path], false) : selectFile}
+              onOpen={page === "explore" ? (path) => openExplore([path], true) : openFile}
               onOpenInNewBrowserTab={openInNewBrowserTab}
               onRenamed={fileRenamed}
-              onDeleted={(path) => closeTabs([path])}
+              onDeleted={(path) => {
+                closeExplore([path]);
+                closeTabs([path]);
+              }}
+              onOpenIn={openIn}
             />
           )}
         </aside>
@@ -767,7 +954,60 @@ function Shell() {
             onKeyDown={onHandleKey}
           />
         )}
-        <main className="main">
+        <main className="main" hidden={page !== "explore"}>
+          <div className="tabbar">
+            <button
+              className="folders-toggle"
+              aria-pressed={foldersShown}
+              title={foldersShown ? "Hide the Folders panel (more room for plots)" : "Show the Folders panel"}
+              onClick={toggleFolders}
+            >
+              ◧ Folders
+            </button>
+            <div className="tabs" role="tablist" aria-label="Files in Explore">
+              {exploreTabs.map((t) => (
+                <div
+                  key={t.path}
+                  className={"tab" + (t.path === exploreActive ? " active" : "") + (t.pinned ? "" : " preview")}
+                  title={`${t.path}\nRight-click: close, open in Figure`}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setExploreMenu({ ...menuAt(e, []), path: t.path });
+                  }}
+                >
+                  <button
+                    role="tab"
+                    aria-selected={t.path === exploreActive}
+                    className="tab-label"
+                    onClick={() => setExploreActive(t.path)}
+                    onDoubleClick={() => openExplore([t.path], true)}
+                  >
+                    {baseName(t.path)}
+                  </button>
+                  <button className="tab-close" aria-label={`Close ${baseName(t.path)}`} onClick={() => closeExplore([t.path])}>
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+          {exploreMenuShown && <ContextMenu menu={exploreMenuShown} onClose={() => setExploreMenu(null)} />}
+          {exploreTabs.length === 0 && <EmptyMain hasRoots={!!state?.roots.length} where="explore" />}
+          {exploreTabs.map((t) => (
+            <div key={t.path} className="tab-body" hidden={t.path !== exploreActive}>
+              <ExploreTab
+                path={t.path}
+                onOpenInFigure={() => openIn(t.path, "figure")}
+                onError={(m) => toast(m, "error")}
+                onMenu={(e) => {
+                  e.preventDefault();
+                  setExploreMenu({ ...menuAt(e, []), path: t.path });
+                }}
+              />
+            </div>
+          ))}
+        </main>
+        <main className="main" hidden={page !== "figure"}>
           {/* The open-files bar. Right-click on a tab: that tab's menu; anywhere else on the bar,
               or the ⋯ button (always visible, outside the part that scrolls): the menu for all tabs. */}
           <div className="tabbar" onContextMenu={(e) => tabs.length > 0 && openTabMenu(e, null)}>
@@ -827,7 +1067,7 @@ function Shell() {
           </div>
           {tabMenuShown && <ContextMenu menu={tabMenuShown} onClose={closeTabMenu} />}
           {confirm && <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />}
-          {tabs.length === 0 && <EmptyMain hasRoots={!!state?.roots.length} />}
+          {tabs.length === 0 && <EmptyMain hasRoots={!!state?.roots.length} where="figure" />}
           {state &&
             tabs.map((t) => (
               <div key={t.path} className="tab-body" hidden={t.path !== active}>
@@ -856,6 +1096,7 @@ function Shell() {
                     onStateChange={(s) => tabStates.current.set(t.path, s)}
                     onMenu={(e) => openTabMenu(e, t.path)}
                     locked={locks.get(t.path)?.reason ?? null}
+                    onOpenInExplore={() => openIn(t.path, "explore")}
                   />
                 )}
               </div>
@@ -887,18 +1128,65 @@ function Shell() {
   );
 }
 
-function EmptyMain({ hasRoots }: { hasRoots: boolean }) {
+function EmptyMain({ hasRoots, where }: { hasRoots: boolean; where: "explore" | "figure" }) {
   return (
     <div className="empty">
       <h2>No file open</h2>
       {hasRoots ? (
-        <p>Click a file in the folder panel to see what is inside it, and double-click it to plot it.</p>
+        where === "explore" ? (
+          <p>Click a file in the folder panel to look at it, and double-click it to keep it open. Zoom with the wheel; click a point to read its value.</p>
+        ) : (
+          <p>Click a file in the folder panel to see what is inside it, and double-click it to plot it.</p>
+        )
       ) : (
         <p>
           Add a folder that contains <code>.lbd</code> files using <strong>Add folder</strong> on the left. You can also
           double-click an <code>.lbd</code> file on your computer to open it here.
         </p>
       )}
+    </div>
+  );
+}
+
+/** Library: what is inside the selected file, and where to open it. */
+function LibraryDetail({ path, onOpenIn }: { path: string; onOpenIn: (path: string, where: "explore" | "figure") => void }) {
+  const [info, setInfo] = useState<import("./api").FileInfo | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    setInfo(null);
+    setError(null);
+    if (fileKind(path) !== "lbd") return;
+    api
+      .file(path)
+      .then((i) => live && setInfo(i))
+      .catch((e) => live && setError((e as Error).message));
+    return () => {
+      live = false;
+    };
+  }, [path]);
+  const data = fileKind(path) === "lbd";
+  return (
+    <div className="file-view">
+      <div className="file-head">
+        <div>
+          <h1>{info?.title || baseName(path)}</h1>
+          <div className="muted small path" title={path}>
+            {path}
+          </div>
+        </div>
+        <div className="actions">
+          {data && (
+            <button className="primary" onClick={() => onOpenIn(path, "explore")}>
+              Open in Explore
+            </button>
+          )}
+          <button onClick={() => onOpenIn(path, "figure")}>{data ? "Open in Figure" : "Open"}</button>
+        </div>
+      </div>
+      {error && <div className="error-box">{error}</div>}
+      {data && !info && !error && <p className="muted">Reading…</p>}
+      {info && <FileDetails info={info} />}
     </div>
   );
 }

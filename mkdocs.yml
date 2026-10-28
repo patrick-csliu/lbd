@@ -141,8 +141,10 @@ nav:
       # gallery:end
   - LBD Viewer:
       - viewer/index.md
+      - Library: viewer/library.md
+      - Explore: viewer/explore.md
       - Folders and files: viewer/folders-and-files.md
-      - Plotting: viewer/plotting.md
+      - "Figure: plotting": viewer/plotting.md
       - Saving views and exporting: viewer/saving-and-exporting.md
       - Images and style files: viewer/images-and-style-files.md
       - Styles page: viewer/styles-page.md

@@ -41,6 +41,7 @@ from lbd.plot.units import prefix_scale  # noqa: E402
 
 from . import VERSION  # noqa: E402
 from . import files, images, scan, sdk  # noqa: E402
+from .catalog import Catalog, catalog_dir, misfit, structure  # noqa: E402
 from .explore import ExploreError, ExploreSession, Sessions  # noqa: E402
 from .pages import PageError, Pages, UnknownPage  # noqa: E402
 from .config import Config, ConfigError, Style, StyleError, from_dict  # noqa: E402
@@ -105,8 +106,16 @@ class AppState:
         self.check_host = check_host
         self.opened: Set[str] = set()
         self.explore = Sessions()           # the Explore views' sessions (explore.py)
+        self._catalog: Optional[Catalog] = None
         self.started = time.monotonic()
         self.last_heartbeat: Optional[float] = None
+
+    @property
+    def catalog(self) -> Catalog:
+        """What LBD remembers about files (catalog.py), next to the settings it belongs to."""
+        if self._catalog is None:
+            self._catalog = Catalog(catalog_dir(self.config.dir))
+        return self._catalog
 
     def open_file(self, path: str) -> str:
         p = Path(path).expanduser().resolve()
@@ -202,6 +211,7 @@ class ImportBody(_Body):
 class SettingsBody(_Body):
     default_style: Optional[str] = None
     open_files_in: Optional[str] = None   # "viewer" or "browser-tab" (config.OPEN_FILES_IN)
+    open_data_in: Optional[str] = None    # "explore" or "figure" (config.OPEN_DATA_IN)
     theme: Optional[str] = None           # "system", "light" or "dark" (config.THEMES)
 
 
@@ -256,9 +266,19 @@ class ExploreRenderBody(_Body):
     ylim: Optional[List[float]] = None
     stat: str = "max"                     # how a pixel shows several map cells: max, min, mean
     format: str = "raw"                   # "raw" RGBA pixels or "png"
+    settings: Optional[Dict[str, Any]] = None   # view settings: select, cmap, invert, scales, clim (explore.py)
     width: Optional[int] = None           # the panel's size now, if it changed since opening
     height: Optional[int] = None
     dpr: Optional[float] = None
+
+
+class RememberBody(_Body):
+    path: str
+    state: Dict[str, Any]                 # an Explore view: spec, view settings, zoom (opaque here)
+
+
+class ExploreSpecBody(_Body):
+    spec: Dict[str, Any]                  # the plot settings to show from now on (values, kind, axes, ...)
 
 
 class ExplorePickBody(_Body):
@@ -538,10 +558,13 @@ def create_app(state: AppState) -> FastAPI:
             s = cfg.settings()
             names = cfg.style_names()
             problems = cfg.problems()
+            if state.catalog.problem:                       # told once
+                problems.append(state.catalog.problem)
+                state.catalog.problem = None
         return {
             "version": VERSION, "lbd_version": lbd.FORMAT_VERSION,
             "roots": s["roots"], "default_style": s["default_style"], "styles": names,
-            "open_files_in": s["open_files_in"], "theme": s["theme"],
+            "open_files_in": s["open_files_in"], "open_data_in": s["open_data_in"], "theme": s["theme"],
             "platform": sys.platform, "config_dir": str(cfg.dir), "warnings": problems + warns,
         }
 
@@ -711,10 +734,46 @@ def create_app(state: AppState) -> FastAPI:
         s = _session(session_id)
         if body.width is not None and body.height is not None:
             s.resize(body.width, body.height, body.dpr if body.dpr is not None else s.dpr)
+        notes = s.apply(body.settings) if body.settings is not None else []
         data, meta = s.render(body.xlim, body.ylim, body.stat, body.format)
+        meta["notes"] = notes
         media = "image/png" if meta["format"] == "png" else "application/octet-stream"
         return Response(content=data, media_type=media,
                         headers={"X-LBD-Frame": json.dumps(meta), "Cache-Control": "no-store"})
+
+    @app.get("/api/explore/remembered")
+    def explore_remembered(path: str = Query(...)):
+        """The Explore view remembered for a file (LBD's database, never the file), if it still
+        fits the file; else a note saying why it doesn't."""
+        p = state.check_allowed(path)
+        rec = state.catalog.view(str(p))
+        if rec is None:
+            return {"state": None, "note": None}
+        reason = misfit(rec["structure"], structure(lbd.info(p)), rec["state"])
+        if reason:
+            return {"state": None, "note": f"The Explore view remembered for {p.name} no longer fits the file "
+                                            f"({reason}), so it starts afresh."}
+        return {"state": rec["state"], "note": None}
+
+    @app.put("/api/explore/remembered")
+    def explore_remember(body: RememberBody):
+        p = state.check_allowed(body.path)
+        state.catalog.remember(str(p), structure(lbd.info(p)), body.state)
+        return {"ok": True}
+
+    @app.delete("/api/explore/remembered")
+    def explore_forget(path: str = Query(...)):
+        state.catalog.forget(str(state.check_allowed(path)))
+        return {"ok": True}
+
+    @app.post("/api/explore/{session_id}/spec")
+    def explore_spec(session_id: str, body: ExploreSpecBody):
+        """Other plot settings for an open session (the data already read is kept)."""
+        s = _session(session_id)
+        with collect_warnings() as warns:
+            s.set_spec(body.spec)
+        return {"session": s.id, "spec": s.spec, "kind": s.kind,
+                "full": [list(s.full[0]), list(s.full[1])], "warnings": warns}
 
     @app.post("/api/explore/{session_id}/pick")
     def explore_pick(session_id: str, body: ExplorePickBody):
@@ -875,16 +934,19 @@ def create_app(state: AppState) -> FastAPI:
 
     @app.put("/api/settings")
     def put_settings(body: SettingsBody):
-        if body.default_style is None and body.open_files_in is None and body.theme is None:
-            raise HTTPException(400, "nothing to change: send default_style, open_files_in and/or theme")
+        if (body.default_style is None and body.open_files_in is None and body.open_data_in is None
+                and body.theme is None):
+            raise HTTPException(400, "nothing to change: send default_style, open_files_in, open_data_in and/or theme")
         if body.default_style is not None:
             cfg.set_default_style(body.default_style)
             state.pages.broadcast("styles_changed")
         if body.open_files_in is not None:
             cfg.set_open_files_in(body.open_files_in)
+        if body.open_data_in is not None:
+            cfg.set_open_data_in(body.open_data_in)
         if body.theme is not None:
             cfg.set_theme(body.theme)
-        if body.open_files_in is not None or body.theme is not None:
+        if body.open_files_in is not None or body.open_data_in is not None or body.theme is not None:
             state.pages.broadcast("settings_changed")      # every page shows the new setting
         return get_state()
 
@@ -925,6 +987,7 @@ def create_app(state: AppState) -> FastAPI:
             raise HTTPException(404, str(e))
         if _key(p) in state.opened:  # a file opened by double-click stays readable
             state.opened.add(_key(new))
+        state.catalog.renamed(str(p), str(new))       # its remembered Explore view follows it
         state.pages.broadcast("renamed", old=str(p), new=str(new))
         return {"path": str(new)}
 

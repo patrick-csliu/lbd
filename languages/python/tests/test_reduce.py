@@ -207,3 +207,16 @@ def test_the_nearest_point_is_found_in_pixels():
     assert nearest_point(x, ys, to_px, (31, 52)) == (1, 3)
     assert nearest_point(x, ys, to_px, (31, 99)) == (0, 3)
     assert nearest_point(x, ys, to_px, (500, 500)) is None
+
+
+def test_an_unsorted_curve_is_thinned_in_stored_order_keeping_extremes():
+    from lbd.plot.reduce import thin_in_order
+
+    t = np.linspace(0, 40 * np.pi, 1_000_000)
+    x, y = np.cos(t), np.sin(t) * np.linspace(0, 1, t.size)           # a spiral: x goes back and forth
+    y[777_777] = 3
+    xs, ys = thin_in_order(x, y, 2000)
+    assert len(ys) <= 2002 and np.max(ys) == 3                       # the spike stays
+    assert np.min(ys) == np.min(y)
+    small_x, small_y = thin_in_order(x[:500], y[:500], 2000)
+    assert np.array_equal(small_y, y[:500])                          # few points: unchanged

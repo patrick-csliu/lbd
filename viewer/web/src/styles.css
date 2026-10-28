@@ -304,10 +304,27 @@ details.group fieldset > .group-fields { margin-top: -4px; }
 .explore-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
 .explore-note { font-size: 12px; color: var(--muted); border: 1px solid var(--border); border-radius: 9px; padding: 1px 8px; }
 .explore-note.reduced { color: var(--text); background: var(--panel-2); }
-.explore-host { position: relative; height: max(320px, calc(100vh - 330px)); min-width: 0; overflow: hidden; }
+.explore-host { position: relative; height: max(300px, calc(100vh - 400px)); min-width: 0; overflow: hidden; }
 .explore-picture, .explore-overlay { position: absolute; left: 0; top: 0; }
 .explore-overlay { cursor: crosshair; touch-action: none; }
 .explore-status { position: absolute; left: 12px; top: 12px; }
 .explore-readout { display: flex; flex-direction: column; gap: 4px; min-height: 64px; }
 .explore-pick { font-size: 14px; }
 .mono { font-family: var(--mono); }
+
+/* Workspaces: Library (folders and a file's contents), Explore, Figure. */
+.pages.secondary { margin-left: 0; }
+.pages.secondary button { font-size: 13px; }
+.page.library { grid-template-columns: minmax(300px, 40%) 1fr; }
+.library-folders { background: var(--panel); border-right: 1px solid var(--border); overflow: auto; min-height: 0; }
+.library-detail { overflow: auto; min-height: 0; }
+
+/* Explore controls: chosen traces, colours, scales, typed limits. */
+.row-controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.axis-values { list-style: none; margin: 4px 0 0; padding: 0; max-height: 180px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+.axis-values li { display: flex; align-items: center; gap: 6px; padding: 1px 6px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.axis-values li span { cursor: pointer; flex: 1; user-select: none; }
+.axis-values li:not(.on) span { color: var(--muted); }
+.number-range input { width: 9ch; }
+.explore-limits { display: flex; flex-wrap: wrap; gap: 4px 18px; }
+.explore-limits .field { flex-direction: row; align-items: center; gap: 6px; }

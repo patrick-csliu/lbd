@@ -61,6 +61,9 @@ class Viewer:
         pages = Pages(ack_timeout=1, transfer_timeout=2, new_tab_timeout=3, offline_grace=2)
         self.state = AppState(cfg, token=TOKEN, port=self.port, pages=pages)
         cfg.add_root(str(data_dir))
+        # These tests are about files opened as figures (tabs that own their file, moving between
+        # pages); Explore has tests of its own (test_explore_e2e.py), which choose it.
+        cfg.set_open_data_in("figure")
         config = uvicorn.Config(create_app(self.state), host="127.0.0.1", port=self.port,
                                 log_level="warning", timeout_graceful_shutdown=1)
         self.server = uvicorn.Server(config)
@@ -106,12 +109,14 @@ def context(browser, viewer):
 
 @pytest.fixture
 def new_page(context, viewer):
-    """Open the viewer in a new browser tab; returns the Playwright page once it has its number."""
+    """Open the viewer in a new browser tab; returns the Playwright page once it has its number,
+    showing the Figure workspace (or `workspace`)."""
 
-    def open_page():
+    def open_page(workspace: str = "Figure"):
         page = context.new_page()
         page.goto(viewer.url)
         sync_api.expect(page).to_have_title(re.compile(r"Page \d+$"))
+        page.get_by_role("tab", name=workspace, exact=True).click()
         return page
 
     return open_page

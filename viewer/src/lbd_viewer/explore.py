@@ -29,19 +29,24 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import matplotlib
+import matplotlib.colors as mcolors
 import numpy as np
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 
 import lbd
 from lbd.plot import render as rnd
-from lbd.plot.reduce import STATS, MapPyramid, cell_edges, curve_minmax
+from lbd.plot.reduce import STATS, MapPyramid, cell_edges, curve_minmax, thin_in_order
 from lbd.plot.style import Style
 
 KINDS = ("curve", "heatmap")
+UNSORTED_LIMIT = 200_000   # a curve with unsorted x and more points than this is thinned for drawing
 MAX_DPR = 2.0
 PICK_RADIUS_PX = 12.0
 FORMATS = ("raw", "png")
+# Colour maps offered in the Explore view: perceptually even ones, a diverging one for signed data,
+# a cyclic one for phases. Any matplotlib colour map name is accepted.
+CMAPS = ("viridis", "plasma", "magma", "cividis", "gray", "RdBu", "twilight")
 
 
 class ExploreError(ValueError):
@@ -80,26 +85,41 @@ class ExploreSession:
         self.id = secrets.token_urlsafe(9)
         self.path, self.version, self.style = path, version, style
         self.last_used = time.monotonic()
-        header = lbd.info(path)
-        with warnings.catch_warnings():               # the same checks run again on the loaded data
-            warnings.simplefilter("ignore", rnd.RenderWarning)
-            resolved = rnd.resolve_spec(header, spec, warn_unused=False)
-        self.data = lbd.load(path, values=rnd.needed_values(header, resolved))
-        self.spec = rnd.resolve_spec(self.data, spec, warn_unused=False)
-        self.kind = self.spec["kind"]
-        if self.kind not in KINDS:
-            raise ExploreError(f"the Explore view shows curves and heat maps, not {self.kind} plots; "
-                               "use the Figure view for this plot")
+        self.header = lbd.info(path)
+        self.data = lbd.load(path, values=[])
         self.dpr = float(min(max(dpr, 1.0), MAX_DPR))
         dpi = 96 * self.dpr                           # 1 CSS pixel = 1/96 inch, as in browsers
-        with rnd.RENDER_LOCK, matplotlib.rc_context(style.to_rcparams()):
-            self.fig = Figure(figsize=(width / 96, height / 96), dpi=dpi, layout="constrained")
-            FigureCanvasAgg(self.fig)
+        self.fig = Figure(figsize=(width / 96, height / 96), dpi=dpi)
+        FigureCanvasAgg(self.fig)
+        self.set_spec(spec)
+
+    def set_spec(self, spec: Dict[str, Any]) -> None:
+        """Show other plot settings (values, kind, axes, slices, complex mode). The data already
+        read is kept; values not read yet are read now."""
+        with warnings.catch_warnings():               # the same checks run again on the loaded data
+            warnings.simplefilter("ignore", rnd.RenderWarning)
+            resolved = rnd.resolve_spec(self.header, spec, warn_unused=False)
+        needed = rnd.needed_values(self.header, resolved)
+        loaded = [n for n, v in self.data.values.items() if v.data is not None]
+        if not set(needed) <= set(loaded):
+            self.data = lbd.load(self.path, values=sorted(set(needed) | set(loaded)))
+        new = rnd.resolve_spec(self.data, spec, warn_unused=False)
+        if new["kind"] not in KINDS:
+            raise ExploreError(f"the Explore view shows curves and heat maps, not {new['kind']} plots; "
+                               "use the Figure view for this plot")
+        self.spec, self.kind = new, new["kind"]
+        with rnd.RENDER_LOCK, matplotlib.rc_context(self.style.to_rcparams()):
+            self.fig.clear()
+            self.fig.set_layout_engine("constrained")
             self.ax = self.fig.add_subplot()
             if self.kind == "curve":
                 self._setup_curves()
             else:
                 self._setup_map()
+            self.settings: Dict[str, Any] = {}           # view settings (apply), reset with the plot
+            self.visible = [True] * (len(self.model.lines) if self.kind == "curve" else 0)
+            self.base_scales = (self.ax.get_xscale(), self.ax.get_yscale())
+            self.full = self._full_view()
             # The layout is made for the whole data's tick labels (usually the widest)
             self.ax.set_xlim(*self.full[0])
             self.ax.set_ylim(*self.full[1])
@@ -137,9 +157,115 @@ class ExploreSession:
         self.full = ((float(self.x_edges[0]), float(self.x_edges[-1])), (float(self.y_edges[0]), float(self.y_edges[-1])))
 
     @staticmethod
-    def _padded(r: Tuple[float, float]) -> Tuple[float, float]:
-        pad = (r[1] - r[0]) * 0.05                      # matplotlib's default margin
+    def _padded(r: Tuple[float, float], log: bool = False) -> Tuple[float, float]:
+        """matplotlib's default margin of 5 %, on a log axis in decades."""
+        if log:
+            a, b = np.log10(r[0]), np.log10(r[1])
+            pad = (b - a) * 0.05
+            return 10 ** (a - pad), 10 ** (b + pad)
+        pad = (r[1] - r[0]) * 0.05
         return r[0] - pad, r[1] + pad
+
+    # -- view settings: how the same data is shown (never written into the file)
+
+    def apply(self, settings: Optional[Dict[str, Any]]) -> List[str]:
+        """Show the data with these view settings; returns notes for the user.
+
+        `select` {axis: [positions]}: which traces are drawn (curves: along the series axis) or
+        make the map (its vertical axis; left-out rows stay empty, so every row keeps its place).
+        `cmap` and `invert`: the map's colour map. `xscale`, `yscale`, `cscale`: "linear" or "log".
+        `clim` [from, to]: the colour range (None: from the data). Missing settings keep the plot's
+        own (its style and saved figure settings)."""
+        settings = dict(settings or {})
+        if settings == self.settings:
+            return []
+        for key in ("xscale", "yscale", "cscale"):
+            if settings.get(key, "linear") not in ("linear", "log"):
+                raise ExploreError(f"{key} must be 'linear' or 'log', not {settings[key]!r}")
+        cmap = settings.get("cmap")
+        if cmap is not None and cmap not in matplotlib.colormaps:
+            raise ExploreError(f"unknown colour map {cmap!r}; for example {', '.join(CMAPS)}")
+        clim = settings.get("clim") or [None, None]
+        if (not isinstance(clim, (list, tuple)) or len(clim) != 2
+                or any(v is not None and not isinstance(v, (int, float)) for v in clim)):
+            raise ExploreError("the colour range must be two numbers (or empty for automatic)")
+        if None not in clim and clim[0] >= clim[1]:
+            raise ExploreError("the colour range needs 'from' lower than 'to'")
+        notes: List[str] = []
+        axis = self.spec.get("series") if self.kind == "curve" else self.spec.get("y")
+        select = settings.get("select") or {}
+        chosen: Optional[set] = None
+        for name, positions in select.items():
+            if name != axis:
+                where = "the series axis" if self.kind == "curve" else "the map's vertical axis"
+                raise ExploreError(f"traces can be chosen along {where} ('{axis}') only, not '{name}'")
+            n = len(self.data.axes[name].data)
+            kept = [i for i in positions if isinstance(i, int) and 0 <= i < n]
+            if len(kept) < len(positions):
+                notes.append(f"{len(positions) - len(kept)} chosen positions of '{name}' no longer exist; left out")
+            chosen = set(kept)
+        with rnd.RENDER_LOCK, matplotlib.rc_context(self.style.to_rcparams()):
+            if self.kind == "curve":
+                per = len(self.data.axes[axis].data) if axis else 1
+                self.visible = [chosen is None or k % per in chosen for k in range(len(self.model.lines))]
+                for artist, shown in zip(self.lines, self.visible):
+                    artist.set_visible(shown)
+            else:
+                self._apply_map(settings, chosen, clim)
+            self.ax.set_xscale(settings.get("xscale", self.base_scales[0]))
+            self.ax.set_yscale(settings.get("yscale", self.base_scales[1]))
+            self.full = self._full_view()
+        self.settings = settings
+        return notes
+
+    def _apply_map(self, settings: Dict[str, Any], chosen: Optional[set], clim) -> None:
+        old = (self.settings.get("select") or {}).get(self.spec["y"])
+        if (None if old is None else set(old)) != chosen or not hasattr(self, "pyramid"):
+            z = self.model.z
+            if chosen is not None:                       # left-out rows are empty, in their place
+                z = z.copy()
+                z[[j for j in range(z.shape[0]) if j not in chosen], :] = np.nan
+            self.pyramid = MapPyramid(z, cell_edges(self.model.x), cell_edges(self.model.y))
+        name = settings.get("cmap") or self.model.cmap
+        if settings.get("invert"):
+            name = name[:-2] if name.endswith("_r") else name + "_r"
+        self.image.set_cmap(name)
+        if "cscale" in settings or any(v is not None for v in clim):
+            log = settings.get("cscale") == "log"
+            z = self.model.z[np.isfinite(self.model.z)]
+            if log:
+                z = z[z > 0]
+            lo = clim[0] if clim[0] is not None else (float(z.min()) if z.size else 1.0)
+            hi = clim[1] if clim[1] is not None else (float(z.max()) if z.size else 10.0)
+            if log and lo <= 0:
+                raise ExploreError("a log colour scale needs a range above 0")
+            norm = mcolors.LogNorm(lo, hi) if log else mcolors.Normalize(lo, hi)
+        else:
+            norm = self.model.norm                       # the style's (and the data's) own
+        self.image.set_norm(norm)
+        if self.image.colorbar is not None:
+            self.image.colorbar.update_normal(self.image)
+
+    def _full_view(self) -> Tuple[Tuple[float, float], Tuple[float, float]]:
+        """The limits that show all the data drawn now (the chosen traces; on a log axis the
+        positive part only)."""
+        xlog, ylog = self.ax.get_xscale() == "log", self.ax.get_yscale() == "log"
+
+        def rng(arrays, log):
+            arrays = [np.asarray(a, dtype=float) for a in arrays]
+            if log:
+                arrays = [a[a > 0] for a in arrays]
+            return _finite_range(arrays)
+
+        if self.kind == "heatmap":
+            xe, ye = self.x_edges, self.y_edges
+            return (rng([xe], xlog), rng([ye], ylog))
+        shown = [k for k, v in enumerate(self.visible) if v] or list(range(len(self.model.lines)))
+        x = rng([self.model.xs[k] for k in shown], xlog)
+        m = self.model
+        if m.ylim and None not in m.ylim and not ylog:
+            return x, m.ylim
+        return x, self._padded(rng([m.lines[k][0] for k in shown], ylog), ylog)
 
     # -- drawing
 
@@ -216,13 +342,23 @@ class ExploreSession:
             else:
                 ys = [y for y, _ in self.model.lines]
                 lines: List[Tuple[np.ndarray, np.ndarray]] = [None] * len(ys)   # type: ignore[list-item]
-                reduced = unsorted = False
+                reduced = unsorted = thinned = False
                 for x, ks, is_sorted in self.x_groups:
+                    for k in ks:                         # left-out traces: nothing to draw
+                        lines[k] = (x[:0], ys[k][:0])
+                    ks = [k for k in ks if self.visible[k]]
+                    if not ks:
+                        continue
                     if is_sorted:
                         out, red = curve_minmax(x, [ys[k] for k in ks], pxe)
                         reduced |= red
                     else:
-                        out, unsorted = [(x, ys[k]) for k in ks], True
+                        unsorted = True
+                        if x.size > UNSORTED_LIMIT:              # thinned in stored order (drawing only)
+                            out = [thin_in_order(x, ys[k], 4 * w) for k in ks]
+                            thinned = True
+                        else:
+                            out = [(x, ys[k]) for k in ks]
                     for k, xy in zip(ks, out):
                         lines[k] = xy
                 for artist, (x, y) in zip(self.lines, lines):
@@ -230,7 +366,8 @@ class ExploreSession:
                 self.last_lines = lines
                 note = "min and max per pixel column" if reduced else "every point shown"
                 if unsorted:
-                    note += "; x is not sorted: drawn as stored"
+                    note += ("; x is not sorted: drawn in stored order, thinned to the lowest and highest "
+                             "point of each stretch" if thinned else "; x is not sorted: drawn as stored")
             t2 = time.perf_counter()
             self.fig.canvas.draw()
             if not _again and self._spills():
@@ -330,7 +467,10 @@ class ExploreSession:
         m = self.model
         best = None                                   # (distance², line, point index, x px, y px)
         for x, ks, is_sorted in self.x_groups:
+            ks = [k for k in ks if self.visible[k]]      # only the traces drawn can be picked
             idx = self._near(x, is_sorted, px)
+            if not ks:
+                continue
             if not idx.size:
                 continue
             ys = np.stack([np.asarray(m.lines[k][0], dtype=float)[idx] for k in ks])   # lines × points

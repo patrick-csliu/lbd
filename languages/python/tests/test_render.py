@@ -554,3 +554,23 @@ def lp_style():
     import lbd.plot as lp
 
     return lp.load_style()
+
+
+def test_unwrapped_phase_has_no_jumps_and_skips_missing_points():
+    phase = np.linspace(0, 6 * np.pi, 50)
+    z = np.exp(1j * phase)
+    z[20] = np.nan
+    y, label, unit = rnd.apply_complex(z, "S21", "", "phase_unwrap")
+    assert unit == "rad" and label == "arg S21"
+    ok = np.isfinite(y)
+    assert np.isnan(y[20]) and ok.sum() == 49
+    assert np.allclose(y[ok], phase[ok])                           # continuous, also after the gap
+    deg, _, unit = rnd.apply_complex(z, "S21", "", "phase_deg_unwrap")
+    assert unit == "°" and np.allclose(deg[ok], np.degrees(phase[ok]))
+
+
+def test_a_map_unwraps_along_its_horizontal_axis():
+    d = sweep()                                                      # S21 = exp(i·p·f·1e-10), rows = power
+    r = resolve_spec(d, {"kind": "heatmap", "values": ["S21"], "complex": "phase_unwrap"})
+    m = rnd.prepare_map(d, r, lp_style())
+    assert np.all(np.abs(np.diff(m.z, axis=1)) < np.pi)            # no 2π jumps along frequency

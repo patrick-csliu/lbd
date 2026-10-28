@@ -1,16 +1,24 @@
 # LBD Viewer
 
-LBD Viewer lists the `.lbd` files in your folders and plots them. It also shows your figures
-and style files. It runs on your own computer and shows its window in your web browser.
-Nothing is uploaded anywhere.
+LBD Viewer lists the `.lbd` files in your folders, lets you explore their data (zoom, read
+values, step through traces) and makes figures of them. It also shows your figures and style
+files. It runs on your own computer and shows its window in your web browser. Nothing is
+uploaded anywhere.
+
+It has three workspaces, switched at the top left:
+
+- **[Library](library.md):** find files: your folders, and what is inside a file.
+- **[Explore](explore.md):** look at data. The default: double-clicking a data file opens it here.
+- **Figure:** make a figure to export, with its style ([Plotting](plotting.md),
+  [Saving views and exporting](saving-and-exporting.md)). The window below shows Figure.
 
 ## The window at a glance
 
 ![LBD Viewer with a data file open: numbered parts](img/overview.png)
 
-1. **Pages of the viewer:** **Data** (your files and plots), **Styles** (how figures look) and
-   **Language modules** (installing the module for each programming language you use). See
-   [The viewer's pages](#the-viewers-pages) below.
+1. **Workspaces and pages:** **Library**, **Explore** and **Figure** on the left; **Styles** (how
+   figures look) and **Language modules** (installing the module for each programming language
+   you use) on the right. See [The viewer's pages](#the-viewers-pages) below.
 2. **Page number:** this browser tab's number. You can open the viewer in several browser tabs.
    Each is a numbered *page*, and you can move open files between them. See
    [Several browser tabs](folders-and-files.md#several-browser-tabs).
@@ -18,7 +26,8 @@ Nothing is uploaded anywhere.
    [Settings](#settings).
 4. **Help** opens this documentation. It is part of the viewer, so it works without internet.
 5. **Folder panel:** the folders you added, with their data files, style files and images.
-   Click a file to look at it, double-click to plot it. See [Folders and files](folders-and-files.md).
+   Click a file to look at it, double-click to keep it open (here, in Figure: to plot it). See
+   [Folders and files](folders-and-files.md).
 6. **Tabs:** the files open in this page. **◧ Folders** at the left hides the folder panel for
    more room. Right-click a tab to close it or move it to another page. See
    [Tabs](folders-and-files.md#tabs).
@@ -49,12 +58,13 @@ Only one copy of the viewer runs at a time. Opening more files adds them to the 
 
 ![The ⚙ settings](img/settings.png){ width="380" }
 
-**⚙** at the top right holds two settings. They are saved, and apply to every viewer tab and to
-the next start:
+**⚙** at the top right holds three settings. They are saved, and apply to every viewer tab and
+to the next start:
 
 1. **Files opened from Explorer / Finder:** *in the open viewer (as a tab)*, which is the
    default, or *in a new browser tab* every time.
-2. **Theme:**
+2. **Data files opened from Explorer / Finder open in** *Explore* (the default) or *Figure*.
+3. **Theme:**
     - **System** follows the light or dark mode of Windows, macOS or Linux, also when it changes
       while the viewer is open.
     - **Light** and **Dark** stay as chosen.
@@ -66,7 +76,9 @@ the next start:
 
 | Page | What it does |
 |---|---|
-| **Data** | The folder panel and the open files: [Folders and files](folders-and-files.md), [Plotting](plotting.md), [Saving views and exporting](saving-and-exporting.md). |
+| **Library** | Your folders, and what is inside the file you click: [Library](library.md), [Folders and files](folders-and-files.md). |
+| **Explore** | Look at data: zoom, read values, choose traces: [Explore](explore.md). |
+| **Figure** | The figures of your files, their styles and export: [Plotting](plotting.md), [Saving views and exporting](saving-and-exporting.md). |
 | **Styles** | Create and edit style presets, and choose the default one: [Styles page](styles-page.md). |
 | **Language modules** | How to install the module for each programming language on this computer: [Language modules page](language-modules.md). |
 | **Help** | Opens this documentation in a new tab. |

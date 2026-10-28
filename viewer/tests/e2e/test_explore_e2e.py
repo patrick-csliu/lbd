@@ -1,12 +1,15 @@
-"""The Explore view (preview) in a real browser: the server's picture appears, a click reads the
-stored value, the wheel zooms, a double-click shows everything again, and one session is opened."""
+"""The Explore workspace in a real browser: a file opens there from the folders, the server's
+picture appears, a click reads the stored value, the wheel zooms, a double-click shows everything
+again, the plot settings change in the same session; and the Library and Figure lead there."""
 
 import json
+
+import httpx
 
 import lbd
 import numpy as np
 import pytest
-from pageui import open_file
+from pageui import deliver, row
 from playwright.sync_api import Page, expect
 
 
@@ -21,6 +24,11 @@ def small_map(viewer):
     d.save(viewer.data / "small_map.lbd")
 
 
+def explore(page: Page):
+    """The Explore workspace's area (Figure's is hidden next to it)."""
+    return page.locator("main:not([hidden])")
+
+
 def frames(page: Page, action):
     """Do `action` and return the mapping (X-LBD-Frame) of the picture it brings."""
     with page.expect_response(lambda r: "/api/explore/" in r.url and r.url.endswith("/render")) as resp:
@@ -30,7 +38,7 @@ def frames(page: Page, action):
 
 def at(page: Page, meta, x, y):
     """Page coordinates of a data point, from a picture's mapping (linear axes)."""
-    box = page.locator(".explore-overlay").bounding_box()
+    box = explore(page).locator(".explore-overlay").bounding_box()
     d = meta["dpr"]
     left, top, w, h = (v / d for v in meta["plot"])
     (x0, x1), (y0, y1) = meta["xlim"], meta["ylim"]
@@ -38,23 +46,125 @@ def at(page: Page, meta, x, y):
 
 
 def test_explore_reads_zooms_and_resets(small_map, new_page):
-    page = new_page()
+    page = new_page("Explore")
     opened = []
     page.on("request", lambda r: opened.append(r) if r.url.endswith("/api/explore") and r.method == "POST" else None)
-    open_file(page, "small_map.lbd")
-    meta = frames(page, lambda: page.get_by_role("button", name="Explore (preview)").click())
-    expect(page.locator(".explore-note")).to_have_text("every cell shown")
+    meta = frames(page, lambda: row(page, "small_map.lbd").dblclick())
+    expect(explore(page).locator(".explore-note")).to_have_text("every cell shown")
     assert meta["xlim"] == pytest.approx([0.5, 20]) and meta["ylim"] == pytest.approx([5, 45])
 
     page.mouse.click(*at(page, meta, 8, 30))
-    expect(page.locator(".explore-pick")).to_contain_text("13 at x = 8, y = 30")
+    expect(explore(page).locator(".explore-pick")).to_contain_text("13 at x = 8, y = 30")
 
-    x, y = at(page, meta, 8, 30)
-    page.mouse.move(x, y)
+    page.mouse.move(*at(page, meta, 8, 30))
     zoomed = frames(page, lambda: page.mouse.wheel(0, -600))
     assert zoomed["xlim"][1] - zoomed["xlim"][0] < 19.5     # zoomed in ...
     assert zoomed["xlim"][0] < 8 < zoomed["xlim"][1]        # ... around the mouse
 
-    full = frames(page, lambda: page.locator(".explore-overlay").dblclick(position={"x": 5, "y": 5}))
+    full = frames(page, lambda: explore(page).locator(".explore-overlay").dblclick(position={"x": 5, "y": 5}))
     assert full["xlim"] == pytest.approx([0.5, 20])
     assert len(opened) == 1                                 # one session for all of it
+
+
+def test_other_plot_settings_redraw_in_the_same_session(small_map, new_page):
+    page = new_page("Explore")
+    opened = []
+    page.on("request", lambda r: opened.append(r) if r.url.endswith("/api/explore") and r.method == "POST" else None)
+    frames(page, lambda: row(page, "small_map.lbd").dblclick())
+    kind = explore(page).get_by_label("Plot type")
+    expect(kind).to_have_value("heatmap")
+    meta = frames(page, lambda: kind.select_option("curve"))
+    expect(explore(page).get_by_label("One curve per")).to_have_value("y")
+    assert meta["xlim"] == pytest.approx([1, 16])           # the curves' own range
+    assert len(opened) == 1
+
+
+def test_the_library_shows_a_file_and_opens_it(small_map, new_page):
+    page = new_page("Library")
+    row(page, "small_map.lbd").click()
+    detail = page.locator(".library-detail")
+    expect(detail.locator("h1")).to_have_text("Small map")
+    expect(detail).to_contain_text("value")
+    frames(page, lambda: detail.get_by_role("button", name="Open in Explore").click())
+    expect(page.get_by_role("tab", name="Explore", exact=True)).to_have_attribute("aria-selected", "true")
+    expect(explore(page).locator(".tab-label")).to_have_text(["small_map.lbd"])
+
+
+def test_a_figure_opens_in_explore_and_back(small_map, new_page):
+    page = new_page("Figure")
+    row(page, "small_map.lbd").dblclick()
+    figure = explore(page)
+    frames(page, lambda: figure.get_by_role("button", name="Open in Explore").click())
+    expect(page.get_by_role("tab", name="Explore", exact=True)).to_have_attribute("aria-selected", "true")
+    explore(page).get_by_role("button", name="Open in Figure").click()
+    expect(page.get_by_role("tab", name="Figure", exact=True)).to_have_attribute("aria-selected", "true")
+
+
+def test_files_from_explorer_open_in_the_workspace_set(viewer, small_map, new_page):
+    page = new_page("Library")
+    # as the settings menu does: every page is told
+    httpx.put(f"http://127.0.0.1:{viewer.port}/api/settings", headers={"X-LBD-Token": viewer.state.token},
+              json={"open_data_in": "explore"}).raise_for_status()
+    deliver(viewer, "small_map.lbd")
+    expect(page.get_by_role("tab", name="Explore", exact=True)).to_have_attribute("aria-selected", "true")
+    expect(explore(page).locator(".tab-label")).to_have_text(["small_map.lbd"])
+    # Explore keeps no hold on the file: the Figure workspace of any page can still open it.
+    assert all(not p["files"] for p in viewer.state.pages.page_list())
+
+
+@pytest.fixture
+def sweep(viewer):
+    """Five traces of 50 points, trace k at height k."""
+    d = lbd.Dataset(title="Sweep")
+    d.add_axis("power", [-40.0, -30.0, -20.0, -10.0, 0.0])
+    d.add_axis("t", np.arange(50.0))
+    d.add_value("v", np.repeat(np.arange(5.0)[:, None], 50, axis=1), axes=["power", "t"])
+    d.plot = {"kind": "curve", "x": "t", "series": "power"}
+    d.save(viewer.data / "sweep.lbd")
+
+
+def test_chosen_traces_typed_limits_and_a_swap(sweep, small_map, new_page):
+    page = new_page("Explore")
+    frames(page, lambda: row(page, "sweep.lbd").dblclick())
+    values = explore(page).locator(".axis-values span")
+    frames(page, lambda: values.nth(1).click())                       # only power -30
+    frames(page, lambda: values.nth(3).click(modifiers=["ControlOrMeta"]))
+    expect(explore(page).locator(".axis-select legend")).to_contain_text("2 of 5")
+    box = explore(page).get_by_label("Horizontal from")
+    box.fill("10")
+    meta = frames(page, lambda: box.press("Enter"))
+    assert meta["xlim"][0] == pytest.approx(10)
+    # a map: swapping its axes
+    frames(page, lambda: row(page, "small_map.lbd").dblclick())
+    meta = frames(page, lambda: explore(page).get_by_role("button", name="Swap the axes").click())
+    assert meta["xlim"] == pytest.approx([5, 45]) and meta["ylim"] == pytest.approx([0.5, 20])
+
+
+def test_reopening_a_file_shows_what_was_explored(sweep, viewer, new_page):
+    page = new_page("Explore")
+    frames(page, lambda: row(page, "sweep.lbd").dblclick())
+    frames(page, lambda: explore(page).locator(".axis-values span").nth(4).click())
+    page.wait_for_timeout(1500)                                       # remembered a moment later
+    page.reload()
+    frames(page, lambda: row(page, "sweep.lbd").dblclick())
+    expect(explore(page).locator(".axis-select legend")).to_contain_text("1 of 5")
+    # remembered by LBD, not in the file
+    assert lbd.load(viewer.data / "sweep.lbd").plot == {"kind": "curve", "x": "t", "series": "power"}
+
+
+def test_a_file_that_grows_keeps_the_zoom(sweep, viewer, new_page):
+    page = new_page("Explore")
+    meta = frames(page, lambda: row(page, "sweep.lbd").dblclick())
+    page.mouse.move(*at(page, meta, 25, 2))
+    zoomed = frames(page, lambda: page.mouse.wheel(0, -400))
+    # the program writing the file adds two traces
+    d = lbd.Dataset(title="Sweep")
+    d.add_axis("power", [-40.0, -30.0, -20.0, -10.0, 0.0, 10.0, 20.0])
+    d.add_axis("t", np.arange(50.0))
+    d.add_value("v", np.repeat(np.arange(7.0)[:, None], 50, axis=1), axes=["power", "t"])
+    d.plot = {"kind": "curve", "x": "t", "series": "power"}
+    with page.expect_response(lambda r: r.url.endswith("/api/explore") and r.request.method == "POST", timeout=15_000):
+        d.save(viewer.data / "sweep.lbd")
+    again = frames(page, lambda: None)
+    assert again["xlim"] == pytest.approx(zoomed["xlim"])           # the zoom stayed
+    expect(explore(page).locator(".axis-select legend")).to_contain_text("all 7")

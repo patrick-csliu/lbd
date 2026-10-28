@@ -223,3 +223,10 @@ def test_open_files_in_setting(api):
     r = api.put("/api/settings", json={"open_files_in": "popup"})
     assert r.status_code == 400 and "viewer, browser-tab" in r.json()["detail"]
     assert api.put("/api/settings", json={}).status_code == 400
+
+
+def test_open_data_in_setting(api):
+    assert api.get("/api/state").json()["open_data_in"] == "explore"
+    assert api.put("/api/settings", json={"open_data_in": "figure"}).json()["open_data_in"] == "figure"
+    r = api.put("/api/settings", json={"open_data_in": "library"})
+    assert r.status_code == 400 and "explore, figure" in r.json()["detail"]

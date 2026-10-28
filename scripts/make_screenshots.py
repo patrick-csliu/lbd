@@ -208,10 +208,12 @@ def region(page: Page, selector: str, pad: int = 12, nth: int = 0, extra_right: 
             "height": min(SIZE["height"] - y, box["height"] + 2 * pad + extra_bottom)}
 
 
-def fresh(page: Page, url: str) -> None:
-    """A new page with nothing open (tabs are not restored)."""
+def fresh(page: Page, url: str, workspace: str = "Figure") -> None:
+    """A new page with nothing open (tabs are not restored), showing a workspace (most shots are
+    of Figure)."""
     page.goto(url)
     page.locator(".page-badge").wait_for()
+    page.get_by_role("tab", name=workspace, exact=True).click()
     page.wait_for_timeout(500)
 
 
@@ -235,7 +237,7 @@ def overview(page: Page, url: str, ctx) -> None:
         (3, ".settings", 0, "b"),
         (4, ".help-button", 0, "b"),
         (5, ".sidebar", 0, "r"),
-        (6, ".tabs .tab", 0, "b"),
+        (6, "main:not([hidden]) .tabs .tab", 0, "b"),
         (7, ".tab-body:not([hidden]) .file-head", 0, "r"),
         (8, ".tab-body:not([hidden]) .controls", 0, "tr"),
         (9, ".tab-body:not([hidden]) .figure-toolbar", 0, "b"),
@@ -243,6 +245,39 @@ def overview(page: Page, url: str, ctx) -> None:
         (11, ".tab-body:not([hidden]) .save-row", 0, "r"),
     ])
     save(page, VIEWER_IMG / "overview.png")
+
+
+@shot
+def explore(page: Page, url: str, ctx) -> None:
+    fresh(page, url, "Explore")
+    page.locator(".row-label", has_text="sweep.lbd").first.dblclick()
+    host = page.locator("main:not([hidden]) .explore-overlay")
+    page.locator("main:not([hidden]) .explore-readout .mono").wait_for()
+    page.wait_for_timeout(800)
+    box = host.bounding_box()
+    page.mouse.click(box["x"] + box["width"] * 0.45, box["y"] + box["height"] * 0.5)   # read a cell
+    page.locator("main:not([hidden]) .explore-pick").wait_for()
+    page.wait_for_timeout(500)
+    mark(page, [
+        (1, ".pages", 0, "b"),
+        (2, "main:not([hidden]) .tabs .tab", 0, "b"),
+        (3, "main:not([hidden]) .controls .field", 0, "r"),
+        (4, "main:not([hidden]) .axis-select", 0, "r"),
+        (5, "main:not([hidden]) .explore-note", 0, "b"),
+        (6, "main:not([hidden]) .explore-host", 0, "tr"),
+        (7, "main:not([hidden]) .explore-pick", 0, "b"),
+    ])
+    save(page, VIEWER_IMG / "explore.png")
+
+
+@shot
+def library(page: Page, url: str, ctx) -> None:
+    fresh(page, url, "Library")
+    page.locator(".library-folders .row-label", has_text="sweep.lbd").first.click()
+    page.locator(".library-detail h1").wait_for()
+    page.wait_for_timeout(500)
+    mark(page, [])                              # no markers; the example path
+    save(page, VIEWER_IMG / "library.png")
 
 
 @shot
@@ -354,6 +389,7 @@ def settings(page: Page, url: str, ctx) -> None:
     mark(page, [
         (1, ".settings-popover .settings-title", 0, "L"),
         (2, ".settings-popover .settings-title", 1, "L"),
+        (3, ".settings-popover .settings-title", 2, "L"),
     ])
     box = pop.bounding_box()
     save(page, VIEWER_IMG / "settings.png", clip={"x": box["x"] - 48, "y": 0, "width": SIZE["width"] - box["x"] + 48,
@@ -364,7 +400,7 @@ def settings(page: Page, url: str, ctx) -> None:
 def styles_page(page: Page, url: str, ctx) -> None:
     fresh(page, url)
     open_file(page, "sweep.lbd")               # the preview shows the open file
-    page.get_by_role("tab", name="Styles").click()
+    page.get_by_role("button", name="Styles", exact=True).click()
     page.locator(".style-editor").wait_for()
     page.locator(".preview img").wait_for()
     page.wait_for_timeout(800)
@@ -381,7 +417,7 @@ def styles_page(page: Page, url: str, ctx) -> None:
 @shot
 def language_modules(page: Page, url: str, ctx) -> None:
     fresh(page, url)
-    page.get_by_role("tab", name="Language modules").click()
+    page.get_by_role("button", name="Language modules", exact=True).click()
     page.locator(".sdk-page").wait_for()
     page.wait_for_timeout(500)
     # Shown as an installed viewer shows it: its module folder, not this checkout's.

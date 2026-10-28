@@ -31,7 +31,7 @@ def test_right_click_on_the_empty_bar(viewer, new_page):
     one = new_page()
     open_file(one, "a.lbd")
     open_file(one, "b.lbd")
-    strip = one.locator(".tabs")
+    strip = one.locator("main:not([hidden]) .tabs")       # the Figure workspace's tab row
     box = strip.bounding_box()
     strip.click(button="right", position={"x": box["width"] - 10, "y": box["height"] / 2})
     expect(menu(one, "Close all")).to_be_visible()

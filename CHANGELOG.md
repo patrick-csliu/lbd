@@ -5,6 +5,40 @@ The file format has its own version (`lbd_version`, currently 1.0).
 
 ## 1.3.0 (in development)
 
+**Changes to how things behave** (read these when upgrading)
+
+- The viewer has three workspaces, switched at the top left: **Library** (find files), **Explore**
+  (look at data) and **Figure** (what the Data page was: figures, styles, export). Double-clicking
+  a data file opens it in Explore now; data files opened from Explorer / Finder too, unless
+  **⚙ → Data files … open in → Figure** is chosen. **Styles** and **Language modules** moved to
+  the right of the header. Each browser tab keeps the workspace it shows across a reload.
+
+**Viewer**
+
+- **Explore**: zoom with the wheel (around the mouse), drag a box, pan with the right or middle
+  button, double-click for everything; click a point or cell to read its stored value. Curves or
+  maps, the values, axes, one curve per …, complex modes and sliders, typed limits, log scales,
+  colour maps (with invert, a log colour scale and a colour range), and a list to choose which
+  traces are drawn (in a map, left-out rows stay empty in their place). Drawn by the same engine
+  as the figures, so both look alike.
+- Large data stays fast and honest: a map with more cells than the screen has pixels shows the
+  max, min or mean of the cells under each pixel (chosen above the plot; a single hot cell stays
+  visible with max), and curves keep the lowest and highest point of each pixel column, so a
+  one-point spike shows. The note above the plot says what is shown.
+- Explore remembers, per file, what you showed (plot, chosen traces, colours, scales, zoom), in
+  the viewer's own database on this computer, never in the file. **Forget this view** starts
+  afresh. A file that grows while it is shown (a running measurement) keeps the zoom and choices.
+- **Library**: your folders, and what is inside the file you click; open it in Explore or
+  Figure. The folder panel's right-click menu has **Open in Explore** and **Open in Figure**.
+
+**Plotting (Figure, `lbd.plot`)**
+
+- Curves can use a value as the horizontal axis (one with the same axes as the plotted value):
+  each trace is drawn at its own x, e.g. a frequency span that changes with power.
+- Complex modes `phase_unwrap` and `phase_deg_unwrap`: the phase without its 2π jumps along the
+  horizontal axis (missing points are skipped).
+- New module `lbd.plot.reduce`: reduce maps and curves to a screen's pixels without losing peaks.
+
 ## 1.2.0 (2026-10-28)
 
 **Changes to how things behave** (read these when upgrading)

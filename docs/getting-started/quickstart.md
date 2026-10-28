@@ -78,7 +78,9 @@ temperature. See [Concepts](concepts.md) for types, names and units.
 
 ## 2. Open it
 
-**Double-click `sweep.lbd`.** LBD Viewer opens it in your browser:
+**Double-click `sweep.lbd`.** LBD Viewer opens it in your browser, in **Explore**, where you can
+zoom in and read values ([Explore](../viewer/explore.md)). To make a figure, press **Open in
+Figure** at the top:
 
 ![sweep.lbd open in LBD Viewer](img/quickstart-open.png)
 

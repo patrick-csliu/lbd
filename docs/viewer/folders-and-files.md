@@ -10,7 +10,8 @@ The folder panel lists folders you choose, and inside them every subfolder and t
 2. **⊟** closes all folders, **⟳** rereads them, **+ Add folder** adds one.
 3. **A folder you added.** Its **×** removes it from the list (no files are deleted).
 4. **A subfolder:** click to open or close it.
-5. **A file.** The icon shows its kind (below). Click to look at it, double-click to plot it.
+5. **A file.** The icon shows its kind (below). Click to look at it, double-click to keep it
+   open: in Explore to explore it, in Figure to plot it.
 6. **The right-click menu** of a file: show it in Explorer, copy its path, open it in a new
    browser tab, rename it, move it to the Recycle Bin.
 
@@ -75,7 +76,7 @@ double-clicking or from the command line.
 | Action on a file | Result |
 |---|---|
 | **Single-click** (or Space) | Opens the file in a *preview tab*, whose name is in italics. For data files it shows the details. The next single-click replaces the preview tab, so browsing doesn't pile up tabs. |
-| **Double-click** (or Enter), or the **Plot** button | Keeps the tab; data files are plotted. |
+| **Double-click** (or Enter), or the **Plot** button | Keeps the tab. In [Explore](explore.md) the data is shown to explore; in Figure it is plotted as a figure. |
 
 Click a tab to switch to it, double-click a preview tab to keep it, and close a tab with its
 **×**. Each tab keeps its own plot settings while it is open. Keeping several files in tabs is
@@ -112,9 +113,13 @@ allow it, its tab title flashes ("● 1 file arrived"). With no page open, a new
 opens. To get a new browser tab every time instead, choose it under **⚙** at the top right:
 *Files opened from Explorer / Finder: in a new browser tab*.
 
-**A file is open in one page at a time.** So two pages can never hold different unsaved
-settings for the same file. Opening a file that another page has asks **Show it in Page N**,
-and a file from Explorer that is already open is shown in its page.
+**A file is open in Figure in one page at a time.** So two pages can never hold different
+unsaved settings for the same file. Opening a file that another page has asks **Show it in Page
+N**, and a file from Explorer that is already open is shown in its page. [Explore](explore.md)
+tabs don't count: Explore never writes into a file, so any page can explore any file, also
+while another page has it in Figure. (Two pages exploring one file remember what the last one
+showed.) To show an Explore tab in another browser tab, right-click it → **Open in a new
+browser tab**.
 
 ![A tab's right-click menu with Move to Page 2](img/tabs-menu.png)
 

@@ -582,8 +582,8 @@ def plot(data, kind: Optional[str] = None, values: Union[None, str, Sequence[str
         Apply the style changes saved in the dataset (`d.style`) on top of `style`, as the
         viewer does (default). `False` uses `style` alone.
     **spec
-        Plot settings: `complex` (`abs`, `db`, `phase`, `phase_deg`, `real`, `imag`, and `iq`
-        for scatter), `x`, `y`, `series`, `color`, `index`, `x_scale`, `y_scale`, `title`,
+        Plot settings: `complex` (`abs`, `db`, `phase`, `phase_deg`, `phase_unwrap`,
+        `phase_deg_unwrap`, `real`, `imag`, and `iq` for scatter), `x`, `y`, `series`, `color`, `index`, `x_scale`, `y_scale`, `title`,
         `x_label`, `y_label`, `z_label`. See the plot settings page of the documentation.
 
     Returns
