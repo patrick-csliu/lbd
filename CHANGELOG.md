@@ -66,6 +66,8 @@ The file format has its own version (`lbd_version`, currently 1.0).
 - Complex modes `phase_unwrap` and `phase_deg_unwrap`: the phase without its 2π jumps along the
   horizontal axis (missing points are skipped).
 - New module `lbd.plot.reduce`: reduce maps and curves to a screen's pixels without losing peaks.
+- Choosing the saved "one curve per" axis (or a map's vertical axis) as the horizontal axis swaps
+  the two, instead of warning that the saved view can't be used.
 
 ## 1.2.0 (2026-10-28)
 

@@ -265,7 +265,12 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
             _warn(f"a heat map shows one value; {values[1:]} ignored", RenderWarning)
         out["values"] = values[:1]
         rest = [a for a in axes if a != x]
-        y = pick("y", lambda v: _pick(v, rest, role="vertical axis"), ([a for a in rest if a in swept] or rest)[-1])
+        y_default = ([a for a in rest if a in swept] or rest)[-1]
+        if explicit("x") and not explicit("y") and file_spec.get("y") == x:
+            # x chosen now is the saved vertical axis: they swap
+            y = file_spec.get("x") if file_spec.get("x") in rest else y_default
+        else:
+            y = pick("y", lambda v: _pick(v, rest, role="vertical axis"), y_default)
         out["y"] = y
         keep.append(y)
     else:
@@ -281,7 +286,12 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
             if series != "none":
                 # by default one curve per swept axis; a single-point axis is a fixed parameter
                 default = next((a for a in others if a in swept), None)
-                series = pick("series", lambda v: _pick(v, others, role="series"), default)
+                saved_x = file_spec.get("x")
+                if explicit("x") and not explicit("series") and file_spec.get("series") == x:
+                    # x chosen now is the saved series: they swap (the saved x becomes the series)
+                    series = saved_x if saved_x in others else default
+                else:
+                    series = pick("series", lambda v: _pick(v, others, role="series"), default)
                 if series is not None:
                     out["series"] = series
                     keep.append(series)

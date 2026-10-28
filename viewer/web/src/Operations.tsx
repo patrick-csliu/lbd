@@ -214,7 +214,11 @@ export default function Operations({ kind, xLabel, tracesLabel, ops, on, info, o
                   <span className="muted small">{alongText(o.along ?? k?.along[0] ?? "x")}</span>
                 )}
                 {o.op === "smooth" && (
-                  <select aria-label="Smooth: method" value={o.method ?? "mean"} onChange={(e) => set(i, { method: e.target.value as Op["method"] })}>
+                  <select aria-label="Smooth: method" value={o.method ?? "mean"} onChange={(e) => {
+                    const method = e.target.value as Op["method"];
+                    const n = o.n ?? 5;
+                    set(i, method === "median" && n % 2 === 0 ? { method, n: n + 1 } : { method });   // a median needs an odd window
+                  }}>
                     <option value="mean">running mean</option>
                     <option value="gaussian">Gaussian</option>
                     <option value="median">median</option>
@@ -222,16 +226,7 @@ export default function Operations({ kind, xLabel, tracesLabel, ops, on, info, o
                 )}
                 {o.op === "smooth" && (o.method ?? "mean") !== "gaussian" && (
                   <label className="small" title={o.method === "median" ? "An odd number: the median of each window" : undefined}>
-                    over{" "}
-                    <input
-                      type="number"
-                      min={2}
-                      step={o.method === "median" ? 2 : 1}
-                      value={o.n ?? 5}
-                      aria-label="Smooth: points"
-                      onChange={(e) => set(i, { n: Math.max(2, Math.round(Number(e.target.value) || 2)) })}
-                    />{" "}
-                    points
+                    over <PointsBox value={o.n ?? 5} odd={o.method === "median"} onSet={(n) => set(i, { n })} /> points
                   </label>
                 )}
                 {o.op === "smooth" && o.method === "gaussian" && (
@@ -304,6 +299,48 @@ function NumberBox({ value, label, onSet }: { value: number; label: string; onSe
       onBlur={apply}
       onKeyDown={(e: KeyboardEvent) => e.key === "Enter" && apply()}
     />
+  );
+}
+
+/** The number of points to smooth over. Typing is free (e.g. "1" on the way to "15"); a whole
+ * number ≥ 2 (odd for a median) applies as it is typed, anything else says why when leaving the
+ * box. The arrows step through allowed numbers only. */
+function PointsBox({ value, odd, onSet }: { value: number; odd: boolean; onSet: (n: number) => void }) {
+  const [text, setText] = useState(String(value));
+  const [bad, setBad] = useState<string | null>(null);
+  useEffect(() => {
+    setText(String(value));
+    setBad(null);
+  }, [value]);
+  const why = (t: string) => {
+    const n = Number(t.trim());
+    if (!Number.isInteger(n) || n < 2) return "A whole number of points, 2 or more";
+    if (odd && n % 2 === 0) return "An odd number: the median of each window";
+    return null;
+  };
+  return (
+    <>
+    <input
+      type="number"
+      className="op-number"
+      min={odd ? 3 : 2}
+      step={odd ? 2 : 1}
+      value={text}
+      aria-label="Smooth: points"
+      aria-invalid={!!bad}
+      title={bad ?? (odd ? "An odd number: the median of each window" : undefined)}
+      onChange={(e) => {
+        setText(e.target.value);
+        if (!why(e.target.value)) {
+          setBad(null);
+          onSet(Number(e.target.value));
+        }
+      }}
+      onBlur={() => setBad(why(text))}
+      onKeyDown={(e: KeyboardEvent) => e.key === "Enter" && setBad(why(text))}
+    />
+    {bad && <span className="field-error"> {bad}</span>}
+    </>
   );
 }
 

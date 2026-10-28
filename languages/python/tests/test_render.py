@@ -160,6 +160,22 @@ def test_explicit_settings_win_over_saved_view():
     assert resolve_spec(d, {})["complex"] == "phase"
 
 
+def test_choosing_the_saved_series_as_x_swaps_them_without_a_warning():
+    """Found by the user: with a saved view of one curve per power, choosing power as the
+    horizontal axis warned "'power' can't be used as series". The two simply swap."""
+    d = sweep()
+    d.plot = {"kind": "curve", "values": ["T"], "x": "freq", "series": "power"}
+    w = quiet()                                      # any warning fails
+    try:
+        curve = resolve_spec(d, {"x": "power"})
+        d.plot = {"kind": "heatmap", "values": ["T"], "x": "freq", "y": "power"}
+        heat = resolve_spec(d, {"x": "power"})
+    finally:
+        w.__exit__(None, None, None)
+    assert curve["x"] == "power" and curve["series"] == "freq"
+    assert heat["x"] == "power" and heat["y"] == "freq"
+
+
 def test_another_plot_kind_takes_only_the_kind_free_settings_of_the_saved_view():
     """Found while watching a session: a saved scatter view (Q against I) made every switch to
     Curves warn "saved view: 'I' can't be used as horizontal axis". The view isn't wrong; it

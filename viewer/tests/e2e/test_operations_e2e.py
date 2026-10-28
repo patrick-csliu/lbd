@@ -68,6 +68,31 @@ def test_calculate_fills_the_delay_and_flattens_the_phase(viewer, new_page):
     expect(ops(page).locator(".op-list li.bad")).to_have_count(0)
 
 
+def test_smoothing_points_can_be_typed_and_a_median_steps_through_odd_numbers(sweep, new_page):
+    """Found by the user: a median's arrows gave even numbers, and "15" couldn't be typed (the
+    "1" was turned into 2 at once)."""
+    page = new_page("Explore")
+    frames(page, lambda: row(page, "sweep.lbd").dblclick())
+    add(page, "Smooth")
+    frames(page, lambda: ops(page).get_by_label("Smooth: method").select_option("median"))
+    box = ops(page).get_by_label("Smooth: points")
+    expect(box).to_have_value("5")
+    frames(page, lambda: box.press("ArrowUp"))
+    expect(box).to_have_value("7")                                    # odd only
+    frames(page, lambda: box.press("ArrowDown"))
+    expect(box).to_have_value("5")
+    box.fill("")
+    box.press_sequentially("1")                                       # on the way to 15: kept as typed
+    expect(box).to_have_value("1")
+    frames(page, lambda: box.press_sequentially("5"))
+    expect(box).to_have_value("15")
+    expect(ops(page)).to_contain_text("median of 15")
+    box.fill("8")
+    box.press("Enter")
+    expect(ops(page)).to_contain_text("An odd number")                # says why, keeps 15
+    expect(ops(page)).to_contain_text("median of 15")
+
+
 def test_equations_with_their_legend_and_messages(sweep, new_page):
     page = new_page("Explore")
     frames(page, lambda: row(page, "sweep.lbd").dblclick())
