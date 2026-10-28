@@ -96,9 +96,9 @@ exactly the map's axes, and follow the cursor while you drag it. Their value axi
 in view; when a cut has more points than pixels, each pixel shows its lowest and highest value.
 Hover a cut to read it. **Cuts** above the plot (or the key **C**) turns them off.
 
-**Cursors** above the plot (or the key **K**) switches the cursors off: a click then does
-nothing, and the cursors, cuts and values are hidden. Switched on again, the same cursors come
-back.
+To switch the cursors off, click the chosen cursor type again (or press **K**): no type is
+chosen, a click on the plot does nothing, and the cursors, cuts and values are hidden. Choose a
+type (or press **K**) and the same cursors come back.
 
 **Taking a cut out:**
 
@@ -123,7 +123,7 @@ back.
 | + − | Zooms in or out around cursor 1. |
 | Home or 0 | Shows everything. |
 | C | Cuts on or off (maps). |
-| K | Cursors on or off (off: a click does nothing). |
+| K | Cursors on or off (off: a click does nothing; the same as clicking the chosen cursor type again). |
 | Esc | Cancels a box being drawn; otherwise removes the cursors. |
 | ? | The list of mouse actions and keys. |
 

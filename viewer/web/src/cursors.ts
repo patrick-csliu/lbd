@@ -81,7 +81,7 @@ export const HELP: [string, string][] = [
   ["+  −", "zoom in / out around cursor 1"],
   ["Home or 0", "show everything"],
   ["C", "cuts on / off (maps)"],
-  ["K", "cursors on / off (off: a click does nothing)"],
+  ["K", "cursors on / off (off: a click does nothing; also: click the chosen cursor type again)"],
   ["Esc", "cancel a box; else remove the cursors"],
   ["?", "this list"],
 ];

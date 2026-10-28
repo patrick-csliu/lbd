@@ -32,8 +32,8 @@ The file format has its own version (`lbd_version`, currently 1.0).
   Beside a map, the row and column through the cursor follow it while you drag. A row, column
   or trace can be shown as a curve or saved as its own `.lbd` file (with where it came from). A
   histogram with draggable limits sets a map's colour range (**Auto** leaves out outliers).
-  Keys for all of it; **?** lists every mouse action and key. **Cursors** above the plot (key K)
-  switches them off, so a click does nothing.
+  Keys for all of it; **?** lists every mouse action and key. Clicking the chosen cursor type again
+  (or key K) switches cursors off, so a click does nothing.
 - **Operations in Explore**: subtract the mean, normalize, derivative, smoothing, subtract the
   first or previous trace, average or std of the traces, FFT and histogram, in any order, along
   the horizontal axis or across the traces (a map's background along its other axis). Units

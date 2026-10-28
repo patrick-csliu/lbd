@@ -135,17 +135,33 @@ export default function CursorPanel({ kind, cursors, onCursors, reading, actions
       ◂ Back to the map
     </button>
   );
+  // The type buttons are also the switch: the chosen type clicked again means no cursors (a click
+  // on the plot then does nothing); choosing a type brings the same cursors back.
+  const types = (
+    <div className="segmented" role="group" aria-label="Cursor type">
+      {TYPES.map(([t, text, tip]) => {
+        const chosen = cursors.on && cursors.type === t;
+        return (
+          <button
+            key={t}
+            aria-pressed={chosen}
+            className={chosen ? "on" : ""}
+            title={chosen ? `${tip}. Click again for no cursors (key K)` : tip}
+            onClick={() => onCursors(chosen ? { ...cursors, on: false } : { ...cursors, type: t, on: true })}
+          >
+            {text}
+          </button>
+        );
+      })}
+    </div>
+  );
   if (!cursors.on) {
     return (
       <fieldset className="field cursor-panel">
         <legend>Cursors</legend>
         {back}
-        <div className="row-controls">
-          <span className="muted small">Off: a click does nothing.</span>
-          <button onClick={() => onCursors({ ...cursors, on: true })} title="Key K">
-            Turn on
-          </button>
-        </div>
+        {types}
+        <p className="muted small">No cursor type chosen: a click on the plot does nothing. Choose one to read values.</p>
       </fieldset>
     );
   }
@@ -153,20 +169,7 @@ export default function CursorPanel({ kind, cursors, onCursors, reading, actions
     <fieldset className="field cursor-panel">
       <legend>Cursors</legend>
       {back}
-      <div className="segmented" role="radiogroup" aria-label="Cursor type">
-        {TYPES.map(([t, text, tip]) => (
-          <button
-            key={t}
-            role="radio"
-            aria-checked={cursors.type === t}
-            className={cursors.type === t ? "on" : ""}
-            title={tip}
-            onClick={() => onCursors({ ...cursors, type: t })}
-          >
-            {text}
-          </button>
-        ))}
-      </div>
+      {types}
       {!c1 && <p className="muted small">Click the plot for cursor 1, Shift+click for cursor 2.</p>}
       {c1 && <CursorNumbers n={1} c={c1} kind={kind} type={cursors.type} actions={actions} />}
       {c2 && <CursorNumbers n={2} c={c2} kind={kind} type={cursors.type} actions={actions} />}

@@ -86,7 +86,7 @@ def test_the_contrast_sets_the_colour_range(small_map, new_page):
 def test_a_vertical_cursor_lists_every_trace(sweep, new_page):
     page = new_page("Explore")
     meta = frames(page, lambda: row(page, "sweep.lbd").dblclick())
-    explore(page).get_by_role("radio", name="Vertical").click()
+    explore(page).get_by_role("button", name="Vertical").click()
     a = cursor_answer(page, lambda: page.mouse.click(*at(page, meta, 25, 2.1)))
     assert a["cursors"][0]["trace"] == 2 and len(a["cursors"][0]["table"]["rows"]) == 5
     expect(explore(page).locator(".cursor-table tr")).to_have_count(5)
@@ -99,15 +99,19 @@ def test_cursors_can_be_switched_off_and_back_on(small_map, new_page):
     cursor_answer(page, lambda: page.mouse.click(*at(page, meta, 8, 30)))
     expect(readout(page).first).to_contain_text("value = 13")
     page.keyboard.press("k")                                          # off: hidden, a click does nothing
-    expect(explore(page).locator(".explore-readout")).to_contain_text("Cursors are off")
+    expect(explore(page).locator(".explore-readout")).to_contain_text("No cursor type chosen")
     expect(explore(page).locator(".explore-cut-top")).to_have_count(0)
     asked = []
     page.on("request", lambda r: asked.append(r) if r.url.endswith("/cursors") else None)
     page.mouse.click(*at(page, meta, 2, 10))
     page.wait_for_timeout(500)
     assert not asked
-    cursor_answer(page, lambda: explore(page).get_by_role("checkbox", name="Cursors").check())
+    cursor_answer(page, lambda: page.keyboard.press("k"))
     expect(readout(page).first).to_contain_text("value = 13 at x = 8, y = 30")   # the same cursor again
+    explore(page).get_by_role("button", name="Crosshair").click()      # the chosen type again: none
+    expect(explore(page).locator(".explore-readout")).to_contain_text("No cursor type chosen")
+    cursor_answer(page, lambda: explore(page).get_by_role("button", name="Vertical").click())
+    expect(readout(page).first).to_contain_text("value = 13")
 
 
 def test_the_list_of_rows_folds(small_map, new_page):

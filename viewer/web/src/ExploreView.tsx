@@ -992,10 +992,6 @@ export default function ExploreView({
         <button onClick={() => setView(null)} title="Show all the data (or double-click the plot)">
           Reset view
         </button>
-        <label className="check" title="Off: a click places no cursor (key K)">
-          <input type="checkbox" checked={cursors.on} onChange={(e) => onCursorsRef.current({ ...cursorsRef.current, on: e.target.checked })} />
-          Cursors
-        </label>
         {opened?.kind === "heatmap" && (
           <label className="check" title="The row and column through cursor 1, beside the map (key C)">
             <input
@@ -1108,7 +1104,7 @@ export default function ExploreView({
         {c1 ? (
           <CursorLine n={1} c={c1} />
         ) : (
-          <div className="muted small">{cursors.on ? "Click the plot to read a stored value." : "Cursors are off: a click does nothing (K or Cursors above the plot turns them on)."}</div>
+          <div className="muted small">{cursors.on ? "Click the plot to read a stored value." : "No cursor type chosen: a click does nothing (choose one in the Cursors section, or press K)."}</div>
         )}
         {c2 && <CursorLine n={2} c={c2} />}
         {c1 && c2 && (
