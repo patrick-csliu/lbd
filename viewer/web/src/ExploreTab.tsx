@@ -1,11 +1,11 @@
 import { DragEvent, KeyboardEvent, MouseEvent, MutableRefObject, ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import NumberRange from "./NumberRange";
-import { api, CursorsAnswer, ExploreOpen, FileInfo, OpsInfo, PlotSpec, ReduceStat, ValueInfo } from "./api";
+import { api, CursorsAnswer, ExploreOpen, FileInfo, OpsInfo, PlotSpec, ReduceStat, SyncKeys, ValueInfo } from "./api";
 import Operations from "./Operations";
 import Contrast from "./Contrast";
 import CursorPanel from "./CursorPanel";
 import { CursorsState, NO_CURSORS } from "./cursors";
-import ExploreView, { ExploreActions, View, ViewSettings } from "./ExploreView";
+import ExploreView, { ExploreActions, Follow, View, ViewSettings } from "./ExploreView";
 import AxisSelect from "./AxisSelect";
 import { COMPLEX_MODES, SliceControl } from "./FileView";
 import { useDiskVersion } from "./watch";
@@ -96,8 +96,13 @@ interface Live {
   resolved: ExploreOpen | null;
   reading: CursorsAnswer | null;
   opsInfo: OpsInfo | null;
+  /** With the last picture: what it must share with another panel to follow its zoom, and where its data is. */
+  sync: (SyncKeys & { full: [[number, number], [number, number]] }) | null;
 }
-const NO_LIVE: Live = { resolved: null, reading: null, opsInfo: null };
+const NO_LIVE: Live = { resolved: null, reading: null, opsInfo: null, sync: null };
+
+/** Two ranges together. */
+const union = (a: [number, number], b: [number, number]): [number, number] => [Math.min(a[0], b[0]), Math.max(a[1], b[1])];
 
 /** A remembered panel with the keys a later LBD added filled in. */
 function filledPanel(st: Partial<PanelState>): PanelState {
@@ -145,7 +150,12 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
   const [live, setLiveMap] = useState<Record<string, Live>>({});
   const liveRef = useRef(live);
   liveRef.current = live;
+  const infoRef = useRef(info);
+  infoRef.current = info;
   const setLive = useCallback((id: string, patch: Partial<Live>) => setLiveMap((m) => ({ ...m, [id]: { ...(m[id] ?? NO_LIVE), ...patch } })), []);
+  // Zoom pushed to panels that follow another (synchronized axes), by panel id.
+  const [follows, setFollows] = useState<Record<string, Follow>>({});
+  const followSeq = useRef(0);
   const [viewKey, setViewKey] = useState(0); // a new one starts every panel's view afresh
   const [panelKeys, setPanelKeys] = useState<Record<string, number>>({}); // … or one panel's
   const restart = useCallback((id: string) => setPanelKeys((k) => ({ ...k, [id]: (k[id] ?? 0) + 1 })), []);
@@ -245,7 +255,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
   /** What a panel's controls and view change in it. */
   const panelApi = useCallback(
     (id: string) => {
-      const updateSpec = (patch: PlotSpec) =>
+      const updateSpec = (patch: PlotSpec) => {
         updatePanel(id, (s) => {
           const reset = RESETS_SELECTION.some((k) => k in patch);
           return {
@@ -256,6 +266,28 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
             back: reset ? undefined : s.back,
           };
         });
+        // Synchronized sliders: the same position in every panel with a slider for that axis.
+        const moved = patch.index;
+        if (moved && recRef.current?.sync.sliders && recRef.current.panels.length > 1)
+          setRec((r) => {
+            if (!r) return r;
+            let changed = false;
+            const panels = r.panels.map((q) => {
+              // its sliders; until its plot is open, its values' axes (an index for a drawn axis is ignored)
+              const opened = liveRef.current[q.id]?.resolved;
+              const sliced = new Set(
+                opened
+                  ? (opened.spec.slices ?? []).map((sl) => sl.axis)
+                  : (q.spec.values ?? []).flatMap((name) => infoRef.current?.values.find((v) => v.name === name)?.axes ?? []),
+              );
+              const same = Object.entries(moved).filter(([a, i]) => q.id !== id && sliced.has(a) && q.spec.index?.[a] !== i);
+              if (!same.length) return q;
+              changed = true;
+              return { ...q, spec: { ...q.spec, index: { ...(q.spec.index ?? {}), ...Object.fromEntries(same) } } };
+            });
+            return changed ? { ...r, panels } : r;
+          });
+      };
       return {
         updateSpec,
         updateSettings: (patch: ViewSettings) => updatePanel(id, (s) => ({ ...s, settings: { ...s.settings, ...patch } })),
@@ -347,6 +379,33 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
   );
   const [menu, setMenu] = useState<MenuAt | null>(null);
 
+  /** Panel `id`'s view changed by the user: the panels that share its x (and y, if synchronized)
+   * follow. Showing everything shows all the data of the panels that follow each other. */
+  const onUserView = useCallback((id: string, v: View | null) => {
+    const r = recRef.current, me = liveRef.current[id]?.sync;
+    if (!r || r.panels.length < 2 || !me || (!r.sync.x && !r.sync.y)) return;
+    const others = r.panels.filter((q) => q.id !== id);
+    const sameX = (q: PanelState) => r.sync.x && liveRef.current[q.id]?.sync?.x === me.x;
+    const sameY = (q: PanelState) => r.sync.y && liveRef.current[q.id]?.sync?.y === me.y;
+    const groupFull = (same: (q: PanelState) => boolean, k: 0 | 1) =>
+      others.filter(same).reduce<[number, number]>((acc, q) => union(acc, liveRef.current[q.id]!.sync!.full[k]), me.full[k]);
+    const next: Record<string, Follow> = {};
+    for (const q of r.panels) {
+      const f: Follow = { seq: ++followSeq.current, ...(v ? {} : { all: true }) };
+      if (v) {
+        if (q.id === id) continue;
+        if (sameX(q)) f.xlim = v.xlim;
+        if (sameY(q)) f.ylim = v.ylim;
+      } else {
+        // everything: the data of every panel that follows this one (this one included)
+        if (q.id === id || sameX(q)) f.xlim = r.sync.x ? groupFull(sameX, 0) : undefined;
+        if (q.id === id || sameY(q)) f.ylim = r.sync.y ? groupFull(sameY, 1) : undefined;
+      }
+      if (f.xlim || f.ylim) next[q.id] = f;
+    }
+    if (Object.keys(next).length) setFollows((old) => ({ ...old, ...next }));
+  }, []);
+
   const forget = async () => {
     if (!info) return;
     await api.forget(path).catch((e) => onError((e as Error).message));
@@ -382,6 +441,11 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
       })
       .join(", ");
   const full = n >= MAX_PANELS;
+  /** Why panel p doesn't follow the active panel's zoom, if it doesn't. */
+  const notSynced = (p: PanelState): string | null => {
+    const mine = live[p.id]?.sync?.x, theirs = live[act.id]?.sync?.x;
+    return mine !== undefined && theirs !== undefined && mine !== theirs ? `x not synced: ${mine || "?"}, not ${theirs || "?"}` : null;
+  };
   const addMenu = (e: MouseEvent) => {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
     setMenu({
@@ -522,6 +586,22 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
                   ))}
                 </span>
               )}
+              {several && (
+                <span className="panel-sync" title="Panels with the same axis zoom together; sliders of the same axis move together">
+                  Sync:
+                  {(["x", "y", "sliders"] as const).map((k) => (
+                    <label key={k} className="check">
+                      <input
+                        type="checkbox"
+                        checked={rec.sync[k]}
+                        aria-label={`Sync ${k}`}
+                        onChange={(e) => setRec((r) => r && { ...r, sync: { ...r.sync, [k]: e.target.checked } })}
+                      />
+                      {k}
+                    </label>
+                  ))}
+                </span>
+              )}
             </div>
             <div className={"panel-grid" + (several ? " several" : "")} style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, ["--rows" as string]: rows }}>
               {rec.panels.map((p, i) => {
@@ -546,6 +626,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
                       >
                         <span className="panel-num">{i + 1}</span>
                         <span className="panel-name">{titleOf(p)}</span>
+                        {rec.sync.x && i !== rec.active && notSynced(p) && <span className="panel-note muted small">{notSynced(p)}</span>}
                         <span className="spacer" />
                         <button className="link" aria-label={`Remove panel ${i + 1}`} title="Remove this panel" onClick={() => removePanel(i)}>
                           ×
@@ -572,6 +653,12 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
                       onStepSlider={pa.onStepSlider}
                       onShowCut={pa.onShowCut}
                       onOpsInfo={(o) => setLive(p.id, { opsInfo: o })}
+                      follow={follows[p.id] ?? null}
+                      onUserView={(v) => onUserView(p.id, v)}
+                      onSync={(sy) => {
+                        const old = liveRef.current[p.id]?.sync;
+                        if (!old || JSON.stringify(old) !== JSON.stringify(sy)) setLive(p.id, { sync: sy });
+                      }}
                     />
                   </section>
                 );

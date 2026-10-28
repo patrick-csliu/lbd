@@ -25,6 +25,7 @@ import {
   OpsInfo,
   PlotSpec,
   ReduceStat,
+  SyncKeys,
 } from "./api";
 import { between, CursorsState, HELP, item, readText, si } from "./cursors";
 import { ConfirmDialog, ConfirmRequest, ContextMenu, MenuAt, MenuEntry } from "./menu";
@@ -152,6 +153,21 @@ interface Props {
   /** One of several panels: the typed limits fold behind a button, the read-out is one line
    *  (the active panel's numbers are in the Cursors section). */
   compact?: boolean;
+  /** Another panel's zoom to follow (several panels, synchronized); a new `seq` applies it. */
+  follow?: Follow | null;
+  /** The user changed the view here (zoom, pan, typed limits; null: show everything). */
+  onUserView?: (v: View | null) => void;
+  /** With each picture: what this view must share with another to follow its zoom, and where all its data is. */
+  onSync?: (s: SyncKeys & { full: [Lim, Lim] }) => void;
+}
+
+/** Limits pushed from another panel: x, y or both. */
+export interface Follow {
+  xlim?: Lim;
+  ylim?: Lim;
+  /** Everything is shown: an axis not given shows all of this panel's data. */
+  all?: boolean;
+  seq: number;
 }
 
 /** What the Cursors section (and the menu) can ask the view to do. */
@@ -201,6 +217,9 @@ export default function ExploreView({
   onShowCut,
   onOpsInfo,
   compact = false,
+  follow = null,
+  onUserView,
+  onSync,
 }: Props) {
   const [limitsOpen, setLimitsOpen] = useState(false);
   // Pictures travel as raw pixels (fastest on this computer; "png" is the server's other choice).
@@ -255,6 +274,12 @@ export default function ExploreView({
   onReadingRef.current = onReading;
   const onOpsInfoRef = useRef(onOpsInfo);
   onOpsInfoRef.current = onOpsInfo;
+  const followRef = useRef(follow);
+  followRef.current = follow;
+  const onUserViewRef = useRef(onUserView);
+  onUserViewRef.current = onUserView;
+  const onSyncRef = useRef(onSync);
+  onSyncRef.current = onSync;
   const kindRef = useRef<"curve" | "heatmap" | null>(null);
   kindRef.current = opened?.kind ?? null;
   const readingRef = useRef<CursorsAnswer | null>(null); // the cursors on screen: the last answer
@@ -419,6 +444,7 @@ export default function ExploreView({
         }
         onViewRef.current({ xlim: f.meta.xlim, ylim: f.meta.ylim });
         onOpsInfoRef.current(f.meta.ops ?? null);
+        if (f.meta.sync) onSyncRef.current?.({ ...f.meta.sync, full: f.meta.full });
         if (f.meta.notes?.length) onErrorRef.current(f.meta.notes.join(" "));
         let src = frameCanvas.current;
         if (!src) src = frameCanvas.current = document.createElement("canvas");
@@ -549,7 +575,7 @@ export default function ExploreView({
   useEffect(() => () => window.clearTimeout(restTimer.current), []);
 
   /** Show this view, or all the data (null). */
-  const setView = useCallback(
+  const showView = useCallback(
     (v: View | null) => {
       const full = frame.current?.meta.full;
       wanted.current = v ?? (full ? { xlim: full[0], ylim: full[1] } : null);
@@ -558,6 +584,24 @@ export default function ExploreView({
     },
     [paint, request],
   );
+  /** The user shows this view (or all the data): panels that follow this one are told. */
+  const setView = useCallback(
+    (v: View | null) => {
+      showView(v);
+      onUserViewRef.current?.(v);
+    },
+    [showView],
+  );
+
+  // Another panel's zoom (synchronized panels): shown here as if moved here, never echoed back.
+  const followSeq = follow?.seq;
+  useEffect(() => {
+    const f = followRef.current, full = frame.current?.meta.full;
+    const v = f?.all && full ? { xlim: full[0], ylim: full[1] } : wanted.current;
+    if (!f || !v) return;
+    markMoving(); // drafts while the other panel moves, the sharp picture when it rests
+    showView({ xlim: f.xlim ?? v.xlim, ylim: f.ylim ?? v.ylim });
+  }, [followSeq, showView, markMoving]);
 
   // ---- the session: opened for this file, plot settings and panel size; closed when they change
 
@@ -588,6 +632,7 @@ export default function ExploreView({
 
   const specKey = JSON.stringify(spec);
   const openedSpecKey = useRef<string | null>(null); // the plot settings the session shows
+  const [opens, setOpens] = useState(0); // a session opened: plot settings changed meanwhile are sent then
   const haveSize = !!size && size.w >= 50 && size.h >= 50;
   useEffect(() => {
     const size = sizeRef.current;
@@ -612,6 +657,7 @@ export default function ExploreView({
           }
           sid = o.session;
           session.current = o.session;
+          setOpens((k) => k + 1);
           setOpened(o);
           onOpenedRef.current(o);
           if (o.warnings.length) onErrorRef.current(o.warnings.join(" "));
@@ -639,7 +685,8 @@ export default function ExploreView({
   }, [info.path, version, haveSize, request]);
 
   // Other plot settings: the same session draws them. Moving a slider keeps the zoom; anything
-  // else (another value, kind, axis, complex mode) starts from the whole data.
+  // else (another value, kind, axis, complex mode) starts from the whole data. Settings changed
+  // while the session was being opened are sent once it is open.
   useEffect(() => {
     const sid = session.current;
     if (!sid || openedSpecKey.current === specKey) return;
@@ -662,7 +709,7 @@ export default function ExploreView({
         setError(e instanceof Error ? e.message : String(e));
         setStatus("");
       });
-  }, [specKey, request]);
+  }, [specKey, request, opens]);
 
   // Other view settings (chosen traces, colours, scales): the same session draws them. A new
   // x or y scale shows all the data (the old limits may not exist on a log axis).

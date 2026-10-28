@@ -413,3 +413,5 @@ details.group fieldset > .group-fields { margin-top: -4px; }
 .panel-title button { font-size: 16px; line-height: 1; }
 .panel-heading { font-size: 14px; margin: 0; }
 .explore-readout.compact { min-height: 0; }
+.panel-sync { display: flex; gap: 10px; font-size: 13px; align-items: center; }
+.panel-note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }

@@ -112,3 +112,84 @@ def test_the_side_bar_changes_the_active_panel_only(values_files, new_page):
     # a value dragged onto a panel joins it
     frames(page, lambda: shown(page).locator(".controls label.check", has_text="Population").drag_to(shown(page).locator(".panel").nth(0)))
     expect(shown(page).locator(".panel-title .panel-name").nth(0)).to_have_text("Digitizer I (V), Population")
+
+
+def per_panel(page, action, panels: int = 1, quiet_ms: int = 600):
+    """Do `action`; returns each panel's last picture mapping (X-LBD-Frame), by session, once
+    pictures of at least `panels` panels came and no more come for a moment."""
+    import json
+    import re
+
+    got = {}
+
+    def collect(r):
+        m = re.search(r"/api/explore/([^/]+)/render$", r.url)
+        if m and r.ok:
+            got[m.group(1)] = json.loads(r.headers["x-lbd-frame"])
+
+    page.on("response", collect)
+    try:
+        action()
+        deadline = 100
+        while len(got) < panels and deadline:
+            page.wait_for_timeout(100)
+            deadline -= 1
+        seen = None
+        while seen != {k: v["xlim"] for k, v in got.items()}:
+            seen = {k: v["xlim"] for k, v in got.items()}
+            page.wait_for_timeout(quiet_ms)
+    finally:
+        page.remove_listener("response", collect)
+    return got
+
+
+def test_panels_with_the_same_axis_zoom_together(values_files, new_page):
+    import pytest
+
+    page = new_page("Explore")
+    first = per_panel(page, lambda: row(page, "6 rabi.lbd").dblclick(), panels=4)
+    assert len(first) == 4
+    full = next(iter(first.values()))["xlim"]
+    box = shown(page).locator(".panel .explore-overlay").nth(0).bounding_box()
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    zoomed = per_panel(page, lambda: page.mouse.wheel(0, -600), panels=4)
+    xs = [m["xlim"] for m in zoomed.values() if not m.get("draft")]
+    assert len(zoomed) == 4 and all(x == pytest.approx(xs[0]) for x in xs)      # all four follow
+    assert xs[0][1] - xs[0][0] < (full[1] - full[0]) * 0.8
+    # show everything (double-click): all four again
+    back = per_panel(page, lambda: shown(page).locator(".panel .explore-overlay").nth(2).dblclick(position={"x": 5, "y": 5}), panels=4)
+    assert all(m["xlim"] == pytest.approx(full) for m in back.values())
+
+    # sync off: only the panel zoomed
+    shown(page).get_by_label("Sync x").uncheck()
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    alone = per_panel(page, lambda: page.mouse.wheel(0, -600))
+    assert len(alone) == 1
+
+
+def test_a_panel_of_another_axis_says_it_does_not_follow(values_files, new_page):
+    page = new_page("Explore")
+    per_panel(page, lambda: row(page, "8 mixed axes.lbd").dblclick(), panels=4)     # Q_i (power), S21, S21_ref (freq), f0 (power)
+    shown(page).locator(".panel-title").nth(1).click()                      # the map over frequency
+    notes = shown(page).locator(".panel-note")
+    expect(notes).to_have_count(2)                                          # the two curves against power
+    expect(notes.first).to_have_text("x not synced: Power (dBm), not Frequency (GHz)")
+    box = shown(page).locator(".panel .explore-overlay").nth(1).bounding_box()
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    zoomed = per_panel(page, lambda: page.mouse.wheel(0, -600), panels=2)
+    assert len(zoomed) == 2                                                 # the map and S21_ref only
+
+
+def test_sliders_of_the_same_axis_move_together_unless_switched_off(values_files, new_page):
+    page = new_page("Explore")
+    per_panel(page, lambda: row(page, "7 spectroscopy 3d.lbd").dblclick(), panels=2)  # amplitude, phase: maps with a qubit-power slider
+    expect(panels(page)).to_have_count(2)
+    slider = shown(page).get_by_role("slider")
+    expect(slider).to_have_count(1)                                         # the active panel's (side bar)
+    per_panel(page, lambda: slider.press("End"))
+    shown(page).locator(".panel-title").nth(1).click()
+    expect(shown(page).get_by_role("slider")).to_have_value("2")            # the other panel moved too
+    shown(page).get_by_label("Sync sliders").uncheck()
+    per_panel(page, lambda: shown(page).get_by_role("slider").press("Home"))
+    shown(page).locator(".panel-title").nth(0).click()
+    expect(shown(page).get_by_role("slider")).to_have_value("2")            # kept its own

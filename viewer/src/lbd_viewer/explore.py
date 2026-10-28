@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import secrets
 import threading
 import time
@@ -763,11 +764,23 @@ class ExploreSession:
             "xscale": self.ax.get_xscale(), "yscale": self.ax.get_yscale(),
             "full": [list(self.full[0]), list(self.full[1])],
             "note": note, "reduced": reduced, "stat": stat, "draft": draft, "ops": self.ops_info(),
-            "hidden": hidden, "empty": empty,
+            "hidden": hidden, "empty": empty, "sync": self.sync_keys(),
             "ms": {"wait": round((t1 - t0) * 1000, 1), "reduce": round((t2 - t1) * 1000, 1),
                    "draw": round((t3 - t2) * 1000, 1), "encode": round((t4 - t3) * 1000, 1)},
         }
         return body, meta
+
+    def sync_keys(self) -> Dict[str, str]:
+        """What panels must share to follow each other's zoom (plan 4): the horizontal axis as
+        drawn (its label, unit prefix included: an equation or an FFT changes it), and the
+        vertical axis (maps: its label; curves: its unit, prefix included)."""
+        ylabel = self.ax.get_ylabel()
+        if self.kind == "heatmap":
+            y = ylabel
+        else:
+            m = re.search(r"\(([^()]*)\)\s*$", ylabel)
+            y = m.group(1) if m else ""
+        return {"x": self.ax.get_xlabel(), "y": y}
 
     # -- picking
 
