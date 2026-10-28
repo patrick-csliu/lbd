@@ -280,3 +280,16 @@ def test_zooming_needs_no_new_layout(client, big_map):
     for lim in ([0.3, 0.30001], [0.123456, 0.123457], [0, 1]):
         render(client, o["session"], xlim=lim, ylim=[-0.000011, -0.00001])
         assert sess._plot_area() == area
+
+
+def test_painted_lines_keep_order_and_gaps():
+    """Many curves are painted with Pillow: later curves on top, a NaN breaks a curve."""
+    from lbd_viewer.explore import paint_lines
+
+    flat = (np.array([0.0, 99.0]), np.array([10.0, 10.0]))
+    gap = (np.array([0.0, 40.0, np.nan, 60.0, 99.0]), np.array([10.0, 10.0, np.nan, 10.0, 10.0]))
+    red, blue = [255, 0, 0, 255], [0, 0, 255, 255]
+    img = paint_lines([flat, gap], np.array([red, blue]), 100, 20, 1)
+    assert list(img[10, 20]) == blue                                  # the later curve on top
+    assert list(img[10, 50]) == red                                   # in its gap the earlier shows
+    assert img[0, 0, 3] == 0                                          # elsewhere: transparent

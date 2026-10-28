@@ -36,13 +36,14 @@ from matplotlib.figure import Figure
 
 import lbd
 from lbd.plot import render as rnd
-from lbd.plot.reduce import STATS, MapPyramid, cell_edges, curve_minmax, raster_columns, raster_lines, thin_in_order
+from lbd.plot.reduce import STATS, CurvePyramid, MapPyramid, cell_edges, curve_minmax, thin_in_order
 from lbd.plot.style import Style
 
 KINDS = ("curve", "heatmap")
 UNSORTED_LIMIT = 200_000   # a curve with unsorted x and more points than this is thinned for drawing
-# Above this many curves on screen, they are drawn as one picture (reduce.raster_lines) instead of
-# line by line: matplotlib needs ~0.7 ms per line, so 1000 curves would take most of a second.
+# Above this many curves on screen, they are painted into one picture with Pillow (paint_lines)
+# instead of drawn line by line: matplotlib needs ~0.7 ms per line, so 1000 curves would take most
+# of a second; Pillow paints them in a few tens of milliseconds (without antialiasing).
 RASTER_ABOVE = 30
 # Tick labels the layout makes room for, so zooming (more digits) never needs a new layout.
 WIDEST_TICK = "\u22128.888888"
@@ -56,6 +57,29 @@ CMAPS = ("viridis", "plasma", "magma", "cividis", "gray", "RdBu", "twilight")
 
 class ExploreError(ValueError):
     """A request the Explore view can't do; the message says what to do instead."""
+
+
+def paint_lines(lines, colors: np.ndarray, width: int, height: int, thickness: float) -> np.ndarray:
+    """Paint polylines into an RGBA picture (height × width), in order, later lines on top.
+
+    `lines`: (px, py) per line in pixels of the picture (x to the right, y down), NaN breaking a
+    line; `colors`: RGBA (0-255) per line. Uses Pillow's line drawing (C, no antialiasing)."""
+    from PIL import Image, ImageDraw
+
+    img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    w = max(1, int(round(thickness)))
+    for (px, py), color in zip(lines, colors):
+        ok = np.isfinite(px) & np.isfinite(py)
+        # each unbroken stretch is one polyline
+        bounds = np.flatnonzero(np.diff(np.r_[False, ok, False].astype(np.int8)))
+        fill = tuple(int(c) for c in color)
+        for a, b in zip(bounds[0::2], bounds[1::2]):
+            pts = np.column_stack([px[a:b], py[a:b]]).ravel()
+            if b - a == 1:                                 # a single point: a dot
+                pts = np.r_[pts, pts]
+            draw.line(pts.tolist(), fill=fill, width=w)
+    return np.asarray(img)
 
 
 def _is_sorted(x: np.ndarray) -> bool:
@@ -158,6 +182,10 @@ class ExploreSession:
         for k, x in enumerate(m.xs):
             groups.setdefault(id(x), (np.asarray(x, dtype=float), []))[1].append(k)
         self.x_groups = [(x, ks, _is_sorted(x)) for x, ks in groups.values()]
+        # Many curves on one sorted x without gaps in x: min/max blocks made once (CurvePyramid)
+        self.pyramids = {id(x): CurvePyramid(x, np.stack([m.lines[k][0] for k in ks]))
+                         for x, ks, ok in self.x_groups if ok and len(ks) > 1 and x.size > 4096
+                         and np.all(np.isfinite(x)) and x[0] < x[-1]}
         # One vertical axis: the traces are named in the list and when clicked, so the figure's
         # colour bar for many series (a second axis) is left out here.
         m.series_bar = None
@@ -297,6 +325,50 @@ class ExploreSession:
 
     # -- drawing
 
+    def _fast_picture(self, pxe: np.ndarray, w: int, h: int, draft: bool) -> bool:
+        """Many curves on one x, reduced to pixel columns by their pyramid: drawn straight from
+        each column's lowest and highest value (no lists of points). False when this doesn't
+        apply (few curves, several x, or zoomed in to the stored points)."""
+        shown = [k for k, v in enumerate(self.visible) if v]
+        if len(shown) <= RASTER_ABOVE or len(self.x_groups) != 1 or id(self.x_groups[0][0]) not in self.pyramids:
+            return False
+        spans = self.pyramids[id(self.x_groups[0][0])].spans(pxe)
+        if spans is None:
+            return False
+        lo, hi = spans
+        ys, yl = self.ax.get_yscale(), self.ax.get_ylim()
+
+        def rows(v):                                      # data -> pixel rows (y down)
+            f = (lambda a: np.log10(np.where(a > 0, a, np.nan))) if ys == "log" else (lambda a: a)
+            a, b = f(np.asarray(yl, dtype=float))
+            return h - (f(v) - a) / (b - a) * h
+
+        width = self.lines[shown[0]].get_linewidth() * self.fig.dpi / 72 * (0.5 if draft else 1.0)
+        # each column's lowest and highest value, joined column to column: as the curves look
+        xx = np.repeat(np.arange(w) + 0.5, 2)
+        yy = np.empty((len(shown), 2 * w))
+        yy[:, 0::2], yy[:, 1::2] = rows(lo[shown]), rows(hi[shown])
+        self.line_image.set_data(paint_lines([(xx, y) for y in yy], self.line_colors[shown], w, h, width))
+        self.line_image.set_visible(True)
+        for artist in self.lines:
+            artist.set_visible(False)
+        # what was drawn, for highlighting a picked curve: per column its lowest and highest value
+        self.spans = (np.repeat((pxe[:-1] + pxe[1:]) / 2, 2), lo, hi)
+        self.last_lines = None
+        return True
+
+    def _drawn(self, k: int) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+        """Curve k as drawn in the last picture (x, y in plot units), for highlighting it."""
+        if getattr(self, "spans", None) is not None:
+            xx, lo, hi = self.spans
+            yy = np.empty(xx.size)
+            yy[0::2], yy[1::2] = lo[k], hi[k]
+            return xx, yy
+        return self.last_lines[k] if self.last_lines is not None else None
+
+    def _group(self, x: np.ndarray) -> List[int]:
+        return next(ks for gx, ks, _ in self.x_groups if gx is x)
+
     def _plain_tick_numbers(self) -> None:
         """Tick numbers as plain text, not math text: they look the same, but every new label
         (each zoom step makes some) would otherwise be parsed as math, ~50 ms per picture. Log
@@ -321,17 +393,8 @@ class ExploreSession:
         xs, ys = self.ax.get_xscale(), self.ax.get_yscale()
         xl, yl = self.ax.get_xlim(), self.ax.get_ylim()
         width = (self.lines[shown[0]].get_linewidth() * self.fig.dpi / 72 if shown else 1.0) * scale
-        groups = [ks for _, ks, ok in self.x_groups if ok and any(k in shown for k in ks)]
-        if len(groups) == 1 and all(len(lines[k][0]) == len(lines[shown[0]][0]) for k in shown):
-            # the usual case: the curves share one sorted x, so they are drawn column by column
-            x = to_px(lines[shown[0]][0], xl, xs, w)
-            y = h - to_px(np.stack([lines[k][1] for k in shown]), yl, ys, h)
-            owner = raster_columns(x, y, w, h, width)
-        else:
-            px = [(to_px(lines[k][0], xl, xs, w), h - to_px(lines[k][1], yl, ys, h)) for k in shown]
-            owner = raster_lines(px, w, h, width)
-        table = np.vstack([self.line_colors[shown], [[0, 0, 0, 0]]])     # -1: transparent
-        self.line_image.set_data(table[owner])
+        px = [(to_px(lines[k][0], xl, xs, w), h - to_px(lines[k][1], yl, ys, h)) for k in shown]
+        self.line_image.set_data(paint_lines(px, self.line_colors[shown], w, h, width))
 
     def _plot_area(self) -> Tuple[int, int, int, int]:
         """The axes' box in image pixels: left, top, width, height (top-left origin)."""
@@ -342,14 +405,22 @@ class ExploreSession:
         return left, top, max(right - left, 1), max(bottom - top, 1)
 
     def _spills(self) -> bool:
-        """Whether some text of the last drawing sticks out of the picture."""
+        """Whether some text of the last drawing sticks out of the picture. Only the plot's tick
+        labels and multipliers change while zooming; they were just measured by the drawing."""
         r = self.fig.canvas.get_renderer()
         box = self.fig.bbox
-        for a in self.fig.axes:
-            tb = a.get_tightbbox(r)
+        a = self.ax
+        texts = [a.xaxis.get_offset_text(), a.yaxis.get_offset_text()]
+        for labels, locs, (lo, hi) in ((a.get_xticklabels(), a.get_xticks(), sorted(a.get_xlim())),
+                                       (a.get_yticklabels(), a.get_yticks(), sorted(a.get_ylim()))):
+            # only the ticks drawn: matplotlib also keeps labels for ticks just outside the view
+            texts += [t for t, v in zip(labels, locs) if lo <= v <= hi]
+        for t in texts:
+            if not t.get_visible() or not t.get_text():
+                continue
+            tb = t.get_window_extent(r)
             # a few pixels over the edge are harmless (antialiased glyph edges, the top tick label)
-            if tb is not None and (tb.x0 < box.x0 - 4 or tb.y0 < box.y0 - 4 or
-                                   tb.x1 > box.x1 + 4 or tb.y1 > box.y1 + 4):
+            if tb.x0 < box.x0 - 4 or tb.y0 < box.y0 - 4 or tb.x1 > box.x1 + 4 or tb.y1 > box.y1 + 4:
                 return True
         return False
 
@@ -409,7 +480,10 @@ class ExploreSession:
                 r = self.pyramid.raster(pxe, pye, stat)
                 self.image.set_data(r.image)
                 note, reduced = r.note(), r.reduced
+            elif self._fast_picture(pxe, dw, dh, draft):
+                note, reduced = "min and max per pixel column", True
             else:
+                self.spans = None
                 ys = [y for y, _ in self.model.lines]
                 lines: List[Tuple[np.ndarray, np.ndarray]] = [None] * len(ys)   # type: ignore[list-item]
                 reduced = unsorted = thinned = False
@@ -419,7 +493,10 @@ class ExploreSession:
                     ks = [k for k in ks if self.visible[k]]
                     if not ks:
                         continue
-                    if is_sorted:
+                    if is_sorted and id(x) in self.pyramids and len(ks) == len(self._group(x)):
+                        out, red = self.pyramids[id(x)].minmax(pxe)
+                        reduced |= red
+                    elif is_sorted:
                         out, red = curve_minmax(x, [ys[k] for k in ks], pxe)
                         reduced |= red
                     else:
@@ -578,8 +655,9 @@ class ExploreSession:
             j = int(k % per_value)
             out["index"][series] = j
             out["series"] = self._stored(series, j)
-        if self.last_lines is not None:
-            lx, ly = self.last_lines[k]
+        drawn = self._drawn(k)
+        if drawn is not None:
+            lx, ly = drawn
             hx, hy = self._to_px(lx, ly)
             out["line"] = [[float(a), float(b)] if np.isfinite(b) else None for a, b in zip(hx, hy)]
         return out

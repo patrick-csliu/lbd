@@ -222,42 +222,25 @@ def test_an_unsorted_curve_is_thinned_in_stored_order_keeping_extremes():
     assert np.array_equal(small_y, y[:500])                          # few points: unchanged
 
 
-def test_lines_are_rastered_with_later_lines_on_top():
-    from lbd.plot.reduce import raster_lines
+def test_the_curve_pyramid_keeps_spikes_and_matches_the_direct_reduction():
+    from lbd.plot.reduce import CurvePyramid
 
-    flat = (np.array([0.0, 99.0]), np.array([10.0, 10.0]))          # a horizontal line at row 10
-    rising = (np.array([0.0, 99.0]), np.array([49.0, 0.0]))         # from bottom-left to top-right
-    spike = (np.array([50.0, 50.5, 51.0]), np.array([30.0, 2.0, 30.0]))
-    owner = raster_lines([flat, rising, spike], 100, 50)
-    assert (owner[10, :] >= 0).all()                                 # no gaps along the flat line
-    assert owner[10, 20] == 0 and owner[2, 50] == 2                  # the spike's tip is drawn
-    col_hits = [(owner[:, c] == 1).any() for c in range(100) if c not in (50, 51)]
-    assert all(col_hits)                                             # the slope is continuous (the spike, on top, hides it at 50-51)
-    assert owner[49, 99] == -1 and owner[0, 0] == -1                 # elsewhere: nothing
-    crossing = np.argwhere((owner == 1) & (np.abs(np.arange(50)[:, None] - 10) == 0))
-    assert crossing.size                                             # 'rising' drawn over 'flat' where they cross
-
-
-def test_rastered_lines_leave_gaps_and_ignore_what_is_outside():
-    from lbd.plot.reduce import raster_lines
-
-    gap = (np.array([0.0, 40.0, np.nan, 60.0, 99.0]), np.array([5.0, 5.0, np.nan, 5.0, 5.0]))
-    far = (np.array([-1e6, 1e6]), np.array([1e6, 1e6]))            # entirely below the picture
-    owner = raster_lines([gap, far], 100, 20)
-    assert (owner[5, 45:55] == -1).all() and (owner[5, :40] == 0).all()
-    assert not (owner == 1).any()
-
-
-@pytest.mark.parametrize("n", [40, 3000])                            # fewer and more points than columns
-def test_curves_sharing_x_raster_like_any_polyline(n):
-    from lbd.plot.reduce import raster_columns, raster_lines
-
-    rng = np.random.default_rng(n)
-    x = np.sort(rng.uniform(-5, 105, n))
-    ys = np.cumsum(rng.normal(0, 2, (6, n)), axis=1) + 25
-    ys[2, n // 2: n // 2 + 3] = np.nan                               # a gap in one curve
-    fast = raster_columns(x, ys, 100, 50, 1.3)
-    slow = raster_lines([(x, y) for y in ys], 100, 50, 1.3)
-    # the same pixels drawn; the owner may differ by a pixel where the two methods round a slope
-    assert np.mean((fast >= 0) == (slow >= 0)) > 0.97
-    assert np.mean(fast[(fast >= 0) & (slow >= 0)] == slow[(fast >= 0) & (slow >= 0)]) > 0.9
+    rng = np.random.default_rng(5)
+    x = np.linspace(0, 1, 100_000)
+    ys = rng.normal(size=(20, x.size))
+    ys[7, 61_234] = 50
+    ys[3, 20_000:20_050] = np.nan
+    pyr = CurvePyramid(x, ys)
+    for lo, hi, w in ((0, 1, 300), (0.6, 0.65, 400), (0.1, 0.9, 800)):
+        px = pixels(lo, hi, w)
+        fast, reduced = pyr.minmax(px)
+        slow, _ = curve_minmax(x, list(ys), px)
+        assert reduced
+        # same overall extremes per curve (no point lost), and the spike in the same or next column
+        for (fx, fy), (sx, sy) in zip(fast, slow):
+            assert np.nanmax(fy) == np.nanmax(sy) and np.nanmin(fy) == np.nanmin(sy)
+        if lo <= x[61_234] <= hi:
+            col = lambda xs, ys_: np.searchsorted(px, xs[np.nanargmax(ys_)]) - 1   # noqa: E731
+            assert abs(col(*fast[7]) - col(*slow[7])) <= 1
+    zoomed, reduced = pyr.minmax(pixels(0.61233, 0.61236, 500))   # few points: stored points
+    assert not reduced and np.nanmax(zoomed[7][1]) == 50

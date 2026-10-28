@@ -330,114 +330,87 @@ def thin_in_order(x: np.ndarray, y: np.ndarray, n_out: int) -> Tuple[np.ndarray,
     return x[idx], y[idx]
 
 
-def raster_lines(lines: Sequence[Tuple[np.ndarray, np.ndarray]], width: int, height: int,
-                 thickness: float = 1.0) -> np.ndarray:
-    """Draw polylines into a picture of width × height pixels: for each pixel, the index of the
-    last line through it (later lines on top, as when drawn in order), or -1.
+class CurvePyramid:
+    """Curves that share one sorted x, with the min and max of blocks of 2, 4, 8, ... points made
+    once, so reducing a view to pixel columns reads about two blocks per column instead of every
+    point (curve_minmax on 1000 curves of 10 000 points: ~50 ms; from the pyramid: a few ms).
 
-    `lines` are (px, py) in pixels of the picture (x to the right, y down); NaN breaks a line.
-    Each line is `thickness` pixels wide. Used instead of drawing many lines one by one: numpy
-    covers every pixel a segment passes, column by column, without antialiasing.
-    """
-    owner = np.full(height * width, -1, dtype=np.int32)
-    pad = max(thickness, 1.0) / 2
-    xa_all, ya_all, xb_all, yb_all, ids = [], [], [], [], []
-    for k, (px, py) in enumerate(lines):
-        px, py = np.asarray(px, dtype=float), np.asarray(py, dtype=float)
-        if px.size == 1:                                  # a single point: a dot
-            px, py = np.repeat(px, 2), np.repeat(py, 2)
-        ok = np.isfinite(px[:-1]) & np.isfinite(py[:-1]) & np.isfinite(px[1:]) & np.isfinite(py[1:])
-        xa_all.append(px[:-1][ok]), ya_all.append(py[:-1][ok]), xb_all.append(px[1:][ok]), yb_all.append(py[1:][ok])
-        ids.append(np.full(int(ok.sum()), k, dtype=np.int32))
-    if not ids or not sum(len(i) for i in ids):
-        return owner.reshape(height, width)
-    xa, ya, xb, yb, k = (np.concatenate(v) for v in (xa_all, ya_all, xb_all, yb_all, ids))
-    swap = xb < xa                                        # every segment left to right
-    xa, xb = np.where(swap, xb, xa), np.where(swap, xa, xb)
-    ya, yb = np.where(swap, yb, ya), np.where(swap, ya, yb)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        slope = np.where(xb > xa, (yb - ya) / (xb - xa), 0.0)
-    # only the part inside the picture (plus a pixel), with y where the segment is cut
-    x0, x1 = np.maximum(xa, -1.0), np.minimum(xb, width + 1.0)
-    keep = x0 <= x1
-    xa, ya, x0, x1, slope, k, yb = xa[keep], ya[keep], x0[keep], x1[keep], slope[keep], k[keep], yb[keep]
-    vertical = x0 == x1
-    y0 = np.where(vertical, ya, ya + slope * (x0 - xa))
-    y1 = np.where(vertical, yb, ya + slope * (x1 - xa))
-    # one entry per pixel column a segment touches
-    c0, c1 = np.floor(x0).astype(np.int64), np.floor(x1).astype(np.int64)
-    n = c1 - c0 + 1
-    seg = np.repeat(np.arange(len(c0)), n)
-    col = c0[seg] + (np.arange(seg.size) - np.repeat(np.cumsum(n) - n, n))
-    xl, xr = np.maximum(x0[seg], col), np.minimum(x1[seg], col + 1)
-    yl = np.where(vertical[seg], y0[seg], y0[seg] + slope[seg] * (xl - x0[seg]))
-    yr = np.where(vertical[seg], y1[seg], y0[seg] + slope[seg] * (xr - x0[seg]))
-    r0 = np.floor(np.minimum(yl, yr) - pad + 0.5).astype(np.int64)
-    r1 = np.floor(np.maximum(yl, yr) + pad - 0.5).astype(np.int64)
-    r1 = np.maximum(r1, r0)
-    inside = (col >= 0) & (col < width) & (r1 >= 0) & (r0 < height)
-    col, line = col[inside], k[seg][inside]
-    r0, r1 = np.clip(r0[inside], 0, height - 1), np.clip(r1[inside], 0, height - 1)
-    # A line is continuous, so in one column it covers one run of rows: merge its pieces there.
-    key = line.astype(np.int64) * width + col
-    lo = np.full(len(lines) * width, height, dtype=np.int32)
-    hi = np.full(len(lines) * width, -1, dtype=np.int32)
-    np.minimum.at(lo, key, r0.astype(np.int32))
-    np.maximum.at(hi, key, r1.astype(np.int32))
-    used = np.flatnonzero(hi >= lo)
-    lo, hi = lo[used], hi[used]
-    col, line = (used % width).astype(np.int32), (used // width).astype(np.int32)
-    # one entry per pixel: the column's rows from lo to hi
-    m = hi - lo + 1
-    rep = np.repeat(np.arange(len(col), dtype=np.int32), m)
-    rows = lo[rep] + (np.arange(rep.size, dtype=np.int32) - np.repeat((np.cumsum(m) - m).astype(np.int32), m))
-    np.maximum.at(owner, rows * width + col[rep], line[rep])
-    return owner.reshape(height, width)
+    `x` increasing (n,), `ys` (curves, n). Blocks never mix points of different columns by more
+    than a block, and a block is at most half a pixel column wide, so peaks stay in their column
+    or the next (as with MapPyramid); zoomed in, the stored points are used as they are."""
 
+    def __init__(self, x: np.ndarray, ys: np.ndarray, smallest: int = 256):
+        x = np.asarray(x, dtype=float)
+        y = np.atleast_2d(np.asarray(ys, dtype=float))
+        self.x, self.y = x, y
+        self.levels: List[Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]] = []   # x0, x1, lo, hi
+        x0, x1, lo, hi = x, x, y, y
+        while x0.size > smallest:
+            n = x0.size // 2 * 2                          # an odd last point stays a block of its own
+            x0 = np.concatenate([x0[:n:2], x0[n:]])
+            x1 = np.concatenate([x1[1:n:2], x1[n:]])
+            lo = np.concatenate([np.fmin(lo[:, :n:2], lo[:, 1:n:2]), lo[:, n:]], axis=1)
+            hi = np.concatenate([np.fmax(hi[:, :n:2], hi[:, 1:n:2]), hi[:, n:]], axis=1)
+            self.levels.append((x0, x1, lo, hi))
 
-def raster_columns(x: np.ndarray, ys: np.ndarray, width: int, height: int, thickness: float = 1.0) -> np.ndarray:
-    """Like raster_lines, for many curves that share one increasing x (the usual case: a sweep
-    with one curve per step), and much faster: the work is per pixel column, for all curves at
-    once, however many points they have.
+    def spans(self, px_x_edges: Sequence[float]) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+        """For each curve and pixel column: its lowest and highest value there, (curves, columns)
+        each (NaN where it has none); None when zoomed in so far that the stored points should be
+        drawn instead (see minmax)."""
+        pxe = np.asarray(px_x_edges, dtype=float)
+        w = len(pxe) - 1
+        found = self._blocks(pxe)
+        if found is None:
+            return None
+        cols, lo_c, hi_c = found
+        lo = np.full((lo_c.shape[0], w), np.nan)
+        hi = np.full((lo_c.shape[0], w), np.nan)
+        inside = (cols >= 0) & (cols < w)
+        lo[:, cols[inside]], hi[:, cols[inside]] = lo_c[:, inside], hi_c[:, inside]
+        return lo, hi
 
-    `x` (n,) and `ys` (curves, n) are in pixels of the picture (x to the right, y down); NaN breaks
-    a curve. In each column a curve covers the rows between its values at the column's two edges
-    and every stored point inside it."""
-    x = np.asarray(x, dtype=float)
-    ys = np.atleast_2d(np.asarray(ys, dtype=float))
-    k = ys.shape[0]
-    owner = np.full(height * width, -1, dtype=np.int32)
-    if x.size < 2 or k == 0:
-        return owner.reshape(height, width)
-    # values at the column edges (linear between neighbouring points; NaN next to a gap)
-    edges = np.arange(width + 1, dtype=float)
-    i = np.clip(np.searchsorted(x, edges, side="right") - 1, 0, x.size - 2)
-    t = (edges - x[i]) / np.where(x[i + 1] > x[i], x[i + 1] - x[i], 1.0)
-    outside = (edges < x[0]) | (edges > x[-1])
-    at_edges = ys[:, i] * (1 - t) + ys[:, i + 1] * t
-    at_edges[:, outside] = np.nan
-    lo = np.fmin(at_edges[:, :-1], at_edges[:, 1:])
-    hi = np.fmax(at_edges[:, :-1], at_edges[:, 1:])
-    # the stored points inside each column
-    col = np.floor(x).astype(np.int64)
-    inside = (col >= 0) & (col < width)
-    if inside.any():
-        xs_col, yv = col[inside], ys[:, inside]
-        starts = np.flatnonzero(np.r_[True, xs_col[1:] != xs_col[:-1]])
-        cols = xs_col[starts]
-        lo[:, cols] = np.fmin(lo[:, cols], np.fmin.reduceat(yv, starts, axis=1))
-        hi[:, cols] = np.fmax(hi[:, cols], np.fmax.reduceat(yv, starts, axis=1))
-    pad = max(thickness, 1.0) / 2
-    ok = np.isfinite(lo) & np.isfinite(hi)
-    r0 = np.floor(np.where(ok, lo, 0) - pad + 0.5)
-    r1 = np.floor(np.where(ok, hi, -1) + pad - 0.5)
-    ok &= (r1 >= 0) & (r0 < height)
-    r0 = np.clip(r0, 0, height - 1).astype(np.int32)
-    r1 = np.maximum(np.clip(r1, 0, height - 1).astype(np.int32), r0)
-    line, c = np.nonzero(ok)                              # curve-major: later curves come later
-    a, b = r0[line, c], r1[line, c]
-    m = b - a + 1
-    rep = np.repeat(np.arange(len(c), dtype=np.int32), m)
-    rows = a[rep] + (np.arange(rep.size, dtype=np.int32) - np.repeat((np.cumsum(m) - m).astype(np.int32), m))
-    np.maximum.at(owner, rows * width + c[rep].astype(np.int32), line[rep].astype(np.int32))
-    return owner.reshape(height, width)
+    def _blocks(self, pxe: np.ndarray):
+        """The pyramid level for these pixel columns: (column of each group, min, max), or None."""
+        w = len(pxe) - 1
+        visible = int(np.searchsorted(self.x, pxe[-1], side="right") - np.searchsorted(self.x, pxe[0], side="left"))
+        level = None
+        for i in range(len(self.levels)):
+            if visible / 2 ** (i + 1) >= 2 * w:
+                level = i
+        if level is None:
+            return None
+        x0, x1, lo, hi = self.levels[level]
+        mid = (x0 + x1) / 2
+        i0 = max(int(np.searchsorted(mid, pxe[0], side="left")) - 1, 0)
+        i1 = min(int(np.searchsorted(mid, pxe[-1], side="right")) + 1, mid.size)
+        col = np.clip(np.searchsorted(pxe, mid[i0:i1], side="right") - 1, -1, w)
+        starts = np.flatnonzero(np.r_[True, col[1:] != col[:-1]])
+        return col[starts], np.fmin.reduceat(lo[:, i0:i1], starts, axis=1), np.fmax.reduceat(hi[:, i0:i1], starts, axis=1)
+
+    def minmax(self, px_x_edges: Sequence[float]) -> Tuple[List[Tuple[np.ndarray, np.ndarray]], bool]:
+        """As curve_minmax(x, ys, px_x_edges), from the coarsest level with at least two blocks per
+        pixel column in view."""
+        pxe = np.asarray(px_x_edges, dtype=float)
+        w = len(pxe) - 1
+        visible = int(np.searchsorted(self.x, pxe[-1], side="right") - np.searchsorted(self.x, pxe[0], side="left"))
+        level = None
+        for i, (x0, x1, lo, hi) in enumerate(self.levels):
+            if visible / 2 ** (i + 1) >= 2 * w:
+                level = i
+        if level is None:
+            return curve_minmax(self.x, list(self.y), pxe)
+        x0, x1, lo, hi = self.levels[level]
+        mid = (x0 + x1) / 2                               # a block belongs to the column of its middle
+        i0 = max(int(np.searchsorted(mid, pxe[0], side="left")) - 1, 0)
+        i1 = min(int(np.searchsorted(mid, pxe[-1], side="right")) + 1, mid.size)
+        col = np.clip(np.searchsorted(pxe, mid[i0:i1], side="right") - 1, -1, w)
+        starts = np.flatnonzero(np.r_[True, col[1:] != col[:-1]])
+        ids = col[starts]
+        centres = np.where((ids >= 0) & (ids < w), (pxe[np.clip(ids, 0, w - 1)] + pxe[np.clip(ids + 1, 0, w)]) / 2,
+                           mid[i0:i1][starts])
+        xx = np.repeat(centres, 2)
+        lo_c = np.fmin.reduceat(lo[:, i0:i1], starts, axis=1)
+        hi_c = np.fmax.reduceat(hi[:, i0:i1], starts, axis=1)
+        yy = np.empty((lo.shape[0], 2 * len(starts)))
+        yy[:, 0::2], yy[:, 1::2] = lo_c, hi_c
+        return [(xx, row) for row in yy], True
