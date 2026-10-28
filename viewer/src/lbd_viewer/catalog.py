@@ -20,7 +20,7 @@ import sqlite3
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 SCHEMA_VERSION = 1
 KEEP_VIEWS = 5000          # remembered Explore views; the oldest beyond this are forgotten
@@ -149,3 +149,37 @@ def misfit(remembered: Dict[str, Any], now: Dict[str, Any], state: Dict[str, Any
         if name and name != "none" and name not in now["axes"] and name not in now["values"]:
             return f"the axis '{name}' is gone"
     return None
+
+
+# The remembered Explore view's shape. Version 2 (plan 4) holds panels; a record without a
+# version is one plot (LBD 1.3.0-dev before panels) and is read as one panel.
+STATE_VERSION = 2
+PANEL_DEFAULTS: Dict[str, Any] = {"active": 0, "layout": "side", "sync": {"x": True, "y": False, "sliders": True}}
+
+
+def upgrade(state: Dict[str, Any]) -> Dict[str, Any]:
+    """A remembered view in the newest shape: an older record becomes one panel (nothing in it is
+    lost); missing keys get their defaults."""
+    if "version" not in state:
+        state = {"version": STATE_VERSION, "panels": [state]}
+    out = {**PANEL_DEFAULTS, **state}
+    out["sync"] = {**PANEL_DEFAULTS["sync"], **(state.get("sync") or {})}
+    return out
+
+
+def fitting(remembered: Dict[str, Any], now: Dict[str, Any], state: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """The remembered view (upgraded) with only the panels that still fit the file, and a note
+    naming the ones left out; (None, why) when none fits."""
+    state = upgrade(state)
+    kept, why = [], []
+    for k, panel in enumerate(state["panels"]):
+        reason = misfit(remembered, now, panel)
+        if reason:
+            why.append(f"panel {k + 1}: {reason}")
+        else:
+            kept.append(k)
+    if not kept:
+        return None, "; ".join(why) or "it has no panels"
+    active = kept.index(state["active"]) if state["active"] in kept else 0
+    state = {**state, "panels": [state["panels"][k] for k in kept], "active": active}
+    return state, ("; ".join(why) if why else None)

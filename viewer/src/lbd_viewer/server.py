@@ -42,7 +42,7 @@ from lbd.plot.units import prefix_scale  # noqa: E402
 
 from . import VERSION  # noqa: E402
 from . import files, images, scan, sdk  # noqa: E402
-from .catalog import Catalog, catalog_dir, misfit, structure  # noqa: E402
+from .catalog import Catalog, catalog_dir, fitting, structure  # noqa: E402
 from . import reading  # noqa: E402
 from .explore import ExploreClosed, ExploreError, ExploreSession, Sessions  # noqa: E402
 from .pages import PageError, Pages, UnknownPage  # noqa: E402
@@ -829,17 +829,20 @@ def create_app(state: AppState) -> FastAPI:
 
     @app.get("/api/explore/remembered")
     def explore_remembered(path: str = Query(...)):
-        """The Explore view remembered for a file (LBD's database, never the file), if it still
-        fits the file; else a note saying why it doesn't."""
+        """The Explore view remembered for a file (LBD's database, never the file), in the newest
+        shape (an older record is upgraded: one panel), with the panels that still fit the file;
+        a note says which were left out, or why it starts afresh."""
         p = state.check_allowed(path)
         rec = state.catalog.view(str(p))
         if rec is None:
             return {"state": None, "note": None}
-        reason = misfit(rec["structure"], structure(lbd.info(p)), rec["state"])
-        if reason:
+        kept, reason = fitting(rec["structure"], structure(lbd.info(p)), rec["state"])
+        if kept is None:
             return {"state": None, "note": f"The Explore view remembered for {p.name} no longer fits the file "
                                             f"({reason}), so it starts afresh."}
-        return {"state": rec["state"], "note": None}
+        note = (f"Some panels remembered for {p.name} no longer fit the file and were left out ({reason})."
+                if reason else None)
+        return {"state": kept, "note": note}
 
     @app.put("/api/explore/remembered")
     def explore_remember(body: RememberBody):

@@ -29,8 +29,8 @@ interface Props {
   onMenu?: (e: MouseEvent) => void;
 }
 
-/** What is remembered for a file (LBD's database; see catalog.py). */
-interface Remembered {
+/** One panel's plot, as remembered. */
+export interface PanelState {
   spec: PlotSpec;
   settings: ViewSettings;
   stat: ReduceStat;
@@ -42,7 +42,38 @@ interface Remembered {
   back?: PlotSpec;
 }
 
-const fresh = (info: FileInfo): Remembered => ({ spec: startSpec(info), settings: {}, stat: "max", view: null, cursors: NO_CURSORS });
+/** What is remembered for a file (LBD's database, never the file; catalog.py `upgrade`): its
+ * panels, which one is active, the layout and what is synchronized. The server upgrades older
+ * records (one plot) to this shape. */
+export interface Remembered {
+  version: 2;
+  panels: PanelState[];
+  active: number;
+  layout: "side" | "stacked";
+  sync: { x: boolean; y: boolean; sliders: boolean };
+}
+
+const freshPanel = (spec: PlotSpec): PanelState => ({ spec, settings: {}, stat: "max", view: null, cursors: NO_CURSORS });
+const fresh = (info: FileInfo): Remembered => ({
+  version: 2,
+  panels: [freshPanel(startSpec(info))],
+  active: 0,
+  layout: "side",
+  sync: { x: true, y: false, sliders: true },
+});
+
+/** A remembered panel with the keys a later LBD added filled in. */
+function filledPanel(st: Partial<PanelState>): PanelState {
+  return {
+    spec: st.spec ?? {},
+    settings: st.settings ?? {},
+    stat: st.stat ?? "max",
+    view: st.view ?? null,
+    cursors: { ...NO_CURSORS, ...(st.cursors ?? {}) },
+    ...(st.listOpen !== undefined ? { listOpen: st.listOpen } : {}),
+    ...(st.back ? { back: st.back } : {}),
+  };
+}
 
 const START_KEYS = ["values", "complex", "x", "y", "series", "index", "kind"] as const;
 const CMAPS = ["viridis", "plasma", "magma", "cividis", "gray", "RdBu", "twilight"];
@@ -71,7 +102,13 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
   const [info, setInfo] = useState<FileInfo | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [updating, setUpdating] = useState<string | null>(null);
-  const [shown, setShown] = useState<Remembered | null>(null); // what the view shows (remembered)
+  const [rec, setRec] = useState<Remembered | null>(null); // what the view shows (remembered)
+  const shown = rec ? rec.panels[rec.active] ?? rec.panels[0] : null;
+  /** Change the active panel. */
+  const setShown = useCallback(
+    (f: (p: PanelState) => PanelState) => setRec((r) => r && { ...r, panels: r.panels.map((p, i) => (i === r.active ? f(p) : p)) }),
+    [],
+  );
   const [resolved, setResolved] = useState<ExploreOpen | null>(null);
   const [viewKey, setViewKey] = useState(0); // a new one starts the view afresh
   const disk = useDiskVersion("file", path);
@@ -88,19 +125,11 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
         if (!live) return;
         setInfo(i);
         if (r.note) onErrorRef.current(r.note);
-        // a remembered view (older ones may lack later keys), else a start from the file
-        const st = r.state as unknown as Partial<Remembered> | null;
-        setShown(
-          st?.spec
-            ? {
-                spec: st.spec,
-                settings: st.settings ?? {},
-                stat: st.stat ?? "max",
-                view: st.view ?? null,
-                cursors: { ...NO_CURSORS, ...(st.cursors ?? {}) },
-                ...(st.listOpen !== undefined ? { listOpen: st.listOpen } : {}),
-                ...(st.back ? { back: st.back } : {}),
-              }
+        // a remembered view (upgraded by the server; panels may lack later keys), else a start from the file
+        const st = r.state as unknown as Remembered | null;
+        setRec(
+          st?.panels?.length
+            ? { ...st, panels: st.panels.map(filledPanel), active: Math.min(st.active ?? 0, st.panels.length - 1) }
             : fresh(i),
         );
       } catch (e) {
@@ -125,7 +154,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
         setUpdating(null);
         if (!grewOnly(info, now)) {
           onErrorRef.current(`${now.name} was rewritten with other contents, so its Explore view starts afresh.`);
-          setShown(fresh(now));
+          setRec(fresh(now));
           setViewKey((k) => k + 1);
         }
         setInfo(now);
@@ -142,16 +171,16 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
   }, [disk.version, info, path]);
 
   // Remember what is shown, a moment after the last change (and when the tab closes).
-  const shownRef = useRef(shown);
-  shownRef.current = shown;
+  const recRef = useRef(rec);
+  recRef.current = rec;
   useEffect(() => {
-    if (!shown) return;
-    const t = window.setTimeout(() => api.remember(path, shown).catch(() => undefined), 1000);
+    if (!rec) return;
+    const t = window.setTimeout(() => api.remember(path, rec).catch(() => undefined), 1000);
     return () => window.clearTimeout(t);
-  }, [shown, path]);
+  }, [rec, path]);
   useEffect(
     () => () => {
-      if (shownRef.current) api.remember(path, shownRef.current).catch(() => undefined);
+      if (recRef.current) api.remember(path, recRef.current).catch(() => undefined);
     },
     [path],
   );
@@ -216,7 +245,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
   const forget = async () => {
     if (!info) return;
     await api.forget(path).catch((e) => onError((e as Error).message));
-    setShown(fresh(info));
+    setRec(fresh(info));
     setViewKey((k) => k + 1);
   };
 

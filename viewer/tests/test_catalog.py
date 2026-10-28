@@ -3,7 +3,7 @@
 import lbd
 import numpy as np
 
-from lbd_viewer.catalog import Catalog, misfit, structure
+from lbd_viewer.catalog import Catalog, fitting, misfit, structure, upgrade
 
 
 def test_a_view_is_remembered_and_forgotten(tmp_path):
@@ -63,7 +63,7 @@ def test_the_viewer_remembers_explore_views_by_file(client, data_dir):
     assert client.get("/api/explore/remembered", params={"path": path}).json() == {"state": None, "note": None}
     state = {"spec": {"values": ["a"], "x": "t"}, "view": {"xlim": [0, 1e-7]}, "settings": {"cmap": "magma"}}
     client.put("/api/explore/remembered", json={"path": path, "state": state}).raise_for_status()
-    assert client.get("/api/explore/remembered", params={"path": path}).json()["state"] == state
+    assert client.get("/api/explore/remembered", params={"path": path}).json()["state"] == upgrade(state)
     # the file is rewritten without 'a': the remembered view no longer fits
     d = lbd.load(path)
     d2 = lbd.Dataset(title="curve")
@@ -74,3 +74,39 @@ def test_the_viewer_remembers_explore_views_by_file(client, data_dir):
     assert r["state"] is None and "the value 'a' is gone" in r["note"]
     client.delete("/api/explore/remembered", params={"path": path}).raise_for_status()
     assert client.get("/api/explore/remembered", params={"path": path}).json()["note"] is None
+
+
+def test_a_view_remembered_before_panels_becomes_one_panel(client, values_files):
+    """Records written before plan 4 hold one plot; they open as one panel, nothing lost."""
+    import mock_values
+
+    old = mock_values.old_record()
+    new = upgrade(old)
+    assert new["version"] == 2 and new["panels"] == [old] and new["active"] == 0
+    assert new["layout"] == "side" and new["sync"] == {"x": True, "y": False, "sliders": True}
+    assert upgrade(new) == new                                          # the newest shape stays as it is
+    path = str(next(p for p in values_files if p.name == "10 one value.lbd").resolve())
+    client.put("/api/explore/remembered", json={"path": path, "state": old}).raise_for_status()
+    r = client.get("/api/explore/remembered", params={"path": path}).json()
+    assert r == {"state": new, "note": None}
+
+
+def test_panels_that_no_longer_fit_are_left_out_and_named(tmp_path):
+    d = lbd.Dataset()
+    d.add_axis("t", np.arange(4.0))
+    d.add_value("I", np.zeros(4), axes="t")
+    d.add_value("Q", np.zeros(4), axes="t")
+    before = structure(d)
+    panel = lambda v: {"spec": {"values": [v], "x": "t"}}             # noqa: E731
+    state = {"version": 2, "panels": [panel("I"), panel("Q")], "active": 1}
+    after = lbd.Dataset()
+    after.add_axis("t", np.arange(4.0))
+    after.add_value("Q", np.zeros(4), axes="t")
+    kept, note = fitting(before, structure(after), state)
+    assert kept["panels"] == [panel("Q")] and kept["active"] == 0
+    assert note == "panel 1: the value 'I' is gone"
+    gone = lbd.Dataset()
+    gone.add_axis("t", np.arange(4.0))
+    gone.add_value("P", np.zeros(4), axes="t")
+    kept, note = fitting(before, structure(gone), state)
+    assert kept is None and "panel 1: the value 'I' is gone; panel 2: the value 'Q' is gone" == note
