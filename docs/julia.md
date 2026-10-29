@@ -38,7 +38,7 @@ d["S21"].axes           # ["power", "freq"]
 ## `Dataset`
 
 ```julia
-Dataset(title::AbstractString=""; description::AbstractString="")
+Dataset(title::AbstractString=""; description::AbstractString="", created=nothing)
 ```
 
 A mutable struct with these fields:
@@ -54,7 +54,7 @@ A mutable struct with these fields:
 | `style` | `Dict{String,Any}` or `nothing` | Per-file [style](styles/index.md) changes. |
 | `style_name` | `String` or `nothing` | Viewer style preset for this file. |
 | `matplotlib` | `String` or `nothing` | matplotlib version that last wrote the saved view (set by Python and the viewer). Julia keeps it when saving. |
-| `created` | `String` or `nothing` | ISO-8601 time the file was written. Set by `save`. |
+| `created` | `String`, `DateTime` or `nothing` | When the data was created, ISO-8601 with a UTC offset (`"2026-10-13T16:09:00+08:00"`). Editable: give it as such a text or a `DateTime` (taken in this computer's time zone); a text without an offset gets this computer's offset. `nothing`: `save` fills in the time of the first save. A loaded file keeps its `created`, and saving again keeps it. |
 | `writer` | `String` or `nothing` | Program that wrote the file, e.g. `"julia LBD 1.0.0"`. |
 | `lbd_version` | `String` | Format version of the file. |
 | `path` | `String` or `nothing` | Last loaded or saved path. |
@@ -123,7 +123,8 @@ add_value!(d, "fit_Q", 12345.6)                 # scalar
 LBD.save(path, d; compression=false) -> path
 ```
 
-Writes the dataset. It also sets `d.created`, `d.writer` and `d.path`.
+Writes the dataset. It also sets `d.writer` and `d.path`, and `d.created` if it was `nothing`
+(the time of this first save); a `created` that is set is written unchanged.
 
 - `compression=true` gzip-compresses arrays of 1024 elements or more. This is lossless.
 - A path not ending in `.lbd` logs a warning.

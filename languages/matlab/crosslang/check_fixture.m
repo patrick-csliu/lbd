@@ -21,6 +21,11 @@ function checkOne(p)
 d = lbd.load(p);
 [I, J, K] = ndgrid(0:2, 0:3, 0:1);
 expect(d.Title == "Fixture – ünïcode", "title: " + d.Title);
+expect(d.Created == "2025-03-01T23:30:00+08:00", "created: " + string(d.Created));
+again = fullfile(tempname, "again.lbd");                 % loaded and saved again: created kept
+mkdir(fileparts(again));
+lbd.load(p).save(again);
+expect(lbd.load(again).Created == "2025-03-01T23:30:00+08:00", "created after saving again");
 expect(isequal(d.Axes.x.Data, (0:9)'), "x");
 expect(isequal([d.Axes.x.Unit d.Axes.a.Unit d.Axes.b.Unit d.Axes.c.Unit], ["s" "V" "A" "Hz"]), "units");
 expect(isequal(d.Values.y.Data, ((0:9).^2)'), "y");

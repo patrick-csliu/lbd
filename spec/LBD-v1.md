@@ -36,7 +36,7 @@ that implement this spec, see [Python](../docs/python/files.md), [MATLAB](../doc
 | `lbd_version` | string, `"<major>.<minor>"` | must | Format version, `"1.0"` for this spec. |
 | `title` | string | must (may be `""`) | Short human-readable title. |
 | `description` | string | must (may be `""`) | Free text. |
-| `created` | string, ISO-8601 with UTC offset | must | Time the file was written, e.g. `2026-10-13T16:09:00+08:00`. |
+| `created` | string, ISO-8601 with UTC offset | must | When the data was created (measured), e.g. `2026-10-13T16:09:00+08:00`. Given by the user when known; otherwise writers fill in the time of the first save. A writer saving a dataset that already has a `created` (set by the user, or read from a file) writes it unchanged. |
 | `writer` | string | must | Writer and its version, e.g. `"python lbd 1.0.0"`, `"matlab lbd 1.0.0"`, `"julia LBD 1.0.0"`. |
 
 ### 1.2 Axes — `/axes/<name>`

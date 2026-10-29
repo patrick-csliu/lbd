@@ -2,7 +2,7 @@ function write_fixture(out)
 % Called by tests/crosslang/run_all.py (see ../language.toml).
 if ~isfolder(out), mkdir(out); end
 [I, J, K] = ndgrid(0:2, 0:3, 0:1);
-d = lbd.Dataset("Fixture – ünïcode");
+d = lbd.Dataset("Fixture – ünïcode", Created="2025-03-01T23:30:00+08:00");
 d.addAxis("x", 0:9, Unit="s");
 d.addAxis("a", [1 2 3], Unit="V");
 d.addAxis("b", [1 2 3 4], Unit="A");

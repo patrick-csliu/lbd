@@ -29,6 +29,7 @@ with a notice. See [languages/README.md](../../languages/README.md) for adding o
 | Item | Definition |
 |---|---|
 | title | `Fixture – ünïcode` |
+| created | `2025-03-01T23:30:00+08:00` (given by the writer, not the time of saving); **check** also loads each fixture, saves it to a scratch file and reads it again: `created` is unchanged |
 | axis `x` | float64 `0..9`, unit `s` |
 | axis `a` | float64 `[1, 2, 3]`, unit `V` |
 | axis `b` | float64 `[1, 2, 3, 4]`, unit `A` |

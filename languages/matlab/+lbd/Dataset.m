@@ -21,25 +21,31 @@ classdef Dataset < handle
         Style = []                     % struct: per-file style override, stored as JSON
         StyleName string = string.empty
         Matplotlib string = string.empty  % matplotlib version that last wrote the saved view (kept as is)
+        % When the data was created: ISO-8601 text with a UTC offset, or a datetime. Empty: save
+        % fills in the time of the first save; a loaded file keeps its time, and saving keeps it.
+        Created = string.empty
     end
 
     properties (SetAccess = private)
         Axes (1,1) struct = struct()   % Axes.<name>   = struct(Name, Data, Unit, Label)
         Values (1,1) struct = struct() % Values.<name> = struct(Name, Data, Axes, Unit, Label, Shape, Dtype)
-        Created string = string.empty
         Writer string = string.empty
         LbdVersion (1,1) string = "1.0"
         Path string = string.empty
     end
 
     methods
-        function obj = Dataset(title, description)
+        function obj = Dataset(title, description, opts)
             arguments
                 title (1,1) string = ""
                 description (1,1) string = ""
+                opts.Created = string.empty
             end
             obj.Title = title;
             obj.Description = description;
+            if ~isempty(opts.Created)
+                obj.Created = lbd_created_text(opts.Created);
+            end
         end
 
         function axis = addAxis(obj, name, data, opts)
@@ -208,7 +214,12 @@ classdef Dataset < handle
         end
 
         function writeFile(obj, path, compression)
-            created = string(datetime('now', 'TimeZone', 'local', 'Format', "yyyy-MM-dd'T'HH:mm:ssxxx"));
+            % when the data was created: kept as set (also as read by load); not set: this first save
+            if isempty(obj.Created) || (isstring(obj.Created) && strlength(obj.Created) == 0)
+                created = string(datetime('now', 'TimeZone', 'local', 'Format', "yyyy-MM-dd'T'HH:mm:ssxxx"));
+            else
+                created = lbd_created_text(obj.Created);
+            end
             v = lbd.version();
             writer = "matlab lbd " + v.package;
             fid = H5F.create(path, 'H5F_ACC_TRUNC', 'H5P_DEFAULT', 'H5P_DEFAULT');

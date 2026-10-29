@@ -104,8 +104,15 @@ When a saved view or style is written, the file also records the installed matpl
 
 ## Saving
 
-[`d.save(path)`][lbd.Dataset.save] writes the file and sets `d.created`, `d.writer` and
-`d.path`. An existing file is replaced.
+[`d.save(path)`][lbd.Dataset.save] writes the file and sets `d.writer` and `d.path`. An
+existing file is replaced.
+
+- **`d.created`** is when the data was created (the date LBD Viewer's Library sorts and
+  filters by). Give it when you know it, as a `datetime` or ISO-8601 text:
+  `lbd.Dataset(title="Rabi", created="2026-10-13T16:09:00+08:00")` or `d.created = ...` (a time
+  without an offset is taken in this computer's time zone). Not given: the first save fills in
+  the time of that save. A loaded file keeps its `created`, and saving it again keeps it: only
+  a new value changes it.
 
 - The file is written under a temporary name and renamed at the end, so the viewer or another
   program never sees a half-written file, and a failed save leaves the old file untouched.

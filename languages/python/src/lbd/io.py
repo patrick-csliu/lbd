@@ -207,8 +207,14 @@ class Dataset:
         The matplotlib version that last wrote the saved view (`plot`, `style`), e.g. `"3.11.2"`.
         Set by `save` and `lbd.set_plot` when matplotlib is installed; only informational (it
         tells which matplotlib the view's annotations were written for).
-    created, writer : str or None
-        When and by which program the file was written. Set by `save`, read by `load`.
+    created : str, datetime or None
+        When the data was created (measured), as ISO-8601 text with a UTC offset, e.g.
+        `"2026-10-13T16:09:00+08:00"`. Give it (here or in `Dataset(created=...)`) as a
+        `datetime` or such a text; a time without an offset is taken in this computer's time
+        zone. Not given: `save` fills in the time of the first save. A loaded file keeps its
+        `created`, and saving it again keeps it; only a new value changes it.
+    writer : str or None
+        The program that wrote the file, e.g. `"python lbd 1.3.0"`. Set by `save`.
     lbd_version : str
         Format version of the file.
     path : pathlib.Path or None
@@ -218,6 +224,8 @@ class Dataset:
     ------
     TypeError
         `title` or `description` is not a string.
+    LBDError
+        `created` is not a date and time.
 
     Examples
     --------
@@ -229,10 +237,10 @@ class Dataset:
     >>> d.save("sweep.lbd")
     """
 
-    def __init__(self, title: str = "", description: str = ""):
+    def __init__(self, title: str = "", description: str = "", created: Any = None):
         self.title = _check_text(title, "title")
         self.description = _check_text(description, "description")
-        self.created: Optional[str] = None
+        self.created: Optional[str] = None if created is None else _created_text(created)
         self.writer: Optional[str] = None
         self.lbd_version: str = FORMAT_VERSION
         self.axes: Dict[str, Axis] = {}
@@ -431,7 +439,9 @@ class Dataset:
         after `add_axis` / `add_value`. The file is written under a temporary name
         (`<name>.lbd.tmp-<pid>`) and then renamed, so LBD Viewer or another program never sees a
         half-written file. If writing fails, the temporary file is removed and an existing file
-        at `path` is left untouched. Sets `created`, `writer` and `path`.
+        at `path` is left untouched. Sets `writer` and `path`, and `created` if it wasn't set
+        (the time of this first save); a `created` that is set, also one read by `load`, is
+        written unchanged.
 
         Parameters
         ----------
@@ -452,7 +462,8 @@ class Dataset:
         LBDError
             Anything that breaks the format: metadata that can't be stored (e.g. `None`), a value
             read without its data, a value whose shape no longer matches its axes, a `plot` with
-            unknown keys or NaN, a `style` that isn't a dict, an invalid `compression`.
+            unknown keys or NaN, a `style` that isn't a dict, an invalid `compression`, a
+            `created` that isn't a date and time.
         OSError
             File-system problems. On Windows, a file another program keeps open (e.g. LBD Viewer
             reading it, a sync client) can't be replaced: `save` waits up to 3 s for it, then
@@ -481,7 +492,8 @@ class Dataset:
         if plot_json is not None or style_json is not None or style_name is not None:
             mpl = _matplotlib_version() or self.matplotlib
 
-        created = _dt.datetime.now().astimezone().isoformat(timespec="seconds")
+        created = _created_text(self.created) if self.created is not None else \
+            _dt.datetime.now().astimezone().isoformat(timespec="seconds")
         writer = f"python lbd {__version__}"
         tmp = path.with_name(f"{path.name}.tmp-{os.getpid()}")
         try:
@@ -927,6 +939,25 @@ def _check_name(name: Any) -> str:
 def _check_loaded_name(name: str, path: Path) -> None:
     if not _NAME_RE.match(name):
         raise LBDError(f"{path.name}: invalid axis/value name {name!r}")
+
+
+def _created_text(value: Any) -> str:
+    """`created` as stored: ISO-8601 text with a UTC offset. A `datetime`, or a text in that form
+    (kept as written); a time without an offset gets this computer's offset."""
+    if isinstance(value, _dt.datetime):
+        when = value if value.tzinfo is not None else value.astimezone()
+        return when.isoformat(timespec="seconds" if not when.microsecond else "microseconds")
+    if isinstance(value, str):
+        text = value.strip()
+        try:
+            # Python before 3.11 doesn't read "Z" for UTC
+            when = _dt.datetime.fromisoformat(text[:-1] + "+00:00" if text.endswith(("Z", "z")) else text)
+        except ValueError:
+            when = None
+        if when is not None and len(text) > 10:          # a time, not only a date
+            return text if when.tzinfo is not None else when.astimezone().isoformat(timespec="seconds")
+    raise LBDError(f"created must be a date and time: a datetime, or ISO-8601 text such as "
+                   f"'2026-10-13T16:09:00+08:00', not {value!r}")
 
 
 def _check_text(value: Any, what: str) -> str:

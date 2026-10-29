@@ -33,10 +33,11 @@ d.Values.S21.Axes           % ["power" "freq"]
 
 <!-- no-check -->
 ```matlab
-d = lbd.Dataset(title, description)
+d = lbd.Dataset(title, description, Created=when)
 ```
 
-Both arguments are optional strings (default `""`).
+All arguments are optional: `title` and `description` are strings (default `""`); `Created` is
+when the data was created (see the `Created` property).
 
 ### Properties
 
@@ -51,6 +52,7 @@ You can set these properties:
 | `Style` | struct, JSON text, or `[]` | Per-file [style](styles/index.md) changes, e.g. `struct("figure", struct("width_mm", 120))`. |
 | `StyleName` | string or empty | Name of a viewer style preset for this file. |
 | `Matplotlib` | string or empty | matplotlib version that last wrote the saved view (set by Python and the viewer). MATLAB keeps it when saving. |
+| `Created` | string, datetime or empty | When the data was created, ISO-8601 with a UTC offset (`"2026-10-13T16:09:00+08:00"`); a datetime without a time zone, or a text without an offset, is taken in this computer's time zone. Empty: `save` fills in the time of the first save. A loaded file keeps its `Created`, and saving again keeps it. |
 
 These properties are read-only; they are set by the methods and by `lbd.load`:
 
@@ -58,7 +60,6 @@ These properties are read-only; they are set by the methods and by `lbd.load`:
 |---|---|---|
 | `Axes` | struct | `Axes.<name>` is a struct with fields `Name`, `Data` (column vector), `Unit`, `Label`. |
 | `Values` | struct | `Values.<name>` is a struct with fields `Name`, `Data`, `Axes` (string row), `Unit`, `Label`, `Shape` (row vector), `Dtype` (LBD type name). |
-| `Created` | string | ISO-8601 time the file was written. |
 | `Writer` | string | Program that wrote the file, e.g. `"matlab lbd 1.0.0"`. |
 | `LbdVersion` | string | Format version of the file. |
 | `Path` | string | Where it was last loaded from or saved to. |
@@ -131,7 +132,8 @@ d.addValue("fit_Q", 12345.6);                      % scalar
 path = d.save(path, Compression=false)
 ```
 
-Writes the dataset and returns the path. It also sets `Created`, `Writer` and `Path`.
+Writes the dataset and returns the path. It also sets `Writer` and `Path`, and `Created` if it
+was empty (the time of this first save); a `Created` that is set is written unchanged.
 
 | Argument | Meaning |
 |---|---|

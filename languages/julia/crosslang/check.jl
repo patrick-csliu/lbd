@@ -4,6 +4,10 @@ using Test
 function check(path)
     d = LBD.load(path)
     @test d.title == "Fixture – ünïcode"
+    @test d.created == "2025-03-01T23:30:00+08:00"
+    again = joinpath(mktempdir(), "again.lbd")              # loaded and saved again: created kept
+    LBD.save(again, LBD.load(path))
+    @test LBD.load(again).created == "2025-03-01T23:30:00+08:00"
     @test d["x"].data == collect(0.0:9.0)
     @test (d["x"].unit, d["a"].unit, d["b"].unit, d["c"].unit) == ("s", "V", "A", "Hz")
     @test d["y"].data == collect(0.0:9.0) .^ 2

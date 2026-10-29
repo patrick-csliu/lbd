@@ -169,6 +169,36 @@ tc.verifyError(@() d.save(p), 'lbd:invalid');
 tc.verifyFalse(isfile(p));
 end
 
+function testCreatedKeptAndSettable(tc)
+f = fullfile(tc.TestData.dir, "created.lbd");
+d = lbd.Dataset("t");
+d.addAxis("x", [1 2]);
+d.addValue("y", [1 2], "x");
+tc.verifyEmpty(d.Created);
+d.save(f);
+first = d.Created;
+r = lbd.load(f);
+tc.verifyEqual(r.Created, first);
+r.Description = "edited later";
+r.save(f);
+tc.verifyEqual(lbd.load(f).Created, first);                  % saved again: kept
+d2 = lbd.Dataset("t", Created="2025-03-01T23:30:00+08:00");
+d2.addAxis("x", [1 2]);
+d2.addValue("y", [1 2], "x");
+d2.save(f);
+tc.verifyEqual(lbd.load(f).Created, "2025-03-01T23:30:00+08:00");
+d2.Created = datetime(2024, 1, 2, 3, 4, 5, 'TimeZone', '-05:00');
+d2.save(f);
+tc.verifyEqual(lbd.load(f).Created, "2024-01-02T03:04:05-05:00");
+d2.Created = "2024-06-01T12:00:00";                          % no offset: this computer's
+d2.save(f);
+tc.verifyTrue(startsWith(lbd.load(f).Created, "2024-06-01T12:00:00") && strlength(lbd.load(f).Created) == 25);
+for bad = ["yesterday", "2025-03-01", "2025-13-01T00:00:00+00:00"]
+    tc.verifyError(@() lbd.Dataset("t", Created=bad), 'lbd:invalid');
+end
+tc.verifyError(@() lbd.Dataset("t", Created=20250301), 'lbd:invalid');
+end
+
 function testVersions(tc)
 p = fullfile(tc.TestData.dir, "v.lbd");
 makeSweep().save(p);

@@ -7,6 +7,12 @@ The file format has its own version (`lbd_version`, currently 1.0).
 
 **Changes to how things behave** (read these when upgrading)
 
+- **`created` is when the data was created, and saving again keeps it** (every language).
+  Before, each save set it to the time of that save, so a file loaded and saved again got a new
+  date. Now it can be given (`lbd.Dataset(created=...)`, MATLAB `Created=`, Julia `created=`; a
+  datetime or ISO-8601 text), is filled with the time of the first save when not given, and is
+  written unchanged afterwards. Files and readers are unchanged (format 1.0).
+
 - The viewer has three workspaces, switched at the top left: **Library** (find files), **Explore**
   (look at data) and **Figure** (what the Data page was: figures, styles, export). Double-clicking
   a data file opens it in Explore now; data files opened from Explorer / Finder too, unless

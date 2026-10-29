@@ -11,6 +11,12 @@ import lbd
 def check(path: Path) -> None:
     d = lbd.load(path)
     assert d.title == "Fixture – ünïcode", d.title
+    assert d.created == "2025-03-01T23:30:00+08:00", d.created
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:          # loaded and saved again: created kept
+        d2 = lbd.load(path)
+        d2.save(Path(tmp) / "again.lbd")
+        assert lbd.load(Path(tmp) / "again.lbd").created == "2025-03-01T23:30:00+08:00", "created after saving again"
     np.testing.assert_array_equal(d["x"].data, np.arange(10.0))
     assert d["x"].unit == "s" and d["a"].unit == "V" and d["b"].unit == "A" and d["c"].unit == "Hz"
     np.testing.assert_array_equal(d["y"].data, np.arange(10.0) ** 2)

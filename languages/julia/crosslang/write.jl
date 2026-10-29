@@ -4,7 +4,7 @@ using OrderedCollections: OrderedDict
 out = ARGS[1]
 mkpath(out)
 
-d = LBD.Dataset("Fixture – ünïcode")
+d = LBD.Dataset("Fixture – ünïcode"; created="2025-03-01T23:30:00+08:00")
 add_axis!(d, "x", collect(0.0:9.0); unit="s")
 add_axis!(d, "a", [1.0, 2.0, 3.0]; unit="V")
 add_axis!(d, "b", [1.0, 2.0, 3.0, 4.0]; unit="A")

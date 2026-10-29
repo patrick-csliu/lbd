@@ -239,3 +239,49 @@ def test_version_function():
     v = lbd.version()
     assert v["lbd_version"] == "1.0"
     assert v["package"] == lbd.__version__
+
+
+# ---- created: when the data was created ------------------------------------------------------
+
+def test_created_is_filled_at_the_first_save_and_kept_after(tmp_path):
+    d = make_sweep()
+    assert d.created is None
+    d.save(tmp_path / "a.lbd")
+    first = d.created
+    assert first and lbd.load(tmp_path / "a.lbd").created == first
+    r = lbd.load(tmp_path / "a.lbd")
+    r.description = "edited later"
+    r.save(tmp_path / "a.lbd")                                   # saved again: the date stays
+    assert lbd.load(tmp_path / "a.lbd").created == first
+    d.save(tmp_path / "b.lbd")                                   # the same Dataset saved again too
+    assert lbd.load(tmp_path / "b.lbd").created == first
+
+
+def test_created_can_be_given_and_overridden(tmp_path):
+    import datetime as dt
+
+    d = lbd.Dataset(title="t", created="2025-03-01T23:30:00+08:00")
+    d.add_axis("x", [1.0, 2.0])
+    d.add_value("y", [1.0, 2.0], axes="x")
+    d.save(tmp_path / "a.lbd")
+    assert lbd.load(tmp_path / "a.lbd").created == "2025-03-01T23:30:00+08:00"   # kept as written
+    d.created = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=dt.timezone(dt.timedelta(hours=-5)))
+    d.save(tmp_path / "a.lbd")
+    assert lbd.load(tmp_path / "a.lbd").created == "2024-01-02T03:04:05-05:00"
+    d.created = "2024-06-01T12:00:00Z"                          # UTC as Z
+    d.save(tmp_path / "a.lbd")
+    assert lbd.load(tmp_path / "a.lbd").created == "2024-06-01T12:00:00Z"
+    d.created = dt.datetime(2024, 6, 1, 12, 0, 0)               # no offset: this computer's
+    d.save(tmp_path / "a.lbd")
+    got = dt.datetime.fromisoformat(lbd.load(tmp_path / "a.lbd").created)
+    assert got.tzinfo is not None and got.replace(tzinfo=None) == dt.datetime(2024, 6, 1, 12, 0, 0)
+
+
+@pytest.mark.parametrize("bad", ["yesterday", "2025-03-01", 20250301, "2025-13-01T00:00:00+00:00"])
+def test_a_created_that_is_no_date_and_time_says_so(tmp_path, bad):
+    with pytest.raises(lbd.LBDError, match="created must be a date and time"):
+        lbd.Dataset(created=bad)
+    d = make_sweep()
+    d.created = bad
+    with pytest.raises(lbd.LBDError, match="created must be a date and time"):
+        d.save(tmp_path / "a.lbd")

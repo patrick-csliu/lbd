@@ -9,7 +9,7 @@ out = Path(sys.argv[1])
 out.mkdir(parents=True, exist_ok=True)
 
 i3, j4, k2 = np.arange(3)[:, None, None], np.arange(4)[None, :, None], np.arange(2)[None, None, :]
-d = lbd.Dataset(title="Fixture – ünïcode")
+d = lbd.Dataset(title="Fixture – ünïcode", created="2025-03-01T23:30:00+08:00")
 d.add_axis("x", np.arange(10.0), unit="s")
 d.add_axis("a", [1.0, 2.0, 3.0], unit="V")
 d.add_axis("b", [1.0, 2.0, 3.0, 4.0], unit="A")

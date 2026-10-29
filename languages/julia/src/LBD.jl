@@ -74,7 +74,7 @@ end
 mutable struct Dataset
     title::String
     description::String
-    created::Union{String,Nothing}
+    created::Union{String,DateTime,Nothing}   # when the data was created; filled at the first save if nothing
     writer::Union{String,Nothing}
     lbd_version::String
     axes::OrderedDict{String,Axis}
@@ -87,8 +87,8 @@ mutable struct Dataset
     path::Union{String,Nothing}
 end
 
-Dataset(title::AbstractString=""; description::AbstractString="") = Dataset(
-    String(title), String(description), nothing, nothing, FORMAT_VERSION,
+Dataset(title::AbstractString=""; description::AbstractString="", created=nothing) = Dataset(
+    String(title), String(description), created === nothing ? nothing : created_text(created), nothing, FORMAT_VERSION,
     OrderedDict{String,Axis}(), OrderedDict{String,Value}(), OrderedDict{String,Any}(),
     nothing, nothing, nothing, nothing, nothing,
 )
@@ -247,7 +247,9 @@ function replace_file(tmp::AbstractString, path::AbstractString)
 end
 
 function write_file(f, d::Dataset, compression::Bool)
-    d.created = Dates.format(now(), dateformat"yyyy-mm-ddTHH:MM:SS") * utc_offset()
+    # when the data was created: kept as set (also as read by `load`); not set: this first save
+    d.created = d.created === nothing ? Dates.format(now(), dateformat"yyyy-mm-ddTHH:MM:SS") * utc_offset() :
+        created_text(d.created)
     d.writer = "julia LBD $PACKAGE_VERSION"
     write_str_attr(f, "lbd_format", "LBD")
     write_str_attr(f, "lbd_version", FORMAT_VERSION)
@@ -287,6 +289,32 @@ function write_file(f, d::Dataset, compression::Bool)
         d.matplotlib !== nothing && !isempty(d.matplotlib) && write_str_attr(gp, "matplotlib", d.matplotlib)
     end
 end
+
+const CREATED_RE = r"^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?$"
+
+"""
+    created_text(x)
+
+`created` as stored: ISO-8601 text with a UTC offset. A `DateTime` is taken in this computer's
+time zone; a text is kept as written, and one without an offset gets this computer's offset.
+Anything else throws an `LBDError`.
+"""
+created_text(x::DateTime) = Dates.format(x, dateformat"yyyy-mm-ddTHH:MM:SS") * utc_offset()
+function created_text(x::AbstractString)
+    t = strip(x)
+    m = match(CREATED_RE, t)
+    ok = m !== nothing && try
+        DateTime(parse.(Int, m.captures[1:5])..., m.captures[6] === nothing ? 0 : parse(Int, m.captures[6]))
+        true
+    catch
+        false
+    end
+    ok || throw(LBDError("created must be a date and time: a DateTime, or ISO-8601 text such as " *
+                         "\"2026-10-13T16:09:00+08:00\", not $(repr(x))"))
+    return m.captures[7] === nothing ? String(t) * utc_offset() : String(t)
+end
+created_text(x) = throw(LBDError("created must be a date and time: a DateTime, or ISO-8601 text such as " *
+                                 "\"2026-10-13T16:09:00+08:00\", not $(repr(x))"))
 
 function utc_offset()
     mins = round(Int, (now() - now(UTC)).value / 60_000)

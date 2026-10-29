@@ -1,6 +1,7 @@
 using LBD
 using HDF5
 using Test
+using Dates
 
 function make_sweep()
     f = collect(range(4e9, 8e9, 41))
@@ -151,6 +152,36 @@ end
         d.meta["bad"] = nothing
         @test_throws LBDError LBD.save(joinpath(dir, "bad.lbd"), d)
         @test !isfile(joinpath(dir, "bad.lbd"))
+    end
+
+    @testset "created: filled at the first save, kept after, can be set" begin
+        d = Dataset("t")
+        add_axis!(d, "x", [1.0, 2.0])
+        add_value!(d, "y", [1.0, 2.0], ["x"])
+        f = joinpath(dir, "created.lbd")
+        @test d.created === nothing
+        LBD.save(f, d)
+        first = d.created
+        r = LBD.load(f)
+        @test r.created == first
+        r.description = "edited later"
+        LBD.save(f, r)
+        @test LBD.load(f).created == first                       # saved again: kept
+        d2 = Dataset("t"; created="2025-03-01T23:30:00+08:00")
+        add_axis!(d2, "x", [1.0, 2.0])
+        add_value!(d2, "y", [1.0, 2.0], ["x"])
+        LBD.save(f, d2)
+        @test LBD.load(f).created == "2025-03-01T23:30:00+08:00"
+        d2.created = "2024-06-01T12:00:00"                        # no offset: this computer's
+        LBD.save(f, d2)
+        @test startswith(LBD.load(f).created, "2024-06-01T12:00:00") && length(LBD.load(f).created) == 25
+        d2.created = DateTime(2024, 1, 2, 3, 4, 5)
+        LBD.save(f, d2)
+        @test startswith(LBD.load(f).created, "2024-01-02T03:04:05")
+        for bad in ("yesterday", "2025-03-01", "2025-13-01T00:00:00+00:00")
+            @test_throws LBDError Dataset("t"; created=bad)
+        end
+        @test_throws LBDError Dataset("t"; created=20250301)
     end
 
     @testset "versions" begin
