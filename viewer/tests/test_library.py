@@ -7,6 +7,7 @@ import shutil
 import time
 from pathlib import Path
 
+import h5py
 import pytest
 
 import lbd
@@ -175,3 +176,74 @@ def test_ten_thousand_files_answer_fast(tmp_path_factory):
     t0 = time.perf_counter()
     assert not ix.scan()                                                       # checking again: nothing read
     print(f"checked again in {time.perf_counter() - t0:.1f} s")
+
+
+# ---- the same id in two places: copies or a conflict (plan 8b) --------------------------------
+
+def _two_folders(tmp_path):
+    a, b = tmp_path / "A", tmp_path / "B"
+    a.mkdir()
+    b.mkdir()
+    d = lbd.Dataset(title="Sweep", created="2026-10-29T10:00:00+08:00")
+    d.add_axis("x", [1.0, 2.0, 3.0])
+    d.add_value("y", [1.0, 2.0, 3.0], axes="x")
+    d.save(a / "sweep.lbd")
+    return a, b, d
+
+
+def test_a_file_copy_is_a_copy(tmp_path):
+    a, b, d = _two_folders(tmp_path)
+    shutil.copy2(a / "sweep.lbd", b / "sweep.lbd")                 # time kept: copies without reading
+    ix = index_of(tmp_path, [a, b])
+    ix.scan()
+    rows = ix.list()["rows"]
+    assert [r["copies"] for r in rows] == [1, 1] and not any(r["conflict"] for r in rows)
+    same = ix.same_id(str(a / "sweep.lbd"))
+    assert same["id"] == d.id and not same["conflict"] and same["others"][0]["path"] == str((b / "sweep.lbd").resolve())
+
+
+def test_a_copy_with_another_time_is_compared_by_its_contents(tmp_path):
+    a, b, d = _two_folders(tmp_path)
+    shutil.copy(a / "sweep.lbd", b / "sweep.lbd")
+    os.utime(b / "sweep.lbd", (1_700_000_000, 1_700_000_000))      # the same bytes, another time
+    ix = index_of(tmp_path, [a, b])
+    ix.scan()
+    assert not any(r["conflict"] for r in ix.list()["rows"])
+
+
+def test_a_copy_changed_later_is_a_conflict_with_what_differs(tmp_path):
+    a, b, d = _two_folders(tmp_path)
+    shutil.copy2(a / "sweep.lbd", b / "sweep.lbd")
+    r = lbd.load(b / "sweep.lbd")
+    r.description = "edited after copying"
+    r.save(b / "sweep.lbd")                                         # same place: keeps the id
+    ix = index_of(tmp_path, [a, b])
+    ix.scan()
+    assert all(row["conflict"] for row in ix.list()["rows"]) and ix.facets()["conflicts"] == 2
+    same = ix.same_id(str(a / "sweep.lbd"))
+    assert same["conflict"] and same["others"][0]["differs"] == ["description"] and same["others"][0]["newer"]
+
+
+def test_an_id_copied_by_hand_is_a_conflict(tmp_path):
+    a, b, d = _two_folders(tmp_path)
+    other = lbd.Dataset(title="Something else")
+    other.add_axis("t", [1.0, 2.0])
+    other.add_value("v", [5.0, 6.0], axes="t")
+    other.save(b / "other.lbd")
+    with h5py.File(b / "other.lbd", "a") as f:                     # a foreign tool copied the id
+        f.attrs["id"] = d.id
+    ix = index_of(tmp_path, [a, b])
+    ix.scan()
+    differs = ix.same_id(str(b / "other.lbd"))["others"][0]["differs"]
+    assert {"title", "values or their sizes", "axes"} <= set(differs)
+
+
+def test_contents_are_read_only_for_same_id_pairs_of_one_size(tmp_path, monkeypatch):
+    a, b, d = _two_folders(tmp_path)
+    shutil.copy2(a / "sweep.lbd", b / "sweep.lbd")
+    ix = index_of(tmp_path, [a, b])
+    calls = []
+    real = LibraryIndex._hash
+    monkeypatch.setattr(LibraryIndex, "_hash", lambda self, m: calls.append(m) or real(self, m))
+    ix.scan()
+    assert calls == []                                              # same time and size: no reading

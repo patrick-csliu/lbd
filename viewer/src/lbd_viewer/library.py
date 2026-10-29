@@ -12,10 +12,15 @@ what the Library lists, filters and searches by, kept on this computer.
   asked for (`file`).
 - Files are only read, never written or locked; one that can't be read stays listed, with the
   reason.
+- Files with the same id (format 1.1: the measurement's identity) are compared after each scan:
+  **copies** (the same size and modification time, or else the same content hash, read only for
+  such pairs) or a **conflict** (they differ: one was changed after copying, or an id was copied
+  by hand). Nothing is decided for the user; `same_id` says what differs.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
@@ -29,7 +34,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from . import scan
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 LIBRARY_FILE = "library.sqlite"
 # How often the open folders are checked: while the Library is shown, and otherwise.
 ACTIVE_EVERY, IDLE_EVERY, ACTIVE_FOR = 3.0, 60.0, 30.0
@@ -44,7 +49,8 @@ SORTS = {
     "modified": "mtime",
 }
 ROW_FIELDS = ["path", "root", "folder", "name", "size", "mtime", "read", "title", "description", "created",
-              "day", "date_from_file", "sweep", "points", "value_names", "error"]
+              "day", "date_from_file", "sweep", "points", "value_names", "error", "id", "parent_id",
+              "copies", "conflict"]
 log = logging.getLogger("lbd_viewer")
 
 
@@ -95,6 +101,7 @@ def row_from_summary(path: Path, root: str, st: os.stat_result, summary: Dict[st
     words += list(_flatten(summary.get("meta") or {}))
     row.update({
         "read": 1, "title": summary.get("title") or "", "description": summary.get("description") or "",
+        "id": summary.get("id"), "parent_id": summary.get("parent_id"),
         "created": summary.get("created"), "writer": summary.get("writer"), "lbd_version": summary.get("lbd_version"),
         "sweep": "×".join(str(a["length"]) for a in swept), "points": points,
         "value_names": ", ".join(v["name"] for v in values),
@@ -114,6 +121,7 @@ def _stat_row(path: Path, root: str, st: os.stat_result, error: Optional[str] = 
         "created": None, "sort_time": st.st_mtime, "day": local.date().isoformat(), "date_from_file": 1,
         "writer": None, "lbd_version": None, "sweep": "", "points": 0, "value_names": "",
         "searchable": path.name.lower(), "summary": None, "error": error, "seen": time.time(),
+        "id": None, "parent_id": None, "fsid": f"{st.st_dev}:{st.st_ino}", "hash": None, "copies": 0, "conflict": 0,
     }
 
 
@@ -174,7 +182,9 @@ class LibraryIndex:
                 version TEXT NOT NULL, size INTEGER, mtime REAL, read INTEGER NOT NULL,
                 title TEXT, description TEXT, created TEXT, sort_time REAL, day TEXT, date_from_file INTEGER,
                 writer TEXT, lbd_version TEXT, sweep TEXT, points INTEGER, value_names TEXT,
-                searchable TEXT, summary TEXT, error TEXT, seen REAL)""")
+                searchable TEXT, summary TEXT, error TEXT, seen REAL,
+                id TEXT, parent_id TEXT, fsid TEXT, hash TEXT, copies INTEGER DEFAULT 0, conflict INTEGER DEFAULT 0)""")
+            db.execute("CREATE INDEX IF NOT EXISTS files_id ON files (id)")
             db.execute("CREATE INDEX IF NOT EXISTS files_root ON files (root)")
             db.execute("CREATE INDEX IF NOT EXISTS files_day ON files (day)")
             db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
@@ -261,9 +271,81 @@ class LibraryIndex:
                     db.execute("COMMIT")
             changed = bool(todo or gone)
             if changed:
+                self._compare_same_ids()
                 self.generation += 1
             self.status.update({"indexing": False, "scans": self.status["scans"] + 1})
             return changed
+
+    def _compare_same_ids(self) -> None:
+        """Copies or conflict, for every id that more than one file has (after a scan)."""
+        with self._lock:
+            db = self._connect()
+            groups: Dict[str, List[Tuple[str, str, int, Optional[str]]]] = {}
+            for path, ident, version, size, h in db.execute(
+                    "SELECT path, id, version, size, hash FROM files WHERE id IN "
+                    "(SELECT id FROM files WHERE id IS NOT NULL GROUP BY id HAVING COUNT(*) > 1)"):
+                groups.setdefault(ident, []).append((path, version, size, h))
+        verdicts: Dict[str, Tuple[int, int]] = {}
+        for ident, members in groups.items():
+            first = members[0]
+            same = True
+            for m in members[1:]:
+                if m[1] == first[1]:                       # same size and modification time
+                    continue
+                if m[2] != first[2]:                       # another size: not the same content
+                    same = False
+                    break
+                if self._hash(first) != self._hash(m):    # same size, other time: compare contents
+                    same = False
+                    break
+            for path, *_ in members:
+                verdicts[path] = (len(members) - 1, 0 if same else 1)
+        with self._lock:
+            db = self._connect()
+            db.execute("BEGIN")
+            db.execute("UPDATE files SET copies = 0, conflict = 0 WHERE copies != 0 OR conflict != 0")
+            db.executemany("UPDATE files SET copies = ?, conflict = ? WHERE path = ?",
+                           [(c, k, p) for p, (c, k) in verdicts.items()])
+            db.execute("COMMIT")
+
+    def _hash(self, member: Tuple[str, str, int, Optional[str]]) -> Optional[str]:
+        """A file's content hash (SHA-256), read once per version and kept in the index."""
+        path, version, _, known = member
+        if known:
+            return known
+        h = hashlib.sha256()
+        try:
+            with open(path, "rb") as f:
+                for block in iter(lambda: f.read(1 << 20), b""):
+                    h.update(block)
+        except OSError:
+            return None
+        digest = h.hexdigest()
+        with self._lock:
+            self._connect().execute("UPDATE files SET hash = ? WHERE path = ? AND version = ?", (digest, path, version))
+        return digest
+
+    def same_id(self, path: str) -> Dict[str, Any]:
+        """The other files with this file's id, whether they are copies or a conflict, and what
+        differs between this file and each other one (from the headers; "the data itself" when
+        only the contents differ)."""
+        self.last_request = time.monotonic()
+        p = str(Path(path).resolve())
+        with self._lock:
+            db = self._connect()
+            me = db.execute("SELECT id, summary, conflict, size, mtime FROM files WHERE path = ?", (p,)).fetchone()
+            if not me or not me[0]:
+                return {"id": None, "others": [], "conflict": False}
+            others = db.execute("SELECT path, summary, size, mtime, version FROM files WHERE id = ? AND path != ?",
+                                (me[0], p)).fetchall()
+        mine = json.loads(me[1]) if me[1] else {}
+        out = []
+        for path_o, summary_o, size_o, mtime_o, _ in others:
+            theirs = json.loads(summary_o) if summary_o else {}
+            out.append({"path": path_o, "size": size_o, "mtime": mtime_o, "title": theirs.get("title"),
+                        "differs": differences(mine, theirs) if me[2] else [],
+                        "newer": mtime_o > me[4]})
+        return {"id": me[0], "conflict": bool(me[2]), "size": me[3], "mtime": me[4], "others": out}
 
     def start(self) -> None:
         """Keep the index up to date in the background (once; later calls do nothing)."""
@@ -339,12 +421,15 @@ class LibraryIndex:
             days = db.execute(f"SELECT day, COUNT(*) FROM files{where} GROUP BY day", args).fetchall()
             folders = db.execute("SELECT root, folder, COUNT(*) FROM files GROUP BY root, folder").fetchall()
             total = db.execute("SELECT COUNT(*) FROM files").fetchone()[0]
+            conflicts = db.execute(f"SELECT COUNT(*) FROM files{where}{' AND' if where else ' WHERE'} conflict = 1",
+                                   args).fetchone()[0]
         dates: Dict[str, Dict[str, Dict[str, int]]] = {}
         for day, n in days:
             if day:
                 y, m, d = day.split("-")
                 dates.setdefault(y, {}).setdefault(m, {})[d] = n
-        return {"dates": dates, "folders": self._folder_tree(folders), "total": total, "generation": self.generation}
+        return {"dates": dates, "folders": self._folder_tree(folders), "total": total, "conflicts": conflicts,
+                "generation": self.generation}
 
     def _folder_tree(self, counts: List[Tuple[str, str, int]]) -> List[Dict[str, Any]]:
         trees = []
@@ -391,6 +476,24 @@ class LibraryIndex:
         self._write([row_from_summary(p, root, st, summary)])
         self.generation += 1
         return summary
+
+
+def differences(a: Dict[str, Any], b: Dict[str, Any]) -> List[str]:
+    """What differs between two files' header summaries, in words for the page; "the data itself"
+    when the headers agree (the contents differ)."""
+    out = []
+    for key, word in (("title", "title"), ("description", "description"), ("created", "date (created)")):
+        if (a.get(key) or "") != (b.get(key) or ""):
+            out.append(word)
+    if set((a.get("meta") or {})) != set((b.get("meta") or {})) or (a.get("meta") or {}) != (b.get("meta") or {}):
+        out.append("metadata")
+    shape = lambda s: sorted((v["name"], tuple(v["shape"])) for v in s.get("values", []))   # noqa: E731
+    if shape(a) != shape(b):
+        out.append("values or their sizes")
+    axes = lambda s: sorted((x["name"], x["length"], x.get("min"), x.get("max")) for x in s.get("axes", []))   # noqa: E731
+    if axes(a) != axes(b):
+        out.append("axes")
+    return out or ["the data itself"]
 
 
 def _sort_tree(node: Dict[str, Any]) -> None:

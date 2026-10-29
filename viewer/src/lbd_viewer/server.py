@@ -769,6 +769,12 @@ def create_app(state: AppState) -> FastAPI:
             summary = state.library.file(str(p))
         return {**summary, "warnings": warns}
 
+    @app.get("/api/library/same")
+    def library_same(path: str = Query(...)):
+        """The other files with this file's id (the same measurement elsewhere): copies, or a
+        conflict (they differ), with what differs."""
+        return state.library.same_id(str(state.check_allowed(path)))
+
     @app.get("/api/library/status")
     def library_status():
         """Indexing progress ({indexing, done, total, errors, scans}) and the index's generation:
