@@ -1,0 +1,138 @@
+"""A mock library of .lbd files for the Library workspace (plan 8a) and its tests.
+
+    uv run python viewer/tests/mock_library.py FOLDER [N]
+
+writes about N files (default 300) into two folders under FOLDER, as two "open folders" of the
+viewer would be: `Lab data/` sorted by date (`YYYY/MM/DD/`) and `Shared/` sorted by project.
+Simulated measurements of a few kinds (resonator sweeps, Rabi, spectroscopy, T1, fridge logs),
+created over two years in several time zones, with titles, descriptions and nested metadata to
+search, plus the cases a list must handle: a damaged file, a file without a title, the same file
+name in two folders, a file of single numbers only, and a measurement just before midnight.
+Small arrays, so 10 000 files are written in a minute or so. A fixed random seed: the same
+library every time.
+"""
+
+import sys
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Dict, List
+
+import numpy as np
+
+import lbd
+
+ZONES = [timezone(timedelta(hours=8)), timezone(timedelta(hours=1)), timezone(timedelta(hours=-5)), timezone.utc]
+PROJECTS = ["Qubit A", "Qubit B", "Resonator chip 3", "Fridge"]
+OPERATORS = ["Patrick", "Alice", "Bob"]
+WORDS = ["after re-cooling", "flux bias 0.2", "punch-out check", "with the new amplifier",
+         "repeat of yesterday", "calibration run"]
+
+# The special files (relative to the folder given), for the tests.
+SPECIAL = {
+    "broken": "Lab data/2026/03/14/broken.lbd",               # damaged: not readable
+    "untitled": "Lab data/2026/03/14/untitled.lbd",           # empty title
+    "midnight": "Lab data/2026/03/14/late resonator.lbd",     # 2026-03-14T23:30:00+08:00
+    "numbers": "Shared/Qubit A/T1 fit only.lbd",              # single numbers only
+    "twin_lab": "Lab data/2025/06/02/calibration.lbd",        # the same name ...
+    "twin_shared": "Shared/Fridge/calibration.lbd",           # ... in another folder
+}
+
+
+def _dataset(kind: str, k: int, rng: np.random.Generator, created: datetime) -> lbd.Dataset:
+    project = PROJECTS[k % len(PROJECTS)]
+    words = WORDS[k % len(WORDS)]
+    if kind == "resonator":
+        d = lbd.Dataset(title=f"Resonator sweep {k}", description=f"Power sweep of the resonator, {words}",
+                        created=created)
+        p, f = np.linspace(-60, 0, 5), np.linspace(6.99e9, 7.01e9, 11)
+        d.add_axis("power", p, unit="dBm", label="Power")
+        d.add_axis("freq", f, unit="Hz", label="Frequency")
+        d.add_value("S21", 1 - 0.8 / (1 + 2j * (f[None, :] - 7e9) / 1e6) * np.ones((5, 1)), axes=["power", "freq"])
+        d.meta = {"vna": {"power_dBm": -30.0, "ifbw_Hz": float(rng.choice([100, 1000])), "averages": 4}}
+    elif kind == "rabi":
+        d = lbd.Dataset(title=f"Rabi amplitude {k}", description=f"Rabi oscillation, {words}", created=created)
+        a = np.linspace(0, 0.5, 21)
+        p = 0.5 * (1 - np.cos(np.pi * a / 0.2))
+        d.add_axis("amplitude", a, unit="V", label="Drive amplitude")
+        d.add_value("I", 1e-3 * p, axes="amplitude", unit="V")
+        d.add_value("Q", 3e-5 * (1 - p), axes="amplitude", unit="V")
+        d.add_value("population", p, axes="amplitude", label="Population")
+    elif kind == "spectroscopy":
+        d = lbd.Dataset(title=f"Qubit spectroscopy {k}", description=f"Two-tone spectroscopy vs flux, {words}",
+                        created=created)
+        d.add_axis("qubit_power", [-30.0, -20.0, -10.0], unit="dBm")
+        d.add_axis("flux", np.linspace(-0.5, 0.5, 4), unit="Φ0", label="Flux")
+        d.add_axis("frequency", np.linspace(4.5e9, 5.5e9, 6), unit="Hz", label="Frequency")
+        d.add_value("amplitude", rng.random((3, 4, 6)), axes=["qubit_power", "flux", "frequency"], unit="V")
+    elif kind == "t1":
+        d = lbd.Dataset(title=f"T1 {k}", description=f"Energy relaxation, {words}", created=created)
+        t = np.linspace(0, 1e-4, 16)
+        d.add_axis("delay", t, unit="s", label="Delay")
+        d.add_value("P1", np.exp(-t / 2.1e-5), axes="delay", label="P(1)")
+        d.add_value("T1", 2.1e-5, unit="s")
+    else:  # fridge
+        d = lbd.Dataset(title=f"Fridge log {k}", description=f"Cool-down monitor, {words}", created=created)
+        t = np.linspace(0, 3600.0, 12)
+        d.add_axis("time", t, unit="s", label="Time")
+        d.add_value("T_mxc", 0.012 + np.exp(-t / 900), axes="time", unit="K")
+        d.add_value("P_main", 1e-6 + np.exp(-t / 300), axes="time", unit="mbar")
+    d.meta = {**d.meta, "project_hint": project, "operator": OPERATORS[k % len(OPERATORS)],
+              "fridge": {"T_mK": float(rng.choice([10, 12, 15]))}}
+    return d
+
+
+KINDS = ["resonator", "rabi", "spectroscopy", "t1", "fridge"]
+
+
+def write_library(folder: Path, n: int = 300) -> Dict[str, List[Path]]:
+    """Write the mock library into `folder`: {"Lab data": [...], "Shared": [...]} (the paths
+    written, per open folder). The special files are in SPECIAL."""
+    folder = Path(folder)
+    rng = np.random.default_rng(8)
+    start = datetime(2024, 10, 1, 9, 0, tzinfo=timezone.utc)         # two years up to about 2026-10
+    out: Dict[str, List[Path]] = {"Lab data": [], "Shared": []}
+    for k in range(max(n - len(SPECIAL), 0)):
+        zone = ZONES[k % len(ZONES)]
+        created = (start + timedelta(minutes=int(rng.integers(0, 720 * 24 * 60)))).astimezone(zone)
+        kind = KINDS[k % len(KINDS)]
+        d = _dataset(kind, k, rng, created)
+        if k % 3 == 2:                                     # a third in the shared, by-project folder
+            path = folder / "Shared" / PROJECTS[k % len(PROJECTS)] / f"{d.title}.lbd"
+            out["Shared"].append(path)
+        else:                                              # the others by date, as written there
+            path = folder / "Lab data" / created.strftime("%Y/%m/%d") / f"{d.title}.lbd"
+            out["Lab data"].append(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        d.save(path)
+    # the special cases
+    late = datetime(2026, 3, 14, 23, 30, tzinfo=ZONES[0])
+    specials = {
+        "midnight": _dataset("resonator", 9001, rng, late),
+        "twin_lab": _dataset("t1", 9002, rng, datetime(2025, 6, 2, 10, 0, tzinfo=ZONES[1])),
+        "twin_shared": _dataset("fridge", 9003, rng, datetime(2025, 6, 3, 10, 0, tzinfo=ZONES[1])),
+    }
+    specials["midnight"].title = "Late resonator sweep"
+    untitled = _dataset("rabi", 9004, rng, datetime(2026, 3, 14, 12, 0, tzinfo=ZONES[0]))
+    untitled.title = ""
+    specials["untitled"] = untitled
+    numbers = lbd.Dataset(title="T1 fit only", description="Only the fitted numbers", created="2025-09-01T15:00:00+08:00")
+    numbers.add_value("T1", 2.1e-5, unit="s")
+    numbers.add_value("T2", 1.4e-5, unit="s")
+    specials["numbers"] = numbers
+    for name, d in specials.items():
+        path = folder / SPECIAL[name]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        d.save(path)
+        out[SPECIAL[name].split("/")[0]].append(path)
+    broken = folder / SPECIAL["broken"]
+    broken.write_bytes((folder / SPECIAL["midnight"]).read_bytes()[:300])   # cut short: damaged
+    out["Lab data"].append(broken)
+    return out
+
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        sys.exit(__doc__)
+    written = write_library(Path(sys.argv[1]), int(sys.argv[2]) if len(sys.argv) > 2 else 300)
+    for root, paths in written.items():
+        print(f"{root}: {len(paths)} files")
