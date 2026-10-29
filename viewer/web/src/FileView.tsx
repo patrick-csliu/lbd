@@ -964,7 +964,11 @@ export function SliceControl({ path, version, slice: s, onIndex }: { path: strin
   );
 }
 
-export function FileDetails({ info }: { info: FileInfo }) {
+/** What is inside a data file. `metaFilter`: the metadata tree folds (nested groups) and has a
+ * filter box (the Library's right column, where metadata can be long). */
+export function FileDetails({ info, metaFilter = false }: { info: FileInfo; metaFilter?: boolean }) {
+  const [filter, setFilter] = useState("");
+  const meta = metaFilter && filter.trim() ? filterMeta(info.meta, filter.trim().toLowerCase()) : info.meta;
   return (
     <div className="details">
       {info.description && <p>{info.description}</p>}
@@ -1038,7 +1042,16 @@ export function FileDetails({ info }: { info: FileInfo }) {
       </table>
 
       <h3>Metadata</h3>
-      {isEmptyObject(info.meta) ? <p className="muted">None</p> : <MetaTree value={info.meta} />}
+      {metaFilter && !isEmptyObject(info.meta) && (
+        <input className="meta-filter" type="search" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter metadata…" aria-label="Filter metadata" />
+      )}
+      {isEmptyObject(info.meta) ? (
+        <p className="muted">None</p>
+      ) : isEmptyObject(meta) ? (
+        <p className="muted">Nothing in the metadata matches "{filter.trim()}".</p>
+      ) : (
+        <MetaTree value={meta} fold={metaFilter} />
+      )}
     </div>
   );
 }
@@ -1048,17 +1061,46 @@ function fmt(x: number | null): string {
   return Math.abs(x) >= 1e5 || (x !== 0 && Math.abs(x) < 1e-3) ? x.toExponential(4) : String(Number(x.toPrecision(6)));
 }
 
-function MetaTree({ value }: { value: JsonObject }) {
+function MetaTree({ value, fold = false }: { value: JsonObject; fold?: boolean }) {
   return (
     <ul className="meta">
-      {Object.entries(value).map(([k, v]) => (
-        <li key={k}>
-          <span className="meta-key">{k}</span>
-          {isObject(v) && !(v as JsonObject).array ? <MetaTree value={v as JsonObject} /> : <span className="meta-val">{metaText(v)}</span>}
-        </li>
-      ))}
+      {Object.entries(value).map(([k, v]) =>
+        isObject(v) && !(v as JsonObject).array ? (
+          fold ? (
+            <li key={k}>
+              <details open>
+                <summary className="meta-key">{k}</summary>
+                <MetaTree value={v as JsonObject} fold />
+              </details>
+            </li>
+          ) : (
+            <li key={k}>
+              <span className="meta-key">{k}</span>
+              <MetaTree value={v as JsonObject} />
+            </li>
+          )
+        ) : (
+          <li key={k}>
+            <span className="meta-key">{k}</span>
+            <span className="meta-val">{metaText(v)}</span>
+          </li>
+        ),
+      )}
     </ul>
   );
+}
+
+/** The metadata whose keys or values contain `text` (lower case); a group whose key matches is kept whole. */
+function filterMeta(value: JsonObject, text: string): JsonObject {
+  const out: JsonObject = {};
+  for (const [k, v] of Object.entries(value)) {
+    if (k.toLowerCase().includes(text)) out[k] = v;
+    else if (isObject(v) && !(v as JsonObject).array) {
+      const inner = filterMeta(v as JsonObject, text);
+      if (!isEmptyObject(inner)) out[k] = inner;
+    } else if (metaText(v).toLowerCase().includes(text)) out[k] = v;
+  }
+  return out;
 }
 
 function isObject(v: Json): boolean {

@@ -315,9 +315,42 @@ details.group fieldset > .group-fields { margin-top: -4px; }
 /* Workspaces: Library (folders and a file's contents), Explore, Figure. */
 .pages.secondary { margin-left: 0; }
 .pages.secondary button { font-size: 13px; }
-.page.library { grid-template-columns: minmax(300px, 40%) 1fr; }
-.library-folders { background: var(--panel); border-right: 1px solid var(--border); overflow: auto; min-height: 0; }
+/* Library (plan 8a): folders and dates | the list of files | the selected file */
+.page.library { grid-template-columns: 250px minmax(360px, 1fr) minmax(320px, 38%); }
+.library-left { background: var(--panel); border-right: 1px solid var(--border); overflow: auto; min-height: 0; padding: 8px 0; }
+.library-tree { list-style: none; margin: 0; padding: 2px 0 8px; user-select: none; }
+.library-tree ul { list-style: none; margin: 0; padding: 0; }
+.library-folder { display: flex; align-items: center; gap: 4px; padding: 2px 8px; font-size: 13px; }
+.library-folder.active { background: var(--accent-soft); }
+.library-folder.active .folder-name { color: var(--accent); font-weight: 600; }
+.library-folder .twisty { width: 14px; flex: none; text-align: center; color: var(--muted); }
+.library-folder .folder-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; color: var(--text); }
+.library-folder .count { color: var(--muted); font-size: 12px; }
+.library-dates { border-top: 1px solid var(--border); padding-top: 6px; }
+.library-middle { display: flex; flex-direction: column; gap: 6px; min-height: 0; min-width: 0; padding: 10px 12px; border-right: 1px solid var(--border); }
+.library-notice { background: var(--accent-soft); border-radius: var(--radius); padding: 8px 10px; font-size: 13px; }
+.library-notice p { margin: 0 0 6px; }
+.library-search { width: 100%; }
+.library-status { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; min-height: 22px; }
+.library-status .chip { background: var(--panel-2); border-radius: 10px; padding: 1px 4px 1px 8px; }
+.library-status .warn { color: var(--danger); }
+.library-list { position: relative; flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius); outline: none; }
+.library-list:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+.library-head { position: sticky; top: 0; z-index: 1; display: grid; height: 28px; align-items: center; background: var(--panel); border-bottom: 1px solid var(--border); font-size: 12px; font-weight: 600; }
+.library-head > div { padding: 0 8px; white-space: nowrap; overflow: hidden; }
+.library-head button { color: var(--text); font-weight: 600; }
+.library-rows { position: relative; }
+.library-row { position: absolute; left: 0; right: 0; height: 28px; display: grid; align-items: center; font-size: 13px; cursor: default; border-bottom: 1px solid var(--border-soft, transparent); }
+.library-row > div { padding: 0 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.library-row:hover { background: var(--panel-2); }
+.library-row.selected { background: var(--accent-soft); }
+.library-row.unreadable { color: var(--muted); font-style: italic; }
+.library-row .cell-date, .library-row .cell-size, .library-row .cell-sweep, .library-row .cell-modified { font-variant-numeric: tabular-nums; }
+.library-empty { position: absolute; left: 0; right: 0; top: 60px; text-align: center; padding: 0 16px; }
 .library-detail { overflow: auto; min-height: 0; }
+.meta-filter { margin: 2px 0 6px; width: 100%; max-width: 320px; }
+.meta details > summary { cursor: pointer; }
+.settings-note { margin: 2px 0 6px 22px; max-width: 300px; }
 
 /* Explore controls: chosen traces, colours, scales, typed limits. */
 .row-controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }

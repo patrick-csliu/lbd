@@ -14,6 +14,78 @@ export interface AppState {
   open_data_in: OpenDataIn;
   /** the viewer's colours: "system" follows the operating system */
   theme: Theme;
+  /** the Library's settings (config.LIBRARY_DEFAULTS) */
+  library: LibrarySettings;
+}
+
+// ---- Library (server: library.py; keep in sync with /api/library in server.py) ----
+
+/** A column of the Library's list. */
+export type LibraryColumn = "name" | "date" | "sweep" | "values" | "folder" | "size" | "file" | "modified";
+
+export interface LibrarySettings {
+  /** read each data file's header for the list (off: names, sizes and file dates only) */
+  read_headers: boolean;
+  /** the notice about reading headers in cloud storage was seen */
+  notice_seen: boolean;
+  columns: LibraryColumn[];
+}
+
+/** One file of the Library's list. */
+export interface LibraryRow {
+  path: string;
+  root: string;
+  folder: string; // relative to its open folder, "/"-separated ("" for the folder itself)
+  name: string; // file name
+  size: number;
+  mtime: number;
+  read: number; // 1: its header was read
+  title: string;
+  description: string;
+  created: string | null; // as written in the file (ISO-8601 with offset)
+  day: string; // YYYY-MM-DD in the file's own time zone (or of the file's date)
+  date_from_file: number; // 1: no readable `created`: the file's modification date
+  sweep: string; // e.g. "401×31"
+  points: number;
+  value_names: string;
+  error: string | null; // why it couldn't be read
+}
+
+export interface LibraryPage {
+  rows: LibraryRow[];
+  total: number;
+  generation: number;
+}
+
+export interface LibraryFolder {
+  path: string;
+  name: string;
+  count: number;
+  children: LibraryFolder[];
+}
+
+export interface LibraryFacets {
+  dates: { [year: string]: { [month: string]: { [day: string]: number } } };
+  folders: LibraryFolder[];
+  total: number; // files under all open folders (a folder opened inside another counted once)
+  generation: number;
+}
+
+export interface LibraryStatus {
+  indexing: boolean;
+  done: number;
+  total: number;
+  errors: { path: string; error: string }[];
+  scans: number;
+  generation: number;
+}
+
+export interface LibraryQuery {
+  folder: string | null;
+  q: string;
+  date: string;
+  sort: LibraryColumn;
+  order: "asc" | "desc";
 }
 
 export type OpenFilesIn = "viewer" | "browser-tab";
@@ -564,6 +636,23 @@ export const api = {
   setOpenFilesIn: (where: OpenFilesIn) => call<AppState>("PUT", "/api/settings", { open_files_in: where }),
   setOpenDataIn: (where: OpenDataIn) => call<AppState>("PUT", "/api/settings", { open_data_in: where }),
   setTheme: (theme: Theme) => call<AppState>("PUT", "/api/settings", { theme }),
+  setLibrary: (changes: Partial<LibrarySettings>) => call<AppState>("PUT", "/api/settings", { library: changes }),
+
+  // ---- Library: the index of the data files under the open folders (library.py)
+  libraryList: (query: LibraryQuery, offset: number, limit: number) =>
+    call<LibraryPage>("GET", "/api/library/list", undefined, {
+      ...(query.folder ? { folder: query.folder } : {}),
+      q: query.q,
+      date: query.date,
+      sort: query.sort,
+      order: query.order,
+      offset: String(offset),
+      limit: String(limit),
+    }),
+  libraryFacets: (folder: string | null, q: string) =>
+    call<LibraryFacets>("GET", "/api/library/facets", undefined, { ...(folder ? { folder } : {}), q }),
+  libraryFile: (path: string) => call<FileInfo>("GET", "/api/library/file", undefined, { path }),
+  libraryStatus: () => call<LibraryStatus>("GET", "/api/library/status"),
 
   // ---- pages: this browser tab among the viewer's open pages (lbd_viewer/pages.py)
   registerPage: () => call<{ page: string; number: number }>("POST", "/api/pages"),

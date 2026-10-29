@@ -99,7 +99,7 @@ def test_other_plot_settings_redraw_in_the_same_session(small_map, new_page):
 
 def test_the_library_shows_a_file_and_opens_it(small_map, new_page):
     page = new_page("Library")
-    row(page, "small_map.lbd").click()
+    page.locator(".library-row", has_text="Small map").click()           # the list shows the title
     detail = page.locator(".library-detail")
     expect(detail.locator("h1")).to_have_text("Small map")
     expect(detail).to_contain_text("value")

@@ -1,7 +1,8 @@
 import { CSSProperties, KeyboardEvent, MouseEvent, PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, AppState, baseName, fileKind, OpenDataIn, OpenFilesIn, PageCommand, PageEntry, TabState, Theme, viewerUrl, Workspace } from "./api";
 import FolderPanel from "./FolderPanel";
-import FileView, { FileDetails } from "./FileView";
+import FileView from "./FileView";
+import LibraryPage from "./LibraryPage";
 import ExploreTab from "./ExploreTab";
 import ImageView from "./ImageView";
 import StyleFileView from "./StyleFileView";
@@ -691,6 +692,17 @@ function Shell() {
     }
   };
 
+  const setLibraryReadHeaders = async (on: boolean) => {
+    setState((s) => s && { ...s, library: { ...s.library, read_headers: on } });
+    try {
+      setState(await api.setLibrary({ read_headers: on }));
+      toast(on ? "The Library now reads each data file's details." : "The Library now lists names, sizes and file dates only.");
+    } catch (e) {
+      toast((e as Error).message, "error");
+      await refreshState();
+    }
+  };
+
   const setOpenDataIn = async (where: OpenDataIn) => {
     setState((s) => s && { ...s, open_data_in: where });
     try {
@@ -856,6 +868,15 @@ function Shell() {
                     {label}
                   </label>
                 ))}
+                <div className="settings-title">Library</div>
+                <label className="settings-choice">
+                  <input type="checkbox" checked={state.library.read_headers} onChange={(e) => setLibraryReadHeaders(e.target.checked)} />
+                  Read each data file's details (title, date, sweep size, values, metadata)
+                </label>
+                <p className="settings-note small muted">
+                  Off: the Library lists names, sizes and file dates only. Switch it off for folders in cloud storage whose files are kept only
+                  online: opening a file there downloads all of it.
+                </p>
                 <div className="settings-title">Theme</div>
                 {(
                   [
@@ -879,36 +900,22 @@ function Shell() {
       </header>
 
       {page === "library" && state && (
-        <div className="page library">
-          <aside className="library-folders">
-            <FolderPanel
-              roots={state.roots}
-              activePath={libraryPath}
-              platform={state.platform}
-              onRootsChanged={(roots) => setState({ ...state, roots })}
-              onSelect={setLibraryPath}
-              onOpen={(path) => openExplore([path], true)}
-              onOpenInNewBrowserTab={openInNewBrowserTab}
-              onRenamed={fileRenamed}
-              onDeleted={(path) => {
-                closeExplore([path]);
-                closeTabs([path]);
-                setLibraryPath((a) => (a === path ? null : a));
-              }}
-              onOpenIn={openIn}
-            />
-          </aside>
-          <section className="library-detail">
-            {libraryPath ? (
-              <LibraryDetail path={libraryPath} onOpenIn={openIn} />
-            ) : (
-              <div className="empty">
-                <h2>Library</h2>
-                <p>Click a file to see what is inside it; double-click to explore it.</p>
-              </div>
-            )}
-          </section>
-        </div>
+        <LibraryPage
+          state={state}
+          selected={libraryPath}
+          onSelect={setLibraryPath}
+          onRootsChanged={(roots) => setState({ ...state, roots })}
+          onLibrarySettings={setState}
+          onOpenIn={openIn}
+          onOpenInNewBrowserTab={openInNewBrowserTab}
+          onRenamed={fileRenamed}
+          onDeleted={(path) => {
+            closeExplore([path]);
+            closeTabs([path]);
+            setLibraryPath((a) => (a === path ? null : a));
+          }}
+          onOpenSettings={() => setSettingsOpen(true)}
+        />
       )}
 
       <div
@@ -1148,45 +1155,3 @@ function EmptyMain({ hasRoots, where }: { hasRoots: boolean; where: "explore" | 
   );
 }
 
-/** Library: what is inside the selected file, and where to open it. */
-function LibraryDetail({ path, onOpenIn }: { path: string; onOpenIn: (path: string, where: "explore" | "figure") => void }) {
-  const [info, setInfo] = useState<import("./api").FileInfo | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    let live = true;
-    setInfo(null);
-    setError(null);
-    if (fileKind(path) !== "lbd") return;
-    api
-      .file(path)
-      .then((i) => live && setInfo(i))
-      .catch((e) => live && setError((e as Error).message));
-    return () => {
-      live = false;
-    };
-  }, [path]);
-  const data = fileKind(path) === "lbd";
-  return (
-    <div className="file-view">
-      <div className="file-head">
-        <div>
-          <h1>{info?.title || baseName(path)}</h1>
-          <div className="muted small path" title={path}>
-            {path}
-          </div>
-        </div>
-        <div className="actions">
-          {data && (
-            <button className="primary" onClick={() => onOpenIn(path, "explore")}>
-              Open in Explore
-            </button>
-          )}
-          <button onClick={() => onOpenIn(path, "figure")}>{data ? "Open in Figure" : "Open"}</button>
-        </div>
-      </div>
-      {error && <div className="error-box">{error}</div>}
-      {data && !info && !error && <p className="muted">Reading…</p>}
-      {info && <FileDetails info={info} />}
-    </div>
-  );
-}
