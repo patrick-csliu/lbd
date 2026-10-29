@@ -26,6 +26,18 @@ again = fullfile(tempname, "again.lbd");                 % loaded and saved agai
 mkdir(fileparts(again));
 lbd.load(p).save(again);
 expect(lbd.load(again).Created == "2025-03-01T23:30:00+08:00", "created after saving again");
+% the identity: a UUID version 7; saved to another file: a new one, the fixture's as its parent
+expect(~isempty(d.Id) && ~isempty(regexp(d.Id, '^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$', 'once')), ...
+    "id: " + strjoin(string(d.Id), ""));
+other = lbd.load(again);
+expect(other.Id ~= d.Id && other.ParentId == d.Id, "id after saving to another file");
+% a copy of the file saved again to the same place: the same id
+copy = fullfile(tempname, "copy.lbd");
+mkdir(fileparts(copy));
+copyfile(p, copy);
+c = lbd.load(copy);
+c.save(copy);
+expect(lbd.load(copy).Id == d.Id, "id after saving a copy to the same place");
 expect(isequal(d.Axes.x.Data, (0:9)'), "x");
 expect(isequal([d.Axes.x.Unit d.Axes.a.Unit d.Axes.b.Unit d.Axes.c.Unit], ["s" "V" "A" "Hz"]), "units");
 expect(isequal(d.Values.y.Data, ((0:9).^2)'), "y");

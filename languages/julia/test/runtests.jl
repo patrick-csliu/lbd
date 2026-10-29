@@ -2,6 +2,7 @@ using LBD
 using HDF5
 using Test
 using Dates
+using Random
 
 function make_sweep()
     f = collect(range(4e9, 8e9, 41))
@@ -184,6 +185,61 @@ end
         @test_throws LBDError Dataset("t"; created=20250301)
     end
 
+    @testset "id: made at the first save, kept, new when saved elsewhere" begin
+        V7 = r"^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        u = LBD.uuid7()
+        @test occursin(V7, u)
+        ms = parse(Int, replace(u[1:13], "-" => ""); base=16)          # the time field: now
+        @test abs(ms / 1000 - Dates.datetime2unix(Dates.now(Dates.UTC))) < 5
+        @test length(Set(LBD.uuid7() for _ in 1:10_000)) == 10_000
+
+        mk() = (d = Dataset("t"); add_axis!(d, "x", [1.0, 2.0]); add_value!(d, "y", [1.0, 2.0], ["x"]); d)
+        a, b = joinpath(dir, "id_a.lbd"), joinpath(dir, "id_b.lbd")
+        d = mk()
+        @test d.id === nothing
+        LBD.save(a, d)
+        first = d.id
+        @test occursin(V7, first) && d.parent_id === nothing
+        r = LBD.load(a)
+        @test r.id == first && r.parent_id === nothing
+        r.description = "edited"
+        LBD.save(a, r)                                                  # the same file: kept
+        @test LBD.load(a).id == first
+        LBD.save(b, r)                                                  # another file: new, made from it
+        rb = LBD.load(b)
+        @test rb.id != first && rb.parent_id == first && r.id == rb.id
+        new_id!(r)
+        @test r.parent_id == rb.id && r.id != rb.id
+
+        # seeded generators don't make ids repeat
+        ids = String[]
+        for _ in 1:2
+            Random.seed!(0)
+            d = mk()
+            LBD.save(joinpath(dir, "seeded.lbd"), d)
+            push!(ids, d.id)
+        end
+        @test ids[1] != ids[2]
+        # made at once on several threads: all different
+        if Threads.nthreads() > 1
+            got = Vector{String}(undef, 4000)
+            Threads.@threads for i in 1:4000
+                got[i] = LBD.uuid7()
+            end
+            @test length(Set(got)) == 4000
+        end
+
+        # a malformed id: a warning, ignored, and saving gives a new one
+        h5open(a, "r+") do f
+            HDF5.delete_attribute(f, "id")
+            attributes(f)["id"] = "not-an-id"
+        end
+        bad = @test_logs (:warn, r"not a valid id") LBD.load(a)
+        @test bad.id === nothing
+        LBD.save(a, bad)
+        @test occursin(V7, LBD.load(a).id)
+    end
+
     @testset "versions" begin
         p = joinpath(dir, "v.lbd")
         LBD.save(p, make_sweep())
@@ -197,7 +253,7 @@ end
             write_attribute(f, "lbd_version", "2.0")
         end
         @test_throws LBDVersionError LBD.load(p)
-        @test LBD.version().lbd_version == "1.0"
+        @test LBD.version().lbd_version == "1.1"
     end
 
     @testset "robust reading" begin

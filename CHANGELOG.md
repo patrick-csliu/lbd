@@ -7,6 +7,15 @@ The file format has its own version (`lbd_version`, currently 1.0).
 
 **Changes to how things behave** (read these when upgrading)
 
+- **File format 1.1: every file gets an `id`** (every language). It is the measurement's
+  identity, so LBD can recognise the same measurement in two places: a UUID version 7 (RFC 9562)
+  made at the first save from the time and the operating system's random bits, with nothing to
+  set up or coordinate. Saving again to the same file keeps it; **saving to another file gives
+  that file a new id**, with `parent_id` naming the one it was made from (`new_id()` /
+  `newId()` / `new_id!` does it on purpose). 1.0 files stay valid (they get an id at their next
+  save); readers for 1.0 read 1.1 files with a warning. Explore's saved cuts record their
+  source's id as `parent_id`.
+
 - **`created` is when the data was created, and saving again keeps it** (every language).
   Before, each save set it to the time of that save, so a file loaded and saved again got a new
   date. Now it can be given (`lbd.Dataset(created=...)`, MATLAB `Created=`, Julia `created=`; a

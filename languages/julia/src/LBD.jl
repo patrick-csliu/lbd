@@ -21,13 +21,14 @@ using Dates
 using HDF5
 using JSON3
 using OrderedCollections: OrderedDict
+using Random: RandomDevice
 
-export Dataset, Axis, Value, add_axis!, add_value!, LBDError, LBDVersionError
+export Dataset, Axis, Value, add_axis!, add_value!, new_id!, LBDError, LBDVersionError
 
 const PACKAGE_VERSION = "1.3.0-dev"
-const FORMAT_VERSION = "1.0"
+const FORMAT_VERSION = "1.1"
 const FORMAT_MAJOR = 1
-const FORMAT_MINOR = 0
+const FORMAT_MINOR = 1
 const NAME_RE = r"^[A-Za-z][A-Za-z0-9_]{0,62}$"
 const COMPRESS_MIN_SIZE = 1024
 const REPLACE_WAIT = 3.0   # seconds `save` waits for a file another program has open (Windows)
@@ -84,14 +85,63 @@ mutable struct Dataset
     style::Union{Dict{String,Any},Nothing}
     style_name::Union{String,Nothing}
     matplotlib::Union{String,Nothing}   # matplotlib version that last wrote the saved view (kept as is)
+    # The measurement's identity (a UUID version 7) and the one it was made from; set by `save`
+    # and `new_id!`, not by hand: see `save`.
+    id::Union{String,Nothing}
+    parent_id::Union{String,Nothing}
     path::Union{String,Nothing}
 end
 
 Dataset(title::AbstractString=""; description::AbstractString="", created=nothing) = Dataset(
     String(title), String(description), created === nothing ? nothing : created_text(created), nothing, FORMAT_VERSION,
     OrderedDict{String,Axis}(), OrderedDict{String,Value}(), OrderedDict{String,Any}(),
-    nothing, nothing, nothing, nothing, nothing,
+    nothing, nothing, nothing, nothing, nothing, nothing, nothing,
 )
+
+# ---- the measurement's identity ----------------------------------------------
+
+const UUID_RE = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+
+"""
+    uuid7() -> String
+
+A new UUID version 7 (RFC 9562), lower case: the Unix time in milliseconds (48 bits), then 74
+random bits. The random bits come from the operating system (`RandomDevice`), never from
+Julia's default generator, so `Random.seed!` in a simulation can't make two files share an id.
+"""
+function uuid7()
+    ms = UInt64(floor(Int, Dates.datetime2unix(Dates.now(Dates.UTC)) * 1000))
+    r = rand(RandomDevice(), UInt8, 10)
+    b = Vector{UInt8}(undef, 16)
+    for i in 1:6
+        b[i] = UInt8((ms >> (8 * (6 - i))) & 0xff)
+    end
+    b[7] = 0x70 | (r[1] & 0x0f)          # version 7
+    b[8] = r[2]
+    b[9] = 0x80 | (r[3] & 0x3f)          # variant 10
+    b[10:16] = r[4:10]
+    h = bytes2hex(b)
+    return string(h[1:8], "-", h[9:12], "-", h[13:16], "-", h[17:20], "-", h[21:32])
+end
+
+"""
+    new_id!(d)
+
+Make `d` a separate measurement: it gets a new id, and its old id becomes `parent_id`. Use it
+before saving a loaded file as something new at the same place; saving to another file does
+this by itself.
+"""
+function new_id!(d::Dataset)
+    d.id === nothing || (d.parent_id = d.id)
+    d.id = uuid7()
+    return d
+end
+
+# Whether `a` and `b` name the same file (the same place once resolved; case doesn't matter on Windows).
+function same_file(a::AbstractString, b::AbstractString)
+    norm(p) = (q = abspath(isfile(p) || islink(p) ? realpath(p) : p); Sys.iswindows() ? lowercase(q) : q)
+    return norm(a) == norm(b)
+end
 
 function Base.getindex(d::Dataset, name::AbstractString)
     haskey(d.values, name) && return d.values[name]
@@ -207,6 +257,11 @@ from_file(x) = x
 
 Write `d` to `path`. With `compression=true`, large arrays are gzip-compressed. The file is
 written under a temporary name and then renamed, so a viewer never sees a half-written file.
+
+The file gets the measurement's identity, `d.id` (a UUID version 7): a new one at the first
+save; kept when `d` is saved again to the same file (also after `load`); a new one when `d` is
+saved to another file, with the old one kept as `d.parent_id` ("made from"). A file copied by
+the file system keeps its id, so LBD Viewer recognises the same measurement in two places.
 On Windows a file another program keeps open (e.g. LBD Viewer reading it, a sync client) can't
 be replaced: `save` waits up to $(REPLACE_WAIT) s for it, then throws an `IOError` naming the file.
 """
@@ -215,12 +270,21 @@ function save(path::AbstractString, d::Dataset; compression::Bool=false)
     for v in values(d.values)
         v.data === nothing && throw(LBDError("value \"$(v.name)\" was not loaded; load the file without `values=` to re-save it"))
     end
+    before = (d.id, d.parent_id)
+    if d.id === nothing
+        d.id = uuid7()
+    elseif d.path !== nothing && !same_file(d.path, path)
+        new_id!(d)                       # saved as another file: a new measurement made from this one
+    end
     tmp = "$path.tmp-$(getpid())"
     try
         h5open(tmp, "w") do f
             write_file(f, d, compression)
         end
         replace_file(tmp, path)
+    catch
+        d.id, d.parent_id = before       # not saved: the dataset stays as it was
+        rethrow()
     finally
         isfile(tmp) && rm(tmp)
     end
@@ -257,6 +321,8 @@ function write_file(f, d::Dataset, compression::Bool)
     write_str_attr(f, "description", d.description)
     write_str_attr(f, "created", d.created)
     write_str_attr(f, "writer", d.writer)
+    write_str_attr(f, "id", d.id)
+    d.parent_id === nothing || write_str_attr(f, "parent_id", d.parent_id)
 
     ga = create_group(f, "axes")
     for a in values(d.axes)
@@ -445,6 +511,8 @@ function read_header(f, path)
     d = Dataset(attr_str(f, "title"); description=attr_str(f, "description"))
     c = attr_str(f, "created"); d.created = isempty(c) ? nothing : c
     w = attr_str(f, "writer"); d.writer = isempty(w) ? nothing : w
+    d.id = read_id(f, "id", path)
+    d.parent_id = read_id(f, "parent_id", path)
     d.lbd_version = ver
     d.path = String(path)
     haskey(f, "meta") && (d.meta = read_meta(f["meta"]))
@@ -456,6 +524,15 @@ function read_header(f, path)
         m = attr_str(g, "matplotlib"); d.matplotlib = isempty(m) ? nothing : m
     end
     return d
+end
+
+# An id attribute: a UUID, or nothing (missing; a malformed one warns and counts as missing).
+function read_id(f, name, path)
+    s = attr_str(f, name)
+    isempty(s) && return nothing
+    occursin(UUID_RE, lowercase(s)) && return lowercase(s)
+    @warn "$(basename(path)): $name \"$s\" is not a valid id (a UUID); it is ignored, and saving gives the file a new one"
+    return nothing
 end
 
 function check_version(ver, path)

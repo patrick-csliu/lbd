@@ -596,5 +596,6 @@ def save_cut(s: "ExploreSession", which: str, index: Dict[str, int], path: Path,
     d.plot = {"kind": "curve", "values": names[:1]}
     if np.iscomplexobj(src.values[names[0]].data):
         d.plot["complex"] = s.spec["complex"]
+    d._parent_id = src.id                    # a new measurement made from the source (format 1.1)
     d.save(path)
     return path

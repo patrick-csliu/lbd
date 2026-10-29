@@ -1,4 +1,4 @@
-# LBD file format — version 1.0
+# LBD file format — version 1.1
 
 LBD ("Lab Data", extension `.lbd`) is a file format for measurement and simulation data that can be written and read identically from any programming language, and viewed with the LBD viewer. Any language with HDF5 support can implement it; this repository provides implementations for Python, MATLAB and Julia.
 
@@ -18,7 +18,7 @@ that implement this spec, see [Python](../docs/python/files.md), [MATLAB](../doc
 
 ```
 /                       (root group)
-├── attrs               lbd_format, lbd_version, title, description, created, writer
+├── attrs               lbd_format, lbd_version, title, description, created, writer [, id, parent_id]
 ├── axes/               (group)  one 1-D dataset per axis
 │   └── <axis name>     attrs: unit, label
 ├── values/             (group)  one N-D dataset per value
@@ -33,11 +33,29 @@ that implement this spec, see [Python](../docs/python/files.md), [MATLAB](../doc
 | Attribute | Type | Required | Meaning |
 |---|---|---|---|
 | `lbd_format` | string, `"LBD"` | must | Identifies the file as LBD. |
-| `lbd_version` | string, `"<major>.<minor>"` | must | Format version, `"1.0"` for this spec. |
+| `lbd_version` | string, `"<major>.<minor>"` | must | Format version, `"1.1"` for this spec (`"1.0"` files are valid 1.1 files without `id`). |
 | `title` | string | must (may be `""`) | Short human-readable title. |
 | `description` | string | must (may be `""`) | Free text. |
 | `created` | string, ISO-8601 with UTC offset | must | When the data was created (measured), e.g. `2026-10-13T16:09:00+08:00`. Given by the user when known; otherwise writers fill in the time of the first save. A writer saving a dataset that already has a `created` (set by the user, or read from a file) writes it unchanged. |
 | `writer` | string | must | Writer and its version, e.g. `"python lbd 1.0.0"`, `"matlab lbd 1.0.0"`, `"julia LBD 1.0.0"`. |
+| `id` | string, a UUID version 7 (RFC 9562), lower case, e.g. `0192d4e2-7b3a-7c1e-9f2a-1c2b3d4e5f60` | should (since 1.1) | The measurement's identity: lets programs recognise the same measurement in two places (a copy, a backup, a synced folder). Rules below. |
+| `parent_id` | string, a UUID | may (since 1.1) | The `id` of the file this one was made from. |
+
+**`id` rules for writers.** The id is made from the current time in milliseconds and random
+bits from the operating system's secure source (never from a seeded generator), so writers on
+any computer make ids that don't collide, without coordination.
+
+| What the writer does | `id` | `parent_id` |
+|---|---|---|
+| saves a new dataset for the first time | a new id | — |
+| saves a dataset again to the file it was read from (or last saved to) | kept | kept |
+| saves a dataset to another file | a new id | the old `id` |
+| makes it a new measurement on request (e.g. `new_id()`) | a new id | the old `id` |
+| (a file copied by the file system keeps both, byte for byte) | | |
+
+A file without `id` (written by format 1.0 or by another program) gets one the next time an LBD
+writer saves it. Readers must accept files without `id`; a value that is not a UUID is ignored
+with a warning.
 
 ### 1.2 Axes — `/axes/<name>`
 
@@ -147,8 +165,9 @@ Writers may store datasets chunked and gzip-compressed. Readers must handle this
 ## 7. Minimal example (as seen by `h5dump`-style listing)
 
 ```
-/                         lbd_format="LBD" lbd_version="1.0" title="Resonator power sweep"
-                          description="" created="2026-10-13T16:09:00+08:00" writer="python lbd 1.0.0"
+/                         lbd_format="LBD" lbd_version="1.1" title="Resonator power sweep"
+                          description="" created="2026-10-13T16:09:00+08:00" writer="python lbd 1.3.0"
+                          id="0199dc2a-4b7e-7f30-8a41-5c6d7e8f9a0b"
 /axes/power   float64[11]       unit="dBm" label="Power"
 /axes/freq    float64[401]      unit="Hz"  label="Frequency"
 /values/S21   {r,i}float64[11,401]  unit="" label="S21" axes="power,freq"

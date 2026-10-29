@@ -193,6 +193,7 @@ def test_a_row_is_saved_as_its_own_file(client, small_map):
     assert list(d.axes) == ["x"] and d.values["z"].data.tolist() == [10, 11, 12, 13, 14] and d.values["z"].unit == "V"
     assert d.meta["cut_from"] == "small_map.lbd" and d.meta["cut_index"]["y"] == 1 and d.meta["cut_at"]["y"] == 200
     assert d.meta["source_meta"]["T_mK"] == 12
+    assert d.parent_id == lbd.info(small_map).id and d.id not in (None, d.parent_id)   # a new measurement made from it
     r = client.post(url, json={"which": "row", "index": {"x": 2, "y": 1}, "path": suggested})
     assert r.status_code == 400 and "exists already" in r.json()["detail"]          # never overwritten
     assert client.post(url, json={"which": "row", "index": {"x": 2, "y": 1}}).json()["path"].endswith("(2).lbd")

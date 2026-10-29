@@ -61,6 +61,8 @@ These properties are read-only; they are set by the methods and by `lbd.load`:
 | `Axes` | struct | `Axes.<name>` is a struct with fields `Name`, `Data` (column vector), `Unit`, `Label`. |
 | `Values` | struct | `Values.<name>` is a struct with fields `Name`, `Data`, `Axes` (string row), `Unit`, `Label`, `Shape` (row vector), `Dtype` (LBD type name). |
 | `Writer` | string | Program that wrote the file, e.g. `"matlab lbd 1.0.0"`. |
+| `Id` | string | The measurement's identity (a UUID, made at the first save; see `save`). `d.newId()` makes a new one. |
+| `ParentId` | string | The `Id` of the file this one was made from. |
 | `LbdVersion` | string | Format version of the file. |
 | `Path` | string | Where it was last loaded from or saved to. |
 
@@ -134,6 +136,14 @@ path = d.save(path, Compression=false)
 
 Writes the dataset and returns the path. It also sets `Writer` and `Path`, and `Created` if it
 was empty (the time of this first save); a `Created` that is set is written unchanged.
+
+It also sets the file's **id**: the measurement's identity, which LBD Viewer's Library uses to recognise
+the same measurement in two places (a copy, a backup, a synced folder). It is made at the first
+save (a UUID, from the time and random bits of the operating system: no setup, nothing to
+coordinate between computers) and is read-only. Saving again to the same file keeps it;
+saving to **another file** gives that file a new id, and the old one becomes its **parent
+id** (a new measurement made from this one). A file copied by the file system keeps its id. `d.newId()` makes a loaded dataset a new
+measurement on purpose.
 
 | Argument | Meaning |
 |---|---|

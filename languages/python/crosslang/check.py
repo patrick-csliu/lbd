@@ -3,6 +3,8 @@
 import sys
 from pathlib import Path
 
+import tempfile
+
 import numpy as np
 
 import lbd
@@ -12,11 +14,21 @@ def check(path: Path) -> None:
     d = lbd.load(path)
     assert d.title == "Fixture – ünïcode", d.title
     assert d.created == "2025-03-01T23:30:00+08:00", d.created
-    import tempfile
+    import shutil
+    import uuid
+
+    u = uuid.UUID(d.id)
+    assert str(u) == d.id and u.version == 7 and u.variant == uuid.RFC_4122, f"id {d.id!r}"
+    with tempfile.TemporaryDirectory() as tmp:          # copied as a file, saved in place: same id
+        shutil.copy(path, Path(tmp) / "copy.lbd")
+        lbd.load(Path(tmp) / "copy.lbd").save(Path(tmp) / "copy.lbd")
+        assert lbd.info(Path(tmp) / "copy.lbd").id == d.id, "id after saving a copy in place"
     with tempfile.TemporaryDirectory() as tmp:          # loaded and saved again: created kept
         d2 = lbd.load(path)
         d2.save(Path(tmp) / "again.lbd")
-        assert lbd.load(Path(tmp) / "again.lbd").created == "2025-03-01T23:30:00+08:00", "created after saving again"
+        again = lbd.load(Path(tmp) / "again.lbd")
+        assert again.created == "2025-03-01T23:30:00+08:00", "created after saving again"
+        assert again.id != d.id and again.parent_id == d.id, "saved to another file: a new id, parent_id"
     np.testing.assert_array_equal(d["x"].data, np.arange(10.0))
     assert d["x"].unit == "s" and d["a"].unit == "V" and d["b"].unit == "A" and d["c"].unit == "Hz"
     np.testing.assert_array_equal(d["y"].data, np.arange(10.0) ** 2)

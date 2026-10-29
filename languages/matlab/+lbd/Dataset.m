@@ -30,8 +30,15 @@ classdef Dataset < handle
         Axes (1,1) struct = struct()   % Axes.<name>   = struct(Name, Data, Unit, Label)
         Values (1,1) struct = struct() % Values.<name> = struct(Name, Data, Axes, Unit, Label, Shape, Dtype)
         Writer string = string.empty
-        LbdVersion (1,1) string = "1.0"
+        LbdVersion (1,1) string = "1.1"
         Path string = string.empty
+        % The measurement's identity (a UUID version 7): made at the first save, kept when the
+        % file is saved again to the same place, new when it is saved to another file (or by
+        % newId), so a copy made by a program is a measurement of its own. Empty: not saved yet,
+        % or a file written before format 1.1.
+        Id string = string.empty
+        % The Id of the file this one was made from (saved to another file, newId), if any.
+        ParentId string = string.empty
     end
 
     methods
@@ -139,6 +146,15 @@ classdef Dataset < handle
             end
         end
 
+        function newId(obj)
+            %NEWID  Make this dataset a measurement of its own: a new Id; the old one becomes
+            %   ParentId. Takes effect when it is saved.
+            if ~isempty(obj.Id) && strlength(obj.Id) > 0
+                obj.ParentId = obj.Id;
+            end
+            obj.Id = lbd_uuid7();
+        end
+
         function path = save(obj, path, opts)
             %SAVE  Write the dataset to PATH (.lbd). Compression=true gzips large arrays.
             %   The file is written under a temporary name and then renamed, so a viewer
@@ -164,9 +180,19 @@ classdef Dataset < handle
             if ~isempty(obj.StyleName) && (~isscalar(obj.StyleName) || strlength(obj.StyleName) == 0)
                 error('lbd:invalid', 'StyleName must be one non-empty name (or empty to remove it)');
             end
+            % The identity: kept when saved again to the same file; new (the old one as ParentId)
+            % when saved to another file; made now for a dataset never saved.
+            id = obj.Id;
+            parent = obj.ParentId;
+            if isempty(id) || strlength(id) == 0
+                id = lbd_uuid7();
+            elseif ~isempty(obj.Path) && ~lbd.Dataset.samePath(obj.Path, path)
+                parent = id;
+                id = lbd_uuid7();
+            end
             tmp = path + ".tmp-" + string(feature('getpid'));
             try
-                obj.writeFile(tmp, opts.Compression);
+                obj.writeFile(tmp, opts.Compression, id, parent);
                 % On Windows the file can't be replaced while another program has it open, even
                 % for a moment (LBD Viewer reading the new version, a sync client, an antivirus
                 % scan): try again for up to 3 s.
@@ -185,6 +211,8 @@ classdef Dataset < handle
                 rethrow(err);
             end
             obj.Path = path;
+            obj.Id = id;
+            obj.ParentId = parent;
         end
 
         function disp(obj)
@@ -213,7 +241,7 @@ classdef Dataset < handle
             end
         end
 
-        function writeFile(obj, path, compression)
+        function writeFile(obj, path, compression, id, parent)
             % when the data was created: kept as set (also as read by load); not set: this first save
             if isempty(obj.Created) || (isstring(obj.Created) && strlength(obj.Created) == 0)
                 created = string(datetime('now', 'TimeZone', 'local', 'Format', "yyyy-MM-dd'T'HH:mm:ssxxx"));
@@ -230,6 +258,10 @@ classdef Dataset < handle
             lbd_write_attr(fid, 'description', obj.Description);
             lbd_write_attr(fid, 'created', created);
             lbd_write_attr(fid, 'writer', writer);
+            lbd_write_attr(fid, 'id', id);
+            if ~isempty(parent) && strlength(parent) > 0
+                lbd_write_attr(fid, 'parent_id', parent);
+            end
 
             gid = H5G.create(fid, 'axes', 'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
             an = fieldnames(obj.Axes);
@@ -279,6 +311,36 @@ classdef Dataset < handle
     end
 
     methods (Static, Hidden)
+        function id = newIdText()
+            %NEWIDTEXT  A new identity text (for tests).
+            id = lbd_uuid7();
+        end
+
+        function id = readId(fid, name, base)
+            %READID  An identity attribute ('id', 'parent_id'): empty when missing; a value that
+            %   isn't a UUID is reported (warning lbd:badId) and treated as missing.
+            id = string(lbd_attr_or(fid, name, string.empty));
+            if isempty(id) || strlength(id) == 0
+                id = string.empty;
+            elseif isempty(regexp(id, '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$', 'once'))
+                warning('lbd:badId', '%s: its %s "%s" is not a UUID; it is ignored', base, name, id);
+                id = string.empty;
+            else
+                id = lower(id);
+            end
+        end
+
+        function same = samePath(a, b)
+            %SAMEPATH  Whether two paths name the same file (full paths; case-insensitive on Windows).
+            fa = string(java.io.File(char(a)).getCanonicalPath());
+            fb = string(java.io.File(char(b)).getCanonicalPath());
+            if ispc
+                same = strcmpi(fa, fb);
+            else
+                same = fa == fb;
+            end
+        end
+
         function d = fromFile(path, loadAll, names)
             %FROMFILE  Used by lbd.load / lbd.info. With loadAll=false, only the values in
             %   NAMES (string array, may be empty) get their data read.
@@ -302,6 +364,8 @@ classdef Dataset < handle
             d.Writer = lbd_attr_or(fid, 'writer', string.empty);
             d.LbdVersion = ver;
             d.Path = path;
+            d.Id = lbd.Dataset.readId(fid, 'id', base);
+            d.ParentId = lbd.Dataset.readId(fid, 'parent_id', base);
 
             if H5L.exists(fid, 'meta', 'H5P_DEFAULT')
                 gid = H5G.open(fid, 'meta');

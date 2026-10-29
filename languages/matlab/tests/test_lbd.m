@@ -169,6 +169,88 @@ tc.verifyError(@() d.save(p), 'lbd:invalid');
 tc.verifyFalse(isfile(p));
 end
 
+function testIdMadeKeptAndNew(tc)
+% The identity: a UUID version 7, made at the first save, kept when saved again to the same
+% file, new (the old one as ParentId) when saved to another file or by newId.
+f = fullfile(tc.TestData.dir, "id.lbd");
+g = fullfile(tc.TestData.dir, "id other.lbd");
+d = lbd.Dataset("t");
+d.addAxis("x", [1 2]);
+d.addValue("y", [1 2], "x");
+tc.verifyEmpty(d.Id);
+d.save(f);
+first = d.Id;
+verifyUuid7(tc, first);
+tc.verifyEmpty(d.ParentId);
+r = lbd.load(f);
+tc.verifyEqual(r.Id, first);
+r.Description = "edited";
+r.save(f);                                                   % the same file: kept
+tc.verifyEqual(lbd.load(f).Id, first);
+r.save(g);                                                   % another file: new, with its parent
+tc.verifyNotEqual(r.Id, first);
+verifyUuid7(tc, r.Id);
+tc.verifyEqual(r.ParentId, first);
+tc.verifyEqual(lbd.load(g).Id, r.Id);
+tc.verifyEqual(lbd.load(g).ParentId, first);
+tc.verifyEqual(lbd.load(f).Id, first);                       % the original untouched
+before = r.Id;
+r.newId();
+tc.verifyEqual(r.ParentId, before);
+verifyUuid7(tc, r.Id);
+tc.verifyNotEqual(r.Id, before);
+tc.verifyError(@() setId(r), 'MATLAB:class:SetProhibited');  % read-only
+end
+
+function setId(d)
+d.Id = "x";
+end
+
+function testIdNotFromRngAndUnique(tc)
+% ids come from the operating system's source: rng(0) doesn't repeat them
+ids = strings(1, 2);
+for k = 1:2
+    rng(0);
+    d = lbd.Dataset("t");
+    d.addAxis("x", [1 2]);
+    d.addValue("y", [1 2], "x");
+    d.save(fullfile(tc.TestData.dir, "seeded" + k + ".lbd"));
+    ids(k) = d.Id;
+end
+tc.verifyNotEqual(ids(1), ids(2));
+many = strings(1, 10000);
+for k = 1:numel(many)
+    many(k) = lbd.Dataset.newIdText();
+end
+tc.verifyEqual(numel(unique(many)), numel(many));
+for k = 1:200
+    verifyUuid7(tc, many(k));
+end
+end
+
+function testMalformedIdWarns(tc)
+f = fullfile(tc.TestData.dir, "badid.lbd");
+d = lbd.Dataset("t");
+d.addAxis("x", [1 2]);
+d.addValue("y", [1 2], "x");
+d.save(f);
+fid = H5F.open(f, 'H5F_ACC_RDWR', 'H5P_DEFAULT');
+H5A.delete(fid, 'id');
+H5F.close(fid);
+h5writeatt(f, '/', 'id', 'not-a-uuid');
+r = tc.verifyWarning(@() lbd.load(f), 'lbd:badId');
+tc.verifyEmpty(r.Id);
+end
+
+function verifyUuid7(tc, id)
+id = char(id);
+tc.verifyEqual(numel(id), 36);
+tc.verifyNotEmpty(regexp(id, '^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$', 'once'), id);
+ms = hex2dec([id(1:8) id(10:13)]);
+now = posixtime(datetime('now', 'TimeZone', 'UTC')) * 1000;
+tc.verifyLessThan(abs(now - ms), 60000, "the time field is now");
+end
+
 function testCreatedKeptAndSettable(tc)
 f = fullfile(tc.TestData.dir, "created.lbd");
 d = lbd.Dataset("t");
@@ -207,7 +289,7 @@ tc.verifyWarning(@() lbd.load(p), 'lbd:newerVersion');
 setVersion(p, "2.0");
 tc.verifyError(@() lbd.load(p), 'lbd:version');
 v = lbd.version();
-tc.verifyEqual(v.lbd_version, "1.0");
+tc.verifyEqual(v.lbd_version, "1.1");
 end
 
 function setVersion(p, ver)

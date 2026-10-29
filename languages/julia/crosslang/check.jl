@@ -8,6 +8,14 @@ function check(path)
     again = joinpath(mktempdir(), "again.lbd")              # loaded and saved again: created kept
     LBD.save(again, LBD.load(path))
     @test LBD.load(again).created == "2025-03-01T23:30:00+08:00"
+    # the id: a UUID version 7; saved to another file: a new one, made from this one
+    @test d.id !== nothing && occursin(r"^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", d.id)
+    @test LBD.load(again).id != d.id && LBD.load(again).parent_id == d.id
+    # a copy made by the file system, loaded and saved at its own place: the same id
+    copied = joinpath(mktempdir(), "copied.lbd")
+    cp(path, copied)
+    LBD.save(copied, LBD.load(copied))
+    @test LBD.load(copied).id == d.id
     @test d["x"].data == collect(0.0:9.0)
     @test (d["x"].unit, d["a"].unit, d["b"].unit, d["c"].unit) == ("s", "V", "A", "Hz")
     @test d["y"].data == collect(0.0:9.0) .^ 2

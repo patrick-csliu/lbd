@@ -432,6 +432,7 @@ def file_summary(d: "lbd.Dataset") -> Dict[str, Any]:
     return {
         "path": str(d.path), "name": d.path.name if d.path else "",
         "title": d.title, "description": d.description, "created": d.created, "writer": d.writer,
+        "id": d.id, "parent_id": d.parent_id,
         "lbd_version": d.lbd_version, "size": stat.st_size if stat else None,
         "axes": axes, "values": values, "meta": jsonable(d.meta),
         "plot": d.plot, "style": d.style, "style_name": d.style_name, "matplotlib": d.matplotlib,

@@ -13,6 +13,7 @@ import os
 import re
 import sys
 import time
+import uuid as _uuid
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -22,7 +23,7 @@ import h5py
 import numpy as np
 
 __version__ = "1.3.0.dev0"
-FORMAT_VERSION = "1.0"
+FORMAT_VERSION = "1.1"
 _FORMAT_MAJOR, _FORMAT_MINOR = (int(p) for p in FORMAT_VERSION.split("."))
 
 _NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,62}$")
@@ -215,6 +216,15 @@ class Dataset:
         `created`, and saving it again keeps it; only a new value changes it.
     writer : str or None
         The program that wrote the file, e.g. `"python lbd 1.3.0"`. Set by `save`.
+    id : str or None
+        The measurement's identity, a UUID (version 7) written into the file at its first save,
+        e.g. `"0192d4e2-7b3a-7c1e-9f2a-1c2b3d4e5f60"`. Read-only. Saving again to the same file
+        keeps it; saving to another file gives the new file a new id (and `parent_id`); a file
+        copied by the file system keeps it. LBD Viewer's Library uses it to recognise the same
+        measurement in two places. `None` for a new dataset not saved yet, or a file written
+        before format 1.1.
+    parent_id : str or None
+        The id of the file this one was made from (saved to another file, or `new_id`).
     lbd_version : str
         Format version of the file.
     path : pathlib.Path or None
@@ -251,6 +261,29 @@ class Dataset:
         self.style_name: Optional[str] = None
         self.matplotlib: Optional[str] = None
         self.path: Optional[Path] = None
+        self._id: Optional[str] = None
+        self._parent_id: Optional[str] = None
+
+    @property
+    def id(self) -> Optional[str]:
+        """The measurement's identity (a UUID version 7), or None before the first save."""
+        return self._id
+
+    @property
+    def parent_id(self) -> Optional[str]:
+        """The id of the file this one was made from, or None."""
+        return self._parent_id
+
+    def new_id(self) -> str:
+        """Make this a separate measurement: a new id, the old one becomes `parent_id`.
+
+        Saving to another file does this by itself; use it when a dataset loaded from a file is
+        meant to become a new measurement saved over that same file. Returns the new id.
+        """
+        if self._id is not None:
+            self._parent_id = self._id
+        self._id = new_uuid7()
+        return self._id
 
     # ---- building -------------------------------------------------------
 
@@ -441,7 +474,9 @@ class Dataset:
         half-written file. If writing fails, the temporary file is removed and an existing file
         at `path` is left untouched. Sets `writer` and `path`, and `created` if it wasn't set
         (the time of this first save); a `created` that is set, also one read by `load`, is
-        written unchanged.
+        written unchanged. Gives the dataset its `id` at the first save; saving to another
+        file than the one it was loaded from or last saved to gives a new `id`, the old one
+        becoming `parent_id` (the new file is a new measurement made from that one).
 
         Parameters
         ----------
@@ -495,15 +530,24 @@ class Dataset:
         created = _created_text(self.created) if self.created is not None else \
             _dt.datetime.now().astimezone().isoformat(timespec="seconds")
         writer = f"python lbd {__version__}"
+        ident, parent = self._id, self._parent_id
+        if ident is None:
+            ident = new_uuid7()
+        elif self.path is not None and not _same_target(self.path, path):
+            ident, parent = new_uuid7(), ident        # another file: a new measurement made from this one
         tmp = path.with_name(f"{path.name}.tmp-{os.getpid()}")
         try:
             with h5py.File(tmp, "w") as f:
                 self._write(f, compression, created, writer, plot_json, style_json, style_name, mpl)
+                f.attrs["id"] = ident
+                if parent is not None:
+                    f.attrs["parent_id"] = parent
             _replace(tmp, path)
         finally:
             if tmp.exists():
                 tmp.unlink()
         self.created, self.writer, self.path = created, writer, path
+        self._id, self._parent_id = ident, parent
         return path
 
     def _check_complete(self) -> None:
@@ -827,6 +871,12 @@ def _read_header(f: h5py.File, path: Path) -> Dataset:
     d = Dataset(title=_attr_str(f, "title", "", path), description=_attr_str(f, "description", "", path))
     d.created = _attr_str(f, "created", "", path) or None
     d.writer = _attr_str(f, "writer", "", path) or None
+    for attr in ("id", "parent_id"):
+        text = _attr_str(f, attr, "", path)
+        if text and not _UUID_RE.match(text):
+            _warn(f"{path.name}: its {attr} {text!r} is not a UUID; reading it without one")
+            text = ""
+        setattr(d, "_" + attr, text.lower() or None)
     d.lbd_version = ver
     d.path = path
     if "meta" in f:
@@ -939,6 +989,32 @@ def _check_name(name: Any) -> str:
 def _check_loaded_name(name: str, path: Path) -> None:
     if not _NAME_RE.match(name):
         raise LBDError(f"{path.name}: invalid axis/value name {name!r}")
+
+
+_UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+
+def new_uuid7() -> str:
+    """A new UUID version 7 (RFC 9562): the Unix time in milliseconds (48 bits) and 74 random
+    bits from the operating system's secure source (`os.urandom`), never from a seeded
+    generator, so `random.seed` / `numpy.random.seed` never repeat an id, and processes saving
+    at the same moment (also forked ones) get different ids."""
+    if hasattr(_uuid, "uuid7"):                       # Python 3.14+
+        return str(_uuid.uuid7())
+    ms = time.time_ns() // 1_000_000
+    rand = int.from_bytes(os.urandom(10), "big")      # 80 bits; 74 used
+    value = (ms & ((1 << 48) - 1)) << 80
+    value |= 0x7 << 76                                # version 7
+    value |= ((rand >> 62) & 0xFFF) << 64             # rand_a: 12 bits
+    value |= 0b10 << 62                               # variant 10
+    value |= rand & ((1 << 62) - 1)                   # rand_b: 62 bits
+    return str(_uuid.UUID(int=value))
+
+
+def _same_target(a: Path, b: Path) -> bool:
+    """Whether two paths name the same file (also before the second exists)."""
+    ra, rb = Path(a).expanduser().resolve(), Path(b).expanduser().resolve()
+    return os.path.normcase(str(ra)) == os.path.normcase(str(rb))
 
 
 def _created_text(value: Any) -> str:

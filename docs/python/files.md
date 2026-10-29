@@ -113,6 +113,13 @@ existing file is replaced.
   without an offset is taken in this computer's time zone). Not given: the first save fills in
   the time of that save. A loaded file keeps its `created`, and saving it again keeps it: only
   a new value changes it.
+- **`d.id`** is the file's **id**: the measurement's identity, which LBD Viewer's Library uses to recognise
+  the same measurement in two places (a copy, a backup, a synced folder). It is made at the first
+  save (a UUID, from the time and random bits of the operating system: no setup, nothing to
+  coordinate between computers) and is read-only. Saving again to the same file keeps it;
+  saving to **another file** gives that file a new id, and the old one becomes its **parent
+  id** (a new measurement made from this one). A file copied by the file system keeps its id. `d.parent_id` gives it; `d.new_id()` makes a loaded
+  dataset a new measurement on purpose (to save it over the same file as something new).
 
 - The file is written under a temporary name and renamed at the end, so the viewer or another
   program never sees a half-written file, and a failed save leaves the old file untouched.
