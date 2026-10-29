@@ -199,11 +199,25 @@ class ExploreSession:
             wide = FuncFormatter(lambda v, pos: WIDEST_TICK)
             wide.set_offset_string("1e−8")              # room for a multiplier too (tiny ranges)
             a.set_major_formatter(wide)
-        self.fig.set_layout_engine("constrained")
+        try:
+            self.fig.set_layout_engine("constrained")
+            self.fig.canvas.draw()
+            self.fig.set_layout_engine("none")
+        finally:                                         # the stand-ins never stay
+            for a, formatter in kept:
+                a.set_major_formatter(formatter)
+        # The real tick labels can still hang over the picture's edge (the last x label of a
+        # narrow plot): the plot area moves in by that much.
         self.fig.canvas.draw()
-        self.fig.set_layout_engine("none")
-        for a, formatter in kept:
-            a.set_major_formatter(formatter)
+        r, width = self.fig.canvas.get_renderer(), self.fig.bbox.width
+        boxes = [t.get_window_extent(r) for t in self.ax.get_xticklabels() if t.get_visible() and t.get_text()]
+        right = max([b.x1 for b in boxes], default=0) - (width - 2)
+        left = 2 - min([b.x0 for b in boxes], default=2)
+        if right > 0 or left > 0:
+            pos = self.ax.get_position()
+            x0, x1 = pos.x0 + max(left, 0) / width, pos.x1 - max(right, 0) / width
+            if x1 - x0 > 0.2:
+                self.ax.set_position([x0, pos.y0, x1 - x0, pos.height])
 
     # -- setup
 
@@ -817,6 +831,8 @@ class ExploreSession:
                 left, top, w, h = self._plot_area()
                 if (w, h) != (len(pxe) - 1, len(pye) - 1):        # the plot area changed size
                     return self.render(xlim, ylim, stat, fmt, draft, _again=True)
+                # the same size: drawn again, as the layout's drawing has stand-in tick labels
+                self.fig.canvas.draw()
             rgba = np.asarray(self.fig.canvas.buffer_rgba())
             t3 = time.perf_counter()
         height, width = rgba.shape[:2]

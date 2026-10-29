@@ -47,6 +47,17 @@ The file format has its own version (`lbd_version`, currently 1.0).
   `log10`, `abs` and per-trace `mean`. A legend above the fields says what each name stands for
   and in which unit. Only formulas are read (never run as a program); a field that can't be used
   says why; points without a value become gaps and are counted.
+- **Several values at once in Explore** (Labber's log channels are LBD's values): a file with
+  several values opens with one panel each (up to four; up to six with **+ Panel**), side by side
+  or stacked. Click a panel to make it active: the side panel shows its controls. Panels are
+  added, removed, duplicated and moved; a value is dragged onto a panel to join it. Panels with
+  the same horizontal axis zoom together, sliders of the same axis move together, and one cursor
+  sits at the same x in every panel, with their values listed in the Cursors section (each can be
+  switched off). Two values of different units in one panel get a right-hand axis.
+- Explore: a narrow plot no longer cuts off its last horizontal tick label, and never shows the
+  stand-in tick numbers ("−8.888888") it uses to lay itself out.
+- Explore views remembered before panels open as one panel; a panel that no longer fits a
+  changed file is left out with a note, the others stay.
 - Nothing in Explore is hidden silently: points a log scale can't show are counted in a note above
   the plot, a log scale with nothing above 0 stays linear and says so, an empty result says why,
   and an unexpected error says it's a bug and where the details are (`viewer.log`, next to LBD's

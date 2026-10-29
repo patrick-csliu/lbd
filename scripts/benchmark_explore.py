@@ -159,6 +159,14 @@ def measure_file(name: str, path: Path, repeats: int) -> Dict[str, float]:
         s.render(None, None)
     ops_apply = min(timed(apply_ops) for _ in range(2))
     s.apply({})
+    # four panels of the file (plan 4), one synchronized zoom: each panel draws the same view, one
+    # after the other (the server draws one picture at a time), at a panel's size
+    panels = [ExploreSession(path, "bench", SPECS[name], Style(), WIDTH // 2, HEIGHT // 2, 1.0) for _ in range(4)]
+    for p in panels:
+        p.render(None, None)
+    synced = min(timed(lambda: [p.render(*mid) for p in panels]) for _ in range(repeats))
+    for p in panels:
+        p.close()
     per_step = [min(col) for col in zip(*steps)]     # each step: its fastest repeat
     per_pan = [min(col) for col in zip(*panned)]
     del lbd
@@ -174,6 +182,7 @@ def measure_file(name: str, path: Path, repeats: int) -> Dict[str, float]:
         "cursor move": statistics.median(cursor_cross),
         "vertical cursor move": statistics.median(cursor_vertical),
         "operations apply": ops_apply,
+        "4 panels synced zoom": synced,
     }
 
 

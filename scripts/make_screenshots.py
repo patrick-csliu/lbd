@@ -56,6 +56,9 @@ Mark = Tuple[int, str, int, str]
 
 MARK_JS = r"""
 (marks) => {
+  // a neutral example path instead of the scratch folder's (first: a shorter path can move the page)
+  for (const el of document.querySelectorAll(".path"))
+    el.textContent = el.textContent.replace(/^.*[\\/]Lab data/, String.raw`C:\Users\me\Documents\Lab data`);
   document.getElementById("doc-marks")?.remove();
   const layer = document.createElement("div");
   layer.id = "doc-marks";
@@ -78,9 +81,6 @@ MARK_JS = r"""
     layer.append(box, dot);
   }
   document.body.append(layer);
-  // a neutral example path instead of the scratch folder's
-  for (const el of document.querySelectorAll(".path"))
-    el.textContent = el.textContent.replace(/^.*[\\/]Lab data/, String.raw`C:\Users\me\Documents\Lab data`);
 }
 """
 
@@ -128,6 +128,12 @@ def make_files(folder: Path) -> None:
     d.add_value("S_V", 1e-15 * (1 / freq ** 0.92 + 3e-4), axes="f", unit="V²/Hz", label="S_V")
     d.add_value("T1", 21e-6, unit="s", label="T1")
     d.save(folder / "t1_noise.lbd")
+
+    # several recorded values (panels): the Rabi mock file of the viewer's tests
+    sys.path.insert(0, str(REPO / "viewer" / "tests"))
+    import mock_values
+
+    mock_values.rabi(small=False).save(folder / "rabi_readout.lbd")
 
     # a parameter that wasn't swept: an axis with one point
     d = lbd.Dataset(title="Resonator at one power")
@@ -339,6 +345,32 @@ def explore_equations(page: Page, url: str, ctx) -> None:
         (2, "main:not([hidden]) .eq-field", 2, "r"),
     ])
     save(page, VIEWER_IMG / "equations.png", clip=region(page, "main:not([hidden]) .operations", pad=16, extra_right=40))
+
+
+@shot
+def explore_panels(page: Page, url: str, ctx) -> None:
+    page.set_viewport_size({"width": SIZE["width"], "height": 1420})   # the panels and the Cursors section
+    fresh(page, url, "Explore")
+    page.locator(".row-label", has_text="rabi_readout.lbd").first.dblclick()
+    area = page.locator("main:not([hidden])")
+    expect_pictures = area.locator(".panel .explore-picture")
+    for k in range(4):
+        expect_pictures.nth(k).wait_for()
+    page.wait_for_timeout(1500)
+    box = area.locator(".panel .explore-overlay").nth(0).bounding_box()
+    page.mouse.click(box["x"] + box["width"] * 0.42, box["y"] + box["height"] * 0.5)   # one cursor in every panel
+    area.locator(".cursor-others").wait_for()
+    page.mouse.move(5, 400)                     # no "mouse at" line: the panels keep their size
+    page.wait_for_timeout(1500)
+    mark(page, [                                # the numbers of the list in explore.md
+        (1, "main:not([hidden]) .panel-bar button", 0, "L"),
+        (2, "main:not([hidden]) .panel.active", 0, "L"),
+        (3, "main:not([hidden]) .panel-title", 1, "t"),
+        (4, "main:not([hidden]) .controls fieldset", 0, "r"),
+        (5, "main:not([hidden]) .panel-sync", 0, "r"),
+    ])
+    save(page, VIEWER_IMG / "panels.png")
+    page.set_viewport_size(SIZE)
 
 
 @shot

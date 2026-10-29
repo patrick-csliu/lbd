@@ -52,6 +52,49 @@ is shown, the list is folded under its title ("all 4001"); click the title to op
 In a map, rows you leave out stay **empty, in their place**: the vertical axis always tells the
 truth. (Packing the chosen rows together would move them.)
 
+## Several values: panels
+
+![Four values of a Rabi measurement in four panels, with one cursor](img/panels.png)
+
+A measurement often records several values at each point: I, Q and a population, or an
+amplitude and a phase. (Labber calls them *log channels*; in LBD they are **values**, and what
+was swept, Labber's *step channels*, are the **axes**.) A file with several values opens in
+Explore with **one panel per value**, side by side: up to four at first, up to six in all. A file
+with one value shows one plot, as always. Single numbers never get a panel.
+
+1. **+ Panel ▾** adds a panel for a value. **Side by side** / **stacked** arranges the panels;
+   their grid follows from how many there are.
+2. **The active panel** is outlined: click anywhere in a panel (or press **1** … **6**). The side
+   panel shows its controls ("Panel 2: Q"): what you change there changes that panel only. Each
+   panel has its own plot type, values, operations, equations, scales and colours.
+3. **A panel's title bar**: drag it to move the panel; **×** removes it; right-click to
+   **Duplicate** it (the same value twice, for example with and without an operation, or at two
+   slider positions).
+4. **Values** in the side panel: tick one to add it to the active panel, drag one onto a panel
+   to add it there (or onto the bar above the panels for a new panel), right-click one for
+   **Show in a new panel** or **Show only this value here**.
+5. **Sync** above the panels:
+    - **x** (on): zooming or panning in one panel does the same in every panel with the same
+      horizontal axis; showing everything shows all their data. A panel on another axis says so
+      in its title bar ("x not synced: Power (dBm), not Frequency (GHz)"); so does one whose x
+      an equation or an FFT changed.
+    - **y** (off): the same for the vertical axis, between panels with the same unit (maps: the
+      same vertical axis).
+    - **sliders** (on): moving a slider moves that axis' slider in every panel. Switch it off to
+      show, say, ground and excited state side by side in two panels of the same value.
+
+**One cursor for all:** while x is synchronized, a click in a panel puts the cursor at that x in
+every panel with the same horizontal axis; each panel puts it on its own data (its own trace, or
+in a map its own row). The panel you click in leads. The **Cursors** section lists the other
+panels' values at the cursor ("The other panels at the same x"), with the difference between
+two cursors. **Max**, **Min** and **Peak** search the active panel and move every cursor.
+
+**Two units in one panel:** a value with another unit than the panel's first one goes on a
+**right-hand axis**, labelled in its colour; its curves are dashed. The cursor reads each curve in
+its own unit. Both axes zoom together. A panel shows two units at most: a value with a third
+can't be ticked; show it in another panel. Operations and equations make one quantity of the
+values (without a unit), so with them the panel has one axis.
+
 ## Reading values
 
 ![Two cursors on a map, with its cuts](img/reading.png)
@@ -264,16 +307,19 @@ Cursor values never come from the picture: they are read from the file's data.
 
 ## What is remembered, and where
 
-The viewer remembers how you explored each file: what was plotted, the chosen traces, the
-operations and equations, colours, scales, limits, the zoom and the cursors. Opening the file again shows the same.
+The viewer remembers how you explored each file: its panels and what each plots, the chosen
+traces, the operations and equations, colours, scales, limits, the zoom, the cursors and what is
+synchronized. Opening the file again shows the same.
 
 - This is kept **on this computer**, in the viewer's own database (in its settings folder, see
   [Command line and settings](command-line.md)). **Nothing is written into the data file.** The
   file holds the data, its description and the figure's saved view (see
   [Saving views](saving-and-exporting.md)).
 - Without a remembered view, Explore starts from what the file's saved figure view plots.
-- **Forget this view** (at the top) starts afresh. If a file changed so that the remembered view
-  no longer fits (an axis it used is gone), a note says so and Explore starts afresh.
+- **Forget this view** (at the top) starts afresh. If a file changed so that a panel no longer
+  fits (a value or axis it used is gone), that panel is left out and a note names it; if none
+  fits, Explore starts afresh.
+- Views remembered by an earlier version (one plot, before panels) open as one panel.
 - Renaming a file in the viewer keeps its remembered view.
 
 ## Files that change
@@ -288,7 +334,8 @@ values), Explore starts afresh and a note says why. A file that is still being w
 ## Explore and Figure
 
 - **Open in Figure** (at the top of an Explore tab) opens the same file in Figure, with the
-  figure's own settings and style ([Plotting](plotting.md)).
+  figure's own settings and style ([Plotting](plotting.md)). Panels and the right-hand axis are
+  Explore's: a figure shows one plot.
 - In Figure, **Open in Explore** goes the other way.
 - In the folder panel, right-click a data file: **Open in Explore** or **Open in Figure**.
 - Data files double-clicked in File Explorer or Finder open in Explore, or in Figure: choose in
