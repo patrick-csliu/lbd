@@ -37,7 +37,7 @@ REPO = Path(__file__).resolve().parents[1]
 HISTORY = REPO / ".benchmarks" / "explore.jsonl"
 DATA = Path(tempfile.gettempdir()) / "lbd-benchmark" / "v1"
 # A change here since the last run on this computer makes test_all.py run the benchmark.
-DRAWING_CODE = ["languages/python/src/lbd/plot", "viewer/src/lbd_viewer/explore.py", "uv.lock",
+DRAWING_CODE = ["languages/python/src/lbd/plot", "viewer/src/lbd_viewer/explore.py", "viewer/src/lbd_viewer/previews.py", "uv.lock",
                 "scripts/benchmark_explore.py"]
 SLOWER = 1.30          # fails when more than 30 % slower ...
 AT_LEAST_MS = 10.0     # ... and at least 10 ms slower than the baseline
@@ -167,6 +167,10 @@ def measure_file(name: str, path: Path, repeats: int) -> Dict[str, float]:
     synced = min(timed(lambda: [p.render(*mid) for p in panels]) for _ in range(repeats))
     for p in panels:
         p.close()
+    # the Library's preview of the file (plan 8c): read, drawn and made a WebP picture, once
+    from lbd_viewer import previews
+    preview = min(timed(lambda: previews.draw(path, [{"spec": SPECS[name]}], (1, 1), Style()))
+                  for _ in range(2))
     per_step = [min(col) for col in zip(*steps)]     # each step: its fastest repeat
     per_pan = [min(col) for col in zip(*panned)]
     del lbd
@@ -183,6 +187,7 @@ def measure_file(name: str, path: Path, repeats: int) -> Dict[str, float]:
         "vertical cursor move": statistics.median(cursor_vertical),
         "operations apply": ops_apply,
         "4 panels synced zoom": synced,
+        "library preview": preview,
     }
 
 

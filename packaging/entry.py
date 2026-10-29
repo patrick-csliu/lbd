@@ -42,6 +42,9 @@ def finder_launch() -> bool:
 
 
 def main() -> int:
+    import multiprocessing
+
+    multiprocessing.freeze_support()   # the Library's preview workers start this program again
     log_path = None
     # Apps without a console (Windows, or the macOS app started by Finder) write to a log file.
     if sys.stdout is None or sys.stderr is None or finder_launch():

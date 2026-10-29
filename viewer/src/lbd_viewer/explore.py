@@ -119,14 +119,17 @@ class ExploreSession:
     `render`, under the render lock."""
 
     def __init__(self, path: Path, version: str, spec: Dict[str, Any], style: Style,
-                 width: int, height: int, dpr: float):
+                 width: int, height: int, dpr: float, saved_view: bool = True):
+        """`saved_view` False: the file's saved figure view (/plot) is not used at all (the
+        Library's automatic previews, plan 8c, depend on the data only)."""
         if width < 50 or height < 50:
             raise ExploreError(f"the plot area is too small ({width}×{height} px); make the window larger")
         self.id = secrets.token_urlsafe(9)
         self.path, self.version, self.style = path, version, style
+        self.saved_view = saved_view
         self.last_used = time.monotonic()
-        self.header = lbd.info(path)
-        self.data = lbd.load(path, values=[])
+        self.header = self._read(lbd.info(path))
+        self.data = self._read(lbd.load(path, values=[]))
         self.dpr = float(min(max(dpr, 1.0), MAX_DPR))
         dpi = 96 * self.dpr                           # 1 CSS pixel = 1/96 inch, as in browsers
         self.fig = Figure(figsize=(width / 96, height / 96), dpi=dpi)
@@ -142,7 +145,7 @@ class ExploreSession:
         needed = rnd.needed_values(self.header, resolved)
         loaded = [n for n, v in self.data.values.items() if v.data is not None]
         if not set(needed) <= set(loaded):
-            self.data = lbd.load(self.path, values=sorted(set(needed) | set(loaded)))
+            self.data = self._read(lbd.load(self.path, values=sorted(set(needed) | set(loaded))))
         new = rnd.resolve_spec(self.data, spec, warn_unused=False)
         if new["kind"] not in KINDS:
             raise ExploreError(f"the Explore view shows curves and heat maps, not {new['kind']} plots; "
@@ -165,6 +168,11 @@ class ExploreSession:
         self.eq_state: Dict[str, Dict[str, str]] = {}
         self.settings: Dict[str, Any] = {}               # view settings (apply), reset with the plot
         self._build()
+
+    def _read(self, d: "lbd.Dataset") -> "lbd.Dataset":
+        if not self.saved_view:
+            d.plot = None
+        return d
 
     def _build(self) -> None:
         """Set the figure up for `self.model` (the base model, or the one after operations)."""
