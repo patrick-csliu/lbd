@@ -16,12 +16,28 @@ export interface AppState {
   theme: Theme;
   /** the Library's settings (config.LIBRARY_DEFAULTS) */
   library: LibrarySettings;
+  /** this computer's user name (suggested first when labelling users) */
+  login: string;
 }
 
 // ---- Library (server: library.py; keep in sync with /api/library in server.py) ----
 
 /** A column of the Library's list. */
-export type LibraryColumn = "name" | "date" | "sweep" | "values" | "folder" | "size" | "file" | "modified";
+export type LibraryColumn =
+  | "name"
+  | "date"
+  | "sweep"
+  | "values"
+  | "folder"
+  | "size"
+  | "file"
+  | "modified"
+  | "star"
+  | "project"
+  | "users"
+  | "tags"
+  | "comment"
+  | "copies";
 
 export interface LibrarySettings {
   /** read each data file's header for the list (off: names, sizes and file dates only) */
@@ -49,6 +65,56 @@ export interface LibraryRow {
   points: number;
   value_names: string;
   error: string | null; // why it couldn't be read
+  id: string | null; // the measurement's identity (format 1.1), null for older files
+  parent_id: string | null;
+  copies: number; // other files with the same id
+  conflict: number; // 1: they differ (the user decides)
+  star: boolean;
+  project: string | null;
+  users: string[];
+  tags: string[];
+  comment: string;
+}
+
+/** A nested label (project, user or tag) with the number of files that have it or one inside it. */
+export interface LabelNode {
+  label: string; // the full label, e.g. "Qubit A/Device 3"
+  name: string; // its last part
+  count: number;
+  children: LabelNode[];
+}
+
+/** Changes to the labels of some files (POST /api/library/labels). */
+export interface LabelChanges {
+  star?: boolean;
+  project?: string; // "" removes it
+  comment?: string;
+  add_tags?: string[];
+  remove_tags?: string[];
+  add_users?: string[];
+  remove_users?: string[];
+}
+
+/** The other files with a file's id (GET /api/library/same). */
+export interface SameId {
+  id: string | null;
+  conflict: boolean;
+  size?: number;
+  mtime?: number;
+  others: { path: string; size: number; mtime: number; title: string | null; differs: string[]; newer: boolean }[];
+}
+
+/** Labels whose file can't be found (GET /api/library/missing). */
+export interface MissingLabels {
+  folder: string;
+  id: string | null;
+  name: string;
+  created: string | null;
+  star: boolean;
+  project: string | null;
+  users: string[];
+  tags: string[];
+  comment: string;
 }
 
 export interface LibraryPage {
@@ -68,6 +134,12 @@ export interface LibraryFacets {
   dates: { [year: string]: { [month: string]: { [day: string]: number } } };
   folders: LibraryFolder[];
   total: number; // files under all open folders (a folder opened inside another counted once)
+  conflicts: number;
+  projects: LabelNode[];
+  users: LabelNode[];
+  tags: LabelNode[];
+  starred: number;
+  missing: number;
   generation: number;
 }
 
@@ -78,6 +150,7 @@ export interface LibraryStatus {
   errors: { path: string; error: string }[];
   scans: number;
   generation: number;
+  notes?: string[]; // about labels (merged sync copies, …): told once
 }
 
 export interface LibraryQuery {
@@ -86,6 +159,11 @@ export interface LibraryQuery {
   date: string;
   sort: LibraryColumn;
   order: "asc" | "desc";
+  project: string;
+  tags: string[];
+  users: string[];
+  starred: boolean;
+  conflicts: boolean;
 }
 
 export type OpenFilesIn = "viewer" | "browser-tab";
@@ -639,18 +717,28 @@ export const api = {
   setLibrary: (changes: Partial<LibrarySettings>) => call<AppState>("PUT", "/api/settings", { library: changes }),
 
   // ---- Library: the index of the data files under the open folders (library.py)
-  libraryList: (query: LibraryQuery, offset: number, limit: number) =>
-    call<LibraryPage>("GET", "/api/library/list", undefined, {
-      ...(query.folder ? { folder: query.folder } : {}),
-      q: query.q,
-      date: query.date,
-      sort: query.sort,
-      order: query.order,
-      offset: String(offset),
-      limit: String(limit),
-    }),
-  libraryFacets: (folder: string | null, q: string) =>
-    call<LibraryFacets>("GET", "/api/library/facets", undefined, { ...(folder ? { folder } : {}), q }),
+  libraryList: (query: LibraryQuery, offset: number, limit: number) => {
+    const qs = new URLSearchParams({ q: query.q, date: query.date, sort: query.sort, order: query.order, offset: String(offset), limit: String(limit) });
+    if (query.folder) qs.set("folder", query.folder);
+    if (query.project) qs.set("project", query.project);
+    for (const t of query.tags) qs.append("tags", t);
+    for (const u of query.users) qs.append("users", u);
+    if (query.starred) qs.set("starred", "true");
+    if (query.conflicts) qs.set("conflicts", "true");
+    return call<LibraryPage>("GET", `/api/library/list?${qs.toString()}`);
+  },
+  libraryFacets: (folder: string | null, q: string, date = "") =>
+    call<LibraryFacets>("GET", "/api/library/facets", undefined, { ...(folder ? { folder } : {}), q, date }),
+  librarySetLabels: (paths: string[], changes: LabelChanges) =>
+    call<{ notes: string[] }>("POST", "/api/library/labels", { paths, ...changes }),
+  librarySame: (path: string) => call<SameId>("GET", "/api/library/same", undefined, { path }),
+  libraryResolve: (path: string, action: "new_id" | "same" | "trash") =>
+    call<{ notes: string[] }>("POST", "/api/library/resolve", { path, action }),
+  libraryDuplicate: (path: string, labels = true) => call<{ path: string; notes: string[] }>("POST", "/api/library/duplicate", { path, labels }),
+  libraryGiveIds: (paths: string[]) => call<{ notes: string[] }>("POST", "/api/library/give-ids", { paths }),
+  libraryMissing: () => call<{ missing: MissingLabels[] }>("GET", "/api/library/missing"),
+  libraryMissingResolve: (entry: MissingLabels, path: string | null) =>
+    call<{ notes: string[] }>("POST", "/api/library/missing", { entry, path }),
   libraryFile: (path: string) => call<FileInfo>("GET", "/api/library/file", undefined, { path }),
   libraryStatus: () => call<LibraryStatus>("GET", "/api/library/status"),
 

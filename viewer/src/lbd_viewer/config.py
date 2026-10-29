@@ -30,7 +30,8 @@ THEMES = ("system", "light", "dark")      # the viewer's colours; "system" follo
 # The Library (library.py): read each data file's header for the list (off: names, sizes and
 # file dates only; for cloud storage, where opening a file downloads it), whether the notice
 # about that was seen, and the list's columns.
-LIBRARY_COLUMNS = ("name", "date", "sweep", "values", "folder", "size", "file", "modified")
+LIBRARY_COLUMNS = ("name", "date", "sweep", "values", "folder", "size", "file", "modified",
+                   "star", "project", "users", "tags", "comment", "copies")
 LIBRARY_DEFAULTS: Dict[str, Any] = {"read_headers": True, "notice_seen": False, "columns": ["name", "date", "sweep"]}
 
 
