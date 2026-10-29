@@ -85,6 +85,7 @@ class Viewer:
     def stop(self):
         self.server.should_exit = True
         self.thread.join(timeout=5)
+        self.state.close()                          # the Library's indexing thread, the databases
 
 
 @pytest.fixture

@@ -21,8 +21,16 @@ from lbd_viewer.config import Config, ConfigError
 def test_config_settings_roundtrip(tmp_path):
     cfg = Config(tmp_path / "c")
     assert cfg.settings() == {"roots": [], "default_style": "default", "open_files_in": "viewer",
-                              "open_data_in": "explore", "theme": "system"}
+                              "open_data_in": "explore", "theme": "system",
+                              "library": {"read_headers": True, "notice_seen": False, "columns": ["name", "date", "sweep"]}}
     assert cfg.problems() == []
+    # the Library's settings: checked, kept
+    assert cfg.set_library({"read_headers": False, "columns": ["name", "values"]})["read_headers"] is False
+    assert cfg.settings()["library"]["columns"] == ["name", "values"]
+    with pytest.raises(ConfigError, match="columns"):
+        cfg.set_library({"columns": ["colour"]})
+    with pytest.raises(ConfigError, match="unknown Library setting"):
+        cfg.set_library({"thumbnails": True})
     folder = tmp_path / "data"
     folder.mkdir()
     assert cfg.add_root(str(folder)) == [str(folder.resolve())]

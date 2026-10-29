@@ -27,6 +27,11 @@ OPEN_FILES_IN = ("viewer", "browser-tab")
 # The workspace a data file opens in when it comes from Explorer / Finder.
 OPEN_DATA_IN = ("explore", "figure")
 THEMES = ("system", "light", "dark")      # the viewer's colours; "system" follows the OS setting
+# The Library (library.py): read each data file's header for the list (off: names, sizes and
+# file dates only; for cloud storage, where opening a file downloads it), whether the notice
+# about that was seen, and the list's columns.
+LIBRARY_COLUMNS = ("name", "date", "sweep", "values", "folder", "size", "file", "modified")
+LIBRARY_DEFAULTS: Dict[str, Any] = {"read_headers": True, "notice_seen": False, "columns": ["name", "date", "sweep"]}
 
 
 class ConfigError(ValueError):
@@ -57,7 +62,7 @@ class Config:
             data = _read_json(self.settings_path)
         if data is None:
             return {"roots": [], "default_style": None, "open_files_in": "viewer", "open_data_in": "explore",
-                    "theme": "system"}
+                    "theme": "system", "library": dict(LIBRARY_DEFAULTS)}
         if not isinstance(data, dict):
             raise ConfigError(f"{self.settings_path} must contain a JSON object; fix or delete the file")
         roots = data.get("roots", [])
@@ -78,8 +83,13 @@ class Config:
         if theme not in THEMES:
             raise ConfigError(f"{self.settings_path}: 'theme' must be one of {', '.join(THEMES)}, "
                               f"not {theme!r}; fix or delete the file")
+        library = {**LIBRARY_DEFAULTS, **(data.get("library") or {})}
+        try:
+            library = _check_library(library)
+        except ConfigError as e:
+            raise ConfigError(f"{self.settings_path}: {e}; fix or delete the file") from None
         return {"roots": list(roots), "default_style": default or None, "open_files_in": open_in,
-                "open_data_in": open_data, "theme": theme}
+                "open_data_in": open_data, "theme": theme, "library": library}
 
     def settings(self) -> Dict[str, Any]:
         """{"roots": [...], "default_style": name, "open_files_in": ..., "open_data_in": ...,
@@ -89,7 +99,7 @@ class Config:
         if default not in self.style_names():
             default = "default"
         return {"roots": stored["roots"], "default_style": default, "open_files_in": stored["open_files_in"],
-                "open_data_in": stored["open_data_in"], "theme": stored["theme"]}
+                "open_data_in": stored["open_data_in"], "theme": stored["theme"], "library": stored["library"]}
 
     def problems(self) -> List[str]:
         """Things the user should know about the settings (shown as warnings in the viewer)."""
@@ -154,6 +164,17 @@ class Config:
             s = self.settings()
             s["open_files_in"] = where
             self._save_settings(s)
+
+    def set_library(self, changes: Dict[str, Any]) -> Dict[str, Any]:
+        """Change Library settings (read_headers, notice_seen, columns); returns them all."""
+        unknown = sorted(set(changes) - set(LIBRARY_DEFAULTS))
+        if unknown:
+            raise ConfigError(f"unknown Library setting(s) {unknown}; known: {sorted(LIBRARY_DEFAULTS)}")
+        with self._lock:
+            s = self.settings()
+            s["library"] = _check_library({**s["library"], **changes})
+            self._save_settings(s)
+            return s["library"]
 
     def set_theme(self, theme: str) -> None:
         """The viewer's colours: "system" (follow the operating system), "light" or "dark"."""
@@ -226,6 +247,16 @@ class Config:
                 warnings.append(f"This file asks for the style {file_style_name!r}, which doesn't exist here; "
                                 f"{default!r} is used.")
         return default
+
+
+def _check_library(library: Dict[str, Any]) -> Dict[str, Any]:
+    for key in ("read_headers", "notice_seen"):
+        if not isinstance(library.get(key), bool):
+            raise ConfigError(f"Library setting '{key}' must be true or false, not {library.get(key)!r}")
+    cols = library.get("columns")
+    if not isinstance(cols, list) or not cols or any(c not in LIBRARY_COLUMNS for c in cols):
+        raise ConfigError(f"Library 'columns' must be a list of {', '.join(LIBRARY_COLUMNS)}, not {cols!r}")
+    return {k: library[k] for k in LIBRARY_DEFAULTS}
 
 
 def _same_path(a: str, b: str) -> bool:

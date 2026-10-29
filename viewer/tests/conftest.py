@@ -55,7 +55,8 @@ def client(cfg, data_dir):
     c = TestClient(create_app(state), base_url="http://127.0.0.1:8000")
     c.headers["X-LBD-Token"] = "t0k"
     c.post("/api/roots", json={"path": str(data_dir)}).raise_for_status()
-    return c
+    yield c
+    state.close()                                   # the Library's indexing thread, the databases
 
 
 @pytest.fixture()
@@ -64,3 +65,11 @@ def values_files(data_dir):
     import mock_values
 
     return mock_values.write_all(data_dir, small=True)
+
+
+@pytest.fixture()
+def library_files(data_dir):
+    """The mock library (mock_library.py, 120 files) in the data folder: {"Lab data": [...], "Shared": [...]}."""
+    import mock_library
+
+    return mock_library.write_library(data_dir, 120)

@@ -43,6 +43,7 @@ from lbd.plot.units import prefix_scale  # noqa: E402
 from . import VERSION  # noqa: E402
 from . import files, images, scan, sdk  # noqa: E402
 from .catalog import Catalog, catalog_dir, fitting, structure  # noqa: E402
+from .library import LibraryIndex  # noqa: E402
 from . import reading  # noqa: E402
 from .explore import ExploreClosed, ExploreError, ExploreSession, Sessions  # noqa: E402
 from .pages import PageError, Pages, UnknownPage  # noqa: E402
@@ -109,6 +110,7 @@ class AppState:
         self.opened: Set[str] = set()
         self.explore = Sessions()           # the Explore views' sessions (explore.py)
         self._catalog: Optional[Catalog] = None
+        self._library: Optional[LibraryIndex] = None
         self.started = time.monotonic()
         self.last_heartbeat: Optional[float] = None
 
@@ -118,6 +120,30 @@ class AppState:
         if self._catalog is None:
             self._catalog = Catalog(catalog_dir(self.config.dir))
         return self._catalog
+
+    @property
+    def library(self) -> LibraryIndex:
+        """The Library's index of the data files under the open folders (library.py), kept up to
+        date in the background from the first time it is used."""
+        if self._library is None:
+            cfg = self.config
+            self._library = LibraryIndex(catalog_dir(cfg.dir), lambda: cfg.settings()["roots"],
+                                         lambda: cfg.settings()["library"]["read_headers"])
+            self._library.start()
+        return self._library
+
+    def close(self) -> None:
+        """Stop the Library's indexing and close LBD's databases (the server is stopping)."""
+        if self._library is not None:
+            self._library.close()
+            self._library = None
+        if self._catalog is not None:
+            self._catalog.close()
+
+    def wake_library(self) -> None:
+        """The open folders or the Library settings changed: the index checks at once (if it runs)."""
+        if self._library is not None:
+            self._library.wake()
 
     def open_file(self, path: str) -> str:
         p = Path(path).expanduser().resolve()
@@ -215,6 +241,7 @@ class SettingsBody(_Body):
     open_files_in: Optional[str] = None   # "viewer" or "browser-tab" (config.OPEN_FILES_IN)
     open_data_in: Optional[str] = None    # "explore" or "figure" (config.OPEN_DATA_IN)
     theme: Optional[str] = None           # "system", "light" or "dark" (config.THEMES)
+    library: Optional[Dict[str, Any]] = None  # {read_headers?, notice_seen?, columns?} (config.LIBRARY_DEFAULTS)
 
 
 class FilePlotBody(_Body):
@@ -649,7 +676,7 @@ def create_app(state: AppState) -> FastAPI:
             "version": VERSION, "lbd_version": lbd.FORMAT_VERSION,
             "roots": s["roots"], "default_style": s["default_style"], "styles": names,
             "open_files_in": s["open_files_in"], "open_data_in": s["open_data_in"], "theme": s["theme"],
-            "platform": sys.platform, "config_dir": str(cfg.dir), "warnings": problems + warns,
+            "library": s["library"], "platform": sys.platform, "config_dir": str(cfg.dir), "warnings": problems + warns,
         }
 
     @app.post("/api/open")
@@ -662,6 +689,7 @@ def create_app(state: AppState) -> FastAPI:
     def add_root(body: PathBody):
         roots = cfg.add_root(body.path)
         state.pages.broadcast("roots_changed")
+        state.wake_library()
         return {"roots": roots}
 
     @app.post("/api/pick-folder")
@@ -676,6 +704,7 @@ def create_app(state: AppState) -> FastAPI:
         except KeyError:
             raise HTTPException(404, f"{path} is not one of your folders")
         state.pages.broadcast("roots_changed")
+        state.wake_library()
         return {"roots": roots}
 
     @app.get("/api/list")
@@ -707,6 +736,45 @@ def create_app(state: AppState) -> FastAPI:
                 except OSError as e:
                     out["errors"][path] = e.strerror or str(e)
         return out
+
+    # -- the Library (library.py): the index of the data files under the open folders
+
+    def _library_folder(folder: Optional[str]) -> Optional[str]:
+        return str(state.check_allowed(folder)) if folder else None
+
+    @app.get("/api/library/list")
+    def library_list(folder: Optional[str] = Query(None), q: str = Query(""), date: str = Query(""),
+                     sort: str = Query("date"), order: str = Query("desc"), offset: int = Query(0),
+                     limit: int = Query(200)):
+        """One page of the data files under `folder` (absent: every open folder) whose text has
+        all the words of `q`, made on `date` ("2026", "2026-03", "2026-03-14"), sorted."""
+        try:
+            return state.library.list(_library_folder(folder), q, date, sort, order, offset, limit)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+
+    @app.get("/api/library/facets")
+    def library_facets(folder: Optional[str] = Query(None), q: str = Query("")):
+        """The date tree (with counts) of the files listed, and the open folders' tree with counts."""
+        return state.library.facets(_library_folder(folder), q)
+
+    @app.get("/api/library/file")
+    def library_file(path: str = Query(...)):
+        """A data file's summary (as /api/file), from the index; read now if it isn't there yet."""
+        p = state.check_allowed(path)
+        if not p.is_file():
+            raise HTTPException(404, f"not a file: {path}")
+        with collect_warnings() as warns:
+            summary = state.library.file(str(p))
+        return {**summary, "warnings": warns}
+
+    @app.get("/api/library/status")
+    def library_status():
+        """Indexing progress ({indexing, done, total, errors, scans}) and the index's generation:
+        a new one means the list changed."""
+        lib = state.library
+        lib.last_request = time.monotonic()
+        return {**lib.status, "generation": lib.generation}
 
     @app.get("/api/search")
     def search(root: str = Query(...), q: str = Query("")):
@@ -1066,8 +1134,9 @@ def create_app(state: AppState) -> FastAPI:
     @app.put("/api/settings")
     def put_settings(body: SettingsBody):
         if (body.default_style is None and body.open_files_in is None and body.open_data_in is None
-                and body.theme is None):
-            raise HTTPException(400, "nothing to change: send default_style, open_files_in, open_data_in and/or theme")
+                and body.theme is None and body.library is None):
+            raise HTTPException(400, "nothing to change: send default_style, open_files_in, open_data_in, theme "
+                                     "and/or library")
         if body.default_style is not None:
             cfg.set_default_style(body.default_style)
             state.pages.broadcast("styles_changed")
@@ -1077,7 +1146,12 @@ def create_app(state: AppState) -> FastAPI:
             cfg.set_open_data_in(body.open_data_in)
         if body.theme is not None:
             cfg.set_theme(body.theme)
-        if body.open_files_in is not None or body.open_data_in is not None or body.theme is not None:
+        if body.library is not None:
+            before = cfg.settings()["library"]["read_headers"]
+            if cfg.set_library(body.library)["read_headers"] != before:
+                state.wake_library()                      # read what is missing (or stop reading)
+        if (body.open_files_in is not None or body.open_data_in is not None or body.theme is not None
+                or body.library is not None):
             state.pages.broadcast("settings_changed")      # every page shows the new setting
         return get_state()
 
