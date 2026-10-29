@@ -22,7 +22,8 @@ def test_config_settings_roundtrip(tmp_path):
     cfg = Config(tmp_path / "c")
     assert cfg.settings() == {"roots": [], "default_style": "default", "open_files_in": "viewer",
                               "open_data_in": "explore", "theme": "system",
-                              "library": {"read_headers": True, "notice_seen": False, "columns": ["name", "date", "sweep"]}}
+                              "library": {"read_headers": True, "notice_seen": False, "columns": ["name", "date", "sweep"],
+                                          "previews": "all", "list_view": "list"}}
     assert cfg.problems() == []
     # the Library's settings: checked, kept
     assert cfg.set_library({"read_headers": False, "columns": ["name", "values"]})["read_headers"] is False

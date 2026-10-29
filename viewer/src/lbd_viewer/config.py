@@ -29,10 +29,25 @@ OPEN_DATA_IN = ("explore", "figure")
 THEMES = ("system", "light", "dark")      # the viewer's colours; "system" follows the OS setting
 # The Library (library.py): read each data file's header for the list (off: names, sizes and
 # file dates only; for cloud storage, where opening a file downloads it), whether the notice
-# about that was seen, and the list's columns.
+# about that was seen, and the list's columns. Previews (plan 8c, previews.py): drawn for every
+# file in the background ("all"), for the selected file and the rows near it ("nearby"), or only
+# when asked ("off"); "all" needs read_headers (it reads every file). The list shows rows
+# ("list") or pictures ("pictures").
 LIBRARY_COLUMNS = ("name", "date", "sweep", "values", "folder", "size", "file", "modified",
                    "star", "project", "users", "tags", "comment", "copies")
-LIBRARY_DEFAULTS: Dict[str, Any] = {"read_headers": True, "notice_seen": False, "columns": ["name", "date", "sweep"]}
+PREVIEW_MODES = ("all", "nearby", "off")
+LIST_VIEWS = ("list", "pictures")
+LIBRARY_DEFAULTS: Dict[str, Any] = {"read_headers": True, "notice_seen": False, "columns": ["name", "date", "sweep"],
+                                    "previews": "all", "list_view": "list"}
+EVERY_FILE_NEEDS_HEADERS = ("Previews of every file can't be drawn while \"Read each data file's details\" is "
+                            "off: drawing them would read every file. Turn that on first, or choose \"The "
+                            "selected file and nearby rows\".")
+
+
+def previews_mode(library: Dict[str, Any]) -> str:
+    """The previews mode in effect: "all" counts as "nearby" while headers aren't read."""
+    mode = library.get("previews", "all")
+    return "nearby" if mode == "all" and not library.get("read_headers") else mode
 
 
 class ConfigError(ValueError):
@@ -173,7 +188,10 @@ class Config:
             raise ConfigError(f"unknown Library setting(s) {unknown}; known: {sorted(LIBRARY_DEFAULTS)}")
         with self._lock:
             s = self.settings()
-            s["library"] = _check_library({**s["library"], **changes})
+            new = _check_library({**s["library"], **changes})
+            if changes.get("previews") == "all" and not new["read_headers"]:
+                raise ConfigError(EVERY_FILE_NEEDS_HEADERS)
+            s["library"] = new
             self._save_settings(s)
             return s["library"]
 
@@ -257,6 +275,9 @@ def _check_library(library: Dict[str, Any]) -> Dict[str, Any]:
     cols = library.get("columns")
     if not isinstance(cols, list) or not cols or any(c not in LIBRARY_COLUMNS for c in cols):
         raise ConfigError(f"Library 'columns' must be a list of {', '.join(LIBRARY_COLUMNS)}, not {cols!r}")
+    for key, allowed in (("previews", PREVIEW_MODES), ("list_view", LIST_VIEWS)):
+        if library.get(key) not in allowed:
+            raise ConfigError(f"Library setting '{key}' must be one of {', '.join(allowed)}, not {library.get(key)!r}")
     return {k: library[k] for k in LIBRARY_DEFAULTS}
 
 

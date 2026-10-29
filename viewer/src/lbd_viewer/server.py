@@ -46,10 +46,11 @@ from . import files, images, scan, sdk  # noqa: E402
 from .catalog import Catalog, catalog_dir, fitting, structure  # noqa: E402
 from . import labels, library_labels  # noqa: E402
 from .library import LibraryIndex  # noqa: E402
+from .previews import PreviewCache, PreviewError, Previewer  # noqa: E402
 from . import reading  # noqa: E402
 from .explore import ExploreClosed, ExploreError, ExploreSession, Sessions  # noqa: E402
 from .pages import PageError, Pages, UnknownPage  # noqa: E402
-from .config import Config, ConfigError, Style, StyleError, from_dict  # noqa: E402
+from .config import Config, ConfigError, Style, StyleError, from_dict, previews_mode  # noqa: E402
 
 CREATOR = f"LBD viewer {VERSION} (matplotlib {matplotlib.__version__})"
 
@@ -113,6 +114,7 @@ class AppState:
         self.explore = Sessions()           # the Explore views' sessions (explore.py)
         self._catalog: Optional[Catalog] = None
         self._library: Optional[LibraryIndex] = None
+        self._previews: Optional[Previewer] = None
         self.started = time.monotonic()
         self.last_heartbeat: Optional[float] = None
 
@@ -134,8 +136,53 @@ class AppState:
             self._library.start()
         return self._library
 
+    # Previews are drawn in worker processes; tests set this False (threads: quicker to start).
+    preview_processes = True
+
+    @property
+    def previews(self) -> Previewer:
+        """The Library's automatic previews (previews.py), drawn in the background from the first
+        time they are asked for, as the Library setting says."""
+        if self._previews is None:
+            cfg, lib = self.config, self.library
+            self._previews = Previewer(
+                PreviewCache(catalog_dir(cfg.dir)), lib.versions, lambda: lib.generation,
+                mode=lambda: previews_mode(cfg.settings()["library"]),
+                style=lambda: cfg.resolve().model_dump(),     # the default style: never the file's
+                chosen=lambda path: self.chosen_preview(path) is not None,
+                processes=self.preview_processes)
+            self._previews.start()
+        return self._previews
+
+    def preview_keys(self, path: str) -> Tuple[List[str], bool]:
+        """Where a file's chosen preview is kept (catalog.py), the key to choose under first:
+        its id, so identical copies share it, else its path; and whether the file is one of
+        copies that differ (then a new choice is kept under its path, for it alone)."""
+        ident, conflict = None, False
+        if self._library is not None:
+            ident, conflict, _ = self._library.identity(path)
+        if ident is None:
+            try:
+                ident = lbd.info(path).id                 # not indexed (yet), or headers aren't read
+            except Exception:
+                ident = None
+        keys = [f"id:{ident}"] if ident else []
+        return (([f"path:{path}"] + keys) if conflict else (keys + [f"path:{path}"])), conflict
+
+    def chosen_preview(self, path: str) -> Optional[Dict[str, Any]]:
+        """The preview chosen for this file, or None. Copies that differ don't share one: a
+        picture chosen under their id belongs only to the file it was chosen for."""
+        keys, conflict = self.preview_keys(path)
+        row = self.catalog.chosen_preview(keys)
+        if row and conflict and row["key"].startswith("id:") and row["path"] != path:
+            return None
+        return row
+
     def close(self) -> None:
-        """Stop the Library's indexing and close LBD's databases (the server is stopping)."""
+        """Stop the Library's indexing and previews, and close LBD's databases (the server is stopping)."""
+        if self._previews is not None:
+            self._previews.close()
+            self._previews = None
         if self._library is not None:
             self._library.close()
             self._library = None
@@ -242,6 +289,18 @@ class DuplicateBody(_Body):
 
 class PathsBody(_Body):
     paths: List[str]
+
+
+class WantBody(_Body):
+    paths: List[str]
+    now: bool = False                        # the selected file (or Show preview); else rows near it
+
+
+class ChooseBody(_Body):
+    path: str
+    panels: List[Dict[str, Any]]             # Explore's panels as shown: spec, settings, stat, view
+    grid: List[int]                          # rows, columns
+    preset: Optional[str] = None
 
 
 class MissingBody(_Body):
@@ -888,7 +947,87 @@ def create_app(state: AppState) -> FastAPI:
         lib = state.library
         lib.last_request = time.monotonic()
         notes, lib.notes = lib.notes, []                  # told once
-        return {**lib.status, "generation": lib.generation, "notes": notes}
+        previews = {**state.previews.status, "mode": previews_mode(cfg.settings()["library"])}
+        return {**lib.status, "generation": lib.generation, "notes": notes, "previews": previews}
+
+    # -- previews (plan 8c, previews.py)
+
+    @app.get("/api/library/preview")
+    def library_preview(path: str = Query(...), now: bool = Query(True)):
+        """A file's preview: the picture (WebP) with what it is in the X-LBD-Preview header
+        ({source: "chosen" | "automatic", chosen_at, changed_since}); or, without a picture, JSON
+        {state: "drawing" | "off" | "error", reason}. Not drawn yet: asked for (`now`: the selected
+        file; else after it, as a picture in view)."""
+        p = str(state.check_allowed(path))
+        chosen = state.chosen_preview(p)
+        if chosen is not None:
+            try:
+                now = file_version(Path(p))
+            except OSError:
+                now = None
+            about = {"source": "chosen", "chosen_at": chosen["chosen_at"], "changed_since": now != chosen["version"]}
+            return Response(content=chosen["picture"], media_type="image/webp",
+                            headers={"X-LBD-Preview": json.dumps(about), "Cache-Control": "no-store"})
+        answer = state.previews.answer(p, now)
+        if answer.get("picture"):
+            about = {"source": "automatic", "drawn_at": answer["drawn_at"]}
+            return Response(content=answer["picture"], media_type="image/webp",
+                            headers={"X-LBD-Preview": json.dumps(about), "Cache-Control": "no-store"})
+        if answer.get("error"):
+            return {"state": "error", "reason": answer["error"]}
+        return {"state": answer["state"], "reason": None}
+
+    @app.post("/api/library/preview/want")
+    def library_preview_want(body: WantBody):
+        """Draw these files' previews soon: `now` (the selected file, Show preview) first, even
+        with previews off; otherwise as the rows near the selection."""
+        state.previews.want([str(state.check_allowed(p)) for p in body.paths], body.now)
+        return {"ok": True}
+
+    @app.post("/api/library/preview/choose")
+    def library_preview_choose(body: ChooseBody):
+        """Explore's "Library preview": its panels as shown become the file's preview, drawn once
+        now; only the picture is kept (in LBD's database), never how it was made."""
+        p = state.check_allowed(body.path)
+        if not 1 <= len(body.panels) <= 6 or len(body.grid) != 2 or body.grid[0] * body.grid[1] < len(body.panels):
+            raise HTTPException(400, "send 1 to 6 panels and a grid [rows, columns] they fit in")
+        notes: List[str] = []
+        with collect_warnings() as warns:
+            header = lbd.info(p)
+            preset = cfg.preset_for(body.preset, header.style_name, notes)
+            style = cfg.resolve(preset=preset, file_style=header.style)
+        job = {"path": str(p), "style": style.model_dump(), "panels": body.panels, "grid": body.grid,
+               "saved_view": True}
+        try:
+            picture = state.previews.draw_now(job)
+        except PreviewError as e:
+            raise HTTPException(422, f"The preview couldn't be drawn: {e}")
+        keys, _ = state.preview_keys(str(p))
+        at = state.catalog.choose_preview(keys[0], str(p), picture, file_version(p))
+        state.library.generation += 1                 # Library pages show it at their next check
+        return {"chosen_at": at, "warnings": notes + warns}
+
+    @app.delete("/api/library/preview/choose")
+    def library_preview_reset(path: str = Query(...)):
+        """Reset a file's preview: the automatic one again."""
+        p = str(state.check_allowed(path))
+        chosen = state.chosen_preview(p)
+        if chosen is None:
+            return {"forgotten": 0}
+        forgotten = state.catalog.forget_preview([chosen["key"]])
+        state.library.generation += 1
+        return {"forgotten": forgotten}
+
+    @app.get("/api/library/preview/cache")
+    def library_preview_cache():
+        """How many automatic pictures are kept, and their size in bytes."""
+        count, size = state.previews.cache.size()
+        return {"count": count, "bytes": size}
+
+    @app.post("/api/library/preview/clear")
+    def library_preview_clear():
+        """Empty the picture cache (automatic pictures; chosen ones are kept). They are drawn again."""
+        return {"freed": state.previews.clear()}
 
     @app.get("/api/search")
     def search(root: str = Query(...), q: str = Query("")):
@@ -1306,7 +1445,9 @@ def create_app(state: AppState) -> FastAPI:
             raise HTTPException(404, str(e))
         if _key(p) in state.opened:  # a file opened by double-click stays readable
             state.opened.add(_key(new))
-        state.catalog.renamed(str(p), str(new))       # its remembered Explore view follows it
+        state.catalog.renamed(str(p), str(new))       # its remembered Explore view (and chosen preview) follows it
+        if state._previews is not None:
+            state._previews.renamed(str(p), str(new))
         _labels_follow(lambda lib: library_labels.renamed(lib, str(p), str(new)))
         state.pages.broadcast("renamed", old=str(p), new=str(new))
         return {"path": str(new)}
@@ -1323,6 +1464,8 @@ def create_app(state: AppState) -> FastAPI:
             ident = lbd.info(p).id if p.suffix.lower() == ".lbd" else None
         except Exception:                             # unreadable: no id to look for
             pass
+        # its chosen preview goes too (under its id only when no indexed copy keeps it)
+        others = state._library.identity(str(p))[2] if state._library is not None and ident else 1
         try:
             files.trash(p)
         except files.FileActionError as e:
@@ -1332,6 +1475,9 @@ def create_app(state: AppState) -> FastAPI:
         except OSError as e:
             raise HTTPException(500, str(e))
         state.pages.broadcast("trashed", path=str(p))
+        state.catalog.forget_preview([f"path:{p}"] + ([f"id:{ident}"] if ident and others == 0 else []))
+        if state._previews is not None:
+            state._previews.forget(str(p))
         _labels_follow(lambda lib: library_labels.trashed(lib, str(p), ident))
         return {"ok": True}
 

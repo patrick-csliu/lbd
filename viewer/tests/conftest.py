@@ -52,6 +52,7 @@ def cfg(tmp_path):
 @pytest.fixture()
 def client(cfg, data_dir):
     state = AppState(cfg, token="t0k")
+    state.preview_processes = False                   # previews drawn in threads: quicker in tests
     c = TestClient(create_app(state), base_url="http://127.0.0.1:8000")
     c.headers["X-LBD-Token"] = "t0k"
     c.post("/api/roots", json={"path": str(data_dir)}).raise_for_status()

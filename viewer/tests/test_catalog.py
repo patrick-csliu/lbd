@@ -30,6 +30,33 @@ def test_a_renamed_file_keeps_its_view(tmp_path):
     assert c.view("old.lbd") is None and c.view("new.lbd")["state"] == {"n": 1}
 
 
+def test_a_schema_1_database_is_upgraded_keeping_its_views(tmp_path):
+    import sqlite3
+
+    db = sqlite3.connect(tmp_path / "catalog.sqlite")
+    db.execute("CREATE TABLE explore_views (path TEXT PRIMARY KEY, structure TEXT NOT NULL, "
+               "state TEXT NOT NULL, updated REAL NOT NULL)")
+    db.execute("INSERT INTO explore_views VALUES ('a.lbd', '{}', '{\"n\": 1}', 1.0)")
+    db.execute("PRAGMA user_version = 1")
+    db.commit()
+    db.close()
+    c = Catalog(tmp_path)
+    assert c.view("a.lbd")["state"] == {"n": 1} and c.problem is None
+    assert c.chosen_preview(["path:a.lbd"]) is None
+
+
+def test_a_chosen_preview_is_kept_by_key_and_follows_renames(tmp_path):
+    c = Catalog(tmp_path)
+    c.choose_preview("path:old.lbd", "old.lbd", b"picture", "v1")
+    c.choose_preview("id:abc", "x.lbd", b"shared", "v2")
+    c.renamed("old.lbd", "new.lbd")
+    row = Catalog(tmp_path).chosen_preview(["path:new.lbd"])                  # kept on disk
+    assert row["picture"] == b"picture" and row["path"] == "new.lbd" and row["version"] == "v1"
+    assert c.chosen_preview(["id:none", "id:abc"])["picture"] == b"shared"     # the first key that has one
+    assert c.forget_preview(["id:abc", "path:new.lbd"]) == 2
+    assert c.chosen_preview(["id:abc", "path:new.lbd"]) is None
+
+
 def test_a_broken_database_is_put_aside_and_said_so(tmp_path):
     (tmp_path / "catalog.sqlite").write_bytes(b"this is not a database" * 100)
     c = Catalog(tmp_path)

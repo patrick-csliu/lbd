@@ -1,8 +1,10 @@
 """LBD's own database (the "catalog"): what LBD remembers about data files, kept on this computer.
 
 Data files hold data, metadata and their figure's settings. Everything else LBD remembers about
-a file lives here and never in the file: for now the Explore view of each file (what was plotted,
-the chosen traces, colour map, scales, limits and zoom), later the file index, tags and stars.
+a file lives here and never in the file: the Explore view of each file (what was plotted, the
+chosen traces, colour map, scales, limits and zoom) and the Library preview a user chose for a
+file in Explore (plan 8c: only the picture, never how it was made; it can't be drawn again, so
+it lives here and not in the preview cache).
 
 - One SQLite file, `catalog.sqlite`, in LBD's local data folder (`catalog_dir`): never a roaming
   or synced folder, as SQLite files must not be synced while open. Rebuildable: losing it loses
@@ -10,7 +12,8 @@ the chosen traces, colour map, scales, limits and zoom), later the file index, t
 - A database that can't be read is moved aside (`catalog.broken-<time>.sqlite`) and a new one is
   started; `problem` then says so, once, for the user.
 - Several browser pages may save the same file's view: the last save wins (it is view state only).
-- The schema has a version (`PRAGMA user_version`); later versions add tables and migrate.
+- The schema has a version (`PRAGMA user_version`); later versions add tables and migrate
+  (1 → 2: the chosen previews' table; the remembered views are kept).
 """
 
 from __future__ import annotations
@@ -22,7 +25,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 KEEP_VIEWS = 5000          # remembered Explore views; the oldest beyond this are forgotten
 
 
@@ -82,6 +85,14 @@ class Catalog:
                           structure TEXT NOT NULL,
                           state TEXT NOT NULL,
                           updated REAL NOT NULL)""")
+        # key: "id:<the file's id>" (identical copies share it) or "path:<path>" (files without an
+        # id, or copies that differ); version: the file's (size, mtime) when it was chosen
+        db.execute("""CREATE TABLE IF NOT EXISTS chosen_previews (
+                          key TEXT PRIMARY KEY,
+                          path TEXT NOT NULL,
+                          picture BLOB NOT NULL,
+                          chosen_at REAL NOT NULL,
+                          version TEXT NOT NULL)""")
         db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def close(self) -> None:
@@ -121,6 +132,40 @@ class Catalog:
             db = self._connect()
             db.execute("DELETE FROM explore_views WHERE path = ?", (new,))
             db.execute("UPDATE explore_views SET path = ? WHERE path = ?", (new, old))
+            db.execute("DELETE FROM chosen_previews WHERE key = ?", ("path:" + new,))
+            db.execute("UPDATE chosen_previews SET key = ?, path = ? WHERE key = ?", ("path:" + new, new, "path:" + old))
+            db.execute("UPDATE chosen_previews SET path = ? WHERE path = ?", (new, old))
+
+    # -- previews chosen in Explore (plan 8c)
+
+    def choose_preview(self, key: str, path: str, picture: bytes, version: str) -> float:
+        """Keep the picture a user chose as a file's Library preview; returns when (time.time())."""
+        now = time.time()
+        with self._lock:
+            self._connect().execute(
+                "INSERT INTO chosen_previews (key, path, picture, chosen_at, version) VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET path = excluded.path, picture = excluded.picture, "
+                "chosen_at = excluded.chosen_at, version = excluded.version",
+                (key, path, picture, now, version))
+        return now
+
+    def chosen_preview(self, keys) -> Optional[Dict[str, Any]]:
+        """The chosen preview under the first of these keys that has one: {key, path, picture,
+        chosen_at, version}, or None."""
+        with self._lock:
+            db = self._connect()
+            for key in keys:
+                row = db.execute("SELECT key, path, picture, chosen_at, version FROM chosen_previews WHERE key = ?",
+                                 (key,)).fetchone()
+                if row is not None:
+                    return dict(zip(("key", "path", "picture", "chosen_at", "version"), row))
+        return None
+
+    def forget_preview(self, keys) -> int:
+        """Forget the chosen previews under these keys; returns how many there were."""
+        with self._lock:
+            db = self._connect()
+            return sum(db.execute("DELETE FROM chosen_previews WHERE key = ?", (k,)).rowcount for k in keys)
 
 
 def structure(header) -> Dict[str, Any]:

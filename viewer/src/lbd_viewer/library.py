@@ -564,6 +564,24 @@ class LibraryIndex:
             _sort_tree(node)
         return trees
 
+    def versions(self) -> Dict[str, str]:
+        """Every indexed file's version (size and modification time), by path: what the
+        previews (previews.py) are drawn for."""
+        with self._lock:
+            return dict(self._connect().execute("SELECT path, version FROM files"))
+
+    def identity(self, path: str) -> Tuple[Optional[str], bool, int]:
+        """A file's id as indexed, whether it is in a conflict (same id, other content), and
+        how many other indexed files have that id."""
+        p = str(Path(path).resolve())
+        with self._lock:
+            db = self._connect()
+            r = db.execute("SELECT id, conflict FROM files WHERE path = ?", (p,)).fetchone()
+            if not r or not r[0]:
+                return None, False, 0
+            n = db.execute("SELECT COUNT(*) FROM files WHERE id = ? AND path != ?", (r[0], p)).fetchone()[0]
+        return r[0], bool(r[1]), n
+
     def file(self, path: str) -> Dict[str, Any]:
         """A file's summary (as /api/file gives it), from the index; read now when it isn't there
         yet, is out of date, or wasn't read (headers off). Raises FileNotFoundError or the
