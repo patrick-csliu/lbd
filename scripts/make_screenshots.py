@@ -135,6 +135,11 @@ def make_files(folder: Path) -> None:
 
     mock_values.rabi(small=False).save(folder / "rabi_readout.lbd")
 
+    # a library of measurements over two years (the Library's list): the viewer tests' mock library
+    import mock_library
+
+    mock_library.write_library(folder / "Lab library", 120)
+
     # a parameter that wasn't swept: an axis with one point
     d = lbd.Dataset(title="Resonator at one power")
     d.add_axis("power", [-40.0], unit="dBm", label="Power")
@@ -376,10 +381,22 @@ def explore_panels(page: Page, url: str, ctx) -> None:
 @shot
 def library(page: Page, url: str, ctx) -> None:
     fresh(page, url, "Library")
-    page.locator(".library-folders .row-label", has_text="sweep.lbd").first.click()
-    page.locator(".library-detail h1").wait_for()
-    page.wait_for_timeout(500)
-    mark(page, [])                              # no markers; the example path
+    page.locator(".library-row").first.wait_for(timeout=60_000)   # the index reads the files first
+    page.get_by_role("button", name="OK", exact=True).click()     # the first-time notice (described in the text)
+    page.get_by_label("Search the files").fill("resonator")       # a search, shown as it is used
+    rows = page.locator(".library-row", has_text="Late resonator sweep")
+    rows.first.wait_for()
+    rows.first.click()
+    page.locator(".library-detail h1", has_text="Late resonator sweep").wait_for()
+    page.mouse.move(5, 400)
+    page.wait_for_timeout(800)
+    mark(page, [                                # the numbers of the list in library.md
+        (1, ".library-tree[aria-label='Folders']", 0, "r"),
+        (2, ".library-tree[aria-label='Dates']", 0, "r"),
+        (3, ".library-search", 0, "r"),
+        (4, ".library-head", 0, "b"),
+        (5, ".library-detail .file-head", 0, "L"),
+    ])
     save(page, VIEWER_IMG / "library.png")
 
 

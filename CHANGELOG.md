@@ -71,8 +71,15 @@ The file format has its own version (`lbd_version`, currently 1.0).
 - Explore remembers, per file, what you showed (plot, chosen traces, operations, colours, scales, zoom, cursors), in
   the viewer's own database on this computer, never in the file. **Forget this view** starts
   afresh. A file that grows while it is shown (a running measurement) keeps the zoom and choices.
-- **Library**: your folders, and what is inside the file you click; open it in Explore or
-  Figure.
+- **Library**, like Labber's Log Browser: every data file under your folders as one list (or
+  under one folder), with a date tree (year → month → day, from when each file's data was
+  created), search inside the files (names, descriptions, values, axes, units, metadata),
+  sortable columns (name, date, sweep size; more from the header's menu), the keyboard, and the
+  selected file's axes, values, description and metadata on the right; open it in Explore or
+  Figure. An index on this computer (`library.sqlite`) keeps it fast with thousands of files and
+  up to date by itself; files that can't be read are listed with the reason. For folders in cloud
+  storage, **⚙ → Library** can switch off reading each file's details (reading a cloud-only file
+  downloads it).
 - After the viewer is updated, the browser loads the new viewer page at once (it no longer keeps
   an old copy of the page). The folder panel's right-click menu has **Open in Explore** and **Open in Figure**.
 

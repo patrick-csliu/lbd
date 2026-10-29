@@ -7,7 +7,7 @@ uploaded anywhere.
 
 It has three workspaces, switched at the top left:
 
-- **[Library](library.md):** find files: your folders, and what is inside a file.
+- **[Library](library.md):** find measurements: every data file under your folders as one list, by folder, date and search.
 - **[Explore](explore.md):** look at data. The default: double-clicking a data file opens it here.
 - **Figure:** make a figure to export, with its style ([Plotting](plotting.md),
   [Saving views and exporting](saving-and-exporting.md)). The window below shows Figure.
@@ -76,7 +76,7 @@ to the next start:
 
 | Page | What it does |
 |---|---|
-| **Library** | Your folders, and what is inside the file you click: [Library](library.md), [Folders and files](folders-and-files.md). |
+| **Library** | Every data file under your folders as one list, by folder, date and search; what is inside the file you select: [Library](library.md), [Folders and files](folders-and-files.md). |
 | **Explore** | Look at data: zoom, read values, choose traces: [Explore](explore.md). |
 | **Figure** | The figures of your files, their styles and export: [Plotting](plotting.md), [Saving views and exporting](saving-and-exporting.md). |
 | **Styles** | Create and edit style presets, and choose the default one: [Styles page](styles-page.md). |

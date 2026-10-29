@@ -27,7 +27,7 @@ On Windows, the installed program is `lbd-view.exe` in the install folder. On Li
 | Settings: folder list, default preset, the **⚙** settings (`settings.json`) | `%APPDATA%\lbd\` | `~/.config/lbd/` | `~/Library/Application Support/lbd/` |
 | Style presets (`styles/<name>.lbd.json`) | `%APPDATA%\lbd\styles\` | `~/.config/lbd/styles/` | `~/Library/Application Support/lbd/styles/` |
 | Log of the installed app (`viewer.log`) | `%LOCALAPPDATA%\lbd\Logs\` | none; messages go to the terminal or the desktop session log | `~/Library/Logs/lbd/` (the app); with uv none, messages go to the terminal |
-| LBD's database: the remembered [Explore](explore.md#what-is-remembered-and-where) views (`catalog.sqlite`), and the log of unexpected errors (`viewer.log`) | `%LOCALAPPDATA%\lbd\` | `~/.local/share/lbd/` | `~/Library/Application Support/lbd/` |
+| LBD's database: the remembered [Explore](explore.md#what-is-remembered-and-where) views (`catalog.sqlite`), the [Library](library.md#what-is-kept-and-where)'s index of your data files (`library.sqlite`, a cache: deleting it only means the files are read again), and the log of unexpected errors (`viewer.log`) | `%LOCALAPPDATA%\lbd\` | `~/.local/share/lbd/` | `~/Library/Application Support/lbd/` |
 | Running-viewer lock (`server.json`) | `%LOCALAPPDATA%\Temp\lbd\` | `$XDG_RUNTIME_DIR/lbd/` | `~/Library/Caches/TemporaryItems/lbd/` |
 | Which folders are expanded in the folder panel | the browser's site storage | the browser's site storage | the browser's site storage |
 

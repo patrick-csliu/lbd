@@ -44,9 +44,9 @@ where the details are (`viewer.log`, next to LBD's database); the session stays 
 |---|---|---|
 | `GET /api/ping` | | `{app: "lbd-viewer", version, pid}`. Used by `cli.py` to detect a running viewer. |
 | `POST /api/heartbeat` | | `{ok: true}`. Tabs call it every 10 s; the server stops after `--idle-exit` seconds without one. |
-| `GET /api/state` | | `{version, lbd_version, roots, default_style, open_files_in, open_data_in, theme, styles, platform, config_dir, warnings}`. `warnings` also lists folders that no longer exist, a default style that was deleted, and (once) a broken database that was put aside. |
+| `GET /api/state` | | `{version, lbd_version, roots, default_style, open_files_in, open_data_in, theme, library, styles, platform, config_dir, warnings}`. `library`: `{read_headers, notice_seen, columns}` (the Library's settings, see `PUT /api/settings`). `warnings` also lists folders that no longer exist, a default style that was deleted, and (once) a broken database that was put aside. |
 | `POST /api/open` | `{path}` | `{path}` (resolved). Allows reading a file outside the roots. |
-| `PUT /api/settings` | `{default_style?, open_files_in?, open_data_in?, theme?}` | Same as `GET /api/state`. `open_files_in`: `"viewer"` (files from Explorer / Finder go to the open page) or `"browser-tab"`. `open_data_in`: the workspace data files from Explorer / Finder open in, `"explore"` or `"figure"`. `theme`: `"system"` (follow the operating system), `"light"` or `"dark"`. Every page gets `settings_changed` for these three. 400 if none is given or a value is invalid. |
+| `PUT /api/settings` | `{default_style?, open_files_in?, open_data_in?, theme?, library?}` | Same as `GET /api/state`. `library`: any of `read_headers` (bool: read each data file's header for the Library's index; off: names, sizes and file dates only), `notice_seen` (bool: the cloud-storage notice was acknowledged), `columns` (list of `name`, `date`, `sweep`, `values`, `folder`, `size`, `file`, `modified`); changing `read_headers` makes the index check the folders at once. `open_files_in`: `"viewer"` (files from Explorer / Finder go to the open page) or `"browser-tab"`. `open_data_in`: the workspace data files from Explorer / Finder open in, `"explore"` or `"figure"`. `theme`: `"system"` (follow the operating system), `"light"` or `"dark"`. Every page gets `settings_changed` for these three. 400 if none is given or a value is invalid. |
 
 ## Folders
 
@@ -61,6 +61,20 @@ where the details are (`viewer.log`, next to LBD's database); the session stays 
 | `POST /api/reveal` | `{path}` | `{ok}`. Opens the system file manager with the file selected (a folder: opens it). |
 | `POST /api/file/rename` | `{path, name}` | `{path}`: the new path, in the same folder. Only data, style and image files. 400 for a folder, another kind of file, a name with `/` or `\`, or a changed extension; 409 if the name exists or the file is being moved between pages; 404 if the file is missing. Every page gets a `renamed` event. |
 | `POST /api/file/trash` | `{path}` | `{ok}`. Moves the file to the Recycle Bin / Trash (`send2trash`); never deletes permanently. 400, 404 and 409 as rename; 500 if the system has no trash for it (the file stays). Every page gets a `trashed` event. |
+
+## Library
+
+The index of the data files under the open folders (`library.py`, `library.sqlite` next to
+`catalog.sqlite`): read in the background, from the first library request on (every few seconds
+while the Library asks, else every minute, and at once after `POST/DELETE /api/roots` or a change
+of `library.read_headers`). A path outside the open folders is a 403.
+
+| Method and path | Body / query | Response |
+|---|---|---|
+| `GET /api/library/list` | `?folder=&q=&date=&sort=&order=&offset=&limit=` | `{rows, total, generation}`: one page of the data files under `folder` (absent: every open folder) whose text has every word of `q` (case-insensitive; title, file name, description, axis and value names, labels and units, metadata keys and values; with `read_headers` off: file names only) and whose day starts with `date` (`2026`, `2026-03`, `2026-03-14`). `sort`: `name` (title, else file name), `date`, `sweep`, `values`, `folder`, `size`, `file`, `modified`; `order`: `asc` / `desc` (default `date`, `desc`); `limit` up to 1000. A row: `{path, root, folder, name, size, mtime, read, title, description, created, day, date_from_file, sweep, points, value_names, error}`: `created` as written in the file, `day` its date in the file's own time zone (`date_from_file`: from the file's modification time, when `created` is missing, unreadable or not read), `sweep` e.g. `"401×31"` (axes with more than one point; `points` their product), `error` why the file can't be read (it stays listed). 400 for an unknown `sort`. |
+| `GET /api/library/facets` | `?folder=&q=` | `{dates: {YYYY: {MM: {DD: count}}}, folders: [{path, name, count, children}], total, generation}`: the date tree of the files `list` would give without a date, the tree of each open folder with the number of data files below each folder, and `total`, the files under all open folders (a folder opened inside another counted once). |
+| `GET /api/library/file` | `?path=` | The file's summary, as `GET /api/file`, plus `warnings`; from the index, or read now when it isn't indexed, changed, or wasn't read (`read_headers` off). 404 if missing; the reading error (e.g. a damaged file) as with `/api/file`. |
+| `GET /api/library/status` | | `{indexing, done, total, errors, scans, generation}`: progress of the current check (`done` of `total` files to read), folders that couldn't be read, and `generation`, which changes whenever the index does (the page then asks for its rows again). |
 
 ## Pages
 
