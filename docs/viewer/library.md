@@ -16,8 +16,9 @@ select described on the right.
    shown, e.g. "37 of 412 files · 2026 › 03 · "resonator"", with an **×** for each filter.
 4. **The list:** one row per data file, newest first. Click a column title to sort by it; click
    again to reverse. Right-click the titles to choose the columns.
-5. **The selected file:** title, date, folder, **Open in Explore** and **Open in Figure**, then its
-   axes (points and range), values, description and metadata (with a filter box for long lists).
+5. **The selected file:** title, date, folder, **Open in Explore** and **Open in Figure**, a
+   [preview](#previews) of its data, then its axes (points and range), values, description and
+   metadata (with a filter box for long lists).
 
 ## Columns
 
@@ -46,6 +47,7 @@ it. A file whose date can't be read is dated by its file's modification time, sh
 |---|---|
 | Click a row | shows the file on the right |
 | ↑ ↓, Page Up, Page Down, Home, End | move through the list (the right side follows) |
+| ← → | in the picture view: the file before or after |
 | Enter, or double-click | opens the file in [Explore](explore.md) |
 | Shift+Enter | opens it in Figure ([Plotting](plotting.md)) |
 | Right-click a row | open in Explore or Figure, show in folder, copy the path, open in a new browser tab, rename, move to the Recycle Bin / Trash |
@@ -56,6 +58,41 @@ The list keeps itself up to date: a new data file appears, a removed one disappe
 one is read again within a few seconds, while your selection stays. A file that can't be read
 (damaged, not an LBD file, or from a newer LBD) stays in the list, greyed; point at it, or select
 it, to see why.
+
+## Previews
+
+The selected file shows a picture of its data on the right, as Explore first shows it: one panel
+per value (up to four), curves for a value over one swept axis, a heat map over two. Step through
+the list with ↑ ↓ and the pictures follow at once: the files near the selection are drawn ahead.
+
+- **Pictures** (above the list, next to **List**) shows the files as a grid of pictures, with
+  their name and date; click, select several, right-click and the keys work as in the list.
+
+    ![The picture view](img/library-pictures.png)
+
+- **Choose a file's picture:** open it in Explore, show what you want (panels, zoom, operations),
+  then **Library preview** (above the panels, on the right). The Library then shows that picture, "Chosen in
+  Explore on …", and keeps it however you change Explore afterwards. Only the picture is kept,
+  so it shows the data as it was then: if the file changes later, it says "before the file last
+  changed"; choose again to update it. **Reset preview** goes back to the automatic one.
+  Identical copies of a measurement share a chosen picture.
+- **Automatic pictures** are drawn again when their file changes (data added). They ignore the
+  file's saved figure view and style: a preview is about the data, the same for every file.
+- A file without a picture says why, e.g. "only single numbers".
+
+**⚙ → Library → Previews** sets which pictures are drawn without being asked:
+
+| Choice | What happens |
+|---|---|
+| **Every file, drawn in the background** (default) | every file's picture is drawn once, after the list is read (the line above the list counts them); then every preview shows at once |
+| **The selected file and the rows near it** | only what you look at, and the files near it |
+| **Only when I click Show preview** | no file is read for a picture by itself; the right side has **Show preview** |
+
+"Every file" reads every file in full, so it needs **Read each data file's details** on (see
+below); while that is off, the files near the selection are drawn instead. Drawing happens in the
+background at low priority, so Explore and the rest of the computer stay quick. The pictures are
+kept on this computer (about 20–40 kB each); **⚙ → Library → Picture cache → Empty** removes
+them (they are drawn again when needed; pictures you chose in Explore are kept).
 
 ## Reading each file's details (cloud storage)
 
@@ -141,7 +178,9 @@ under another name.
 
 The list comes from an index on this computer (`library.sqlite`, in LBD's local data folder, see
 [Command line and settings](command-line.md)). It holds only what is in the files, so deleting it
-is safe: the files are read again. **The Library never writes into data files.**
+is safe: the files are read again. **The Library never writes into data files.** The automatic
+previews are a cache next to it (`previews.sqlite`), safe to delete in the same way; pictures
+chosen in Explore are kept with the remembered Explore views (`catalog.sqlite`).
 
 Explore and Figure keep their own folder panel on the left (the same folders, with images and
 style files too), so you can open the next file without leaving them: see

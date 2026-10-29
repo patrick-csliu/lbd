@@ -388,6 +388,7 @@ def library(page: Page, url: str, ctx) -> None:
     rows.first.wait_for()
     rows.first.click()
     page.locator(".library-detail h1", has_text="Late resonator sweep").wait_for()
+    page.locator(".library-detail .preview img").wait_for(timeout=60_000)   # drawn by the server
     page.mouse.move(5, 400)
     page.wait_for_timeout(800)
     mark(page, [                                # the numbers of the list in library.md
@@ -398,6 +399,27 @@ def library(page: Page, url: str, ctx) -> None:
         (5, ".library-detail .file-head", 0, "L"),
     ])
     save(page, VIEWER_IMG / "library.png")
+
+
+@shot
+def library_pictures(page: Page, url: str, ctx) -> None:
+    fresh(page, url, "Library")
+    page.locator(".library-row").first.wait_for(timeout=60_000)
+    notice = page.get_by_role("button", name="OK", exact=True)
+    if notice.is_visible():
+        notice.click()
+    page.get_by_role("button", name="Pictures", exact=True).click()
+    cards = page.locator(".library-card:not(.loading)")
+    cards.nth(1).click()
+    page.wait_for_function(                             # the pictures in view, drawn (or why not)
+        "() => [...document.querySelectorAll('.library-card:not(.loading)')].every(c => !c.textContent.includes('Drawing'))",
+        timeout=60_000)
+    page.locator(".library-detail .preview img").wait_for(timeout=60_000)
+    page.mouse.move(5, 400)
+    page.wait_for_timeout(800)
+    mark(page, [])                                      # no numbers; the path as on the other shots
+    save(page, VIEWER_IMG / "library-pictures.png")
+    page.get_by_role("button", name="List", exact=True).click()   # as the other shots expect
 
 
 @shot

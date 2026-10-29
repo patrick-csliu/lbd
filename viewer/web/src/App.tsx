@@ -2,7 +2,7 @@ import { CSSProperties, KeyboardEvent, MouseEvent, PointerEvent, useCallback, us
 import { api, ApiError, AppState, baseName, fileKind, OpenDataIn, OpenFilesIn, PageCommand, PageEntry, TabState, Theme, viewerUrl, Workspace } from "./api";
 import FolderPanel from "./FolderPanel";
 import FileView from "./FileView";
-import LibraryPage from "./LibraryPage";
+import LibraryPage, { PreviewSettings } from "./LibraryPage";
 import ExploreTab from "./ExploreTab";
 import ImageView from "./ImageView";
 import StyleFileView from "./StyleFileView";
@@ -877,6 +877,7 @@ function Shell() {
                   Off: the Library lists names, sizes and file dates only. Switch it off for folders in cloud storage whose files are kept only
                   online: opening a file there downloads all of it.
                 </p>
+                <PreviewSettings settings={state.library} onSettings={setState} />
                 <div className="settings-title">Theme</div>
                 {(
                   [

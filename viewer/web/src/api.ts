@@ -1,5 +1,7 @@
 // Typed client for the viewer's HTTP API (python/src/lbd/viewer/server.py).
 
+import type { View, ViewSettings } from "./ExploreView";
+
 export interface AppState {
   version: string;
   lbd_version: string;
@@ -45,6 +47,26 @@ export interface LibrarySettings {
   /** the notice about reading headers in cloud storage was seen */
   notice_seen: boolean;
   columns: LibraryColumn[];
+  /** previews drawn without being asked: every file, the rows near the selection, or none ("all" needs read_headers) */
+  previews: PreviewMode;
+  /** the list as rows or as pictures */
+  list_view: "list" | "pictures";
+}
+
+export type PreviewMode = "all" | "nearby" | "off";
+
+/** A file's preview (GET /api/library/preview): the picture, or why there is none yet. */
+export type Preview =
+  | { picture: Blob; source: "automatic"; drawn_at: number }
+  | { picture: Blob; source: "chosen"; chosen_at: number; changed_since: boolean }
+  | { picture: null; state: "drawing" | "off" | "error"; reason: string | null };
+
+/** An Explore panel as shown, for its "Library preview" button. */
+export interface PreviewPanel {
+  spec: PlotSpec;
+  settings: ViewSettings;
+  stat: ReduceStat;
+  view: View | null;
 }
 
 /** One file of the Library's list. */
@@ -151,6 +173,8 @@ export interface LibraryStatus {
   scans: number;
   generation: number;
   notes?: string[]; // about labels (merged sync copies, …): told once
+  /** automatic previews: drawn (current) of total files, how many are waiting or being drawn, the mode in effect */
+  previews: { drawn: number; total: number; drawing: number; mode: PreviewMode };
 }
 
 export interface LibraryQuery {
@@ -741,6 +765,22 @@ export const api = {
     call<{ notes: string[] }>("POST", "/api/library/missing", { entry, path }),
   libraryFile: (path: string) => call<FileInfo>("GET", "/api/library/file", undefined, { path }),
   libraryStatus: () => call<LibraryStatus>("GET", "/api/library/status"),
+  // ---- Library previews (previews.py)
+  /** `now`: the selected file (drawn first); else a picture in view (drawn after it). */
+  libraryPreview: async (path: string, now = true, signal?: AbortSignal): Promise<Preview> => {
+    const r = await send("GET", "/api/library/preview", undefined, { path, now: String(now) }, signal);
+    if (r.headers.get("content-type") === "image/webp") {
+      const about = JSON.parse(r.headers.get("X-LBD-Preview") ?? "{}");
+      return { picture: await r.blob(), ...about } as Preview;
+    }
+    return { picture: null, ...(await r.json()) } as Preview;
+  },
+  libraryPreviewWant: (paths: string[], now: boolean) => call<{ ok: boolean }>("POST", "/api/library/preview/want", { paths, now }),
+  libraryPreviewChoose: (path: string, panels: PreviewPanel[], grid: [number, number], preset: string | null) =>
+    call<{ chosen_at: number; warnings: string[] }>("POST", "/api/library/preview/choose", { path, panels, grid, preset }),
+  libraryPreviewReset: (path: string) => call<{ forgotten: number }>("DELETE", "/api/library/preview/choose", undefined, { path }),
+  libraryPreviewCache: () => call<{ count: number; bytes: number }>("GET", "/api/library/preview/cache"),
+  libraryPreviewClear: () => call<{ freed: number }>("POST", "/api/library/preview/clear"),
 
   // ---- pages: this browser tab among the viewer's open pages (lbd_viewer/pages.py)
   registerPage: () => call<{ page: string; number: number }>("POST", "/api/pages"),

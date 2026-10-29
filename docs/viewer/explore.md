@@ -321,6 +321,9 @@ synchronized. Opening the file again shows the same.
   fits, Explore starts afresh.
 - Views remembered by an earlier version (one plot, before panels) open as one panel.
 - Renaming a file in the viewer keeps its remembered view.
+- **Library preview** (above the panels, on the right) makes the panels as they are now the file's picture in
+  the [Library](library.md#previews). Only the picture is kept: changing Explore afterwards
+  doesn't change it.
 
 ## Files that change
 

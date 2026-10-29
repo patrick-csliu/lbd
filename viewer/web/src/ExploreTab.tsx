@@ -10,6 +10,7 @@ import AxisSelect from "./AxisSelect";
 import { COMPLEX_MODES, SliceControl } from "./FileView";
 import { useDiskVersion } from "./watch";
 import { ContextMenu, MenuAt, menuAt } from "./menu";
+import { useToast } from "./toast";
 
 /**
  * One file in the Explore workspace: its header, what to plot (values, kind, axes, slices,
@@ -21,6 +22,9 @@ import { ContextMenu, MenuAt, menuAt } from "./menu";
  *
  * When the file changes on disk and only grew (the same axes and values, more data), the view
  * stays as it is (cursors included); anything else starts afresh, with a note saying why.
+ *
+ * "Library preview" (above the panels) draws the panels as shown once, on the server, as the file's picture
+ * in the Library; only the picture is kept, so later changes here don't change it.
  */
 
 interface Props {
@@ -144,6 +148,8 @@ function grewOnly(before: FileInfo, now: FileInfo): boolean {
 export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Props) {
   const [info, setInfo] = useState<FileInfo | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [choosing, setChoosing] = useState(false); // drawing the Library preview
+  const toast = useToast();
   const [updating, setUpdating] = useState<string | null>(null);
   const [rec, setRec] = useState<Remembered | null>(null); // what the view shows (remembered)
   // What each panel's view reports while it is open (not remembered), by panel id.
@@ -438,6 +444,21 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
     if (Object.keys(next).length) setFollows((old) => ({ ...old, ...next }));
   }, []);
 
+  const chooseAsPreview = async () => {
+    if (!rec) return;
+    setChoosing(true);
+    try {
+      const panels = rec.panels.map((p) => ({ spec: p.spec, settings: p.settings, stat: p.stat, view: p.view }));
+      const answer = await api.libraryPreviewChoose(path, panels, gridOf(rec.panels.length, rec.layout), null);
+      toast("This view is now the file's preview in the Library.");
+      for (const w of answer.warnings) toast(w, "warning");
+    } catch (e) {
+      onError((e as Error).message);
+    } finally {
+      setChoosing(false);
+    }
+  };
+
   const forget = async () => {
     if (!info) return;
     await api.forget(path).catch((e) => onError((e as Error).message));
@@ -640,6 +661,10 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
                   ))}
                 </span>
               )}
+              <button className="panel-preview" onClick={chooseAsPreview} disabled={choosing}
+                      title="Use these panels, as they are now, as this file's picture in the Library (kept on this computer, not in the file)">
+                {choosing ? "Drawing…" : "Library preview"}
+              </button>
             </div>
             <div className={"panel-grid" + (several ? " several" : "")} style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, ["--rows" as string]: rows }}>
               {rec.panels.map((p, i) => {

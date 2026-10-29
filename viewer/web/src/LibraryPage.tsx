@@ -16,6 +16,8 @@ import {
   LibrarySettings,
   LibraryStatus,
   MissingLabels,
+  Preview,
+  PreviewMode,
   SameId,
 } from "./api";
 import { docsUrl } from "./help";
@@ -39,6 +41,11 @@ import { useToast } from "./toast";
  * Ctrl+A) and labelled at once; Space stars them. Files that are the same measurement in two
  * places (copies) share their labels; copies that differ are explained in plain words, and the
  * user decides what they are.
+ *
+ * Previews (plan 8c): a picture of the selected file on the right, drawn by the server
+ * (previews.py) as Explore first shows the file, or as chosen in Explore. While stepping with the
+ * arrow keys, the rows near the selection are drawn ahead. The list can show pictures instead of
+ * rows ("Pictures"): the same files, selection and keys, as a grid.
  */
 
 interface Props {
@@ -55,6 +62,8 @@ interface Props {
 }
 
 const ROW_H = 28; // px: every row has this height (the list is windowed)
+const CARD_W = 220, CARD_H = 206; // px: a picture of the picture view, with its name and date (at least this wide)
+const NEAR = 5; // rows above and below the selection whose previews are drawn ahead
 const PAGE = 100; // rows asked for at a time
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 export const NOTICE =
@@ -224,7 +233,13 @@ export default function LibraryPage(props: Props) {
   const asked = useRef<Map<number, string>>(new Map()); // page -> the query+generation it was asked for
   const [listError, setListError] = useState<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
-  const [view, setView] = useState({ top: 0, height: 600 });
+  const [view, setView] = useState({ top: 0, height: 600, width: 800 });
+  const measure = (el: HTMLElement) => setView({ top: el.scrollTop, height: el.clientHeight, width: el.clientWidth });
+  // rows, or pictures in a grid: how many items per line, and a line's height
+  const pictures = settings.list_view === "pictures";
+  const perLine = pictures ? Math.max(1, Math.floor(view.width / CARD_W)) : 1;
+  const lineH = pictures ? CARD_H : ROW_H;
+  const head = pictures ? 0 : ROW_H; // the column titles above the rows
 
   // a new query: everything afresh, from the top
   useEffect(() => {
@@ -235,8 +250,8 @@ export default function LibraryPage(props: Props) {
     setView((v) => ({ ...v, top: 0 }));
   }, [queryKey]);
 
-  const firstPage = Math.max(0, Math.floor(view.top / ROW_H / PAGE) - 0);
-  const lastPage = Math.floor((view.top + view.height) / ROW_H / PAGE) + 1;
+  const firstPage = Math.max(0, Math.floor((Math.floor(view.top / lineH) * perLine) / PAGE));
+  const lastPage = Math.floor(((Math.floor((view.top + view.height) / lineH) + 1) * perLine) / PAGE) + 1;
   useEffect(() => {
     for (let p = firstPage; p <= lastPage; p++) {
       if (total !== null && p * PAGE >= total && p > 0) break;
@@ -322,12 +337,12 @@ export default function LibraryPage(props: Props) {
 
   const onScroll = () => {
     const el = scroller.current;
-    if (el) setView({ top: el.scrollTop, height: el.clientHeight });
+    if (el) measure(el);
   };
   useEffect(() => {
     const el = scroller.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => setView({ top: el.scrollTop, height: el.clientHeight }));
+    const ro = new ResizeObserver(() => measure(el));
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
@@ -339,10 +354,32 @@ export default function LibraryPage(props: Props) {
     if (r) onSelect(r.path);
     const el = scroller.current;
     if (el) {
-      const top = i * ROW_H, bottom = top + ROW_H, head = ROW_H;
-      if (top < el.scrollTop + head) el.scrollTop = Math.max(0, top - head);
+      const top = Math.floor(i / perLine) * lineH, bottom = top + lineH + head;
+      if (top < el.scrollTop) el.scrollTop = Math.max(0, top);
       else if (bottom > el.scrollTop + el.clientHeight) el.scrollTop = bottom - el.clientHeight;
-      setView({ top: el.scrollTop, height: el.clientHeight });
+      measure(el);
+    }
+  };
+
+  // the previews of the rows near the selection are drawn ahead, so stepping shows them at once
+  useEffect(() => {
+    const i = indexOf(selected);
+    if (i < 0 || settings.previews === "off") return;
+    const near: string[] = [];
+    for (let k = 1; k <= NEAR; k++)
+      for (const j of [i + k, i - k]) {
+        const r = rowAt(j);
+        if (r && !r.error) near.push(r.path);
+      }
+    if (near.length) api.libraryPreviewWant(near, false).catch(() => undefined); // only ahead of time: no need to tell
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, pages, settings.previews]);
+
+  const setListView = async (v: LibrarySettings["list_view"]) => {
+    try {
+      onLibrarySettings(await api.setLibrary({ list_view: v }));
+    } catch (e) {
+      toast((e as Error).message, "error");
     }
   };
 
@@ -474,13 +511,16 @@ export default function LibraryPage(props: Props) {
 
   const onListKey = (e: KeyboardEvent) => {
     const i = indexOf(selected);
-    if (e.key === "ArrowDown" || e.key === "ArrowUp") setChosen([]); // keys move one selection
-    if (e.key === "ArrowDown") selectIndex(i < 0 ? 0 : i + 1);
-    else if (e.key === "ArrowUp") selectIndex(Math.max(0, i - 1));
+    const page = scroller.current ? Math.max(1, Math.floor(scroller.current.clientHeight / lineH) - 1) * perLine : perLine;
+    if (e.key.startsWith("Arrow")) setChosen([]); // keys move one selection
+    if (e.key === "ArrowDown") selectIndex(i < 0 ? 0 : Math.min((total ?? 1) - 1, i + perLine));
+    else if (e.key === "ArrowUp") selectIndex(Math.max(0, i - perLine));
+    else if (e.key === "ArrowRight" && pictures) selectIndex(i < 0 ? 0 : i + 1);
+    else if (e.key === "ArrowLeft" && pictures) selectIndex(Math.max(0, i - 1));
     else if (e.key === "Home") selectIndex(0);
     else if (e.key === "End" && total) selectIndex(total - 1);
-    else if (e.key === "PageDown" && scroller.current) selectIndex(Math.min((total ?? 1) - 1, Math.max(0, i) + Math.floor(scroller.current.clientHeight / ROW_H) - 1));
-    else if (e.key === "PageUp" && scroller.current) selectIndex(Math.max(0, i - Math.floor(scroller.current.clientHeight / ROW_H) + 1));
+    else if (e.key === "PageDown") selectIndex(Math.min((total ?? 1) - 1, Math.max(0, i) + page));
+    else if (e.key === "PageUp") selectIndex(Math.max(0, i - page));
     else if (e.key === "Enter" && selected) onOpenIn(selected, e.shiftKey ? "figure" : "explore");
     else if (e.key === " ") toggleStar(chosenRows());
     else if ((e.ctrlKey || e.metaKey) && (e.key === "a" || e.key === "A")) setChosen(loadedRows().map((r) => r.path));
@@ -636,6 +676,19 @@ export default function LibraryPage(props: Props) {
               Indexing {status.done.toLocaleString()} of {status.total.toLocaleString()}…
             </span>
           )}
+          {status?.previews && status.previews.mode === "all" && status.previews.drawing > 0 && (
+            <span className="muted" title="Previews of every file are drawn in the background (⚙ Settings → Library)">
+              Drawing previews {status.previews.drawn.toLocaleString()} of {status.previews.total.toLocaleString()}…
+            </span>
+          )}
+          <span className="list-view-switch" role="group" aria-label="Show the files as">
+            <button className={pictures ? "" : "on"} aria-pressed={!pictures} onClick={() => setListView("list")} title="The files as rows">
+              List
+            </button>
+            <button className={pictures ? "on" : ""} aria-pressed={pictures} onClick={() => setListView("pictures")} title="The files as pictures">
+              Pictures
+            </button>
+          </span>
           {status && status.errors.length > 0 && (
             <span className="warn" title={status.errors.map((e) => `${e.path}: ${e.error}`).join("\n")}>
               {status.errors.length} folder(s) or file(s) couldn't be read (point here for which)
@@ -660,7 +713,45 @@ export default function LibraryPage(props: Props) {
           </div>
         )}
 
-        <div className="library-list" ref={scroller} onScroll={onScroll} onKeyDown={onListKey} tabIndex={0} role="grid" aria-label="Data files" aria-rowcount={total ?? undefined}>
+        <div
+          className={"library-list" + (pictures ? " pictures" : "")}
+          ref={scroller}
+          onScroll={onScroll}
+          onKeyDown={onListKey}
+          tabIndex={0}
+          role="grid"
+          aria-label="Data files"
+          aria-rowcount={total ?? undefined}
+        >
+          {pictures ? (
+            <div className="library-cards" style={{ height: Math.ceil((total ?? 0) / perLine) * CARD_H }}>
+              {Array.from({ length: Math.max(0, Math.min(total ?? 0, (lastPage + 1) * PAGE) - firstPage * PAGE) }, (_, k) => {
+                const i = firstPage * PAGE + k;
+                const top = Math.floor(i / perLine) * CARD_H;
+                if (top + CARD_H < view.top - CARD_H || top > view.top + view.height + CARD_H) return null;
+                const width = view.width / perLine;
+                const r = rowAt(i);
+                if (!r) return <div key={`empty-${i}`} className="library-card loading" style={{ top, left: (i % perLine) * width, width }} />;
+                const on = r.path === selected || chosen.includes(r.path);
+                return (
+                  <PictureCard
+                    key={r.path}
+                    row={r}
+                    generation={generation}
+                    selected={on}
+                    style={{ top, left: (i % perLine) * width, width }}
+                    onClick={(e) => {
+                      clickRow(e, r);
+                      scroller.current?.focus({ preventScroll: true });
+                    }}
+                    onDoubleClick={() => onOpenIn(r.path, "explore")}
+                    onContextMenu={(e) => rowMenu(e, r)}
+                  />
+                );
+              })}
+            </div>
+          ) : (
+          <>
           <div className="library-head" role="row" style={{ gridTemplateColumns: gridColumns }} onContextMenu={columnMenu} title="Click: sort; right-click: choose the columns">
             {columns.map((c) => (
               <div key={c.id} role="columnheader" aria-sort={sort === c.id ? (order === "asc" ? "ascending" : "descending") : "none"}>
@@ -733,6 +824,8 @@ export default function LibraryPage(props: Props) {
               );
             })}
           </div>
+          </>
+          )}
           {total === 0 && (
             <div className="library-empty muted">
               {state.roots.length === 0
@@ -1099,10 +1192,227 @@ function SelectedFile({
           <strong>This file can't be read.</strong> {error ?? row?.error}
         </div>
       )}
+      {!row?.error && <PreviewBox path={path} version={`${version}-${generation}`} />}
       {children}
       {!shown && !error && <p className="muted">Reading…</p>}
       {shown && <FileDetails info={shown} metaFilter />}
     </div>
+  );
+}
+
+// ---- previews (plan 8c, previews.py)
+
+/** A file's preview, asked for again when `version` changes; asked again while it is drawn.
+ * `now`: the selected file (drawn first); else a picture in view (drawn after it). */
+function usePreview(path: string, version: string, now: boolean, nonce = 0): { preview: Preview | null; url: string | null; error: string | null } {
+  const [got, setGot] = useState<{ path: string; preview: Preview; url: string | null } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const shown = useRef<string | null>(null); // the picture's object URL, freed when replaced
+  useEffect(() => {
+    let live = true;
+    let timer = 0;
+    const stop = new AbortController();
+    const ask = () =>
+      api
+        .libraryPreview(path, now, stop.signal)
+        .then((p) => {
+          if (!live) return;
+          setError(null);
+          const url = p.picture ? URL.createObjectURL(p.picture) : null;
+          if (shown.current) URL.revokeObjectURL(shown.current);
+          shown.current = url;
+          setGot({ path, preview: p, url });
+          if (!p.picture && p.state === "drawing") timer = window.setTimeout(ask, now ? 400 : 1500);
+        })
+        .catch((e) => {
+          if (live && (e as Error).name !== "AbortError") setError((e as Error).message);
+        });
+    ask();
+    return () => {
+      live = false;
+      stop.abort();
+      window.clearTimeout(timer);
+    };
+  }, [path, version, now, nonce]);
+  useEffect(
+    () => () => {
+      if (shown.current) URL.revokeObjectURL(shown.current);
+    },
+    [],
+  );
+  const mine = got && got.path === path ? got : null;
+  return { preview: mine?.preview ?? null, url: mine?.url ?? null, error };
+}
+
+function dateTime(seconds: number): string {
+  return new Date(seconds * 1000).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+
+/** The selected file's preview, with what it shows and, for a chosen one, Reset. */
+function PreviewBox({ path, version }: { path: string; version: string }) {
+  const toast = useToast();
+  const [nonce, setNonce] = useState(0);
+  const { preview, url, error } = usePreview(path, version, true, nonce);
+  const again = () => setNonce((n) => n + 1);
+  const show = () =>
+    api
+      .libraryPreviewWant([path], true)
+      .then(again)
+      .catch((e) => toast((e as Error).message, "error"));
+  const reset = () =>
+    api
+      .libraryPreviewReset(path)
+      .then(again)
+      .catch((e) => toast((e as Error).message, "error"));
+  let inside: ReactNode;
+  if (url) inside = <img src={url} alt="Preview of the file" />;
+  else if (error) inside = <span className="warn">The preview couldn't be asked for: {error}</span>;
+  else if (!preview || (!preview.picture && preview.state === "drawing")) inside = <span className="muted">Drawing the preview…</span>;
+  else if (!preview.picture && preview.state === "off")
+    inside = (
+      <span className="muted">
+        Previews are off (⚙ Settings → Library).{" "}
+        <button onClick={show}>Show preview</button>
+      </span>
+    );
+  else if (!preview.picture) inside = <span className="muted">No preview: {preview.reason}</span>;
+  return (
+    <div className="preview" aria-label="Preview">
+      <div className="preview-box" data-state={url ? "picture" : preview && !preview.picture ? preview.state : "asking"}>
+        {inside}
+      </div>
+      {preview?.picture && (
+        <div className="preview-about small muted">
+          {preview.source === "chosen" ? (
+            <>
+              Chosen in Explore on {dateTime(preview.chosen_at)}
+              {preview.changed_since && <span className="warn"> — before the file last changed; choose again in Explore to show its data now</span>}
+              .{" "}
+              <button className="link" onClick={reset} title="Show the automatic preview again (as Explore first shows the file)">
+                Reset preview
+              </button>
+            </>
+          ) : (
+            <>As Explore first shows the file. To show another view here: Explore → Library preview.</>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A file in the picture view: its preview, name, date and marks. */
+function PictureCard({
+  row,
+  generation,
+  selected,
+  style,
+  onClick,
+  onDoubleClick,
+  onContextMenu,
+}: {
+  row: LibraryRow;
+  generation: number;
+  selected: boolean;
+  style: React.CSSProperties;
+  onClick: (e: MouseEvent) => void;
+  onDoubleClick: () => void;
+  onContextMenu: (e: MouseEvent) => void;
+}) {
+  const { preview, url } = usePreview(row.path, `${row.size}-${row.mtime}-${generation}`, false);
+  const name = row.title || row.name;
+  return (
+    <div
+      className={"library-card" + (selected ? " selected" : "") + (row.error ? " unreadable" : "") + (row.conflict ? " conflict" : "")}
+      style={style}
+      role="row"
+      aria-selected={selected}
+      title={row.error ? `Can't be read: ${row.error}` : row.conflict ? CONFLICT_TIP : row.path}
+      onClick={onClick}
+      onDoubleClick={onDoubleClick}
+      onContextMenu={onContextMenu}
+    >
+      <div className="card-picture" role="gridcell">
+        {url ? (
+          <img src={url} alt="" />
+        ) : (
+          <span className="muted small">
+            {row.error ? "Can't be read" : !preview || (!preview.picture && preview.state === "drawing") ? "Drawing…" : !preview.picture && preview.state === "off" ? "Previews are off" : "No preview"}
+          </span>
+        )}
+      </div>
+      <div className="card-name" role="gridcell">
+        {row.conflict ? <span className="mark-conflict" aria-label="differs from its copy">⚠ </span> : null}
+        {row.star ? <span className="mark-star" aria-label="starred">★ </span> : null}
+        {name}
+      </div>
+      <div className="card-date muted small">{createdText(row)}</div>
+    </div>
+  );
+}
+
+/** Settings → Library: which previews are drawn, and the picture cache. */
+export function PreviewSettings({ settings, onSettings }: { settings: LibrarySettings; onSettings: (s: AppState) => void }) {
+  const toast = useToast();
+  const [cache, setCache] = useState<{ count: number; bytes: number } | null>(null);
+  // the choice shows at once; the viewer's answer (or a refusal, with the old value) follows
+  const [mode, setMode] = useState(settings.previews);
+  useEffect(() => setMode(settings.previews), [settings.previews]);
+  const measure = useCallback(() => api.libraryPreviewCache().then(setCache).catch(() => setCache(null)), []);
+  useEffect(() => {
+    measure();
+  }, [measure]);
+  const choose = async (chosen: PreviewMode) => {
+    setMode(chosen);
+    try {
+      onSettings(await api.setLibrary({ previews: chosen }));
+    } catch (e) {
+      setMode(settings.previews);
+      toast((e as Error).message, "error");
+    }
+  };
+  const empty = async () => {
+    try {
+      const { freed } = await api.libraryPreviewClear();
+      toast(`Emptied the picture cache (${formatBytes(freed)}); previews are drawn again as needed.`);
+      measure();
+    } catch (e) {
+      toast((e as Error).message, "error");
+    }
+  };
+  const choices: [PreviewMode, string][] = [
+    ["all", "Every file, drawn in the background (previews show at once)"],
+    ["nearby", "The selected file and the rows near it"],
+    ["off", "Only when I click Show preview"],
+  ];
+  return (
+    <>
+      <div className="settings-subtitle">Previews</div>
+      {choices.map(([value, label]) => {
+        const blocked = value === "all" && !settings.read_headers;
+        return (
+          <label key={value} className={"settings-choice" + (blocked ? " disabled" : "")}
+                 title={blocked ? 'Needs "Read each data file\'s details": drawing every preview reads every file' : undefined}>
+            <input type="radio" name="previews" disabled={blocked} checked={mode === value && !blocked}
+                   onChange={() => choose(value)} />
+            {label}
+          </label>
+        );
+      })}
+      {!settings.read_headers && (
+        <p className="settings-note small muted">
+          "Every file" needs "Read each data file's details" on: drawing every preview reads every file{settings.previews === "all" ? "; until then, the selected file and the rows near it are drawn" : ""}.
+        </p>
+      )}
+      <p className="settings-note small muted">
+        Picture cache: {cache ? `${cache.count.toLocaleString()} picture${cache.count === 1 ? "" : "s"}, ${formatBytes(cache.bytes)}` : "…"}{" "}
+        <button className="link" onClick={empty} disabled={!cache || cache.count === 0}>
+          Empty
+        </button>
+        <br />
+        Previews you chose in Explore are kept.
+      </p>
+    </>
   );
 }
 

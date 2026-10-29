@@ -30,6 +30,13 @@ The file format has its own version (`lbd_version`, currently 1.0).
 
 **Viewer**
 
+- **Previews in the Library:** the selected file shows a picture of its data, as Explore first
+  shows it, and the files near it are drawn ahead, so stepping with the arrow keys shows them at
+  once. **Pictures** shows the list as a grid of pictures. Explore's **Library preview** button
+  makes the panels as shown the file's picture (kept as a picture; Reset in the Library).
+  **⚙ → Library → Previews:** every file drawn in the background (the default; needs the files'
+  details read), only the selected file and those near it, or only on request. Drawn in the
+  background at low priority, as small WebP pictures kept on this computer.
 - **Labels in the Library:** a star, a project, users and tags (all nested, like
   `Qubit A/Device 3`) and a comment, set on one file or many at once (Space stars), filtered
   on the left and searched. Kept in a small label file in each folder: data files are never
