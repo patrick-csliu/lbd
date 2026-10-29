@@ -16,6 +16,9 @@ what the Library lists, filters and searches by, kept on this computer.
   **copies** (the same size and modification time, or else the same content hash, read only for
   such pairs) or a **conflict** (they differ: one was changed after copying, or an id was copied
   by hand). Nothing is decided for the user; `same_id` says what differs.
+- Labels (star, project, users, tags, comment) come from the folders' sidecars (labels.py); the
+  index keeps a copy per file for listing, filtering and searching, worked out again whenever
+  files or sidecars change (library_labels.py), which also follows renamed and moved files.
 """
 
 from __future__ import annotations
@@ -34,7 +37,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from . import scan
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 LIBRARY_FILE = "library.sqlite"
 # How often the open folders are checked: while the Library is shown, and otherwise.
 ACTIVE_EVERY, IDLE_EVERY, ACTIVE_FOR = 3.0, 60.0, 30.0
@@ -50,7 +53,9 @@ SORTS = {
 }
 ROW_FIELDS = ["path", "root", "folder", "name", "size", "mtime", "read", "title", "description", "created",
               "day", "date_from_file", "sweep", "points", "value_names", "error", "id", "parent_id",
-              "copies", "conflict"]
+              "copies", "conflict", "star", "project", "users", "tags", "comment"]
+LABEL_SORTS = {"star": "star", "project": "project COLLATE NOCASE", "users": "users COLLATE NOCASE",
+               "tags": "tags COLLATE NOCASE", "comment": "comment COLLATE NOCASE", "copies": "copies"}
 log = logging.getLogger("lbd_viewer")
 
 
@@ -155,6 +160,15 @@ class LibraryIndex:
         self.last_request = 0.0                  # when the Library last asked (it is shown)
         self.generation = 0                      # changes whenever the index does
         self.status: Dict[str, Any] = {"indexing": False, "done": 0, "total": 0, "errors": [], "scans": 0}
+        self.missing: List[Dict[str, Any]] = []          # labels whose file can't be found
+        self.notes: List[str] = []                       # about labels, for the page (told once)
+        self._sidecar_state: Optional[Dict[str, Optional[str]]] = None
+
+    def trash(self, path: Path) -> None:
+        """Move a file (a merged sync conflict copy) to the Recycle Bin."""
+        from .files import trash
+
+        trash(path)
 
     # -- the database
 
@@ -183,7 +197,10 @@ class LibraryIndex:
                 title TEXT, description TEXT, created TEXT, sort_time REAL, day TEXT, date_from_file INTEGER,
                 writer TEXT, lbd_version TEXT, sweep TEXT, points INTEGER, value_names TEXT,
                 searchable TEXT, summary TEXT, error TEXT, seen REAL,
-                id TEXT, parent_id TEXT, fsid TEXT, hash TEXT, copies INTEGER DEFAULT 0, conflict INTEGER DEFAULT 0)""")
+                id TEXT, parent_id TEXT, fsid TEXT, hash TEXT, copies INTEGER DEFAULT 0, conflict INTEGER DEFAULT 0,
+                star INTEGER DEFAULT 0, project TEXT, users TEXT DEFAULT '', tags TEXT DEFAULT '',
+                comment TEXT DEFAULT '', label_text TEXT DEFAULT '')""")
+            db.execute("CREATE TABLE IF NOT EXISTS sidecars (folder TEXT PRIMARY KEY)")
             db.execute("CREATE INDEX IF NOT EXISTS files_id ON files (id)")
             db.execute("CREATE INDEX IF NOT EXISTS files_root ON files (root)")
             db.execute("CREATE INDEX IF NOT EXISTS files_day ON files (day)")
@@ -247,8 +264,8 @@ class LibraryIndex:
                     except OSError as e:
                         errors.append({"path": str(p), "error": e.strerror or str(e)})
             with self._lock:
-                known = {r[0]: (r[1], r[2], r[3]) for r in
-                         self._connect().execute("SELECT path, version, read, root FROM files")}
+                known = {r[0]: (r[1], r[2], r[3], r[4]) for r in
+                         self._connect().execute("SELECT path, version, read, root, fsid FROM files")}
             todo = [(p, root, st) for p, root, st in found
                     if (k := known.get(str(p))) is None or k[0] != _version(st) or k[2] != root
                     or (read and not k[1])]
@@ -263,6 +280,9 @@ class LibraryIndex:
                 self.status["done"] = i + 1
             self._write(batch)
             gone = set(known) - {str(p) for p, _, _ in found}
+            # renamed or moved on the same drive: the file system's id is the same
+            new_by_fsid = {f"{st.st_dev}:{st.st_ino}": str(p) for p, _, st in found if str(p) not in known}
+            renames = {g: new_by_fsid[known[g][3]] for g in gone if known[g][3] in new_by_fsid}
             if gone:
                 with self._lock:
                     db = self._connect()
@@ -272,9 +292,56 @@ class LibraryIndex:
             changed = bool(todo or gone)
             if changed:
                 self._compare_same_ids()
+            sidecars = self._sidecars([p for p, _, _ in found])
+            if changed or sidecars != self._sidecar_state:
+                from . import library_labels
+
+                try:
+                    self.notes += library_labels.apply(self, renames)
+                except Exception as e:                   # labels must never stop the list
+                    log.exception("Library: labels couldn't be worked out")
+                    self.notes.append(f"The Library's labels couldn't be worked out ({e}); the details are in the log.")
+                self._sidecar_state = self._sidecars([p for p, _, _ in found])
+                changed = True
+            if changed:
                 self.generation += 1
             self.status.update({"indexing": False, "scans": self.status["scans"] + 1})
             return changed
+
+    def _sidecars(self, files: List[Path]) -> Dict[str, Optional[str]]:
+        """The version of the label file of every folder with data files (or labels before)."""
+        from .labels import SIDECAR
+
+        folders = {str(p.parent) for p in files}
+        with self._lock:
+            folders |= {f for (f,) in self._connect().execute("SELECT folder FROM sidecars")}
+        out = {}
+        for f in folders:
+            try:
+                st = os.stat(os.path.join(f, SIDECAR))
+                out[f] = _version(st)
+            except OSError:
+                out[f] = None
+            for name in _listdir(f):                       # sync conflict copies count as changes
+                if name.lower().startswith(".lbd-library") and name != SIDECAR and ".broken-" not in name:
+                    out[f] = (out[f] or "") + "+" + name
+        return out
+
+    def refresh(self, path: str) -> None:
+        """Read one file again now (LBD itself just changed it), then compare same ids."""
+        p = Path(path).resolve()
+        st = p.stat()
+        with self._lock:
+            r = self._connect().execute("SELECT root FROM files WHERE path = ?", (str(p),)).fetchone()
+        root = r[0] if r else next((o for o in outermost(self.roots())
+                                    if str(p).lower().startswith(o.lower().rstrip("\\/") + os.sep)), str(p.parent))
+        self._write([self._read(p, root, st)])
+        self._compare_same_ids()
+        self.generation += 1
+
+    def compare_same_ids(self) -> None:
+        self._compare_same_ids()
+        self.generation += 1
 
     def _compare_same_ids(self) -> None:
         """Copies or conflict, for every id that more than one file has (after a scan)."""
@@ -378,8 +445,23 @@ class LibraryIndex:
 
     # -- what the Library asks
 
-    def _where(self, folder: Optional[str], q: str, date: str) -> Tuple[str, List[Any]]:
+    def _where(self, folder: Optional[str], q: str, date: str, project: str = "", tags: Iterable[str] = (),
+               users: Iterable[str] = (), starred: bool = False, conflicts: bool = False) -> Tuple[str, List[Any]]:
         clauses, args = [], []
+        if project:                                        # this project and the ones inside it
+            clauses.append("(project = ? OR project LIKE ? ESCAPE '\\')")
+            args += [project, _like(project + "/")[1:]]
+        for key, chosen in (("tags", list(tags)), ("users", list(users))):
+            if chosen:                                     # any of them (OR), each with its sub-labels
+                ors = []
+                for label in chosen:
+                    ors.append(f"({key} LIKE ? ESCAPE '\\' OR {key} LIKE ? ESCAPE '\\')")
+                    args += [_like("\n" + label + "\n"), _like("\n" + label + "/")]
+                clauses.append("(" + " OR ".join(ors) + ")")
+        if starred:
+            clauses.append("star = 1")
+        if conflicts:
+            clauses.append("conflict = 1")
         if folder:
             f = str(Path(folder).resolve())
             clauses.append("(path LIKE ? ESCAPE '\\')")
@@ -388,29 +470,36 @@ class LibraryIndex:
             clauses.append("day LIKE ?")
             args.append(date + "%")
         for word in q.lower().split():
-            clauses.append("searchable LIKE ? ESCAPE '\\'")
+            clauses.append("(searchable || ' ' || label_text) LIKE ? ESCAPE '\\'")
             args.append(_like(word))
         return (" WHERE " + " AND ".join(clauses)) if clauses else "", args
 
     def list(self, folder: Optional[str] = None, q: str = "", date: str = "", sort: str = "date",
-             order: str = "desc", offset: int = 0, limit: int = 200) -> Dict[str, Any]:
+             order: str = "desc", offset: int = 0, limit: int = 200, project: str = "",
+             tags: Iterable[str] = (), users: Iterable[str] = (), starred: bool = False,
+             conflicts: bool = False) -> Dict[str, Any]:
         """One page of the files under `folder` (None: every open folder) matching the search
         words (all of them) and the date ("2026", "2026-03" or "2026-03-14"), sorted."""
         self.last_request = time.monotonic()
-        if sort not in SORTS:
-            raise ValueError(f"sort must be one of {', '.join(SORTS)}, not {sort!r}")
+        sorts = {**SORTS, **LABEL_SORTS}
+        if sort not in sorts:
+            raise ValueError(f"sort must be one of {', '.join(sorts)}, not {sort!r}")
         direction = "DESC" if order == "desc" else "ASC"
-        where, args = self._where(folder, q, date)
+        where, args = self._where(folder, q, date, project, tags, users, starred, conflicts)
         with self._lock:
             db = self._connect()
             total = db.execute(f"SELECT COUNT(*) FROM files{where}", args).fetchone()[0]
             cur = db.execute(f"SELECT {', '.join(ROW_FIELDS)} FROM files{where} "
-                             f"ORDER BY {SORTS[sort]} {direction}, path LIMIT ? OFFSET ?",
+                             f"ORDER BY {sorts[sort]} {direction}, path LIMIT ? OFFSET ?",
                              args + [max(1, min(limit, 1000)), max(0, offset)])
             rows = [dict(zip(ROW_FIELDS, r)) for r in cur]
+        for r in rows:
+            r["users"] = [u for u in (r["users"] or "").split("\n") if u]
+            r["tags"] = [t for t in (r["tags"] or "").split("\n") if t]
+            r["star"] = bool(r["star"])
         return {"rows": rows, "total": total, "generation": self.generation}
 
-    def facets(self, folder: Optional[str] = None, q: str = "") -> Dict[str, Any]:
+    def facets(self, folder: Optional[str] = None, q: str = "", date: str = "") -> Dict[str, Any]:
         """The date tree (year → month → day, with counts) of the files under `folder` matching
         the search, the folder tree of every open folder with the number of files below each, and
         the number of files in all of them (`total`: a folder opened inside another counts once)."""
@@ -423,12 +512,28 @@ class LibraryIndex:
             total = db.execute("SELECT COUNT(*) FROM files").fetchone()[0]
             conflicts = db.execute(f"SELECT COUNT(*) FROM files{where}{' AND' if where else ' WHERE'} conflict = 1",
                                    args).fetchone()[0]
+            lw, la = self._where(folder, q, date)
+            labelled = db.execute(f"SELECT project, users, tags, star FROM files{lw}", la).fetchall()
         dates: Dict[str, Dict[str, Dict[str, int]]] = {}
         for day, n in days:
             if day:
                 y, m, d = day.split("-")
                 dates.setdefault(y, {}).setdefault(m, {})[d] = n
+        trees = {"projects": {}, "users": {}, "tags": {}}
+        starred = 0
+        for project, users, tags, star in labelled:
+            starred += 1 if star else 0
+            if project:
+                _count(trees["projects"], project)
+            for u in (users or "").split("\n"):
+                if u:
+                    _count(trees["users"], u)
+            for t in (tags or "").split("\n"):
+                if t:
+                    _count(trees["tags"], t)
         return {"dates": dates, "folders": self._folder_tree(folders), "total": total, "conflicts": conflicts,
+                "projects": _label_tree(trees["projects"]), "users": _label_tree(trees["users"]),
+                "tags": _label_tree(trees["tags"]), "starred": starred, "missing": len(self.missing),
                 "generation": self.generation}
 
     def _folder_tree(self, counts: List[Tuple[str, str, int]]) -> List[Dict[str, Any]]:
@@ -476,6 +581,32 @@ class LibraryIndex:
         self._write([row_from_summary(p, root, st, summary)])
         self.generation += 1
         return summary
+
+
+def _listdir(folder: str) -> List[str]:
+    try:
+        return os.listdir(folder)
+    except OSError:
+        return []
+
+
+def _count(tree: Dict[str, Any], label: str) -> None:
+    """Count a nested label (a/b/c) in a tree of {part: {"n": count, "c": children}}."""
+    node = tree
+    for part in label.split("/"):
+        child = node.setdefault(part, {"n": 0, "c": {}})
+        child["n"] += 1
+        node = child["c"]
+
+
+def _label_tree(tree: Dict[str, Any], prefix: str = "") -> List[Dict[str, Any]]:
+    """[{label, name, count, children}] sorted by name: what the filter boxes show."""
+    out = []
+    for name in sorted(tree, key=str.lower):
+        label = f"{prefix}{name}"
+        out.append({"label": label, "name": name, "count": tree[name]["n"],
+                    "children": _label_tree(tree[name]["c"], label + "/")})
+    return out
 
 
 def differences(a: Dict[str, Any], b: Dict[str, Any]) -> List[str]:

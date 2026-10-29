@@ -58,8 +58,9 @@ def new_entry(ident: Optional[str], name: str, created: Optional[str]) -> Dict[s
 
 
 def is_empty(e: Dict[str, Any]) -> bool:
-    """No label left (the entry can go)."""
-    return not (e.get("star") or e.get("project") or e.get("comment") or e.get("users") or e.get("tags"))
+    """No label left and nothing decided about the file (the entry can go)."""
+    return not (e.get("star") or e.get("project") or e.get("comment") or e.get("users") or e.get("tags")
+                or e.get("accepted"))
 
 
 def _clean(label: str) -> str:
@@ -149,6 +150,9 @@ def merge(a: Dict[str, Any], b: Dict[str, Any], notes: Optional[List[str]] = Non
     del history[:-50]                                  # the latest 50 are enough to look back
     for key in ("id", "name", "created"):
         out[key] = out.get(key) or b.get(key)
+    accepted = sorted(set(a.get("accepted") or []) | set(b.get("accepted") or []))
+    if accepted:                                       # "the same measurement", decided on either side
+        out["accepted"] = accepted
     return out
 
 

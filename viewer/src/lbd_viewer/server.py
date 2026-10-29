@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import getpass
 import json
 import logging
 import math
@@ -43,6 +44,7 @@ from lbd.plot.units import prefix_scale  # noqa: E402
 from . import VERSION  # noqa: E402
 from . import files, images, scan, sdk  # noqa: E402
 from .catalog import Catalog, catalog_dir, fitting, structure  # noqa: E402
+from . import labels, library_labels  # noqa: E402
 from .library import LibraryIndex  # noqa: E402
 from . import reading  # noqa: E402
 from .explore import ExploreClosed, ExploreError, ExploreSession, Sessions  # noqa: E402
@@ -215,6 +217,36 @@ class PathBody(_Body):
 class RenameBody(_Body):
     path: str
     name: str
+
+
+class LabelsBody(_Body):
+    paths: List[str]
+    star: Optional[bool] = None
+    project: Optional[str] = None            # "" removes it
+    comment: Optional[str] = None
+    add_tags: List[str] = []
+    remove_tags: List[str] = []
+    add_users: List[str] = []
+    remove_users: List[str] = []
+
+
+class ResolveBody(_Body):
+    path: str
+    action: str                              # "new_id", "same" or "trash"
+
+
+class DuplicateBody(_Body):
+    path: str
+    labels: bool = True
+
+
+class PathsBody(_Body):
+    paths: List[str]
+
+
+class MissingBody(_Body):
+    entry: Dict[str, Any]
+    path: Optional[str] = None               # None: discard the labels
 
 
 class RenderBody(_Body):
@@ -677,7 +709,7 @@ def create_app(state: AppState) -> FastAPI:
             "version": VERSION, "lbd_version": lbd.FORMAT_VERSION,
             "roots": s["roots"], "default_style": s["default_style"], "styles": names,
             "open_files_in": s["open_files_in"], "open_data_in": s["open_data_in"], "theme": s["theme"],
-            "library": s["library"], "platform": sys.platform, "config_dir": str(cfg.dir), "warnings": problems + warns,
+            "library": s["library"], "login": getpass.getuser(), "platform": sys.platform, "config_dir": str(cfg.dir), "warnings": problems + warns,
         }
 
     @app.post("/api/open")
@@ -746,18 +778,23 @@ def create_app(state: AppState) -> FastAPI:
     @app.get("/api/library/list")
     def library_list(folder: Optional[str] = Query(None), q: str = Query(""), date: str = Query(""),
                      sort: str = Query("date"), order: str = Query("desc"), offset: int = Query(0),
-                     limit: int = Query(200)):
+                     limit: int = Query(200), project: str = Query(""), tags: List[str] = Query([]),
+                     users: List[str] = Query([]), starred: bool = Query(False), conflicts: bool = Query(False)):
         """One page of the data files under `folder` (absent: every open folder) whose text has
-        all the words of `q`, made on `date` ("2026", "2026-03", "2026-03-14"), sorted."""
+        all the words of `q`, made on `date` ("2026", "2026-03", "2026-03-14"), with the labels
+        chosen (`project` and its sub-projects; any of `tags`; any of `users`; `starred`; only
+        `conflicts`), sorted."""
         try:
-            return state.library.list(_library_folder(folder), q, date, sort, order, offset, limit)
+            return state.library.list(_library_folder(folder), q, date, sort, order, offset, limit,
+                                      project, tags, users, starred, conflicts)
         except ValueError as e:
             raise HTTPException(400, str(e))
 
     @app.get("/api/library/facets")
-    def library_facets(folder: Optional[str] = Query(None), q: str = Query("")):
-        """The date tree (with counts) of the files listed, and the open folders' tree with counts."""
-        return state.library.facets(_library_folder(folder), q)
+    def library_facets(folder: Optional[str] = Query(None), q: str = Query(""), date: str = Query("")):
+        """The date tree (with counts) of the files listed, the open folders' tree with counts, and
+        the project / users / tags trees, starred, conflicts and missing counts."""
+        return state.library.facets(_library_folder(folder), q, date)
 
     @app.get("/api/library/file")
     def library_file(path: str = Query(...)):
@@ -768,6 +805,75 @@ def create_app(state: AppState) -> FastAPI:
         with collect_warnings() as warns:
             summary = state.library.file(str(p))
         return {**summary, "warnings": warns}
+
+    def _labels_follow(action) -> None:
+        """Labels follow a file LBD renamed or recycled (when the Library is in use)."""
+        if state._library is None:
+            return
+        try:
+            state.library.notes += action(state.library)
+        except labels.LabelsError as e:
+            state.library.notes.append(str(e))
+        state.library.wake()
+
+    def _labels_call(action):
+        try:
+            return action()
+        except labels.LabelsError as e:
+            raise HTTPException(409, str(e))
+
+    @app.post("/api/library/labels")
+    def library_labels_set(body: LabelsBody):
+        """Change the labels of these files (and of their identical copies): star, project
+        ("" removes it), comment, tags and users added or removed."""
+        paths = [str(state.check_allowed(p)) for p in body.paths]
+        changes: Dict[str, Any] = {k: v for k, v in body.model_dump().items() if k != "paths" and v not in (None, [])}
+        if "project" in changes and changes["project"] == "":
+            changes["project"] = None
+        return {"notes": _labels_call(lambda: library_labels.set_labels(state.library, paths, changes))}
+
+    @app.post("/api/library/resolve")
+    def library_resolve(body: ResolveBody):
+        """Two files share an id but differ: make this one a new measurement (writes a new id into
+        it, after the user confirmed), say they are the same measurement, or recycle this one."""
+        p = str(state.check_allowed(body.path))
+        if body.action == "new_id":
+            notes = _labels_call(lambda: library_labels.new_measurement(state.library, p))
+        elif body.action == "same":
+            notes = _labels_call(lambda: library_labels.same_measurement(state.library, p))
+        elif body.action == "trash":
+            trash_file(PathBody(path=p))
+            state.library.scan()
+            notes = []
+        else:
+            raise HTTPException(400, "action must be new_id, same or trash")
+        return {"notes": notes}
+
+    @app.post("/api/library/duplicate")
+    def library_duplicate(body: DuplicateBody):
+        """Copy a file next to it as a new measurement (a new id; the original isn't touched)."""
+        p = str(state.check_allowed(body.path))
+        path, notes = _labels_call(lambda: library_labels.duplicate(state.library, p, body.labels))
+        return {"path": path, "notes": notes}
+
+    @app.post("/api/library/give-ids")
+    def library_give_ids(body: PathsBody):
+        """Write an id into these files, which have none (the user asked)."""
+        paths = [str(state.check_allowed(p)) for p in body.paths]
+        return {"notes": _labels_call(lambda: library_labels.give_ids(state.library, paths))}
+
+    @app.get("/api/library/missing")
+    def library_missing():
+        """Labels whose file can't be found (renamed, moved or deleted outside LBD)."""
+        return {"missing": state.library.missing}
+
+    @app.post("/api/library/missing")
+    def library_missing_resolve(body: MissingBody):
+        """Point missing labels to a file (`path`), or discard them (no path)."""
+        path = str(state.check_allowed(body.path)) if body.path else None
+        if body.entry.get("folder"):
+            state.check_allowed(body.entry["folder"])
+        return {"notes": _labels_call(lambda: library_labels.resolve_missing(state.library, body.entry, path))}
 
     @app.get("/api/library/same")
     def library_same(path: str = Query(...)):
@@ -781,7 +887,8 @@ def create_app(state: AppState) -> FastAPI:
         a new one means the list changed."""
         lib = state.library
         lib.last_request = time.monotonic()
-        return {**lib.status, "generation": lib.generation}
+        notes, lib.notes = lib.notes, []                  # told once
+        return {**lib.status, "generation": lib.generation, "notes": notes}
 
     @app.get("/api/search")
     def search(root: str = Query(...), q: str = Query("")):
@@ -1200,6 +1307,7 @@ def create_app(state: AppState) -> FastAPI:
         if _key(p) in state.opened:  # a file opened by double-click stays readable
             state.opened.add(_key(new))
         state.catalog.renamed(str(p), str(new))       # its remembered Explore view follows it
+        _labels_follow(lambda lib: library_labels.renamed(lib, str(p), str(new)))
         state.pages.broadcast("renamed", old=str(p), new=str(new))
         return {"path": str(new)}
 
@@ -1210,6 +1318,11 @@ def create_app(state: AppState) -> FastAPI:
             state.pages.check_unlocked(str(p))
         except PageError as e:
             raise HTTPException(409, str(e))
+        ident = None
+        try:
+            ident = lbd.info(p).id if p.suffix.lower() == ".lbd" else None
+        except Exception:                             # unreadable: no id to look for
+            pass
         try:
             files.trash(p)
         except files.FileActionError as e:
@@ -1219,6 +1332,7 @@ def create_app(state: AppState) -> FastAPI:
         except OSError as e:
             raise HTTPException(500, str(e))
         state.pages.broadcast("trashed", path=str(p))
+        _labels_follow(lambda lib: library_labels.trashed(lib, str(p), ident))
         return {"ok": True}
 
     # -- pages: the browser tabs showing the viewer (the rules are in pages.py)
