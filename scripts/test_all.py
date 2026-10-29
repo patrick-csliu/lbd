@@ -135,7 +135,8 @@ def main(argv=None) -> int:
             missing = _e2e_missing()
             if missing:
                 return ("skipped", missing)
-            r = run([sys.executable, "-m", "pytest", "-q", "viewer/tests/e2e"], REPO)
+            # short tracebacks: a failure's reason fits in the lines shown below the summary
+            r = run([sys.executable, "-m", "pytest", "-q", "--tb=short", "viewer/tests/e2e"], REPO)
             return ("passed" if r.returncode == 0 else "FAILED", r.stdout + r.stderr)
 
         record("Viewer in a browser (e2e)", viewer_e2e)

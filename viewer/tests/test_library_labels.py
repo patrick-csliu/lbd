@@ -150,6 +150,15 @@ def test_files_without_id_are_followed_then_listed_as_missing(tmp_path):
     assert row(ix, "found.lbd")["tags"] == ["no id"] and ix.missing == []
 
 
+def test_a_file_that_lost_its_id_keeps_its_labels(lib):
+    ix, a, b = lib
+    ll.set_labels(ix, [str(a / "one.lbd")], {"add_tags": ["kept"]})
+    with h5py.File(a / "one.lbd", "a") as f:                         # saved again by an older program
+        del f.attrs["id"]
+    ix.scan()
+    assert row(ix, "one.lbd")["tags"] == ["kept"] and ix.missing == []
+
+
 def test_give_ids_and_renames_and_trash_in_lbd(tmp_path):
     a = tmp_path / "A"
     make(a, "old.lbd", ident=False)

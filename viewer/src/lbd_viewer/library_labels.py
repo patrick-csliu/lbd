@@ -88,6 +88,8 @@ def apply(ix: "LibraryIndex", renames: Optional[Dict[str, str]] = None) -> List[
                             give(r, e)
                 elif everywhere:                           # moved to another open folder
                     moves.append((folder, e, everywhere[0]))
+                elif (same := by_path.get(str(Path(folder) / e.get("name", "")))) and not same["id"]:
+                    give(same, e)                          # its id was lost (saved by an older program)
                 else:
                     missing.append({"folder": folder, **_brief(e)})
             else:
