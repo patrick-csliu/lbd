@@ -1,6 +1,6 @@
 """A mock library of .lbd files for the Library workspace (plan 8a) and its tests.
 
-    uv run python viewer/tests/mock_library.py FOLDER [N]
+    uv run python viewer/tests/mock_library.py FOLDER [N] [--labels]
 
 writes about N files (default 300) into two folders under FOLDER, as two "open folders" of the
 viewer would be: `Lab data/` sorted by date (`YYYY/MM/DD/`) and `Shared/` sorted by project.
@@ -12,6 +12,7 @@ Small arrays, so 10 000 files are written in a minute or so. A fixed random seed
 library every time.
 """
 
+import json
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -130,9 +131,84 @@ def write_library(folder: Path, n: int = 300) -> Dict[str, List[Path]]:
     return out
 
 
+
+def add_labels(folder: Path) -> Dict[str, Path]:
+    """Organise a mock library written by write_library (plan 8b): labels in the folders' label
+    files (stars, nested projects, users and tags, comments), an identical copy, a copy changed
+    after copying (a conflict), a sync conflict copy of a label file, files without an id, and
+    labels whose file is gone (missing). Returns the special files by name."""
+    import random
+    import shutil
+
+    import h5py
+
+    from lbd_viewer import labels
+
+    folder = Path(folder)
+    rng = random.Random(8)
+    files = sorted(p for p in folder.rglob("*.lbd") if "broken" not in p.name)
+    tags = ["resonator", "flux/bias", "flux/sweet spot", "calibration", "good"]
+    users = ["Lab A/Qubit team/Patrick", "Lab A/Qubit team/Alice", "Lab B/Bob"]
+    by_folder: Dict[Path, List[Path]] = {}
+    for p in files:
+        by_folder.setdefault(p.parent, []).append(p)
+    for k, (where, members) in enumerate(sorted(by_folder.items())):
+        def change(doc, members=members):
+            for p in members:
+                if rng.random() < 0.4:
+                    continue
+                info = lbd.info(p)
+                e = labels.new_entry(info.id, p.name, info.created)
+                labels.apply(e, {"star": rng.random() < 0.2,
+                                 "project": f"{PROJECTS[rng.randrange(len(PROJECTS))]}/Device {rng.randrange(1, 4)}",
+                                 "add_users": rng.sample(users, rng.randrange(1, 3)),
+                                 "add_tags": rng.sample(tags, rng.randrange(0, 3)),
+                                 "comment": rng.choice(["", "", "punch-out at -20 dBm", "redo with more averages"])})
+                doc["files"].append(e)
+        labels.update(where, change)
+    special: Dict[str, Path] = {}
+    backup = folder / "Shared" / "Backup"
+    backup.mkdir(parents=True, exist_ok=True)
+    original = files[0]
+    special["copy"] = backup / original.name
+    shutil.copy2(original, special["copy"])                         # an identical copy
+    edited = files[1]
+    special["conflict"] = backup / edited.name
+    shutil.copy2(edited, special["conflict"])
+    d = lbd.load(special["conflict"])
+    d.description = d.description + " (edited after copying)"
+    d.save(special["conflict"])                                     # same place: same id, other content
+    for p in files[-3:]:                                            # written before format 1.1
+        with h5py.File(p, "a") as f:
+            if "id" in f.attrs:
+                del f.attrs["id"]
+            f.attrs["lbd_version"] = "1.0"
+        special.setdefault("no_id", p)
+    gone = files[2]                                                 # labelled, then deleted: missing
+    def label_gone(doc):
+        info = lbd.info(gone)
+        e = labels.find(doc, info.id, gone.name) or labels.new_entry(info.id, gone.name, info.created)
+        if e not in doc["files"]:
+            doc["files"].append(e)
+        labels.apply(e, {"add_tags": ["lost"], "comment": "this file was deleted outside LBD"})
+    labels.update(gone.parent, label_gone)
+    gone.unlink()
+    special["missing"] = gone
+    side = folder / "Shared" / PROJECTS[0] / labels.SIDECAR       # a sync tool's conflict copy
+    if side.exists():
+        doc = json.loads(side.read_text(encoding="utf-8"))
+        for e in doc["files"][:1]:
+            labels.apply(e, {"add_tags": ["from the laptop"]}, "2099-01-01T00:00:00.000Z", "LAPTOP")
+        (side.parent / ".lbd-library_LAPTOP_Oct-29-140513-2026_Conflict.json").write_text(json.dumps(doc), encoding="utf-8")
+    return special
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         sys.exit(__doc__)
     written = write_library(Path(sys.argv[1]), int(sys.argv[2]) if len(sys.argv) > 2 else 300)
     for root, paths in written.items():
         print(f"{root}: {len(paths)} files")
+    if "--labels" in sys.argv:
+        for what, path in add_labels(Path(sys.argv[1])).items():
+            print(f"{what}: {path}")

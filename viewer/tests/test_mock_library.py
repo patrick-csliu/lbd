@@ -23,3 +23,17 @@ def test_the_mock_library(tmp_path):
     for p in written["Lab data"][:20]:
         created = datetime.fromisoformat(lbd.info(p).created)
         assert p.parent.relative_to(tmp_path / "Lab data").as_posix() == created.strftime("%Y/%m/%d")
+
+
+def test_the_mock_library_with_labels(tmp_path):
+    from lbd_viewer import labels
+
+    mock_library.write_library(tmp_path, 60)
+    special = mock_library.add_labels(tmp_path)
+    sidecars = list(tmp_path.rglob(labels.SIDECAR))
+    assert sidecars and any(e["tags"] for s in sidecars for e in labels.read(s.parent)["files"])
+    ids = [lbd.info(p).id for p in tmp_path.rglob("*.lbd") if "broken" not in p.name]
+    assert ids.count(lbd.info(special["copy"]).id) == 2                 # the copy and its original
+    assert ids.count(lbd.info(special["conflict"]).id) == 2              # changed after copying
+    assert not special["missing"].exists() and lbd.info(special["no_id"]).id is None
+    assert list(tmp_path.rglob(".lbd-library_LAPTOP_*_Conflict.json"))

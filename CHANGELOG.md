@@ -30,6 +30,17 @@ The file format has its own version (`lbd_version`, currently 1.0).
 
 **Viewer**
 
+- **Labels in the Library:** a star, a project, users and tags (all nested, like
+  `Qubit A/Device 3`) and a comment, set on one file or many at once (Space stars), filtered
+  on the left and searched. Kept in a small label file in each folder: data files are never
+  changed for a label, and labels travel with the folder; edits from two computers are merged
+  without losing anything, and sync conflict copies are merged and recycled.
+- **The same measurement in two places:** identical copies share their labels; files renamed or
+  moved outside LBD keep them (labels that lose their file are listed as Missing); copies that
+  differ are shown side by side, explained in plain words, and the user chooses: make one a new
+  measurement, keep them as the same, or recycle one. **Duplicate as new measurement** makes a
+  separate copy without touching the original.
+
 - **Explore**: zoom with the wheel (around the mouse), drag a box, pan with the right or middle
   button, double-click for everything; click a point or cell to read its stored value. Curves or
   maps, the values, axes, one curve per …, complex modes and sliders, typed limits, log scales,
