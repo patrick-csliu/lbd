@@ -138,6 +138,12 @@ class Axis:
     grows : bool
         An axis of unknown length (`add_axis(..., grows=True)`): [`write`][lbd.Dataset.write]
         adds its points. Not stored in the file (a saved file has the points written).
+    group : str or None
+        The axis group it belongs to (format 2.0), `None` for a fixed axis. An axis in a group
+        holds one entry per point of its level: `data` is each point's coordinate.
+    parent : numpy.ndarray or None
+        For an axis in a group below its first: for each point, the index (from 0) of the
+        point it belongs to in the level above. `None` for a fixed axis and a group's first.
     """
 
     name: str
@@ -147,9 +153,29 @@ class Axis:
     elements: Optional[List[str]] = None
     role: Optional[str] = None
     grows: bool = False
+    group: Optional[str] = None
+    parent: Optional[np.ndarray] = None
 
     def __len__(self) -> int:
         return len(self.data)
+
+
+@dataclass
+class Group:
+    """An axis group (format 2.0): axes whose points are listed together, outer to inner, for a
+    sweep whose inner points depend on the outer ones (B chosen per A). Only measured points
+    are stored, level by level: see [`Axis`][lbd.Axis] `group` and `parent`.
+
+    Attributes
+    ----------
+    name : str
+        Group name, e.g. `"scan"`.
+    order : list of str
+        Its axes, outer to inner (the order they were added in).
+    """
+
+    name: str
+    order: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -207,10 +233,93 @@ class Value:
     measured: Optional[np.ndarray] = None
     # how the file names and labels the data point's dimensions (axes with role "point")
     _point: List[Axis] = field(default_factory=list, repr=False, compare=False)
+    # the dataset it belongs to (for coords, rows, to_dense)
+    _owner: Optional["Dataset"] = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if not self.dims:
             self.dims = [(a,) for a in self.axes]
+
+    def coords(self) -> Dict[str, np.ndarray]:
+        """Each point's coordinates: one array per axis, along its dimension of `data`.
+
+        For a fixed axis, its coordinates (`d.axes[name].data`); for the points of an axis
+        group, every point's coordinate on each axis down to it (following `parent`). A copy.
+
+        Examples
+        --------
+        >>> f.coords()      # f on a group A → B: {"A": [1, 2, 2, 3, 3, 3], "B": [10, 10, 20, 15, 25, 35]}
+        >>> plt.scatter(c["A"], c["B"], c=f.data)
+        """
+        from . import groups
+
+        return groups.coords(self._dataset(), self)
+
+    def rows(self, by: str) -> Iterator[tuple]:
+        """The value row by row: one row per point of `by`'s level (per position of a fixed
+        axis `by`), as `(key, row)`. The key is the coordinate, or the coordinates down to `by`
+        as a tuple; the row is an `lbd.Dataset` with what lies inside it (a copy).
+
+        Examples
+        --------
+        >>> for a, row in f.rows(by="A"):
+        ...     plt.plot(row.axes["B"].data, row.values["f"].data, label=f"A = {a}")
+        """
+        from . import groups
+
+        return groups.rows(self._dataset(), self, by)
+
+    def to_dense(self, round: Optional[int] = None, rtol: Optional[float] = None,
+                 atol: Optional[float] = None, limit: Optional[int] = 10 ** 8) -> "Dataset":
+        """The value as a full rectangle: an `lbd.Dataset` with fixed axes only.
+
+        A group stores only the measured points ("sparse"); this places them in the full
+        rectangle ("dense"), like scipy's `toarray()` or pandas / xarray `unstack`. Each axis's
+        ticks are the sorted distinct coordinates of this value's points; cells not measured
+        hold `NaN` (for integers and booleans 0 / False, with `measured` marking the measured
+        cells). It doesn't interpolate, and it is always a copy. For fixed axes only, it is a
+        copy of the value with its axes.
+
+        Parameters
+        ----------
+        round : int, optional
+            Round coordinates to this many decimals (as `np.round`) before making the ticks:
+            merges coordinates that differ only by rounding (`0.1 + 0.2` and `0.3`).
+        rtol, atol : float, optional
+            Merge coordinates as `np.isclose` would (`|a − b| <= atol + rtol·|b|`): sorted, a
+            coordinate close to the first of the current tick joins it; the tick is their mean.
+            Only what is given is used (`rtol=1e-9` alone has `atol=0`). Not with `round`.
+        limit : int or None, optional
+            Refuse a rectangle of more cells (default 10**8); `None`: no limit.
+
+        Raises
+        ------
+        LBDError
+            Too many cells; two points in one cell after merging (a result would be lost);
+            `round` together with `rtol` / `atol`.
+
+        Warns
+        -----
+        LBDWarning
+            Coordinates that differ only by rounding became separate ticks (no option given).
+        """
+        from . import groups
+
+        return groups.to_dense(self._dataset(), self, round=round, rtol=rtol, atol=atol, limit=limit)
+
+    def _dataset(self) -> "Dataset":
+        d = self._owner
+        if d is None or d.values.get(self.name) is not self:
+            raise LBDError(f"value '{self.name}' isn't part of a dataset (any more); use the dataset's form, "
+                           f"e.g. d.to_dense('{self.name}')")
+        return d
+
+    def _read(self, selection: Any = ()) -> np.ndarray:
+        """Part of the data, the one way LBD reads a value's data (a file read lazily reads
+        only this part)."""
+        if self.data is None:
+            raise LBDError(f"value '{self.name}' was not loaded; load the file without `values=`")
+        return np.asarray(self.data)[selection]
 
 
 class Dataset:
@@ -237,7 +346,10 @@ class Dataset:
     title, description : str
         Editable text.
     axes : dict of str to Axis
-        Axes by name. Add with `add_axis`.
+        Sweep axes by name (fixed axes, and the axes of axis groups). Add with `add_axis`.
+    groups : dict of str to Group
+        Axis groups by name (format 2.0): sweeps whose inner points depend on the outer ones.
+        Add with `add_group`.
     values : dict of str to Value
         Values by name. Add with `add_value`.
     meta : dict
@@ -301,6 +413,7 @@ class Dataset:
         self.writer: Optional[str] = None
         self.lbd_version: str = _GRID_VERSION
         self.axes: Dict[str, Axis] = {}
+        self.groups: Dict[str, Group] = {}
         self.values: Dict[str, Value] = {}
         self.meta: Dict[str, Any] = {}
         self.plot: Optional[Dict[str, Any]] = None
@@ -311,6 +424,8 @@ class Dataset:
         self._id: Optional[str] = None
         self._parent_id: Optional[str] = None
         self._placeholders: Optional[set] = None   # lbd.Writer: names of values whose data is in the file
+        self._room: Dict[Any, np.ndarray] = {}     # buffers with room for arrays that grow (groups.grown)
+        self._lookups: Dict[str, Any] = {}         # each group level's points by coordinate (groups.lookup)
 
     @property
     def id(self) -> Optional[str]:
@@ -335,8 +450,35 @@ class Dataset:
 
     # ---- building -------------------------------------------------------
 
+    def add_group(self, name: str) -> Group:
+        """Add an axis group (format 2.0): a sweep whose inner points depend on the outer ones,
+        e.g. B chosen per A, a different number of B for each A, adaptive points.
+
+        Add its axes next, outer to inner, with `add_axis(name, group=...)`; their points come
+        with [`write`][lbd.Dataset.write] (only measured points are stored). A file with a
+        group is format 2.0, which LBD older than 1.3 can't read; use fixed axes when every
+        combination of the axes is planned.
+
+        Raises
+        ------
+        LBDError
+            Invalid or already used name.
+
+        Examples
+        --------
+        >>> d.add_group("scan")
+        >>> d.add_axis("power", group="scan", unit="dBm")
+        >>> d.add_axis("freq", group="scan", unit="Hz")     # frequencies chosen per power
+        >>> d.add_value("S21", axes=["power", "freq"], dtype="complex128")
+        """
+        self._check_new_name(name)
+        group = Group(name)
+        self.groups[name] = group
+        return group
+
     def add_axis(self, name: str, data: Any = None, unit: str = "", label: Optional[str] = None,
-                 elements: Optional[Sequence[str]] = None, grows: bool = False) -> Axis:
+                 elements: Optional[Sequence[str]] = None, grows: bool = False,
+                 group: Optional[str] = None) -> Axis:
         """Add a 1-D axis: the coordinates of one swept quantity.
 
         Add every axis before the values that use it.
@@ -362,6 +504,10 @@ class Dataset:
             An axis of unknown length (a log, "until I stop it"): give no `data`;
             [`write`][lbd.Dataset.write] adds its points (`d.write(time=t, T=x)`). It must be the
             first axis of the values on it.
+        group : str, optional
+            Make it an axis of this axis group (`add_group`), after the group's axes added so
+            far (outer to inner). Give no `data`: [`write`][lbd.Dataset.write] adds its points,
+            by coordinate.
 
         Returns
         -------
@@ -393,6 +539,18 @@ class Dataset:
         self._check_new_name(name)
         unit = _check_text(unit, "unit")
         label = name if label is None else _check_text(label, "label")
+        if group is not None:
+            if group not in self.groups:
+                raise LBDError(f"axis '{name}': there is no group '{group}'; add it first with add_group('{group}')")
+            if data is not None or elements is not None or grows:
+                raise LBDError(f"axis '{name}' is in group '{group}': give no data, elements or grows; write adds "
+                               "its points by coordinate")
+            g = self.groups[group]
+            axis = Axis(name, np.empty(0, dtype=np.int64), unit=unit, label=label, group=group,
+                        parent=None if not g.order else np.empty(0, dtype=np.int64))
+            g.order.append(name)
+            self.axes[name] = axis
+            return axis
         if grows:
             if data is not None or elements is not None:
                 raise LBDError(f"axis '{name}' grows: give no data or elements; write adds its points")
@@ -449,10 +607,13 @@ class Dataset:
             value is filled later by [`write`][lbd.Dataset.write] — every point starts as `NaN`
             (not measured yet), or for integers and booleans as 0 with `measured` False.
         axes : str or sequence of str, optional
-            One axis name per dimension of `data` (before the data point's dimensions), in
-            order: a list (`["power", "freq"]`), one name (`"freq"`), a comma-separated string
-            (`"power,freq"`), or `None` for a scalar. The axes must already exist, each may
-            appear once, and each dimension's size must equal its axis length.
+            The axes the value depends on, outer to inner: a list (`["power", "freq"]`), one
+            name (`"freq"`), a comma-separated string (`"power,freq"`), or `None` for a scalar.
+            A fixed axis is one dimension of `data`. Axes of an axis group are one dimension
+            together, the points of their level: the group's first axes in its order
+            (`["A", "B"]` of a group A → B → C: one entry per (A, B) point), or the group's
+            name for all of them. Each dimension's size must equal its axis length (its
+            level's number of points).
         unit : str, optional
             Unit, `""` for dimensionless.
         label : str, optional
@@ -508,18 +669,18 @@ class Dataset:
         label = name if label is None else _check_text(label, "label")
         if not isinstance(dtype, str):
             raise TypeError(f"dtype must be a string such as 'float32' or 'auto', not {type(dtype).__name__}")
-        axes_list = _axes_argument(axes)
+        from . import groups
+
+        dims = groups.dimensions(self, _axes_argument(axes), f"value '{name}'")
+        axes_list = [a for dim in dims for a in dim]
         point = _check_shape(shape, name)
         measured = None
         placeholder = None
         if data is None:                      # filled later by write: "not measured yet"
-            for ax in axes_list:
-                if ax not in self.axes:
-                    raise LBDError(f"value '{name}': axis '{ax}' does not exist; add it with add_axis first")
             kind = "float64" if dtype == "auto" else dtype
             if kind not in _ALLOWED_DTYPES:
                 raise LBDError(f"value '{name}': unknown dtype {dtype!r}; use one of {', '.join(_ALLOWED_DTYPES)}")
-            full = tuple(len(self.axes[a]) for a in axes_list) + point
+            full = tuple(groups.dim_length(self, dim) for dim in dims) + point
             fill = np.nan if kind.startswith(("float", "complex")) else 0
             if kind not in ("float32", "float64", "complex64", "complex128"):
                 measured = np.zeros(full, dtype=bool)
@@ -530,37 +691,37 @@ class Dataset:
                 data = np.full(full, fill, dtype=kind)
             dtype = "auto"
         arr = placeholder if placeholder is not None else _coerce_value(data, dtype, name)
-        if len(axes_list) + len(point) != arr.ndim:
-            if len(axes_list) < arr.ndim and not point:
+        nd = len(dims)
+        shown = [",".join(dim) if len(dim) > 1 else dim[0] for dim in dims]
+        if nd + len(point) != arr.ndim:
+            if nd < arr.ndim and not point:
                 raise LBDError(
-                    f"value '{name}' has {arr.ndim} dimension(s) but {len(axes_list)} axes were given: "
-                    f"{axes_list}; if each data point holds several numbers, say so with "
-                    f"shape={tuple(arr.shape[len(axes_list):])}")
+                    f"value '{name}' has {arr.ndim} dimension(s) but {nd} were given: {shown}; if each data "
+                    f"point holds several numbers, say so with shape={tuple(arr.shape[nd:])}")
             raise LBDError(
-                f"value '{name}' has {arr.ndim} dimension(s) {tuple(arr.shape)}, but its axes {axes_list} "
-                f"and shape={point} make {len(axes_list) + len(point)}")
-        if len(set(axes_list)) != len(axes_list):
-            raise LBDError(f"value '{name}': an axis appears more than once in {axes_list}")
-        growing = [a for a in axes_list if a in self.axes and self.axes[a].grows]
-        if growing and axes_list[0] != growing[0] or len(growing) > 1:
+                f"value '{name}' has {arr.ndim} dimension(s) {tuple(arr.shape)}, but its axes {shown} "
+                f"and shape={point} make {nd + len(point)}")
+        growing = [dim[0] for dim in dims if self.axes[dim[0]].grows]
+        if growing and dims[0][0] != growing[0] or len(growing) > 1:
             raise LBDError(f"value '{name}': a growing axis must be its first axis, and only one "
                            f"(here {axes_list}, growing {growing})")
-        for i, ax in enumerate(axes_list):
-            if ax not in self.axes:
-                raise LBDError(f"value '{name}': axis '{ax}' does not exist; add it with add_axis first")
-            if len(self.axes[ax]) != arr.shape[i]:
+        for i, dim in enumerate(dims):
+            n = groups.dim_length(self, dim)
+            if n != arr.shape[i]:
                 hint = (f"; the value's axes come first, then the data point (e.g. use `.T`)"
                         if point and arr.shape[-len(point):] != point else "")
-                raise LBDError(
-                    f"value '{name}': dimension {i} has size {arr.shape[i]} "
-                    f"but axis '{ax}' has length {len(self.axes[ax])}{hint}"
-                )
-        if point and tuple(arr.shape[len(axes_list):]) != point:
-            raise LBDError(f"value '{name}': its data points have shape {tuple(arr.shape[len(axes_list):])}, "
+                if groups.is_group_dim(self, dim):
+                    what = f"the level {shown[i]} of group '{self.axes[dim[0]].group}' has {n} points"
+                else:
+                    what = f"axis '{dim[0]}' has length {n}"
+                raise LBDError(f"value '{name}': dimension {i} has size {arr.shape[i]} but {what}{hint}")
+        if point and tuple(arr.shape[nd:]) != point:
+            raise LBDError(f"value '{name}': its data points have shape {tuple(arr.shape[nd:])}, "
                            f"not shape={point}")
         named = _value_elements(elements, point, name)
         value = Value(name, arr, axes_list, unit=unit, label=label, shape=arr.shape, dtype=str(arr.dtype),
-                      point_shape=point, elements=named, measured=measured)
+                      dims=dims, point_shape=point, elements=named, measured=measured)
+        value._owner = self
         value._point = _point_axes(value)
         for p in value._point:
             if p.name in self.axes or p.name in self.values or p.name in self._point_names():
@@ -571,7 +732,7 @@ class Dataset:
             self._placeholders.add(name)
         return value
 
-    def write(self, names: Optional[Mapping[str, Any]] = None, **more: Any) -> None:
+    def write(self, names: Optional[Mapping[str, Any]] = None, *, parent: Any = None, **more: Any) -> Any:
         """Put measured data into values made by `add_value`: a point, a trace, a whole map, or
         several values at once, at the place the axes say.
 
@@ -581,32 +742,66 @@ class Dataset:
         - a **fixed axis**: an index (`power=3`), or one of its elements (`state="excited"`);
         - a **growing axis** (`add_axis(..., grows=True)`): its coordinate (`time=12.5`), or an
           array of them, adding as many points;
-        - a **value**: its data, shaped as the value's axes that weren't given (and its data
-          point), in order: a point is one number, a trace at `power=3` of `S21[power, freq]`
-          is one number per frequency.
+        - an **axis of a group** (`add_axis(..., group=...)`): its coordinate, or an array of
+          them for several points. The group's axes are given outer first (`A=3, B=25`); the
+          same coordinates are the same point (found, or added). Coordinates are compared
+          exactly; a new point that differs from one already there only by rounding gives a
+          warning;
+        - a **value**: its data, shaped as the value's dimensions that weren't given (and its
+          data point, always whole), in order: a point is one number, a trace at `power=3` of
+          `S21[power, freq]` is one number per frequency; n points of a group, n entries.
 
         Writing again to the same place replaces the data there.
+
+        Parameters
+        ----------
+        parent : int or array of int, optional
+            Instead of the outer coordinates: the index of the outer point, as an earlier
+            `write` returned it (`i = d.write(A=3)`, then `d.write(parent=i, B=25, f=x)`). No
+            lookup, and exact even when coordinates are computed with rounding.
+
+        Returns
+        -------
+        int, numpy.ndarray, dict or None
+            When axes of a group are given: the index of the point at the deepest level given
+            (an array for several points), for `parent=`. With several groups, a dict by
+            group name. `None` when no group is involved.
 
         Raises
         ------
         LBDError
-            An unknown name; no value given; a position out of range or an unknown element; a
-            position for an axis a value doesn't lie on; a growing axis without its coordinate;
-            data of another shape than the place needs (the message says which); complex data for
-            a real value, or numbers an integer or boolean value can't hold exactly.
+            An unknown name; no value (and no group point) given; a position out of range or an
+            unknown element; a position for an axis a value doesn't lie on; a growing axis
+            without its coordinate; an inner axis of a group without its outer ones (or
+            `parent=`); NaN or inf as a coordinate; data of another shape than the place needs
+            (the message says which); complex data for a real value, or numbers an integer or
+            boolean value can't hold exactly.
+
+        Warns
+        -----
+        LBDWarning
+            A new point's coordinate differs from one already there (under the same outer
+            point) only by rounding, e.g. 0.30000000000000004 next to 0.3.
 
         Examples
         --------
         >>> d.write(power=i, S21=trace)                    # a trace
         >>> d.write(power=i, freq=j, S21=z, T=t)           # a point, and T at power i
         >>> d.write(time=12.5, T=4.2)                      # a row of a growing axis
+        >>> d.write(A=3, B=[15, 25, 35], f=[x1, x2, x3])   # 3 points of a group A → B
+        >>> i = d.write(A=3)                               # an outer point, then under it:
+        >>> d.write(parent=i, B=25, f=x)
         """
-        plan = self._plan_write(names, more)
+        plan = self._plan_write(names, more, parent)
         self._apply_write(plan)
+        return plan["result"]
 
-    def _plan_write(self, names: Optional[Mapping[str, Any]], more: Mapping[str, Any]) -> Dict[str, Any]:
+    def _plan_write(self, names: Optional[Mapping[str, Any]], more: Mapping[str, Any],
+                    parent: Any = None) -> Dict[str, Any]:
         """Check a write against the dataset's shapes; returns what to put where (data not
-        needed: `lbd.Writer` uses the same plan)."""
+        needed: `lbd.Writer` uses the same plan). Nothing is changed."""
+        from . import groups
+
         given: Dict[str, Any] = {}
         if names is not None:
             if not isinstance(names, Mapping):
@@ -620,9 +815,14 @@ class Dataset:
         if unknown:
             raise LBDError(f"write: no axis or value named {unknown}; axes: {list(self.axes)}, values: {list(self.values)}")
         values = {k: v for k, v in given.items() if k in self.values}
-        if not values:
-            raise LBDError("write: give at least one value with its data, e.g. write(power=3, S21=trace)")
         positions = {k: v for k, v in given.items() if k in self.axes}
+        in_groups = {a: x for a, x in positions.items() if self.axes[a].group is not None}
+        if not values and not in_groups:
+            raise LBDError("write: give at least one value with its data, e.g. write(power=3, S21=trace)")
+        if parent is not None and not in_groups:
+            raise LBDError("write: parent= names an outer point of a group; give the next axes of that group with it, "
+                           "e.g. write(parent=i, B=25, f=x)")
+        points = groups.plan_points(self, in_groups, parent) if in_groups else {}
         growing = [a for a in positions if self.axes[a].grows]
         if len(growing) > 1:
             raise LBDError(f"write: one growing axis at a time, not {growing}")
@@ -635,7 +835,7 @@ class Dataset:
             grow = (g, coords)
         index_of: Dict[str, int] = {}
         for a, x in positions.items():
-            if self.axes[a].grows:
+            if self.axes[a].grows or a in in_groups:
                 continue
             index_of[a] = self._position(a, x)
         puts = []
@@ -645,9 +845,22 @@ class Dataset:
                 if a not in v.axes:
                     raise LBDError(f"write: '{name}' doesn't lie on '{a}' (its axes: {v.axes})")
             index, shape = [], []
-            for a in v.axes:
+            for dim in v.dims:
+                a = dim[0]
                 ax = self.axes[a]
-                if ax.grows:
+                if groups.is_group_dim(self, dim):
+                    p = points.get(ax.group)
+                    if p is None:                          # every point of the level
+                        index.append(slice(None))
+                        shape.append(groups.dim_length(self, dim))
+                        continue
+                    if p["depth"] != dim[-1]:
+                        missing = list(dim[dim.index(p["depth"]) + 1:])
+                        raise LBDError(f"write: '{name}' lies on the points of {', '.join(dim)}: give {missing} too")
+                    index.append(p["index"])
+                    if p["n"] is not None:
+                        shape.append(p["n"])
+                elif ax.grows:
                     if grow is None or grow[0] != a:
                         raise LBDError(f"write: '{name}' lies on the growing axis '{a}': give its coordinate "
                                        f"({a}=…), which adds a point")
@@ -667,13 +880,21 @@ class Dataset:
             arr = np.asarray(data)
             if arr.shape != tuple(shape) and not (arr.size == 1 and shape == []):
                 given_axes = [a for a in v.axes if a in positions]
-                left = [a for a in v.axes if a not in index_of and not self.axes[a].grows]
+                left = [",".join(dim) for dim in v.dims if not any(a in positions for a in dim)
+                        or (groups.is_group_dim(self, dim) and points.get(self.axes[dim[0]].group, {}).get("n"))]
                 left += [f"a data point of shape {v.point_shape}"] if v.point_shape else []
                 raise LBDError(f"write: '{name}' at {given_axes or 'every place'} needs data of shape {tuple(shape)} "
                                f"({', '.join(left) or 'one number'}), not {arr.shape}")
             puts.append((name, tuple(index), _check_fits(arr.reshape(shape) if arr.size == 1 and shape == [] else arr,
                                                          v.dtype, name)))
-        return {"grow": grow, "puts": puts}
+        levels = [(a, np.asarray(cs), None if self.axes[a].parent is None else np.asarray(ps, dtype=np.int64))
+                  for p in points.values() for a, cs, ps in p["new"]]
+        result = None
+        if len(points) == 1:
+            result = next(iter(points.values()))["index"]
+        elif points:
+            result = {g: p["index"] for g, p in points.items()}
+        return {"grow": grow, "levels": levels, "puts": puts, "result": result}
 
     def _position(self, axis: str, x: Any) -> int:
         """An index of a fixed axis, from an index or one of its elements."""
@@ -692,23 +913,32 @@ class Dataset:
         return int(x) % n
 
     def _apply_write(self, plan: Dict[str, Any]) -> None:
+        from . import groups
+
         if plan["grow"] is not None:
             g, coords = plan["grow"]
-            n = max(coords.size, 1)
+            k = max(coords.size, 1)
             ax = self.axes[g]
-            ax.data = np.concatenate([ax.data, np.atleast_1d(coords)]) if ax.data.size else np.atleast_1d(coords).copy()
-            for v in self.values.values():
-                if v.axes and v.axes[0] == g:
-                    if v.data is None:
-                        raise LBDError(f"write: value '{v.name}' was not loaded")
-                    pad = np.full((n,) + v.data.shape[1:], np.nan, dtype=v.data.dtype) \
-                        if v.data.dtype.kind in "fc" else np.zeros((n,) + v.data.shape[1:], dtype=v.data.dtype)
-                    if v.data.dtype.kind not in "fc" and v.measured is None:
-                        v.measured = np.ones(v.data.shape, dtype=bool)
-                    v.data = np.concatenate([v.data, pad])
-                    if v.measured is not None:
-                        v.measured = np.concatenate([v.measured, np.zeros((n,) + v.measured.shape[1:], dtype=bool)])
-                    v.shape = v.data.shape
+            ax.data = groups.grown(self, ("axis", g), np.asarray(ax.data), 0, k, np.atleast_1d(coords), coords.dtype)
+            self._extend_values(g, k)
+        near = []
+        for a, coords, parents in plan.get("levels", ()):
+            ax = self.axes[a]
+            start, k = len(ax.data), len(coords)
+            lk = self._lookups.get(a)
+            ax.data = groups.grown(self, ("axis", a), np.asarray(ax.data), 0, k, coords, coords.dtype)
+            if parents is not None:
+                ax.parent = groups.grown(self, ("parent", a), np.asarray(ax.parent), 0, k, parents)
+            if lk is not None and lk.n == start:
+                for i, (c, p) in enumerate(zip(coords.tolist(), [-1] * k if parents is None else parents.tolist())):
+                    other = lk.add(p, float(c), start + i)
+                    if other is not None and coords.dtype.kind == "f":
+                        near.append((a, c, other))
+            self._extend_values(a, k)
+        if near:
+            shown = "; ".join(f"{a} = {c!r} is a new point next to {o!r}" for a, c, o in near[:3])
+            _warn(f"write: {shown}{' …' if len(near) > 3 else ''}. Coordinates are compared exactly: round the "
+                  "coordinate, or write with parent= (the index write returned)")
         for name, index, arr in plan["puts"]:
             v = self.values[name]
             if v.data is None:
@@ -717,16 +947,56 @@ class Dataset:
             if v.measured is not None:
                 v.measured[index] = True
 
+    def _extend_values(self, axis: str, k: int) -> None:
+        """`k` points were added to `axis` (a growing axis, or a group's level): every value on
+        it grows along that dimension, the new points not measured (NaN, or a `measured` mask)."""
+        from . import groups
+
+        for v in self.values.values():
+            for pos, dim in enumerate(v.dims):
+                if dim[-1] != axis:
+                    continue
+                if v.data is None:
+                    raise LBDError(f"write: value '{v.name}' was not loaded")
+                if not v.dtype.startswith(("float", "complex")) and v.measured is None:
+                    v.measured = np.ones(np.shape(v.data), dtype=bool)
+                v.data = groups.grown(self, ("value", v.name), np.asarray(v.data), pos, k, groups.fill_for(v.dtype))
+                if v.measured is not None:
+                    v.measured = groups.grown(self, ("measured", v.name), np.asarray(v.measured), pos, k, False)
+                v.shape = v.data.shape
+
     def _check_new_name(self, name: str) -> None:
         _check_name(name)
-        if name in self.axes or name in self.values:
-            raise LBDError(f"name '{name}' is already used by an axis or value")
+        if name in self.axes or name in self.values or name in self.groups:
+            raise LBDError(f"name '{name}' is already used by an axis, group or value")
         if name in self._point_names():
             raise LBDError(f"name '{name}' is used in the file for a dimension of a value's data points")
 
     def _point_names(self) -> set:
         """The names the file gives the dimensions of the values' data points."""
         return {p.name for v in self.values.values() for p in v._point}
+
+    # ---- reading values on groups -----------------------------------------
+
+    def coords(self, value: str) -> Dict[str, np.ndarray]:
+        """Each point's coordinates of a value: as [`Value.coords`][lbd.Value.coords]."""
+        return self._value(value).coords()
+
+    def rows(self, value: str, by: str) -> Iterator[tuple]:
+        """A value row by row: as [`Value.rows`][lbd.Value.rows]."""
+        return self._value(value).rows(by)
+
+    def to_dense(self, value: str, round: Optional[int] = None, rtol: Optional[float] = None,
+                 atol: Optional[float] = None, limit: Optional[int] = 10 ** 8) -> "Dataset":
+        """A value as a full rectangle: as [`Value.to_dense`][lbd.Value.to_dense]."""
+        return self._value(value).to_dense(round=round, rtol=rtol, atol=atol, limit=limit)
+
+    def _value(self, name: str) -> Value:
+        if name not in self.values:
+            raise KeyError(f"no value named {name!r}; values: {list(self.values)}")
+        v = self.values[name]
+        v._owner = self
+        return v
 
     # ---- access ---------------------------------------------------------
 
@@ -742,8 +1012,11 @@ class Dataset:
 
     def __repr__(self) -> str:
         lines = [f"<lbd.Dataset {self.title!r}>"]
+        for g in self.groups.values():
+            lines.append(f"  group {g.name}: {' → '.join(g.order)}")
         for a in self.axes.values():
-            lines.append(f"  axis  {a.name}[{len(a)}] {a.unit}".rstrip())
+            where = f" (group {a.group})" if a.group else ""
+            lines.append(f"  axis  {a.name}[{len(a)}]{where} {a.unit}".rstrip())
         for v in self.values.values():
             dims = ",".join(v.axes)
             point = f" point {v.point_shape}" if v.point_shape else ""
@@ -858,6 +1131,9 @@ class Dataset:
                 if live:
                     continue
                 raise LBDError(f"the growing axis '{key}' has no points yet; write some before saving")
+            if a.group is not None:
+                self._check_group_axis(key, a, arr)
+                continue
             if arr.ndim != 1 or arr.size == 0 or arr.dtype.kind not in "iuf":
                 raise LBDError(f"axis '{key}' must hold 1-D, non-empty real numbers; got {arr.dtype} {arr.shape}")
             if arr.dtype.kind == "f" and not np.all(np.isfinite(arr)):
@@ -867,6 +1143,17 @@ class Dataset:
             if a.role is not None:
                 raise LBDError(f"axis '{key}' has role {a.role!r}; the axes of a dataset are sweep axes (None): "
                                "a value describes its data points with shape= (point_shape)")
+        for key, g in self.groups.items():
+            if not isinstance(g, Group) or g.name != key:
+                raise LBDError(f"groups['{key}'] must be an lbd.Group named '{key}'")
+            _check_name(key)
+            if key in self.axes or key in self.values:
+                raise LBDError(f"'{key}' is used by a group and an axis or value")
+            for a in g.order:
+                if a not in self.axes or self.axes[a].group != key:
+                    raise LBDError(f"group '{key}' lists '{a}', which isn't an axis of that group")
+        from . import groups
+
         shared: Dict[str, Axis] = {}          # data-point dimensions by their name in the file
         for key, v in self.values.items():
             if not isinstance(v, Value):
@@ -884,19 +1171,20 @@ class Dataset:
             if arr.dtype.kind not in "biufc" or                     str(_normalize_dtype(np.empty(0, arr.dtype), key, quiet=True).dtype) not in _ALLOWED_DTYPES:
                 raise LBDError(f"value '{key}' has unsupported dtype {arr.dtype}")
             point = tuple(v.point_shape)
-            if len(v.axes) + len(point) != arr.ndim or len(set(v.axes)) != len(v.axes):
-                raise LBDError(f"value '{key}' has {arr.ndim} dimension(s) but axes={v.axes}"
-                               + (f" and point_shape={point}" if point else ""))
-            if list(v.dims) != [(a,) for a in v.axes]:
-                raise LBDError(f"value '{key}': dims={v.dims} doesn't match its axes {v.axes}")
-            for i, ax in enumerate(v.axes):
-                if ax not in self.axes:
-                    raise LBDError(f"value '{key}' refers to missing axis '{ax}'")
-                if len(self.axes[ax]) != arr.shape[i]:
+            dims = groups.dimensions(self, list(v.axes), f"value '{key}'")
+            if [tuple(dim) for dim in v.dims] != dims:
+                raise LBDError(f"value '{key}': dims={v.dims} doesn't match its axes {v.axes} (they make {dims})")
+            if len(dims) + len(point) != arr.ndim:
+                raise LBDError(f"value '{key}' has {arr.ndim} dimension(s) but its axes make {len(dims)}"
+                               + (f" and point_shape={point} {len(point)} more" if point else ""))
+            for i, dim in enumerate(dims):
+                n = groups.dim_length(self, dim)
+                if n != arr.shape[i]:
                     raise LBDError(f"value '{key}': dimension {i} has size {arr.shape[i]} "
-                                   f"but axis '{ax}' has length {len(self.axes[ax])}")
-            if point and tuple(arr.shape[len(v.axes):]) != point:
-                raise LBDError(f"value '{key}': its data points have shape {tuple(arr.shape[len(v.axes):])}, "
+                                   f"but {'the level ' + ','.join(dim) if len(dim) > 1 or self.axes[dim[0]].group else 'axis ' + dim[0]} "
+                                   f"has {n} points")
+            if point and tuple(arr.shape[len(dims):]) != point:
+                raise LBDError(f"value '{key}': its data points have shape {tuple(arr.shape[len(dims):])}, "
                                f"but point_shape={point}")
             if len(v.elements) != len(point):
                 raise LBDError(f"value '{key}': elements must have one entry per dimension of a data point "
@@ -916,6 +1204,31 @@ class Dataset:
                 raise LBDError(f"value '{key}': its measured mask has shape {np.shape(v.measured)}, not {arr.shape}")
         if not isinstance(self.meta, Mapping):
             raise LBDError(f"meta must be a dict, not {type(self.meta).__name__}")
+
+    def _check_group_axis(self, key: str, a: Axis, arr: np.ndarray) -> None:
+        """An axis of a group: in its group's order, one coordinate per point (finite real
+        numbers, none yet allowed), and below the first level, a valid parent for each."""
+        g = self.groups.get(a.group)
+        if g is None or key not in g.order:
+            raise LBDError(f"axis '{key}' says it is in group '{a.group}', which doesn't list it")
+        if arr.ndim != 1 or arr.dtype.kind not in "iuf":
+            raise LBDError(f"axis '{key}' must hold 1-D real numbers; got {arr.dtype} {arr.shape}")
+        if arr.dtype.kind == "f" and not np.all(np.isfinite(arr)):
+            raise LBDError(f"axis '{key}' contains NaN or inf")
+        if a.elements is not None or a.grows:
+            raise LBDError(f"axis '{key}' is in group '{a.group}': it has no elements and doesn't grow")
+        k = g.order.index(key)
+        if k == 0:
+            if a.parent is not None:
+                raise LBDError(f"axis '{key}' is the first of group '{a.group}': its parent must be None")
+            return
+        par = np.asarray(a.parent) if a.parent is not None else None
+        above = len(self.axes[g.order[k - 1]].data)
+        if par is None or par.shape != arr.shape or par.dtype.kind not in "iu":
+            raise LBDError(f"axis '{key}' needs one parent index (an integer) per point; got "
+                           f"{None if par is None else (par.dtype, par.shape)} for {arr.size} points")
+        if par.size and (par.min() < 0 or par.max() >= above):
+            raise LBDError(f"axis '{key}': a parent index is outside '{g.order[k - 1]}' (0 … {above - 1})")
 
     def _write(self, f: h5py.File, compression: Optional[str], created: str, writer: str,
                plot_json: Optional[str], style_json: Optional[str], style_name: Optional[str],
@@ -937,6 +1250,16 @@ class Dataset:
                 ds.attrs.create("elements", np.array(a.elements, dtype=object), dtype=_STR_DTYPE)
             if a.role is not None:
                 ds.attrs["role"] = a.role
+        for g in self.groups.values():                # axis groups (spec §1.8), level by level
+            gg = g_axes.create_group(g.name)
+            gg.attrs["order"] = ",".join(g.order)
+            for k, name in enumerate(g.order):
+                a = self.axes[name]
+                ds = _create_dataset(gg, name, _normalize_dtype(np.asarray(a.data), name), compression)
+                ds.attrs["unit"] = a.unit
+                ds.attrs["label"] = a.label
+                if k:
+                    _create_dataset(gg, name + "._parent", np.asarray(a.parent, dtype=np.int64), compression)
 
         g_values = f.create_group("values")
         for v in self.values.values():
@@ -1228,19 +1551,92 @@ def _open(path: Path, mode: str, swmr: bool = False) -> h5py.File:
 
 
 def _read_structure(f: h5py.File, path: Path, writing: bool) -> tuple:
-    """Everything but the values' data: the header, every axis whole (axes are small next to
-    the data), and each value described (shape, type, axes). `load` and `info` read files
-    through it; the values' data is read afterwards."""
+    """Everything but the values' data: the header, every axis and group whole (axes are small
+    next to the data), and each value described (shape, type, dimensions). `load` and `info`
+    read files through it; the values' data is read afterwards."""
     d = _read_header(f, path)
     for group in ("axes", "values"):
         if not isinstance(f.get(group), h5py.Group):
             raise LBDError(f"{path.name} has no /{group} group; it breaks the LBD format")
-    for name, ds in f["axes"].items():
-        d.axes[name] = _read_axis(name, ds, path)
+    for name, obj in f["axes"].items():
+        if isinstance(obj, h5py.Group):
+            _read_group(d, name, obj, path)
+        else:
+            d.axes[name] = _read_axis(name, obj, path)
     described = {name: _describe_value(name, ds, path) for name, ds in f["values"].items()}
-    if writing:                     # a growing axis and its values may be caught mid-write
-        _same_lengths(d.axes, described)
+    for v in described.values():
+        v._owner = d
+    _resolve_dims(d, described, path)
+    if writing:                     # a growing axis, a group's levels and their values may be caught mid-write
+        _same_lengths(d, described)
     return d, described
+
+
+def _read_group(d: Dataset, name: str, grp: h5py.Group, path: Path) -> None:
+    """An axis group (spec §1.8): its axes, level by level, with each point's parent."""
+    _check_loaded_name(name, path)
+    if name in d.axes:
+        raise LBDError(f"{path.name}: '{name}' is used by an axis and a group")
+    if "order" not in grp.attrs:
+        raise LBDError(f"{path.name}: the axis group '{name}' has no 'order' attribute; it breaks the LBD format")
+    order = _axes_list(_attr_str(grp, "order", "", path))
+    if not order or len(set(order)) != len(order):
+        raise LBDError(f"{path.name}: the axis group '{name}' has an invalid order {order}")
+    for k, a in enumerate(order):
+        if a in d.axes or a in d.groups:
+            raise LBDError(f"{path.name}: '{a}' (in group '{name}') is used twice")
+        ax = _read_axis(a, grp.get(a), path, f"/axes/{name}/{a}", in_group=True)
+        ax.group = name
+        if k:
+            raw = grp.get(a + "._parent")
+            if not isinstance(raw, h5py.Dataset):
+                raise LBDError(f"{path.name}: axis '{a}' of group '{name}' has no '{a}._parent'; it breaks the LBD format")
+            par = np.asarray(raw[()])
+            if par.ndim != 1 or par.dtype.kind not in "iu":
+                raise LBDError(f"{path.name}: '{a}._parent' must be 1-D integers, got {par.dtype} {par.shape}")
+            ax.parent = par.astype(np.int64)
+        d.axes[a] = ax
+    d.groups[name] = Group(name, order)
+
+
+def _resolve_dims(d: Dataset, values: Dict[str, Value], path: Path) -> None:
+    """Each value's axes as the file lists them → its dimensions: the last ones with role
+    "point" are its data point's (they move from `d.axes` to the value), the others are sweep
+    dimensions (a fixed axis, or a group's level)."""
+    from . import groups
+
+    trailing: Dict[str, int] = {}
+    for v in values.values():
+        names = list(v.axes)
+        k = len(names)
+        while k > 0 and names[k - 1] in d.axes and d.axes[names[k - 1]].role == "point":
+            k -= 1
+        for a in names[k:]:
+            trailing[a] = trailing.get(a, 0) + 1
+        try:
+            dims = groups.dimensions(d, names[:k], f"value '{v.name}'")
+        except LBDError as e:
+            raise LBDError(f"{path.name}: {e}") from None
+        if len(dims) + len(names) - k != len(v.shape):
+            raise LBDError(f"{path.name}: value '{v.name}' has {len(v.shape)} dimension(s) but axes={names}")
+        v._point = [copy.copy(d.axes[a]) for a in names[k:]]
+        v.axes = [a for dim in dims for a in dim]
+        v.dims = dims
+        v.point_shape = tuple(v.shape[len(dims):])
+        v.elements = [p.elements for p in v._point]
+    for name, a in list(d.axes.items()):
+        if a.role != "point":
+            continue
+        swept = [v.name for v in values.values() if name in v.axes]
+        if trailing.get(name) and swept:
+            raise LBDError(f"{path.name}: axis '{name}' is a dimension of a data point of some values and a "
+                           f"sweep axis of {swept}; it can't be both")
+        if trailing.get(name):
+            del d.axes[name]
+        else:
+            a.role = None
+            _warn(f"{path.name}: axis '{name}' is marked as a dimension of a data point (role 'point') "
+                  "but no value's data point uses it; it is read as a sweep axis")
 
 
 def _read_header(f: h5py.File, path: Path) -> Dataset:
@@ -1292,17 +1688,22 @@ def _check_version(ver: str, path: Path) -> None:
 
 def _version_needed(d: "Dataset") -> str:
     """The lowest format version that holds `d`'s content (spec §6): 1.2 without an axis group."""
-    return _GRID_VERSION
+    return FORMAT_VERSION if d.groups else _GRID_VERSION
 
 
-def _read_axis(name: str, ds: Any, path: Path) -> Axis:
+def _read_axis(name: str, ds: Any, path: Path, where: Optional[str] = None, in_group: bool = False) -> Axis:
+    where = where or f"/axes/{name}"
     if not isinstance(ds, h5py.Dataset):
-        raise LBDError(f"{path.name}: /axes/{name} is not a dataset")
+        raise LBDError(f"{path.name}: {where} is not a dataset" if ds is not None else f"{path.name}: {where} is missing")
     _check_loaded_name(name, path)
     data = np.asarray(ds[()])
     if data.ndim != 1 or data.dtype.kind not in "iuf":
         raise LBDError(f"{path.name}: axis '{name}' must be 1-D real numbers, got {data.dtype} {data.shape}")
     axis = Axis(name, data, unit=_attr_str(ds, "unit", "", path), label=_attr_str(ds, "label", name, path))
+    if in_group:
+        if "elements" in ds.attrs or "role" in ds.attrs:
+            _warn(f"{path.name}: axis '{name}' is in a group, where elements and role aren't used; they are ignored")
+        return axis
     if "elements" in ds.attrs:
         raw = _attr_to_python(ds.attrs["elements"], path)
         if isinstance(raw, str):                       # one text, written as a single string
@@ -1352,16 +1753,39 @@ def _bool_flag(ds: h5py.Dataset, name: str, path: Path) -> bool:
     return raw == 1
 
 
-def _same_lengths(axes: Dict[str, Axis], values: Dict[str, Value]) -> None:
-    """In a file being written, cut each axis and the values on it to the length all of them
+def _same_lengths(d: Dataset, values: Dict[str, Value]) -> None:
+    """In a file being written, keep what is complete: each group level's points up to the
+    shortest of its coordinates and parents and up to the first point whose parent isn't
+    there yet, and each axis (or level) and the values along it cut to the length all of them
     have reached (the writer extends them one after the other)."""
-    for a, axis in axes.items():
-        n = min([len(axis)] + [v.shape[i] for v in values.values() for i, x in enumerate(v.axes)
-                               if x == a and i < len(v.shape)])
-        if n < len(axis):
-            axis.data = axis.data[:n]
-        for v in values.values():
-            v.shape = tuple(min(k, n) if i < len(v.axes) and v.axes[i] == a else k for i, k in enumerate(v.shape))
+    changed = True
+    while changed:
+        changed = False
+        for g in d.groups.values():
+            above = None
+            for name in g.order:
+                ax = d.axes[name]
+                n = len(ax.data) if ax.parent is None else min(len(ax.data), len(ax.parent))
+                if ax.parent is not None:
+                    late = np.flatnonzero(np.asarray(ax.parent[:n]) >= above)
+                    n = int(late[0]) if late.size else n
+                if n < len(ax.data) or (ax.parent is not None and n < len(ax.parent)):
+                    ax.data = ax.data[:n]
+                    ax.parent = None if ax.parent is None else ax.parent[:n]
+                    changed = True
+                above = n
+        for a, axis in d.axes.items():
+            along = [v.shape[i] for v in values.values() for i, dim in enumerate(v.dims)
+                     if dim[-1] == a and i < len(v.shape)]
+            n = min([len(axis)] + along)
+            if n < len(axis):
+                axis.data = axis.data[:n]
+                if axis.parent is not None:
+                    axis.parent = axis.parent[:n]
+                changed = True
+            for v in values.values():
+                v.shape = tuple(min(k, n) if i < len(v.dims) and v.dims[i][-1] == a else k
+                                for i, k in enumerate(v.shape))
 
 
 def _read_value_data(ds: h5py.Dataset, v: Value, path: Path, part: tuple = ()) -> np.ndarray:
@@ -1375,45 +1799,36 @@ def _read_value_data(ds: h5py.Dataset, v: Value, path: Path, part: tuple = ()) -
 
 
 def _validate_loaded(d: Dataset, path: Path) -> None:
+    from . import groups
+
+    for g in d.groups.values():
+        above = None
+        for k, name in enumerate(g.order):
+            ax = d.axes[name]
+            if ax.data.dtype.kind == "f" and not np.all(np.isfinite(ax.data)):
+                raise LBDError(f"{path.name}: axis '{name}' of group '{g.name}' contains NaN or inf")
+            if k:
+                par = ax.parent
+                if len(par) != len(ax.data):
+                    raise LBDError(f"{path.name}: '{name}._parent' has {len(par)} entries for {len(ax.data)} points")
+                if par.size and (par.min() < 0 or par.max() >= above):
+                    raise LBDError(f"{path.name}: '{name}._parent' points outside '{g.order[k - 1]}' "
+                                   f"(0 … {above - 1})")
+            keys = np.stack([np.zeros(len(ax.data)) if ax.parent is None else ax.parent.astype(float),
+                             ax.data.astype(float)], axis=1) if len(ax.data) else np.zeros((0, 2))
+            if len(np.unique(keys, axis=0)) != len(keys):
+                _warn(f"{path.name}: group '{g.name}' has the same point twice on level '{name}' "
+                      "(same coordinate under the same outer point); both are kept")
+            above = len(ax.data)
     for v in d.values.values():
-        if v.name in d.axes:
-            raise LBDError(f"{path.name}: '{v.name}' is used by an axis and a value")
-        if len(v.axes) != len(v.shape):
-            raise LBDError(f"{path.name}: value '{v.name}' has {len(v.shape)} dimension(s) but axes={v.axes}")
-        for i, ax in enumerate(v.axes):
-            if ax not in d.axes:
-                raise LBDError(f"{path.name}: value '{v.name}' refers to missing axis '{ax}'")
-            if len(d.axes[ax]) != v.shape[i]:
-                raise LBDError(
-                    f"{path.name}: value '{v.name}': dimension {i} has size {v.shape[i]} but axis '{ax}' "
-                    f"has length {len(d.axes[ax])}"
-                )
-    # a data point's dimensions are a value's last axes with role "point": they move to the value
-    trailing: Dict[str, int] = {}
-    for v in d.values.values():
-        k = len(v.axes)
-        while k > 0 and d.axes[v.axes[k - 1]].role == "point":
-            k -= 1
-        for a in v.axes[k:]:
-            trailing[a] = trailing.get(a, 0) + 1
-        v._point = [copy.copy(d.axes[a]) for a in v.axes[k:]]
-        v.axes = v.axes[:k]
-        v.dims = [(a,) for a in v.axes]
-        v.point_shape = tuple(v.shape[k:])
-        v.elements = [p.elements for p in v._point]
-    for name, a in list(d.axes.items()):
-        if a.role != "point":
-            continue
-        swept = [v.name for v in d.values.values() if name in v.axes]
-        if trailing.get(name) and swept:
-            raise LBDError(f"{path.name}: axis '{name}' is a dimension of a data point of some values and a "
-                           f"sweep axis of {swept}; it can't be both")
-        if trailing.get(name):
-            del d.axes[name]
-        else:
-            a.role = None
-            _warn(f"{path.name}: axis '{name}' is marked as a dimension of a data point (role 'point') "
-                  "but no value's data point uses it; it is read as a sweep axis")
+        if v.name in d.axes or v.name in d.groups:
+            raise LBDError(f"{path.name}: '{v.name}' is used by an {'axis' if v.name in d.axes else 'group'} and a value")
+        for i, dim in enumerate(v.dims):
+            n = groups.dim_length(d, dim)
+            if n != v.shape[i]:
+                what = f"the level {','.join(dim)} has {n} points" if groups.is_group_dim(d, dim) \
+                    else f"axis '{dim[0]}' has length {n}"
+                raise LBDError(f"{path.name}: value '{v.name}': dimension {i} has size {v.shape[i]} but {what}")
 
 
 def _point_axes(v: Value) -> List[Axis]:
@@ -1439,7 +1854,7 @@ def _dim_names(v: Value) -> List[str]:
 def _file_axes(d: Dataset) -> List[Axis]:
     """Every axis the file stores: the sweep axes, then each value's data-point axes (once
     each: values read from another program's file may share one)."""
-    out = {a.name: a for a in d.axes.values()}
+    out = {a.name: a for a in d.axes.values() if a.group is None}
     for v in d.values.values():
         for p in _point_axes(v):
             out.setdefault(p.name, p)

@@ -12,8 +12,18 @@ are still written as 1.2).
   depend on the outer ones is stored as only its measured points, level by level. Writers
   write 2.0 only for a file with an axis group; **every other file is still written as 1.2**, so
   older LBD keeps reading it. LBD older than 1.3 refuses 2.0 files ("please update").
-  `lbd.version()` gives `"2.0"`, the newest format read and written. Writing and reading axis
-  groups comes in the next steps of this version.
+  `lbd.version()` gives `"2.0"`, the newest format read and written.
+
+- **Variable sweeps in Python** (`lbd`, format 2.0): `d.add_group("scan")`, then its axes outer
+  to inner with `add_axis(name, group="scan")`; values lie on a group's points
+  (`add_value("f", axes=["A", "B"])`). `write` takes a group axis's coordinate (the same
+  coordinates are the same point; a new point that differs from one already there only by
+  rounding is warned about) or `parent=` (the index an earlier `write` returned), and adds the
+  points. Reading: `v.coords()` (each point's coordinates), `v.rows(by="A")` (row by row, each
+  an `lbd.Dataset`) and `v.to_dense()` (the full rectangle, gaps `NaN`; `round=` or
+  `rtol=` / `atol=` merge coordinates that differ only by rounding; `limit=`), also as
+  `d.coords("f")`, `d.rows("f", by=...)`, `d.to_dense("f")`. MATLAB, Julia, `lbd.Writer` and
+  the viewer follow in this version.
 
 - **A value's `axes` are what was swept** (Python; MATLAB and Julia follow in this version).
   The dimensions of a data point (`shape=`) are no longer axes of the dataset: `d.axes` holds
