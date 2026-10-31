@@ -1046,6 +1046,9 @@ export function FileDetails({ info, metaFilter = false }: { info: FileInfo; meta
               <td>
                 {a.label}
                 {a.role === "point" && <span className="muted small"> (inside each data point)</span>}
+                {a.group && info.groups?.[a.group] && (
+                  <span className="muted small"> (variable sweep {info.groups[a.group].join(" → ")}: points, numbered)</span>
+                )}
               </td>
               <td>{a.unit}</td>
               <td className="num">{a.length}</td>

@@ -267,6 +267,8 @@ export interface AxisInfo {
   elements?: string[] | null;
   /** "point": an axis of a value's data point (format 1.2); null: a sweep axis */
   role?: string | null;
+  /** the axis group it is in (format 2.0): its points are listed with the group's other axes */
+  group?: string | null;
 }
 
 export interface ValueInfo {
@@ -304,6 +306,8 @@ export interface FileInfo {
   size: number | null;
   axes: AxisInfo[];
   values: ValueInfo[];
+  /** axis groups (format 2.0): their axes, outer to inner */
+  groups?: Record<string, string[]>;
   meta: JsonObject;
   plot: PlotSpec | null;
   style: JsonObject | null;

@@ -29,6 +29,7 @@ import sqlite3
 import sys
 import threading
 import time
+import warnings
 from concurrent.futures import Executor, Future, ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from pathlib import Path
@@ -37,7 +38,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set,
 import numpy as np
 
 import lbd
-from lbd.plot.render import flat
+from lbd.plot.render import RenderWarning, flat
 from lbd.plot.style import Style
 
 PREVIEW_SIZE = (640, 480)           # drawn as a 640×480 Explore panel (text in proportion), 4:3
@@ -102,14 +103,18 @@ def draw(path: Path, panels: Sequence[Panel], grid: Tuple[int, int], style: Styl
         x0, x1 = c * width // cols, (c + 1) * width // cols
         y0, y1 = r * height // rows, (r + 1) * height // rows
         try:
-            s = ExploreSession(Path(path), version, dict(panel.get("spec") or {}), style,
-                               x1 - x0, y1 - y0, PREVIEW_DPR, saved_view=saved_view)
-            try:
-                s.apply(panel.get("settings") or {})
-                view = panel.get("view") or {}
-                data, meta = s.render(view.get("xlim"), view.get("ylim"), panel.get("stat", "max"))
-            finally:
-                s.close()
+            # a preview is a picture: the notices about how a plot is drawn (e.g. a variable sweep
+            # against its point number) are shown when the file is opened, not on its thumbnail
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RenderWarning)
+                s = ExploreSession(Path(path), version, dict(panel.get("spec") or {}), style,
+                                   x1 - x0, y1 - y0, PREVIEW_DPR, saved_view=saved_view)
+                try:
+                    s.apply(panel.get("settings") or {})
+                    view = panel.get("view") or {}
+                    data, meta = s.render(view.get("xlim"), view.get("ylim"), panel.get("stat", "max"))
+                finally:
+                    s.close()
         except PreviewError:
             raise
         except Exception as e:                   # unreadable file, unplottable value …: in words

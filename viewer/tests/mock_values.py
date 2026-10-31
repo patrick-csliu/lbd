@@ -2,9 +2,10 @@
 
     uv run python viewer/tests/mock_values.py FOLDER [--small]
 
-writes six `.lbd` files into FOLDER. Each is made for a part of the panels: several recorded
+writes the `.lbd` files into FOLDER. Each is made for a part of the panels: several recorded
 values against one axis, 3-D maps with a slider, values over different axes, many values, one
-value (nothing changes), and single-shot I/Q readout. The tests use `small=True`: the same
+value (nothing changes), single-shot I/Q readout, data points with a shape, and variable sweeps
+(axis groups, format 2.0: frequencies chosen per power, a triangle, an adaptive map). The tests use `small=True`: the same
 structure with few points. Simulated data, with a fixed random seed, so the files are always the
 same.
 """
@@ -18,7 +19,8 @@ import numpy as np
 import lbd
 
 NAMES = ["6 rabi.lbd", "7 spectroscopy 3d.lbd", "8 mixed axes.lbd", "9 many values.lbd",
-         "10 one value.lbd", "11 single shot iq.lbd", "12 tomography.lbd"]
+         "10 one value.lbd", "11 single shot iq.lbd", "12 tomography.lbd", "13 variable sweep.lbd",
+         "14 triangle.lbd", "15 adaptive map.lbd"]
 
 
 def rabi(small: bool) -> lbd.Dataset:
@@ -167,7 +169,59 @@ def tomography(small: bool) -> lbd.Dataset:
     return d
 
 
-MAKERS = dict(zip(NAMES, [rabi, spectroscopy_3d, mixed_axes, many_values, one_value, single_shot_iq, tomography]))
+def variable_sweep(small: bool) -> lbd.Dataset:
+    """A resonator measured around its resonance (format 2.0): for each power, the frequencies
+    are chosen around where the resonance is at that power (a window that moves, with more
+    points at low power); Q is fitted once per power."""
+    rng = np.random.default_rng(13)
+    powers = np.linspace(-60, 0, 5 if small else 21)
+    d = lbd.Dataset(title="Variable sweep", description="Mock data: frequencies chosen per power (an axis group)")
+    d.add_group("scan")
+    d.add_axis("power", group="scan", unit="dBm", label="Power")
+    d.add_axis("freq", group="scan", unit="Hz", label="Frequency")
+    d.add_value("S21", axes=["power", "freq"], dtype="complex128")
+    d.add_value("Q", axes="power", label="Quality factor")
+    for p in powers:
+        f0 = 7e9 - 2e6 * 10 ** (p / 20)                                  # the resonance moves down at high power
+        n = (6 if small else 40) + int(-p / 10)                          # more points at low power
+        f = np.linspace(f0 - 3e6, f0 + 3e6, n)
+        s21 = 1 - 0.8 / (1 + 2j * (f - f0) / 0.6e6) + 0.01 * rng.normal(size=n)
+        d.write(power=p, freq=f, S21=s21)
+        d.write(power=p, Q=1e4 * (1 + 0.1 * rng.normal()))
+    return d
+
+
+def triangle(small: bool) -> lbd.Dataset:
+    """A triangle (format 2.0): A = 1 … n, and for each A, B = 1 … A."""
+    n = 5 if small else 40
+    d = lbd.Dataset(title="Triangle", description="Mock data: B = 1 … A (an axis group)")
+    d.add_group("tri")
+    d.add_axis("A", group="tri")
+    d.add_axis("B", group="tri")
+    d.add_value("S", axes=["A", "B"])
+    for a in range(1, n + 1):
+        b = np.arange(1, a + 1)
+        d.write(A=a, B=b, S=np.sin(a / 5) * np.cos(b / 5))
+    return d
+
+
+def adaptive_map(small: bool) -> lbd.Dataset:
+    """Points placed anywhere in a plane (format 2.0): adaptive sampling, denser near a peak."""
+    rng = np.random.default_rng(15)
+    n = 30 if small else 600
+    x = np.round(np.concatenate([rng.uniform(-1, 1, n // 2), rng.normal(0.3, 0.1, n - n // 2)]), 4)
+    y = np.round(np.concatenate([rng.uniform(-1, 1, n // 2), rng.normal(-0.2, 0.1, n - n // 2)]), 4)
+    d = lbd.Dataset(title="Adaptive map", description="Mock data: points anywhere (an axis group)")
+    d.add_group("xy")
+    d.add_axis("x", group="xy", unit="V")
+    d.add_axis("y", group="xy", unit="V")
+    d.add_value("z", axes=["x", "y"])
+    d.write(x=x, y=y, z=np.exp(-((x - 0.3) ** 2 + (y + 0.2) ** 2) / 0.05))
+    return d
+
+
+MAKERS = dict(zip(NAMES, [rabi, spectroscopy_3d, mixed_axes, many_values, one_value, single_shot_iq, tomography,
+                          variable_sweep, triangle, adaptive_map]))
 
 
 def write_all(folder: Path, small: bool = False) -> List[Path]:

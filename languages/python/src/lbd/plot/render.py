@@ -312,6 +312,11 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
         if unused_idx:
             _warn(f"index for {unused_idx} is ignored: those axes are drawn, not sliced", RenderWarning)
     out["index"], out["slices"] = _slices(d, [a for a in all_axes if a not in keep], index_in, spec)
+    variable = [a for a in all_axes if getattr(d.axes[a], "group", None) is not None]
+    if variable:
+        _warn(f"{_where(d)}{', '.join(variable)} {'is' if len(variable) == 1 else 'are'} part of a variable sweep "
+              "(an axis group): drawn against the point number for now; drawing variable sweeps against their "
+              "coordinates comes later", RenderWarning)
     return out
 
 

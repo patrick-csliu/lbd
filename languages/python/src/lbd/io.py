@@ -1894,6 +1894,8 @@ def _file_axes(d: Dataset) -> List[Axis]:
 def _flat_view(d: Dataset) -> Dataset:
     """`d` with one axis per dimension of every value, as the file lays it out (format 1.2):
     a data point's dimensions are axes with role "point", listed last in the value's `axes`.
+    A level of an axis group is one dimension: its axis (the level's last) is drawn against
+    the point number, 0 … n−1, for now (it keeps `group`, so drawing code can say so).
 
     For drawing code (`lbd.plot`, LBD Viewer), which handles every dimension as an axis. It
     shares the arrays with `d`; a flat view of a flat view is itself."""
@@ -1901,12 +1903,15 @@ def _flat_view(d: Dataset) -> Dataset:
         return d
     flat = copy.copy(d)
     flat.axes = dict(d.axes)
+    for name, a in d.axes.items():
+        if a.group is not None:
+            flat.axes[name] = Axis(name, np.arange(len(a.data)), label=f"{a.label} (point number)", group=a.group)
     flat.values = {}
     for name, v in d.values.items():
         pts = _point_axes(v)
         for p in pts:
             flat.axes.setdefault(p.name, p)
-        names = list(v.axes) + [p.name for p in pts]
+        names = [dim[-1] for dim in v.dims] + [p.name for p in pts]
         flat.values[name] = dataclasses.replace(v, axes=names, dims=[(a,) for a in names], _point=[])
     flat._flat = True
     return flat

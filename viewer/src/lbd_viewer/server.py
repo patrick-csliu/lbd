@@ -526,7 +526,7 @@ def file_summary(d: "lbd.Dataset") -> Dict[str, Any]:
         finite = data[np.isfinite(data)] if data.dtype.kind == "f" else data
         axes.append({
             "name": a.name, "unit": a.unit, "label": a.label, "length": int(data.size), "dtype": str(data.dtype),
-            "elements": a.elements, "role": a.role,
+            "elements": a.elements, "role": a.role, "group": a.group,
             "min": jsonable(finite.min()) if finite.size else None,
             "max": jsonable(finite.max()) if finite.size else None,
         })
@@ -544,6 +544,7 @@ def file_summary(d: "lbd.Dataset") -> Dict[str, Any]:
         "id": d.id, "parent_id": d.parent_id,
         "lbd_version": d.lbd_version, "size": stat.st_size if stat else None,
         "axes": axes, "values": values, "meta": jsonable(d.meta),
+        "groups": {g.name: list(g.order) for g in d.groups.values()},
         "plot": d.plot, "style": d.style, "style_name": d.style_name, "matplotlib": d.matplotlib,
         "version": file_version(d.path) if d.path else None,
         "writing": writing_status(str(d.path)) if d.path else None,

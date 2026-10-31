@@ -97,10 +97,19 @@ def row_from_summary(path: Path, root: str, st: os.stat_result, summary: Dict[st
     created = parse_created(summary.get("created"))
     if created:
         row["sort_time"], row["day"], row["date_from_file"] = created[0], created[1], 0
-    # the sweep: axes with more than one point that values lie on; not a data point's axes (format 1.2)
-    swept = [a for a in summary["axes"] if a["length"] > 1 and a.get("role") != "point"
-             and any(a["name"] in v["axes"] for v in summary["values"])]
-    points = math.prod(a["length"] for a in swept) if swept else 0
+    # the sweep: axes with more than one point that values lie on; not a data point's axes (format
+    # 1.2); a group's points count once, as many as its most points a value lies on (format 2.0)
+    used = [a for a in summary["axes"] if a.get("role") != "point" and any(a["name"] in v["axes"] for v in summary["values"])]
+    swept = [a for a in used if a["length"] > 1 and not a.get("group")]
+    groups = {}
+    for a in used:
+        if a.get("group"):
+            groups[a["group"]] = max(groups.get(a["group"], 0), a["length"])
+    parts = [str(a["length"]) for a in swept] + [f"{n} (variable)" for n in groups.values()]
+    points = math.prod([a["length"] for a in swept] + list(groups.values())) if parts else 0
+    sweep = "×".join(parts)
+    if groups and len(parts) == 1:
+        sweep = f"{next(iter(groups.values()))} points (variable)"
     values = summary["values"]
     words = [summary.get("title") or "", path.name, summary.get("description") or ""]
     for item in summary["axes"] + values:
@@ -110,7 +119,7 @@ def row_from_summary(path: Path, root: str, st: os.stat_result, summary: Dict[st
         "read": 1, "title": summary.get("title") or "", "description": summary.get("description") or "",
         "id": summary.get("id"), "parent_id": summary.get("parent_id"),
         "created": summary.get("created"), "writer": summary.get("writer"), "lbd_version": summary.get("lbd_version"),
-        "sweep": "×".join(str(a["length"]) for a in swept), "points": points,
+        "sweep": sweep, "points": points,
         "value_names": ", ".join(v["name"] for v in values),
         "searchable": "\n".join(w for w in words if w).lower(),
         "summary": json.dumps(summary),
