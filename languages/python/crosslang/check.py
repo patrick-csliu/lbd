@@ -45,6 +45,14 @@ def check(path: Path) -> None:
     assert d["T"].axes == ["a", "b", "c"]
     np.testing.assert_array_equal(d["T"].data, 100 * i + 10 * j + k)
     assert d["q"].axes == [] and float(d["q"].data) == 42.5
+    assert d["state"].elements == ["ground", "état 1", "量子"], d["state"].elements
+    np.testing.assert_array_equal(d["state"].data, [0, 1, 2])
+    np.testing.assert_array_equal(d["S"].data, [0.5, 1.5, 2.5])
+    assert d["C"].axes == ["a", "C_dim1", "C_dim2"] and d["C"].point_shape == (2, 2), d["C"].axes
+    assert d["C"].elements == [["I", "Q"], None], d["C"].elements
+    assert d["C_dim1"].role == "point" and d["C_dim2"].role == "point" and d["a"].role is None
+    r, c = np.ogrid[0:2, 0:2]
+    np.testing.assert_array_equal(d["C"].data, 100 * np.arange(3)[:, None, None] + 10 * r + c)
     m = d.meta
     assert m["sample"] == "chip – é"
     assert m["T_mK"] == 12

@@ -253,7 +253,7 @@ end
             write_attribute(f, "lbd_version", "2.0")
         end
         @test_throws LBDVersionError LBD.load(p)
-        @test LBD.version().lbd_version == "1.1"
+        @test LBD.version().lbd_version == "1.2"
     end
 
     @testset "robust reading" begin
@@ -279,6 +279,48 @@ end
             write_attribute(f["values"]["names"], "axes", "x")
         end
         @test_throws LBDError LBD.load(q)
+    end
+
+    @testset "elements of an axis (format 1.2)" begin
+        p = joinpath(dir, "elements.lbd")
+        d = Dataset("elements")
+        add_axis!(d, "state"; elements=["ground", "excited"], label="Prepared state")
+        add_axis!(d, "device", [1, 2, 5]; elements=["Q1", "état 1", "量子"])
+        add_axis!(d, "one", [7]; elements=["only"])
+        add_axis!(d, "t", range(0, 1, length=3))
+        add_value!(d, "I", zeros(2, 3), ["state", "t"])
+        LBD.save(p, d)
+        r = LBD.load(p)
+        @test r["state"].elements == ["ground", "excited"]
+        @test r["state"].data == [0, 1]
+        @test r["device"].elements == ["Q1", "état 1", "量子"]
+        @test r["one"].elements == ["only"]
+        @test r["t"].elements === nothing && r["t"].role === nothing
+        @test r.lbd_version == "1.2"
+        @test_throws LBDError add_axis!(d, "x", [0, 1]; elements=["a", "b", "c"])
+        @test_throws LBDError add_axis!(d, "y")
+    end
+
+    @testset "the shape of a data point (format 1.2)" begin
+        p = joinpath(dir, "shape.lbd")
+        d = Dataset("shape")
+        add_axis!(d, "amp", range(0, 0.5, length=4); unit="V")
+        b = reshape(collect(1.0:12.0), 4, 3)
+        v = add_value!(d, "bloch", b, "amp"; shape=(3,), elements=["x", "y", "z"])
+        @test v.axes == ["amp", "bloch_dim1"]
+        @test d.axes["bloch_dim1"].role == "point"
+        add_value!(d, "cov", zeros(4, 2, 2), "amp"; shape=(2, 2), elements=[["I", "Q"], nothing])
+        LBD.save(p, d)
+        r = LBD.load(p)
+        @test r["bloch"].data == b
+        @test r["bloch"].point_axes == ["bloch_dim1"]
+        @test LBD.point_shape(r["bloch"]) == (3,)
+        @test r["bloch"].elements == Any[["x", "y", "z"]]
+        @test r["cov"].elements == Any[["I", "Q"], nothing]
+        @test LBD.point_shape(LBD.info(p)["cov"]) == (2, 2)
+        @test_throws LBDError add_value!(d, "r", zeros(4, 3), "amp")              # the shape must be said
+        @test_throws LBDError add_value!(d, "r", zeros(3, 4), "amp"; shape=(3,)) # the axes come first
+        @test_throws LBDError add_value!(d, "r", zeros(4, 3), "amp"; shape=(3,), elements=["u", "v"])
     end
 
     @testset "reads Python-written examples" begin

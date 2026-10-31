@@ -30,7 +30,7 @@ def test_roundtrip_values_and_axes(tmp_path):
     assert r.title == "Resonator power sweep"
     assert r.description == "test"
     assert r.writer == f"python lbd {lbd.__version__}"
-    assert r.lbd_version == lbd.FORMAT_VERSION == "1.1"
+    assert r.lbd_version == lbd.FORMAT_VERSION == "1.2"
     assert r.created
     np.testing.assert_array_equal(r["power"].data, d["power"].data)
     assert r["freq"].unit == "Hz" and r["freq"].label == "Frequency"
@@ -61,7 +61,7 @@ def test_file_layout_matches_spec(tmp_path):
     p = make_sweep().save(tmp_path / "sweep.lbd")
     with h5py.File(p, "r") as f:
         assert f.attrs["lbd_format"] == "LBD"
-        assert f.attrs["lbd_version"] == "1.1"
+        assert f.attrs["lbd_version"] == "1.2"
         assert f["values/S21"].attrs["axes"] == "power,freq"
         # complex is stored as compound {r, i}
         t = f["values/S21"].id.get_type()
@@ -237,7 +237,7 @@ def test_fixed_length_strings_accepted(tmp_path):
 
 def test_version_function():
     v = lbd.version()
-    assert v["lbd_version"] == "1.1"
+    assert v["lbd_version"] == "1.2"
     assert v["package"] == lbd.__version__
 
 

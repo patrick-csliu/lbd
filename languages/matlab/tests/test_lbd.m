@@ -289,7 +289,7 @@ tc.verifyWarning(@() lbd.load(p), 'lbd:newerVersion');
 setVersion(p, "2.0");
 tc.verifyError(@() lbd.load(p), 'lbd:version');
 v = lbd.version();
-tc.verifyEqual(v.lbd_version, "1.1");
+tc.verifyEqual(v.lbd_version, "1.2");
 end
 
 function setVersion(p, ver)
@@ -361,4 +361,62 @@ H5G.close(gid); H5F.close(fid);
 h5writeatt(p, '/plot', 'spec', '[1, 2]');
 r = tc.verifyWarning(@() lbd.load(p), 'lbd:json');
 tc.verifyEmpty(r.Plot);
+end
+
+function testAxisElements(tc)
+p = fullfile(tc.TestData.dir, "elements.lbd");
+d = lbd.Dataset("elements");
+d.addAxis("state", [], Elements=["ground" "excited"], Label="Prepared state");
+d.addAxis("device", [1 2 5], Elements=["Q1" "état 1" "量子"]);
+d.addAxis("one", 7, Elements="only");
+d.addAxis("t", linspace(0, 1, 3));
+d.addValue("I", zeros(2, 3), ["state" "t"]);
+d.save(p);
+r = lbd.load(p);
+tc.verifyEqual(r.Axes.state.Elements, ["ground" "excited"]);
+tc.verifyEqual(double(r.Axes.state.Data'), [0 1]);
+tc.verifyEqual(r.Axes.device.Elements, ["Q1" "état 1" "量子"]);
+tc.verifyEqual(r.Axes.one.Elements, "only");
+tc.verifyEmpty(r.Axes.t.Elements);
+tc.verifyEqual(r.LbdVersion, "1.2");
+tc.verifyError(@() d.addAxis("x", [0 1], Elements=["a" "b" "c"]), 'lbd:invalid');
+tc.verifyError(@() d.addAxis("y"), 'lbd:invalid');
+end
+
+function testDataPointShape(tc)
+p = fullfile(tc.TestData.dir, "shape.lbd");
+d = lbd.Dataset("shape");
+d.addAxis("amp", linspace(0, 0.5, 4), Unit="V");
+b = reshape(1:12, 4, 3);
+v = d.addValue("bloch", b, "amp", Shape=3, Elements=["x" "y" "z"]);
+tc.verifyEqual(v.Axes, ["amp" "bloch_dim1"]);
+tc.verifyEqual(d.Axes.bloch_dim1.Role, "point");
+d.addValue("cov", zeros(4, 2, 2), "amp", Shape=[2 2], Elements={["I" "Q"], []});
+d.save(p);
+r = lbd.load(p);
+tc.verifyEqual(r.Values.bloch.Data, b);
+tc.verifyEqual(r.Values.bloch.PointAxes, "bloch_dim1");
+tc.verifyEqual(r.Values.bloch.Elements, {["x" "y" "z"]});
+tc.verifyEqual(r.Values.cov.Axes, ["amp" "cov_dim1" "cov_dim2"]);
+tc.verifyEqual(r.Values.cov.Elements{1}, ["I" "Q"]);
+tc.verifyEmpty(r.Values.cov.Elements{2});
+tc.verifyEqual(string(h5readatt(p, '/values/bloch', 'axes')), "amp,bloch_dim1");
+% the shape must be said; the value's axes come first
+tc.verifyError(@() d.addValue("r", zeros(4, 3), "amp"), 'lbd:invalid');
+tc.verifyError(@() d.addValue("r", zeros(3, 4), "amp", Shape=3), 'lbd:invalid');
+tc.verifyError(@() d.addValue("r", zeros(4, 3), "amp", Shape=3, Elements=["u" "v"]), 'lbd:invalid');
+end
+
+function testBadElementsInAFileWarn(tc)
+p = fullfile(tc.TestData.dir, "badelements.lbd");
+d = lbd.Dataset("bad");
+d.addAxis("state", [], Elements=["ground" "excited"]);
+d.save(p);
+fid = H5F.open(p, 'H5F_ACC_RDWR', 'H5P_DEFAULT');
+did = H5D.open(fid, '/axes/state');
+H5A.delete(did, 'elements');
+H5D.close(did); H5F.close(fid);
+h5writeatt(p, '/axes/state', 'elements', 'one');
+r = tc.verifyWarning(@() lbd.load(p), 'lbd:badElements');
+tc.verifyEmpty(r.Axes.state.Elements);
 end

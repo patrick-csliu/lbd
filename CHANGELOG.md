@@ -1,7 +1,7 @@
 # Changelog
 
 All components (the viewer and every language module) share one version number.
-The file format has its own version (`lbd_version`, currently 1.0).
+The file format has its own version (`lbd_version`, currently 1.2).
 
 ## 1.3.0 (in development)
 
@@ -119,6 +119,17 @@ The file format has its own version (`lbd_version`, currently 1.0).
 - New module `lbd.plot.reduce`: reduce maps and curves to a screen's pixels without losing peaks.
 - Choosing the saved "one curve per" axis (or a map's vertical axis) as the horizontal axis swaps
   the two, instead of warning that the saved view can't be used.
+
+**File format and languages**
+
+- **File format 1.2: elements and the shape of a data point** (every language). An axis's
+  positions can have names: `add_axis("state", elements=["ground", "excited"])` (numbered 0, 1
+  by itself). A value's data point can be a vector or a matrix, said like numpy:
+  `add_value("bloch", b, axes="amp", shape=(3,), elements=["x", "y", "z"])` — the data's
+  dimensions are the value's axes first, then the data point's; LBD makes an axis for each
+  dimension of the data point (`bloch_dim1`, marked `role="point"`), so earlier readers still
+  read these files. Data with more dimensions than axes needs `shape=` (a clear error says so).
+  1.1 files stay valid; readers for 1.1 read 1.2 files with a warning.
 
 ## 1.2.0 (2026-10-28)
 

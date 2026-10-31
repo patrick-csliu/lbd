@@ -26,9 +26,8 @@ using Random: RandomDevice
 export Dataset, Axis, Value, add_axis!, add_value!, new_id!, LBDError, LBDVersionError
 
 const PACKAGE_VERSION = "1.3.0-dev"
-const FORMAT_VERSION = "1.1"
-const FORMAT_MAJOR = 1
-const FORMAT_MINOR = 1
+const FORMAT_VERSION = "1.2"
+const FORMAT_MAJOR, FORMAT_MINOR = parse.(Int, split(FORMAT_VERSION, "."))
 const NAME_RE = r"^[A-Za-z][A-Za-z0-9_]{0,62}$"
 const COMPRESS_MIN_SIZE = 1024
 const REPLACE_WAIT = 3.0   # seconds `save` waits for a file another program has open (Windows)
@@ -59,7 +58,10 @@ mutable struct Axis
     data::Vector
     unit::String
     label::String
+    elements::Union{Vector{String},Nothing}   # a text per position (format 1.2), or nothing: numbered
+    role::Union{String,Nothing}               # "point": an axis of a value's data point (1.2); nothing: a sweep axis
 end
+Axis(name, data, unit, label) = Axis(name, data, unit, label, nothing, nothing)
 Base.length(a::Axis) = length(a.data)
 
 mutable struct Value
@@ -70,7 +72,13 @@ mutable struct Value
     label::String
     shape::Tuple              # logical shape, kept even when data is not loaded
     dtype::String
+    point_axes::Vector{String}   # the axes of one data point (the last of `axes`; format 1.2)
+    elements::Vector{Any}        # per data-point dimension: its texts (Vector{String}) or nothing
 end
+Value(name, data, axes, unit, label, shape, dtype) = Value(name, data, axes, unit, label, shape, dtype, String[], Any[])
+
+"""The shape of one data point of `v`: `()` for one number, `(3,)` for a vector of 3 …"""
+point_shape(v::Value) = isempty(v.point_axes) ? () : Tuple(v.shape[end-length(v.point_axes)+1:end])
 
 mutable struct Dataset
     title::String
@@ -169,47 +177,121 @@ function check_new_name(d::Dataset, name::AbstractString)
 end
 
 """
-    add_axis!(d, name, data; unit="", label=name)
+    add_axis!(d, name, data=nothing; unit="", label=name, elements=nothing)
 
-Add a 1-D real axis.
+Add a 1-D real axis. `elements`: a text for each position (e.g. `["ground", "excited"]`);
+`data` may then be left out (the positions are numbered 0, 1, 2 …).
 """
-function add_axis!(d::Dataset, name::AbstractString, data; unit::AbstractString="", label::AbstractString=name)
+function add_axis!(d::Dataset, name::AbstractString, data=nothing; unit::AbstractString="",
+                   label::AbstractString=name, elements=nothing)
     check_new_name(d, name)
+    if data === nothing
+        elements === nothing && throw(LBDError("axis \"$name\" needs its coordinates (data) or its elements"))
+        data = collect(0:length(check_elements(elements, nothing, "axis \"$name\"")) - 1)
+    end
     arr = collect(data)
     ndims(arr) == 1 || throw(LBDError("axis \"$name\" must be 1-D, got size $(size(arr))"))
     T = eltype(arr)
     (T <: Real && !(T <: Bool)) || throw(LBDError("axis \"$name\" must be real numeric, got $T"))
     arr = normalize_eltype(arr)
     haskey(DTYPE_NAMES, eltype(arr)) || throw(LBDError("axis \"$name\": unsupported element type $(eltype(arr))"))
-    a = Axis(String(name), arr, String(unit), String(label))
+    el = elements === nothing ? nothing : check_elements(elements, length(arr), "axis \"$name\"")
+    a = Axis(String(name), arr, String(unit), String(label), el, nothing)
     d.axes[a.name] = a
     return a
 end
 
+# A vector of texts, one per position (n of them, unless n is nothing).
+function check_elements(elements, n, where)
+    (elements isa AbstractString || !(elements isa Union{AbstractVector,Tuple})) &&
+        throw(LBDError("$where: elements must be a list of texts, one per position"))
+    all(e -> e isa AbstractString, elements) || throw(LBDError("$where: elements must be texts"))
+    isempty(elements) && throw(LBDError("$where: elements is empty; give one text per position"))
+    n === nothing || length(elements) == n ||
+        throw(LBDError("$where: $(length(elements)) elements for $n positions; give one text per position"))
+    return String[String(e) for e in elements]
+end
+
 """
-    add_value!(d, name, data, axes=String[]; unit="", label=name, dtype=:auto)
+    add_value!(d, name, data, axes=String[]; unit="", label=name, dtype=:auto, shape=(), elements=nothing)
 
 Add an N-D value. `axes` lists one axis name per dimension (or a single name / comma-separated
 string). `size(data)` must match the axis lengths. `dtype=:auto` keeps the element type;
 pass e.g. `Float32` to force one.
+
+Each data point is one number unless `shape` says otherwise (format 1.2): `shape=(3,)` for a
+vector of 3, `(2, 2)` for a matrix; `data`'s dimensions are then the value's axes first, then
+the data point's. `elements` names a data point's positions: one list (`["u", "v", "w"]`), or one
+per dimension (`[["I", "Q"], nothing]`).
 """
 function add_value!(d::Dataset, name::AbstractString, data, axes=String[];
-                    unit::AbstractString="", label::AbstractString=name, dtype=:auto)
+                    unit::AbstractString="", label::AbstractString=name, dtype=:auto,
+                    shape=(), elements=nothing)
     check_new_name(d, name)
     arr = coerce_value(data, dtype, name)
     axl = axes_list(axes)
+    point = check_shape(shape, name)
     nd = arr isa Number ? 0 : ndims(arr)
-    length(axl) == nd || throw(LBDError(
-        "value \"$name\" has $nd dimension(s) but $(length(axl)) axes were given: $axl"))
+    if length(axl) + length(point) != nd
+        if length(axl) < nd && isempty(point)
+            throw(LBDError("value \"$name\" has $nd dimension(s) but $(length(axl)) axes were given: $axl; " *
+                           "if each data point holds several numbers, say so with shape=$(size(arr)[length(axl)+1:end])"))
+        end
+        throw(LBDError("value \"$name\" has $nd dimension(s), but its axes $axl and shape=$point make " *
+                       "$(length(axl) + length(point))"))
+    end
     for (i, ax) in enumerate(axl)
         haskey(d.axes, ax) || throw(LBDError("value \"$name\": axis \"$ax\" does not exist; add it with add_axis! first"))
-        length(d.axes[ax]) == size(arr, i) || throw(LBDError(
-            "value \"$name\": dimension $i has size $(size(arr, i)) but axis \"$ax\" has length $(length(d.axes[ax]))"))
+        if length(d.axes[ax]) != size(arr, i)
+            hint = !isempty(point) && size(arr)[end-length(point)+1:end] != point ?
+                "; the value's axes come first, then the data point (e.g. use permutedims)" : ""
+            throw(LBDError("value \"$name\": dimension $i has size $(size(arr, i)) but axis \"$ax\" has " *
+                           "length $(length(d.axes[ax]))$hint"))
+        end
     end
-    shape = arr isa Number ? () : size(arr)
-    v = Value(String(name), arr, axl, String(unit), String(label), shape, DTYPE_NAMES[eltype(arr)])
+    if !isempty(point) && size(arr)[length(axl)+1:end] != point
+        throw(LBDError("value \"$name\": its data points have shape $(size(arr)[length(axl)+1:end]), not shape=$point"))
+    end
+    named = value_elements(elements, point, name)
+    point_names = ["$(name)_dim$k" for k in 1:length(point)]
+    for pn in point_names
+        haskey(d, pn) && throw(LBDError("value \"$name\" needs the name \"$pn\" for an axis of its data " *
+                                        "points, but it is already used; rename that axis or value"))
+    end
+    for (k, (pn, n)) in enumerate(zip(point_names, point))
+        plabel = length(point) > 1 ? "$label (dim$k)" : String(label)
+        d.axes[pn] = Axis(pn, collect(0:n-1), "", plabel, named[k], "point")
+    end
+    vshape = arr isa Number ? () : size(arr)
+    v = Value(String(name), arr, vcat(axl, point_names), String(unit), String(label), vshape,
+              DTYPE_NAMES[eltype(arr)], point_names, named)
     d.values[v.name] = v
     return v
+end
+
+# A data point's shape: a tuple of positive Ints (() for one number).
+function check_shape(shape, name)
+    shape isa Integer && (shape = (shape,))
+    (shape isa Union{Tuple,AbstractVector} && all(n -> n isa Integer && !(n isa Bool), shape)) ||
+        throw(LBDError("value \"$name\": shape must be a tuple of whole numbers such as (3,) or (2, 2), not $(repr(shape))"))
+    any(n -> n < 1, shape) && throw(LBDError("value \"$name\": shape $(Tuple(shape)) has an empty dimension"))
+    return Tuple(Int(n) for n in shape)
+end
+
+# The elements of each dimension of a data point (nothing: numbered).
+function value_elements(elements, point, name)
+    where = "value \"$name\""
+    elements === nothing && return Any[nothing for _ in point]
+    isempty(point) && throw(LBDError("$where: elements name the positions in a data point; give shape= too " *
+                                     "(each data point here is one number)"))
+    if length(point) == 1 && elements isa AbstractVector && all(e -> e isa AbstractString, elements)
+        return Any[check_elements(elements, point[1], where)]
+    end
+    (elements isa AbstractVector && length(elements) == length(point)) ||
+        throw(LBDError("$where: give one list of elements per dimension of a data point " *
+                       "($(length(point)) for shape=$point), or nothing for a dimension left numbered"))
+    return Any[e === nothing ? nothing : check_elements(e, n, "$where, dimension $k of a data point")
+               for (k, (e, n)) in enumerate(zip(elements, point))]
 end
 
 axes_list(::Nothing) = String[]
@@ -329,6 +411,11 @@ function write_file(f, d::Dataset, compression::Bool)
         ds = write_array(ga, a.name, a.data, compression)
         write_str_attr(ds, "unit", a.unit)
         write_str_attr(ds, "label", a.label)
+        if a.elements !== nothing
+            check_elements(a.elements, length(a.data), "axis \"$(a.name)\"")
+            write_attribute(ds, "elements", String[e for e in a.elements])
+        end
+        a.role === nothing || write_str_attr(ds, "role", a.role)
     end
 
     gv = create_group(f, "values")
@@ -477,7 +564,7 @@ function load(path::AbstractString; values=nothing)
         if haskey(f, "axes")
             for name in keys(f["axes"])
                 ds = f["axes"][name]
-                d.axes[name] = Axis(name, vec(read(ds)), attr_str(ds, "unit"), attr_str(ds, "label", name))
+                d.axes[name] = read_axis(name, ds, path)
             end
         end
         if haskey(f, "values")
@@ -498,6 +585,27 @@ function load(path::AbstractString; values=nothing)
     end
     validate_loaded(d)
     return d
+end
+
+function read_axis(name, ds, path)
+    data = vec(read(ds))
+    a = Axis(name, data, attr_str(ds, "unit"), attr_str(ds, "label", name))
+    if haskey(attributes(ds), "elements")
+        raw = read_attribute(ds, "elements")
+        raw isa AbstractString && (raw = [raw])
+        if raw isa AbstractVector && length(raw) == length(data) && all(e -> e isa AbstractString, raw)
+            a.elements = String[String(e) for e in raw]
+        else
+            @warn "$(basename(path)): axis \"$name\" has elements that aren't one text per position; they are ignored"
+        end
+    end
+    role = attr_str(ds, "role")
+    if role == "point"
+        a.role = role
+    elseif !isempty(role)
+        @warn "$(basename(path)): axis \"$name\" has an unknown role \"$role\"; it is read as a sweep axis"
+    end
+    return a
 end
 
 """Read everything except value data. Cheap, even for large files."""
@@ -575,6 +683,13 @@ function validate_loaded(d::Dataset)
             length(d.axes[ax]) == v.shape[i] || throw(LBDError(
                 "value \"$(v.name)\": dimension $i has size $(v.shape[i]) but axis \"$ax\" has length $(length(d.axes[ax]))"))
         end
+        # a data point's axes are the last ones with role "point"
+        k = length(v.axes)
+        while k > 0 && d.axes[v.axes[k]].role == "point"
+            k -= 1
+        end
+        v.point_axes = v.axes[k+1:end]
+        v.elements = Any[d.axes[a].elements for a in v.point_axes]
     end
 end
 

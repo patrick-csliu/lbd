@@ -23,7 +23,7 @@ import h5py
 import numpy as np
 
 __version__ = "1.3.0.dev0"
-FORMAT_VERSION = "1.1"
+FORMAT_VERSION = "1.2"
 _FORMAT_MAJOR, _FORMAT_MINOR = (int(p) for p in FORMAT_VERSION.split("."))
 
 _NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,62}$")
@@ -121,12 +121,20 @@ class Axis:
         Unit, `""` for dimensionless. Prefer base units (`"Hz"`, not `"GHz"`).
     label : str
         Display text used on plot axes, e.g. `"Frequency"`.
+    elements : list of str or None
+        A text for each position, in order (format 1.2): `["ground", "excited"]` for an axis
+        swept over named states. `None`: the positions are known by their numbers.
+    role : str or None
+        `"point"` for an axis made by [`Dataset.add_value`][lbd.Dataset.add_value] for a
+        dimension inside a value's data point (format 1.2); `None` for a sweep axis.
     """
 
     name: str
     data: np.ndarray
     unit: str = ""
     label: str = ""
+    elements: Optional[List[str]] = None
+    role: Optional[str] = None
 
     def __len__(self) -> int:
         return len(self.data)
@@ -155,6 +163,12 @@ class Value:
         Array shape, available even when `data` is `None`.
     dtype : str
         LBD type name, e.g. `"complex128"` or `"bool"`.
+    point_axes : list of str
+        The axes of one data point (format 1.2), the last of `axes`: empty when each data point
+        is one number.
+    elements : list
+        For each dimension of a data point, the text of each position, or `None` when it is
+        known by number (format 1.2; a copy of its point axes' `elements`).
     """
 
     name: str
@@ -165,6 +179,13 @@ class Value:
     # Shape and dtype are kept even when the data itself was not loaded.
     shape: tuple = ()
     dtype: str = ""
+    point_axes: List[str] = field(default_factory=list)
+    elements: List[Optional[List[str]]] = field(default_factory=list)
+
+    @property
+    def point_shape(self) -> tuple:
+        """The shape of one data point: `()` for one number, `(3,)` for a vector of 3 …"""
+        return tuple(self.shape[len(self.shape) - len(self.point_axes):]) if self.point_axes else ()
 
 
 class Dataset:
@@ -287,7 +308,8 @@ class Dataset:
 
     # ---- building -------------------------------------------------------
 
-    def add_axis(self, name: str, data: Any, unit: str = "", label: Optional[str] = None) -> Axis:
+    def add_axis(self, name: str, data: Any = None, unit: str = "", label: Optional[str] = None,
+                 elements: Optional[Sequence[str]] = None) -> Axis:
         """Add a 1-D axis: the coordinates of one swept quantity.
 
         Add every axis before the values that use it.
@@ -297,14 +319,18 @@ class Dataset:
         name : str
             Axis name: starts with a letter, then letters, digits and `_` (at most 63), and not
             used by another axis or value.
-        data : array_like
+        data : array_like, optional
             1-D, finite real numbers (integer or float; not bool or complex), at least one.
-            Ranges and lists work. `float16` is stored as `float32`.
+            Ranges and lists work. `float16` is stored as `float32`. May be left out when
+            `elements` is given: the positions are then numbered 0, 1, 2 …
         unit : str, optional
             Unit, `""` for dimensionless. Prefer base units (`"Hz"`, not `"GHz"`): plots then
             choose a readable prefix.
         label : str, optional
             Display text for plot axes. Defaults to `name`.
+        elements : list of str, optional
+            A text for each position of the axis, in order, e.g. `["ground", "excited"]`: plots,
+            cursors and sliders show them instead of the numbers (format 1.2).
 
         Returns
         -------
@@ -315,9 +341,10 @@ class Dataset:
         ------
         LBDError
             Invalid or already used name; data not 1-D, empty, not real numeric, or containing
-            NaN/inf; a masked array.
+            NaN/inf; a masked array; neither `data` nor `elements`; `elements` of another length
+            than the axis.
         TypeError
-            `unit` or `label` is not a string.
+            `unit` or `label` is not a string; `elements` is not a list of strings.
 
         Warns
         -----
@@ -329,10 +356,15 @@ class Dataset:
         Examples
         --------
         >>> d.add_axis("t", np.linspace(0, 1e-6, 201), unit="s", label="Time")
+        >>> d.add_axis("state", elements=["ground", "excited"])        # numbered 0, 1
         """
         self._check_new_name(name)
         unit = _check_text(unit, "unit")
         label = name if label is None else _check_text(label, "label")
+        if data is None:
+            if elements is None:
+                raise LBDError(f"axis '{name}' needs its coordinates (data) or its elements")
+            data = np.arange(len(_check_elements(elements, None, f"axis '{name}'")))
         arr = _as_array(data, f"axis '{name}'")
         if arr.ndim != 1:
             raise LBDError(f"axis '{name}' must be 1-D, got shape {arr.shape}")
@@ -348,7 +380,9 @@ class Dataset:
                 _warn(f"axis '{name}' is not strictly increasing or decreasing; plots draw its points "
                       "in the given order")
         arr = _normalize_dtype(arr, f"axis '{name}'")
-        axis = Axis(name, arr, unit=unit, label=label)
+        if elements is not None:
+            elements = _check_elements(elements, arr.size, f"axis '{name}'")
+        axis = Axis(name, arr, unit=unit, label=label, elements=elements)
         self.axes[name] = axis
         return axis
 
@@ -360,8 +394,13 @@ class Dataset:
         unit: str = "",
         label: Optional[str] = None,
         dtype: str = "auto",
+        shape: Optional[Sequence[int]] = None,
+        elements: Optional[Sequence[Any]] = None,
     ) -> Value:
         """Add an N-D value whose dimensions are tied to existing axes.
+
+        Each data point is one number, unless `shape` says otherwise: then `data`'s dimensions
+        are the value's axes first, then the data point's (format 1.2).
 
         Parameters
         ----------
@@ -370,10 +409,10 @@ class Dataset:
         data : array_like
             Numbers or booleans. A plain number makes a scalar value (no axes).
         axes : str or sequence of str, optional
-            One axis name per dimension of `data`, in order: a list (`["power", "freq"]`), one
-            name (`"freq"`), a comma-separated string (`"power,freq"`), or `None` for a scalar.
-            The axes must already exist, each may appear once, and each dimension's size must
-            equal its axis length.
+            One axis name per dimension of `data` (before the data point's dimensions), in
+            order: a list (`["power", "freq"]`), one name (`"freq"`), a comma-separated string
+            (`"power,freq"`), or `None` for a scalar. The axes must already exist, each may
+            appear once, and each dimension's size must equal its axis length.
         unit : str, optional
             Unit, `""` for dimensionless.
         label : str, optional
@@ -384,6 +423,15 @@ class Dataset:
             The conversion must not lose information: floats stored as integers must be whole
             numbers in range, integers must fit the smaller type, `bool` needs 0/1 data, and
             complex data needs a complex type.
+        shape : tuple of int, optional
+            The shape of one data point, like numpy: `(3,)` for a vector of 3, `(2, 2)` for a
+            matrix. Default `()`: one number. `data`'s last dimensions must have this shape.
+            For each dimension of the data point an axis is made, named `<name>_dim1`,
+            `<name>_dim2` … (positions 0, 1, 2 …).
+        elements : list, optional
+            The text of each position in a data point: one list for a vector
+            (`["u", "v", "w"]`), one list per dimension for more (`[["I", "Q"], ["I", "Q"]]`;
+            `None` leaves a dimension numbered).
 
         Returns
         -------
@@ -393,9 +441,11 @@ class Dataset:
         Raises
         ------
         LBDError
-            Invalid or used name; number of axes doesn't match `data.ndim`; unknown or repeated
-            axis; a dimension's size differs from its axis length; non-numeric or masked data;
-            unknown `dtype`; or a conversion to `dtype` that would change the numbers.
+            Invalid or used name; number of axes and `shape` don't match `data.ndim`; unknown or
+            repeated axis; a dimension's size differs from its axis length; the data point's
+            shape differs from `shape`; `elements` of the wrong length; a data point axis name
+            already used; non-numeric or masked data; unknown `dtype`; or a conversion to
+            `dtype` that would change the numbers.
         TypeError
             `axes`, `unit`, `label` or `dtype` has the wrong type (e.g. a dict for `axes`).
 
@@ -411,6 +461,7 @@ class Dataset:
         >>> d.add_value("mask", v > 0.5, axes="t")                 # stored as bool
         >>> d.add_value("raw", counts, axes="t", dtype="float32")  # force a type
         >>> d.add_value("fit_Q", 12345.6)                          # scalar, no axes
+        >>> d.add_value("bloch", b, axes="amp", shape=(3,), elements=["x", "y", "z"])   # (n_amp, 3)
         """
         self._check_new_name(name)
         unit = _check_text(unit, "unit")
@@ -419,21 +470,42 @@ class Dataset:
             raise TypeError(f"dtype must be a string such as 'float32' or 'auto', not {type(dtype).__name__}")
         arr = _coerce_value(data, dtype, name)
         axes_list = _axes_argument(axes)
-        if len(axes_list) != arr.ndim:
+        point = _check_shape(shape, name)
+        if len(axes_list) + len(point) != arr.ndim:
+            if len(axes_list) < arr.ndim and not point:
+                raise LBDError(
+                    f"value '{name}' has {arr.ndim} dimension(s) but {len(axes_list)} axes were given: "
+                    f"{axes_list}; if each data point holds several numbers, say so with "
+                    f"shape={tuple(arr.shape[len(axes_list):])}")
             raise LBDError(
-                f"value '{name}' has {arr.ndim} dimension(s) but {len(axes_list)} axes were given: {axes_list}"
-            )
+                f"value '{name}' has {arr.ndim} dimension(s) {tuple(arr.shape)}, but its axes {axes_list} "
+                f"and shape={point} make {len(axes_list) + len(point)}")
         if len(set(axes_list)) != len(axes_list):
             raise LBDError(f"value '{name}': an axis appears more than once in {axes_list}")
         for i, ax in enumerate(axes_list):
             if ax not in self.axes:
                 raise LBDError(f"value '{name}': axis '{ax}' does not exist; add it with add_axis first")
             if len(self.axes[ax]) != arr.shape[i]:
+                hint = (f"; the value's axes come first, then the data point (e.g. use `.T`)"
+                        if point and arr.shape[-len(point):] != point else "")
                 raise LBDError(
                     f"value '{name}': dimension {i} has size {arr.shape[i]} "
-                    f"but axis '{ax}' has length {len(self.axes[ax])}"
+                    f"but axis '{ax}' has length {len(self.axes[ax])}{hint}"
                 )
-        value = Value(name, arr, axes_list, unit=unit, label=label, shape=arr.shape, dtype=str(arr.dtype))
+        if point and tuple(arr.shape[len(axes_list):]) != point:
+            raise LBDError(f"value '{name}': its data points have shape {tuple(arr.shape[len(axes_list):])}, "
+                           f"not shape={point}")
+        named = _value_elements(elements, point, name)
+        point_names = [f"{name}_dim{k + 1}" for k in range(len(point))]
+        for p in point_names:
+            if p in self.axes or p in self.values:
+                raise LBDError(f"value '{name}' needs the name '{p}' for an axis of its data points, but it "
+                               "is already used; rename that axis or value")
+        for p, n, el in zip(point_names, point, named):
+            self.axes[p] = Axis(p, np.arange(n), label=f"{label} ({p.rsplit('_', 1)[1]})" if len(point) > 1 else label,
+                                elements=el, role="point")
+        value = Value(name, arr, axes_list + point_names, unit=unit, label=label, shape=arr.shape,
+                      dtype=str(arr.dtype), point_axes=point_names, elements=named)
         self.values[name] = value
         return value
 
@@ -567,6 +639,10 @@ class Dataset:
                 raise LBDError(f"axis '{key}' must hold 1-D, non-empty real numbers; got {arr.dtype} {arr.shape}")
             if arr.dtype.kind == "f" and not np.all(np.isfinite(arr)):
                 raise LBDError(f"axis '{key}' contains NaN or inf")
+            if a.elements is not None:
+                _check_elements(a.elements, arr.size, f"axis '{key}'")
+            if a.role not in (None, "point"):
+                raise LBDError(f"axis '{key}' has role {a.role!r}; it must be None (a sweep axis) or 'point'")
         for key, v in self.values.items():
             if not isinstance(v, Value):
                 raise LBDError(f"values['{key}'] is a {type(v).__name__}, not an lbd.Value")
@@ -608,6 +684,10 @@ class Dataset:
             ds = _create_dataset(g_axes, a.name, _normalize_dtype(np.asarray(a.data), a.name), compression)
             ds.attrs["unit"] = a.unit
             ds.attrs["label"] = a.label
+            if a.elements is not None:
+                ds.attrs.create("elements", np.array(a.elements, dtype=object), dtype=_STR_DTYPE)
+            if a.role is not None:
+                ds.attrs["role"] = a.role
 
         g_values = f.create_group("values")
         for v in self.values.values():
@@ -916,7 +996,24 @@ def _read_axis(name: str, ds: Any, path: Path) -> Axis:
     data = np.asarray(ds[()])
     if data.ndim != 1 or data.dtype.kind not in "iuf":
         raise LBDError(f"{path.name}: axis '{name}' must be 1-D real numbers, got {data.dtype} {data.shape}")
-    return Axis(name, data, unit=_attr_str(ds, "unit", "", path), label=_attr_str(ds, "label", name, path))
+    axis = Axis(name, data, unit=_attr_str(ds, "unit", "", path), label=_attr_str(ds, "label", name, path))
+    if "elements" in ds.attrs:
+        raw = _attr_to_python(ds.attrs["elements"], path)
+        if isinstance(raw, str):                       # one text, written as a single string
+            raw = [raw]
+        if isinstance(raw, list) and len(raw) == data.size and all(isinstance(e, str) for e in raw):
+            axis.elements = raw
+        else:
+            _warn(f"{path.name}: axis '{name}' has elements that aren't one text per position "
+                  f"({len(raw) if isinstance(raw, list) else type(raw).__name__} for {data.size} positions); "
+                  "they are ignored")
+    if "role" in ds.attrs:
+        role = _attr_str(ds, "role", "", path)
+        if role == "point":
+            axis.role = role
+        else:
+            _warn(f"{path.name}: axis '{name}' has an unknown role {role!r}; it is read as a sweep axis")
+    return axis
 
 
 def _describe_value(name: str, ds: Any, path: Path) -> Value:
@@ -973,6 +1070,12 @@ def _validate_loaded(d: Dataset, path: Path) -> None:
                     f"{path.name}: value '{v.name}': dimension {i} has size {v.shape[i]} but axis '{ax}' "
                     f"has length {len(d.axes[ax])}"
                 )
+        # a data point's axes are the last ones with role "point"
+        k = len(v.axes)
+        while k > 0 and d.axes[v.axes[k - 1]].role == "point":
+            k -= 1
+        v.point_axes = v.axes[k:]
+        v.elements = [d.axes[a].elements for a in v.point_axes]
 
 
 # ---- helpers ---------------------------------------------------------------
@@ -984,6 +1087,55 @@ def _check_name(name: Any) -> str:
             f"invalid name {name!r}: must start with a letter and contain only letters, digits and '_' (max 63)"
         )
     return name
+
+
+def _check_elements(elements: Any, n: Optional[int], where: str) -> List[str]:
+    """A list of texts, one per position (n of them, if given)."""
+    if isinstance(elements, str) or not isinstance(elements, (list, tuple, np.ndarray)):
+        raise TypeError(f"{where}: elements must be a list of texts, one per position, not {type(elements).__name__}")
+    items = list(elements)
+    bad = [e for e in items if not isinstance(e, str)]
+    if bad:
+        raise TypeError(f"{where}: elements must be texts; {bad[0]!r} is a {type(bad[0]).__name__}")
+    if not items:
+        raise LBDError(f"{where}: elements is empty; give one text per position")
+    if n is not None and len(items) != n:
+        raise LBDError(f"{where}: {len(items)} elements for {n} positions; give one text per position")
+    return items
+
+
+def _check_shape(shape: Any, name: str) -> tuple:
+    """A data point's shape: a tuple of positive ints (`()` for one number)."""
+    if shape is None:
+        return ()
+    if isinstance(shape, (int, np.integer)) and not isinstance(shape, bool):
+        shape = (shape,)
+    if not isinstance(shape, (tuple, list)) or not all(
+            isinstance(n, (int, np.integer)) and not isinstance(n, bool) for n in shape):
+        raise TypeError(f"value '{name}': shape must be a tuple of whole numbers such as (3,) or (2, 2), not {shape!r}")
+    if any(n < 1 for n in shape):
+        raise LBDError(f"value '{name}': shape {tuple(shape)} has an empty dimension")
+    return tuple(int(n) for n in shape)
+
+
+def _value_elements(elements: Any, point: tuple, name: str) -> List[Optional[List[str]]]:
+    """The elements of each dimension of a data point (None: numbered)."""
+    where = f"value '{name}'"
+    if elements is None:
+        return [None] * len(point)
+    if not point:
+        raise LBDError(f"{where}: elements name the positions in a data point; give shape= too "
+                       "(each data point here is one number)")
+    items = list(elements) if isinstance(elements, (list, tuple)) else None
+    if items is None:
+        raise TypeError(f"{where}: elements must be a list of texts, or one list per dimension of a data point")
+    if len(point) == 1 and all(isinstance(e, str) for e in items):
+        return [_check_elements(items, point[0], where)]
+    if len(items) != len(point):
+        raise LBDError(f"{where}: give one list of elements per dimension of a data point "
+                       f"({len(point)} for shape={point}), or None for a dimension left numbered")
+    return [None if e is None else _check_elements(e, n, f"{where}, dimension {k + 1} of a data point")
+            for k, (e, n) in enumerate(zip(items, point))]
 
 
 def _check_loaded_name(name: str, path: Path) -> None:

@@ -5,6 +5,8 @@ classdef Dataset < handle
     %   d.addAxis("power", -40:4:0, Unit="dBm", Label="Power");
     %   d.addAxis("freq", linspace(4e9, 8e9, 401), Unit="Hz", Label="Frequency");
     %   d.addValue("S21", s21, ["power" "freq"]);      % size(s21) == [11 401]
+    %   d.addAxis("state", [], Elements=["ground" "excited"]);   % named positions, numbered 0, 1
+    %   d.addValue("bloch", b, "amp", Shape=3, Elements=["x" "y" "z"]);   % size(b) == [21 3]
     %   d.Meta.T_mK = 12;
     %   d.save("sweep.lbd");
     %
@@ -27,10 +29,15 @@ classdef Dataset < handle
     end
 
     properties (SetAccess = private)
-        Axes (1,1) struct = struct()   % Axes.<name>   = struct(Name, Data, Unit, Label)
-        Values (1,1) struct = struct() % Values.<name> = struct(Name, Data, Axes, Unit, Label, Shape, Dtype)
+        % Axes.<name> = struct(Name, Data, Unit, Label, Elements, Role): Elements, a text per
+        % position (string.empty: numbered); Role, "point" for an axis of a value's data point
+        Axes (1,1) struct = struct()
+        % Values.<name> = struct(Name, Data, Axes, Unit, Label, Shape, Dtype, PointAxes, Elements):
+        % PointAxes, the axes of one data point (the last of Axes); Elements, a cell with each
+        % data point dimension's texts (string.empty: numbered)
+        Values (1,1) struct = struct()
         Writer string = string.empty
-        LbdVersion (1,1) string = "1.1"
+        LbdVersion (1,1) string = "1.2"
         Path string = string.empty
         % The measurement's identity (a UUID version 7): made at the first save, kept when the
         % file is saved again to the same place, new when it is saved to another file (or by
@@ -57,14 +64,24 @@ classdef Dataset < handle
 
         function axis = addAxis(obj, name, data, opts)
             %ADDAXIS  Add a 1-D real axis.
+            %   d.addAxis("power", -40:4:0, Unit="dBm")
+            %   d.addAxis("state", [], Elements=["ground" "excited"])   % numbered 0, 1
             arguments
                 obj
                 name (1,1) string
-                data
+                data = []
                 opts.Unit (1,1) string = ""
                 opts.Label string = string.empty
+                opts.Elements = string.empty
             end
             obj.checkNewName(name);
+            elements = lbd.Dataset.checkElements(opts.Elements, [], sprintf('axis "%s"', name));
+            if isempty(data)
+                if isempty(elements)
+                    error('lbd:invalid', 'axis "%s" needs its coordinates (data) or its Elements', name);
+                end
+                data = int64(0:numel(elements) - 1);
+            end
             if ~isvector(data) && ~isempty(data)
                 error('lbd:invalid', 'axis "%s" must be 1-D, got size %s', name, mat2str(size(data)));
             end
@@ -73,7 +90,11 @@ classdef Dataset < handle
             end
             label = opts.Label;
             if isempty(label), label = name; end
-            axis = struct('Name', name, 'Data', data(:), 'Unit', opts.Unit, 'Label', label);
+            if ~isempty(elements)
+                lbd.Dataset.checkElements(elements, numel(data), sprintf('axis "%s"', name));
+            end
+            axis = struct('Name', name, 'Data', data(:), 'Unit', opts.Unit, 'Label', label, ...
+                'Elements', elements, 'Role', "");
             obj.Axes.(name) = axis;
         end
 
@@ -83,6 +104,10 @@ classdef Dataset < handle
             %   d.addValue("trace", y, "freq")
             %   d.addValue("fit_Q", 1.2e4)                 % scalar, no axes
             %   d.addValue("v", x, "freq", Dtype="float32")
+            %   d.addValue("bloch", b, "amp", Shape=3, Elements=["x" "y" "z"])   % a vector per point
+            %   d.addValue("cov", c, "amp", Shape=[2 2], Elements={["I" "Q"], ["I" "Q"]})
+            %   Each data point is one number unless Shape says otherwise; DATA's dimensions are
+            %   the value's axes first, then the data point's.
             arguments
                 obj
                 name (1,1) string
@@ -91,19 +116,27 @@ classdef Dataset < handle
                 opts.Unit (1,1) string = ""
                 opts.Label string = string.empty
                 opts.Dtype (1,1) string = "auto"
+                opts.Shape double = zeros(1, 0)
+                opts.Elements = []
             end
             obj.checkNewName(name);
             axesList = lbd.Dataset.axesList(axes);
             data = lbd.Dataset.coerce(data, opts.Dtype, name);
+            point = opts.Shape(:)';
+            if any(point < 1 | point ~= round(point))
+                error('lbd:invalid', 'value "%s": Shape must hold whole numbers of at least 1, not %s', name, mat2str(opts.Shape));
+            end
             nd = numel(axesList);
-            if nd == 0
+            total = nd + numel(point);
+            if total == 0
                 if ~isscalar(data)
                     error('lbd:invalid', 'value "%s" is not scalar, so it needs axes', name);
                 end
                 shape = zeros(1, 0);
-            elseif nd == 1
+            elseif total == 1
                 if ~isvector(data)
-                    error('lbd:invalid', 'value "%s" has %d dimension(s) but 1 axis was given', name, ndims(data));
+                    error('lbd:invalid', ['value "%s" has %d dimension(s) but 1 axis was given; if each ' ...
+                        'data point holds several numbers, say so with Shape'], name, ndims(data));
                 end
                 wasComplex = ~isreal(data);
                 data = data(:);
@@ -111,10 +144,16 @@ classdef Dataset < handle
                 if wasComplex, data = complex(data); end
                 shape = numel(data);
             else
-                if ndims(data) > nd
-                    error('lbd:invalid', 'value "%s" has %d dimension(s) but %d axes were given', name, ndims(data), nd);
+                if ndims(data) > total
+                    if isempty(point)
+                        error('lbd:invalid', ['value "%s" has %d dimension(s) but %d axes were given; if each ' ...
+                            'data point holds several numbers, say so with Shape=%s'], name, ndims(data), nd, ...
+                            mat2str(size(data, nd+1:ndims(data))));
+                    end
+                    error('lbd:invalid', 'value "%s" has %d dimension(s), but its axes and Shape make %d', ...
+                        name, ndims(data), total);
                 end
-                shape = size(data, 1:nd);
+                shape = size(data, 1:total);
             end
             for i = 1:nd
                 ax = axesList(i);
@@ -123,14 +162,38 @@ classdef Dataset < handle
                 end
                 n = numel(obj.Axes.(ax).Data);
                 if n ~= shape(i)
-                    error('lbd:invalid', 'value "%s": dimension %d has size %d but axis "%s" has length %d', ...
-                        name, i, shape(i), ax, n);
+                    hint = '';
+                    if ~isempty(point) && ~isequal(shape(nd+1:end), point)
+                        hint = '; the value''s axes come first, then the data point (e.g. transpose it)';
+                    end
+                    error('lbd:invalid', 'value "%s": dimension %d has size %d but axis "%s" has length %d%s', ...
+                        name, i, shape(i), ax, n, hint);
+                end
+            end
+            if ~isempty(point) && ~isequal(shape(nd+1:end), point)
+                error('lbd:invalid', 'value "%s": its data points have size %s, not Shape=%s', ...
+                    name, mat2str(shape(nd+1:end)), mat2str(point));
+            end
+            named = lbd.Dataset.valueElements(opts.Elements, point, name);
+            pointNames = name + "_dim" + string(1:numel(point));
+            for k = 1:numel(point)
+                if isfield(obj.Axes, pointNames(k)) || isfield(obj.Values, pointNames(k))
+                    error('lbd:invalid', ['value "%s" needs the name "%s" for an axis of its data points, but ' ...
+                        'it is already used; rename that axis or value'], name, pointNames(k));
                 end
             end
             label = opts.Label;
             if isempty(label), label = name; end
+            for k = 1:numel(point)
+                plabel = label;
+                if numel(point) > 1, plabel = label + " (dim" + k + ")"; end
+                obj.Axes.(pointNames(k)) = struct('Name', pointNames(k), 'Data', int64(0:point(k) - 1)', ...
+                    'Unit', "", 'Label', plabel, 'Elements', named{k}, 'Role', "point");
+            end
+            axesList = [axesList pointNames];
             value = struct('Name', name, 'Data', data, 'Axes', axesList, 'Unit', opts.Unit, ...
-                'Label', label, 'Shape', shape, 'Dtype', lbd_dtype_name(data));
+                'Label', label, 'Shape', shape, 'Dtype', lbd_dtype_name(data), ...
+                'PointAxes', pointNames, 'Elements', {named});
             obj.Values.(name) = value;
         end
 
@@ -270,6 +333,13 @@ classdef Dataset < handle
                 did = lbd_write_dataset(gid, a.Name, a.Data, 1, compression);
                 lbd_write_attr(did, 'unit', a.Unit);
                 lbd_write_attr(did, 'label', a.Label);
+                if isfield(a, 'Elements') && ~isempty(a.Elements)
+                    lbd.Dataset.checkElements(a.Elements, numel(a.Data), sprintf('axis "%s"', a.Name));
+                    lbd_write_attr(did, 'elements', string(a.Elements), true);
+                end
+                if isfield(a, 'Role') && strlength(a.Role) > 0
+                    lbd_write_attr(did, 'role', a.Role);
+                end
                 H5D.close(did);
             end
             H5G.close(gid);
@@ -388,8 +458,21 @@ classdef Dataset < handle
                 for name = lbd_link_names(gid)
                     did = H5D.open(gid, char(name));
                     data = lbd_read_dataset(did);
+                    elements = lbd_attr_or(did, 'elements', string.empty);
+                    if ~isempty(elements) && (~isstring(elements) || numel(elements) ~= numel(data))
+                        warning('lbd:badElements', ['%s: axis "%s" has elements that aren''t one text per ' ...
+                            'position; they are ignored'], base, name);
+                        elements = string.empty;
+                    end
+                    role = string(lbd_attr_or(did, 'role', ""));
+                    if strlength(role) > 0 && role ~= "point"
+                        warning('lbd:badRole', '%s: axis "%s" has an unknown role "%s"; it is read as a sweep axis', ...
+                            base, name, role);
+                        role = "";
+                    end
                     d.Axes.(name) = struct('Name', name, 'Data', data(:), ...
-                        'Unit', lbd_attr_or(did, 'unit', ""), 'Label', lbd_attr_or(did, 'label', name));
+                        'Unit', lbd_attr_or(did, 'unit', ""), 'Label', lbd_attr_or(did, 'label', name), ...
+                        'Elements', reshape(string(elements), 1, []), 'Role', role);
                     H5D.close(did);
                 end
                 H5G.close(gid);
@@ -409,7 +492,7 @@ classdef Dataset < handle
                     d.Values.(name) = struct('Name', name, 'Data', data, ...
                         'Axes', lbd.Dataset.axesList(lbd_attr_or(did, 'axes', "")), ...
                         'Unit', lbd_attr_or(did, 'unit', ""), 'Label', lbd_attr_or(did, 'label', name), ...
-                        'Shape', shape, 'Dtype', dtype);
+                        'Shape', shape, 'Dtype', dtype, 'PointAxes', strings(1, 0), 'Elements', {{}});
                     found(end+1) = name; %#ok<AGROW>
                     H5D.close(did);
                 end
@@ -458,6 +541,49 @@ classdef Dataset < handle
             end
         end
 
+        function elements = checkElements(elements, n, where)
+            %CHECKELEMENTS  A row of texts, one per position (N of them, if N isn't empty).
+            if isempty(elements)
+                elements = string.empty;
+                return
+            end
+            if iscellstr(elements) || ischar(elements), elements = string(elements); end
+            if ~isstring(elements)
+                error('lbd:invalid', '%s: Elements must be texts, one per position, not %s', where, class(elements));
+            end
+            elements = reshape(elements, 1, []);
+            if ~isempty(n) && numel(elements) ~= n
+                error('lbd:invalid', '%s: %d elements for %d positions; give one text per position', ...
+                    where, numel(elements), n);
+            end
+        end
+
+        function named = valueElements(elements, point, name)
+            %VALUEELEMENTS  Each data point dimension's texts (string.empty: numbered).
+            where = sprintf('value "%s"', name);
+            named = repmat({string.empty}, 1, numel(point));
+            if isempty(elements), return; end
+            if isempty(point)
+                error('lbd:invalid', ['%s: Elements name the positions in a data point; give Shape too ' ...
+                    '(each data point here is one number)'], where);
+            end
+            if ~iscell(elements)
+                if numel(point) ~= 1
+                    error('lbd:invalid', ['%s: give one list of elements per dimension of a data point ' ...
+                        '(%d for Shape=%s), as a cell; [] for a dimension left numbered'], where, numel(point), mat2str(point));
+                end
+                elements = {elements};
+            end
+            if numel(elements) ~= numel(point)
+                error('lbd:invalid', ['%s: give one list of elements per dimension of a data point ' ...
+                    '(%d for Shape=%s); [] for a dimension left numbered'], where, numel(point), mat2str(point));
+            end
+            for k = 1:numel(point)
+                named{k} = lbd.Dataset.checkElements(elements{k}, point(k), ...
+                    string(where) + ", dimension " + k + " of a data point");
+            end
+        end
+
         function data = realOnly(data, dtype, name)
             if ~isreal(data)
                 error('lbd:invalid', 'value "%s" is complex; refusing to drop the imaginary part (Dtype="%s")', name, dtype);
@@ -483,6 +609,14 @@ classdef Dataset < handle
                             v.Name, k, v.Shape(k), ax, numel(obj.Axes.(ax).Data));
                     end
                 end
+                % a data point's axes are the last ones with role "point"
+                k = numel(v.Axes);
+                while k > 0 && obj.Axes.(v.Axes(k)).Role == "point"
+                    k = k - 1;
+                end
+                v.PointAxes = v.Axes(k+1:end);
+                v.Elements = arrayfun(@(a) obj.Axes.(a).Elements, v.PointAxes, 'UniformOutput', false);
+                obj.Values.(vn{i}) = v;
             end
         end
     end

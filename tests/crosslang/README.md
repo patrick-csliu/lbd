@@ -42,6 +42,9 @@ with a notice. See [languages/README.md](../../languages/README.md) for adding o
 | value `Z(a,b)` | complex128 `(i+1) + (j+1)·1j` |
 | value `T(a,b,c)` | float64 `100·i + 10·j + k` |
 | value `q` | scalar float64 `42.5` |
+| axis `state` | positions `0, 1, 2` with elements `["ground", "état 1", "量子"]` (format 1.2), made from the elements alone |
+| value `S(state)` | float64 `[0.5, 1.5, 2.5]` |
+| value `C(a)` | each data point a 2×2 matrix (shape `(2, 2)`, format 1.2): `C[i, r, c] = 100·i + 10·r + c`; elements `["I", "Q"]` for the first dimension, the second numbered; **check**: axes `a, C_dim1, C_dim2`, `C_dim1` and `C_dim2` have `role="point"`, `a` none |
 | meta | `sample="chip – é"`, `T_mK=12` (int), `names=["a","b"]`, `vec=[1,2,3]`, `mat=[[0,1,2],[3,4,5]]` (2×3), `vna.ifbw_Hz=1000.0`, `vna.averages=4` (int) |
 | plot | `spec={"kind":"heatmap","values":["M"]}`, `style_name="thesis"`, `matplotlib` a non-empty version text (Python writes the installed matplotlib version; MATLAB and Julia write `"3.9.0"`) |
 

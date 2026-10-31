@@ -1,4 +1,4 @@
-# LBD file format — version 1.1
+# LBD file format — version 1.2
 
 LBD ("Lab Data", extension `.lbd`) is a file format for measurement and simulation data that can be written and read identically from any programming language, and viewed with the LBD viewer. Any language with HDF5 support can implement it; this repository provides implementations for Python, MATLAB and Julia.
 
@@ -33,7 +33,7 @@ that implement this spec, see [Python](../docs/python/files.md), [MATLAB](../doc
 | Attribute | Type | Required | Meaning |
 |---|---|---|---|
 | `lbd_format` | string, `"LBD"` | must | Identifies the file as LBD. |
-| `lbd_version` | string, `"<major>.<minor>"` | must | Format version, `"1.1"` for this spec (`"1.0"` files are valid 1.1 files without `id`). |
+| `lbd_version` | string, `"<major>.<minor>"` | must | Format version, `"1.2"` for this spec (`"1.0"` and `"1.1"` files are valid 1.2 files without the content added since). |
 | `title` | string | must (may be `""`) | Short human-readable title. |
 | `description` | string | must (may be `""`) | Free text. |
 | `created` | string, ISO-8601 with UTC offset | must | When the data was created (measured), e.g. `2026-10-13T16:09:00+08:00`. Given by the user when known; otherwise writers fill in the time of the first save. A writer saving a dataset that already has a `created` (set by the user, or read from a file) writes it unchanged. |
@@ -63,7 +63,10 @@ with a warning.
 - Attributes:
   - `unit`: string, must; `""` for dimensionless.
   - `label`: string, must; a human-readable name used on plot axes, e.g. `"Frequency"`. Defaults to the axis name.
+  - `elements`: 1-D array of strings, may (since 1.2); a text for each position of the axis, in order, e.g. `["ground", "excited"]` for an axis swept over named states. Readers show them instead of the numbers (tick labels, legends, read-outs). Any text; repeats allowed. Variable-length UTF-8 when written; readers must also accept fixed-length strings.
+  - `role`: string, may (since 1.2); `"point"` for an axis of a dimension inside a value's data point (§1.3). Absent: a sweep axis (every axis written before 1.2).
 - Axis values should be monotonic, but this is not enforced.
+- A reader that finds `elements` with another count than the axis's length, or not strings, or a `role` other than `"point"`, ignores it with a warning.
 
 ### 1.3 Values — `/values/<name>`
 
@@ -74,6 +77,14 @@ with a warning.
   - `axes`: string, must. The names of the axes along each dimension, **comma-separated, in logical order** (see §2), e.g. `"power,freq"`. It is `""` for a 0-D value.
   - `lbd_bool`: integer `1`, only for boolean data (see §3).
 - For every dimension *i*: the axis named in position *i* must exist in `/axes`, and its length must equal the size of dimension *i*.
+- **Data points with a shape** (since 1.2). Each data point of a value is one number, unless its
+  last dimensions lie on axes with `role="point"`: then one data point is the array over those
+  dimensions (a vector, a matrix). Writers make one such axis per dimension of the data point,
+  named `<value>_dim<k>` (k = 1, 2 … within the data point), holding `0 … n−1` (and `elements` if
+  the positions have names); e.g. a Bloch vector per drive amplitude: `axes="amp,bloch_dim1"`,
+  with `/axes/bloch_dim1` = `[0, 1, 2]`, `role="point"`, `elements=["x", "y", "z"]`. These are
+  ordinary axes, so readers of earlier versions read such values (with every dimension as an
+  axis).
 
 ### 1.4 Meta — `/meta`
 
@@ -159,13 +170,15 @@ Writers may store datasets chunked and gzip-compressed. Readers must handle this
 - A **minor** bump only adds optional content. A reader for `1.x` must read any `1.y` file, ignoring what it does not understand, and should warn when `y > x`.
 - A **major** bump may break compatibility. A reader must refuse a file whose major version is newer than it supports, with an error telling the user to update.
 - Readers must ignore unknown attributes, groups and datasets anywhere in the file.
+- Version history: **1.1** added the root `id` and `parent_id`; **1.2** added an axis's
+  `elements` and `role`, and data points with a shape (§1.2, §1.3).
 
 ---
 
 ## 7. Minimal example (as seen by `h5dump`-style listing)
 
 ```
-/                         lbd_format="LBD" lbd_version="1.1" title="Resonator power sweep"
+/                         lbd_format="LBD" lbd_version="1.2" title="Resonator power sweep"
                           description="" created="2026-10-13T16:09:00+08:00" writer="python lbd 1.3.0"
                           id="0199dc2a-4b7e-7f30-8a41-5c6d7e8f9a0b"
 /axes/power   float64[11]       unit="dBm" label="Power"
@@ -174,6 +187,16 @@ Writers may store datasets chunked and gzip-compressed. Readers must handle this
 /meta                     T_mK=12  sample="R7"
 /meta/vna                 ifbw_Hz=1000.0 averages=4
 /plot                     spec='{"kind":"heatmap","values":["S21"],"complex":"db"}'
+```
+
+A file with named positions and a vector per data point (format 1.2):
+
+```
+/axes/state         int64[2]     unit="" label="Prepared state" elements=["ground","excited"]
+/axes/amp           float64[21]  unit="V" label="Drive"
+/axes/bloch_dim1    int64[3]     unit="" label="bloch" role="point" elements=["x","y","z"]
+/values/P1          float64[2,21]    unit="" label="P1" axes="state,amp"
+/values/bloch       float64[21,3]    unit="" label="bloch" axes="amp,bloch_dim1"
 ```
 
 <!-- --8<-- [end:body] -->

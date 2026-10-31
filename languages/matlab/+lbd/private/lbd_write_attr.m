@@ -1,11 +1,13 @@
-function lbd_write_attr(loc, name, val)
-% Write an attribute: strings as variable-length UTF-8, numbers per spec.
+function lbd_write_attr(loc, name, val, asArray)
+% Write an attribute: strings as variable-length UTF-8, numbers per spec. ASARRAY true: texts are
+% written as a 1-D array even when there is one (an axis's elements).
+if nargin < 4, asArray = false; end
 name = char(name);
 if ischar(val) || isstring(val) || iscellstr(val)
     t = H5T.copy('H5T_C_S1');
     H5T.set_size(t, 'H5T_VARIABLE');
     H5T.set_cset(t, H5ML.get_constant_value('H5T_CSET_UTF8'));
-    if ischar(val) || (isstring(val) && isscalar(val))
+    if ~asArray && (ischar(val) || (isstring(val) && isscalar(val)))
         sp = H5S.create('H5S_SCALAR');
         buf = {char(val)};
     else

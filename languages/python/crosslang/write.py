@@ -21,6 +21,11 @@ d.add_value("M", (10 * i3 + j4)[:, :, 0].astype(float), axes=["a", "b"])
 d.add_value("Z", ((i3 + 1) + 1j * (j4 + 1))[:, :, 0], axes=["a", "b"])
 d.add_value("T", (100 * i3 + 10 * j4 + k2).astype(float), axes=["a", "b", "c"])
 d.add_value("q", 42.5)
+d.add_axis("state", elements=["ground", "état 1", "量子"])
+d.add_value("S", [0.5, 1.5, 2.5], axes="state")
+r2, c2 = np.arange(2)[None, :, None], np.arange(2)[None, None, :]
+d.add_value("C", (100 * i3[:, :1, :1] + 10 * r2 + c2).astype(float), axes="a", shape=(2, 2),
+            elements=[["I", "Q"], None])
 d.meta = {
     "sample": "chip – é",
     "T_mK": 12,

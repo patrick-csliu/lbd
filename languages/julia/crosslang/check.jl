@@ -29,6 +29,13 @@ function check(path)
     @test d["Z"].data == [ComplexF64(i + 1, j + 1) for i in 0:2, j in 0:3]
     @test d["T"].data == [100.0 * i + 10j + k for i in 0:2, j in 0:3, k in 0:1]
     @test isempty(d["q"].axes) && d["q"].data == 42.5
+    @test d["state"].elements == ["ground", "état 1", "量子"]
+    @test d["state"].data == [0, 1, 2]
+    @test d["S"].data == [0.5, 1.5, 2.5]
+    @test d["C"].axes == ["a", "C_dim1", "C_dim2"] && LBD.point_shape(d["C"]) == (2, 2)
+    @test d["C"].elements == Any[["I", "Q"], nothing]
+    @test d["C_dim1"].role == "point" && d["a"].role === nothing
+    @test d["C"].data == [100.0 * i + 10r + c for i in 0:2, r in 0:1, c in 0:1]
     m = d.meta
     @test m["sample"] == "chip – é"
     @test m["T_mK"] == 12
