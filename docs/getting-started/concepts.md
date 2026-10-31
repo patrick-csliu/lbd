@@ -30,8 +30,10 @@ cursors and sliders show the names.
 **Data points with a shape** (format 1.2): each data point of a value is one number, unless you
 say otherwise. A Bloch vector per drive amplitude is a value whose data points have shape `(3,)`
 (elements `x`, `y`, `z`); an I/Q covariance is a `(2, 2)` matrix per point. The value's array is
-then *its axes first, then the data point*: 21 amplitudes × 3 → shape 21 × 3. LBD stores one
-small axis for each dimension of a data point (`bloch_dim1`), so every program reads the file.
+then *its axes first, then the data point*: 21 amplitudes × 3 → shape 21 × 3. The value's axes
+are only what was swept (`amp`); the data point is described by the value itself (its shape and
+elements). In the file LBD stores one small axis for each dimension of a data point
+(`bloch_dim1`), so every program reads the file.
 
 ## Dimension order is the same in every language
 

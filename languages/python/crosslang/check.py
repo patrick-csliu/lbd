@@ -48,9 +48,9 @@ def check(path: Path) -> None:
     assert d["state"].elements == ["ground", "état 1", "量子"], d["state"].elements
     np.testing.assert_array_equal(d["state"].data, [0, 1, 2])
     np.testing.assert_array_equal(d["S"].data, [0.5, 1.5, 2.5])
-    assert d["C"].axes == ["a", "C_dim1", "C_dim2"] and d["C"].point_shape == (2, 2), d["C"].axes
+    assert d["C"].axes == ["a"] and d["C"].point_shape == (2, 2), (d["C"].axes, d["C"].point_shape)
     assert d["C"].elements == [["I", "Q"], None], d["C"].elements
-    assert d["C_dim1"].role == "point" and d["C_dim2"].role == "point" and d["a"].role is None
+    assert "C_dim1" not in d.axes and d["a"].role is None        # a data point isn't a sweep axis
     r, c = np.ogrid[0:2, 0:2]
     np.testing.assert_array_equal(d["C"].data, 100 * np.arange(3)[:, None, None] + 10 * r + c)
     m = d.meta

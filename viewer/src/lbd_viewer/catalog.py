@@ -171,6 +171,9 @@ class Catalog:
 def structure(header) -> Dict[str, Any]:
     """A file's shape, to tell whether a remembered view still fits it: its axes (name, length)
     and values (name, axes, type)."""
+    from lbd.plot.render import flat
+
+    header = flat(header)
     return {"axes": {n: int(len(a.data)) for n, a in header.axes.items()},
             "values": {n: {"axes": list(v.axes), "dtype": str(v.dtype)} for n, v in header.values.items()}}
 

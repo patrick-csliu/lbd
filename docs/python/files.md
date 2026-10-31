@@ -87,8 +87,10 @@ cov = np.zeros((21, 2, 2))
 d.add_value("cov", cov, axes="amp", shape=(2, 2), elements=[["I", "Q"], ["I", "Q"]])
 
 print(d.axes["state"].elements)          # ['ground', 'excited']
-print(d.values["bloch"].point_shape)     # (3,)
-print(d.values["bloch"].axes)            # ['amp', 'bloch_dim1']
+print(d.values["bloch"].axes)            # ['amp']: what was swept
+print(d.values["bloch"].point_shape)     # (3,): one data point
+print(d.values["bloch"].data.shape)      # (21, 3): the sweep, then the data point
+print(d.values["cov"].data[4])           # the 2 × 2 matrix at the 5th amplitude
 ```
 
 - **`elements`** on an axis: one text per position, in order (repeats allowed). Give the
@@ -98,9 +100,13 @@ print(d.values["bloch"].axes)            # ['amp', 'bloch_dim1']
   more dimensions than axes needs `shape=`: LBD doesn't guess.
 - **`elements`** on a value names a data point's positions: one list for a vector, one list per
   dimension for a matrix (`None` leaves a dimension numbered).
-- LBD makes one axis per dimension of a data point (`bloch_dim1`, `cov_dim1`, `cov_dim2`,
-  `role="point"`): readers of every version read the file, and the viewer draws the vector as one
-  curve per element against `amp`.
+- A value's `axes` are what was swept; its data point is described by `point_shape` and
+  `elements`. The array always splits the same way: `data.shape` is the axes' lengths, then
+  `point_shape` (a single number has `point_shape == ()`: no dimensions, as in numpy).
+- `write` takes a whole data point: `d.write(amp=4, cov=[[1, 0.1], [0.1, 2]])`.
+- In the file, each dimension of a data point is a small axis of its own (`bloch_dim1`,
+  `cov_dim1`, `cov_dim2`, `role="point"`), so readers of every version read the file; the viewer
+  draws the vector as one curve per element against `amp`.
 
 ### Filling values piece by piece
 

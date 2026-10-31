@@ -170,6 +170,7 @@ class ExploreSession:
         self._build()
 
     def _read(self, d: "lbd.Dataset") -> "lbd.Dataset":
+        d = rnd.flat(d)                     # one axis per dimension, a data point's too
         if not self.saved_view:
             d.plot = None
         return d

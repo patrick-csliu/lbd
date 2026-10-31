@@ -28,6 +28,7 @@ from matplotlib.figure import Figure
 
 import lbd
 from lbd.io import PLOT_SPEC_KEYS, _warn
+from lbd.io import _flat_view as flat   # drawing sees one axis per dimension (a data point's too)
 
 from .style import QuantityStyle, Style
 from .units import AUTO_UNITS, UnitWarning, axis_label, mathsafe, prefix_scale
@@ -88,6 +89,7 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
     as dimensions for the automatic kind or a heat map, and are not chosen as the horizontal
     axis, vertical axis or series unless asked for.
     """
+    d = flat(d)
     if spec is None:
         spec = {}
     if not isinstance(spec, dict):
@@ -732,6 +734,7 @@ def build_figure(d: "lbd.Dataset", spec: Dict[str, Any], style: Style,
     `d` must have the data of the plotted values loaded (and of `x`/`color` if they are values).
     Returns (figure, axes).
     """
+    d = flat(d)
     if ax is None:
         fig = fig or new_figure(style)
         ax = fig.add_subplot()
@@ -840,6 +843,7 @@ class MapModel:
 
 
 def prepare_curves(d, spec, style: Style) -> CurveModel:
+    d = flat(d)
     a = style.figure.axes
     xs, ys = style.axis_style("x"), style.axis_style("y")
     # x is an axis (shared by every curve) or a value (its own x for each curve, see resolve_spec)
@@ -937,6 +941,7 @@ def draw_curves(fig: Figure, ax, model: CurveModel, d, spec, style: Style,
 
 
 def prepare_map(d, spec, style: Style) -> MapModel:
+    d = flat(d)
     a = style.figure.axes
     xs, ys = style.axis_style("x"), style.axis_style("y")
     name = spec["values"][0]
@@ -1155,6 +1160,7 @@ def render_dataset(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], style: Styl
                    display: bool = False, creator: Optional[str] = None,
                    warn_unused: bool = True) -> Tuple[bytes, Dict[str, Any]]:
     """Render an in-memory (fully loaded) dataset. Returns (image bytes, resolved spec)."""
+    d = flat(d)
     fmt = check_format(fmt)
     resolved = resolve_spec(d, spec, warn_unused=warn_unused)
     meta = metadata(fmt, d, creator)
@@ -1186,6 +1192,7 @@ def render_file(path, spec: Optional[Dict[str, Any]], style: Style, fmt: str = "
 
 
 def needed_values(d: "lbd.Dataset", resolved: Dict[str, Any]) -> List[str]:
+    d = flat(d)
     names = list(resolved["values"])
     for key in ("x", "color"):
         n = resolved.get(key)

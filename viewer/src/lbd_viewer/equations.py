@@ -200,7 +200,7 @@ def names_of(s, g: Grid, arrays: bool = True) -> Tuple[Dict[str, Any], List[Dict
         missing = [n for n in usable if d.values[n].data is None]
         if missing:
             loaded = [n for n, v in d.values.items() if v.data is not None]
-            s.data = d = lbd.load(s.path, values=sorted(set(loaded) | set(missing)))
+            s.data = d = s._read(lbd.load(s.path, values=sorted(set(loaded) | set(missing))))
     for vname in usable:
         v = d.values[vname] if d.values[vname].data is not None else s.header.values[vname]
         if not lined_up:

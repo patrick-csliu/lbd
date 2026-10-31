@@ -37,6 +37,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set,
 import numpy as np
 
 import lbd
+from lbd.plot.render import flat
 from lbd.plot.style import Style
 
 PREVIEW_SIZE = (640, 480)           # drawn as a 640×480 Explore panel (text in proportion), 4:3
@@ -71,6 +72,7 @@ def grid_of(n: int, layout: str = "side") -> Tuple[int, int]:
 def automatic_panels(header: "lbd.Dataset") -> Tuple[List[Panel], Tuple[int, int]]:
     """What Explore opens a file with the first time (ExploreTab.tsx `fresh`), from the data
     only: one panel per value with axes, up to FIRST_PANELS, side by side."""
+    header = flat(header)
     names = [name for name, v in header.values.items() if len(v.shape) > 0]
     if not names:
         singles = ", ".join(header.values) or "none"

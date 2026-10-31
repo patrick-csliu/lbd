@@ -514,6 +514,7 @@ def jsonable(x: Any) -> Any:
 
 
 def file_summary(d: "lbd.Dataset") -> Dict[str, Any]:
+    d = rnd.flat(d)                     # the page shows one axis per dimension, a data point's too
     # HDF5 lists group members alphabetically; show axes in the order the values use them.
     order: List[str] = []
     for v in d.values.values():
@@ -530,7 +531,7 @@ def file_summary(d: "lbd.Dataset") -> Dict[str, Any]:
             "max": jsonable(finite.max()) if finite.size else None,
         })
     values = [{"name": v.name, "unit": v.unit, "label": v.label, "axes": v.axes, "shape": list(v.shape),
-               "point_axes": v.point_axes,
+               "point_axes": [a for a in v.axes if d.axes[a].role == "point"],
                "dtype": v.dtype, "complex": v.dtype.startswith("complex")} for v in d.values.values()]
     numbers = _single_numbers(d)
     for v in values:

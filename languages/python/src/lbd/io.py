@@ -8,6 +8,8 @@ Nothing is dropped or altered without one of the two.
 from __future__ import annotations
 
 import contextlib
+import copy
+import dataclasses
 import datetime as _dt
 import json
 import os
@@ -129,8 +131,10 @@ class Axis:
         A text for each position, in order (format 1.2): `["ground", "excited"]` for an axis
         swept over named states. `None`: the positions are known by their numbers.
     role : str or None
-        `"point"` for an axis made by [`Dataset.add_value`][lbd.Dataset.add_value] for a
-        dimension inside a value's data point (format 1.2); `None` for a sweep axis.
+        `None` for every axis in `Dataset.axes` (a sweep axis). `"point"` marks an axis of a
+        dimension inside a value's data point, as the file stores it (format 1.2); such axes
+        aren't in `Dataset.axes`: a value describes its data point (`point_shape`,
+        `elements`).
     grows : bool
         An axis of unknown length (`add_axis(..., grows=True)`): [`write`][lbd.Dataset.write]
         adds its points. Not stored in the file (a saved file has the points written).
@@ -150,9 +154,11 @@ class Axis:
 
 @dataclass
 class Value:
-    """An N-D value of a dataset, with one axis per dimension.
+    """An N-D value of a dataset: a result measured over the sweep axes.
 
-    Created by [`Dataset.add_value`][lbd.Dataset.add_value] or read from a file.
+    Created by [`Dataset.add_value`][lbd.Dataset.add_value] or read from a file. Its array
+    splits the same way every time: the sweep first (one dimension per entry of `dims`), then
+    one data point (`point_shape`), so `data.shape == lengths of dims + point_shape`.
 
     Attributes
     ----------
@@ -162,7 +168,8 @@ class Value:
         The array: 0-D for a scalar, `bool` for boolean values. `None` if the file was read
         without this value's data (see [`load`][lbd.load] with `values=`).
     axes : list of str
-        The axis name of each dimension, in order.
+        What was swept: the sweep axes the value depends on, outer to inner (`d.axes[name]`
+        holds each). Never the data point's dimensions.
     unit : str
         Unit, `""` for dimensionless.
     label : str
@@ -171,12 +178,15 @@ class Value:
         Array shape, available even when `data` is `None`.
     dtype : str
         LBD type name, e.g. `"complex128"` or `"bool"`.
-    point_axes : list of str
-        The axes of one data point (format 1.2), the last of `axes`: empty when each data point
-        is one number.
+    dims : list of tuple of str
+        How the sweep part is stored: one tuple of axis names per sweep dimension of `data`,
+        `[("power",), ("freq",)]` for a grid.
+    point_shape : tuple
+        The shape of one data point: `()` for one number, `(3,)` for a vector of 3, `(2, 2)`
+        for a matrix (format 1.2).
     elements : list
         For each dimension of a data point, the text of each position, or `None` when it is
-        known by number (format 1.2; a copy of its point axes' `elements`).
+        known by number (format 1.2); `[]` when each data point is one number.
     measured : numpy.ndarray or None
         For an integer or boolean value filled piece by piece (`add_value` without data, then
         `write`): `True` where something was written. `None` for every other value (float and
@@ -191,14 +201,16 @@ class Value:
     # Shape and dtype are kept even when the data itself was not loaded.
     shape: tuple = ()
     dtype: str = ""
-    point_axes: List[str] = field(default_factory=list)
+    dims: List[tuple] = field(default_factory=list)
+    point_shape: tuple = ()
     elements: List[Optional[List[str]]] = field(default_factory=list)
     measured: Optional[np.ndarray] = None
+    # how the file names and labels the data point's dimensions (axes with role "point")
+    _point: List[Axis] = field(default_factory=list, repr=False, compare=False)
 
-    @property
-    def point_shape(self) -> tuple:
-        """The shape of one data point: `()` for one number, `(3,)` for a vector of 3 …"""
-        return tuple(self.shape[len(self.shape) - len(self.point_axes):]) if self.point_axes else ()
+    def __post_init__(self) -> None:
+        if not self.dims:
+            self.dims = [(a,) for a in self.axes]
 
 
 class Dataset:
@@ -454,8 +466,8 @@ class Dataset:
         shape : tuple of int, optional
             The shape of one data point, like numpy: `(3,)` for a vector of 3, `(2, 2)` for a
             matrix. Default `()`: one number. `data`'s last dimensions must have this shape.
-            For each dimension of the data point an axis is made, named `<name>_dim1`,
-            `<name>_dim2` … (positions 0, 1, 2 …).
+            The value describes its data point (`point_shape`, `elements`); the file stores
+            each of its dimensions as an axis named `<name>_dim1`, `<name>_dim2` …
         elements : list, optional
             The text of each position in a data point: one list for a vector
             (`["u", "v", "w"]`), one list per dimension for more (`[["I", "Q"], ["I", "Q"]]`;
@@ -547,16 +559,13 @@ class Dataset:
             raise LBDError(f"value '{name}': its data points have shape {tuple(arr.shape[len(axes_list):])}, "
                            f"not shape={point}")
         named = _value_elements(elements, point, name)
-        point_names = [f"{name}_dim{k + 1}" for k in range(len(point))]
-        for p in point_names:
-            if p in self.axes or p in self.values:
-                raise LBDError(f"value '{name}' needs the name '{p}' for an axis of its data points, but it "
-                               "is already used; rename that axis or value")
-        for p, n, el in zip(point_names, point, named):
-            self.axes[p] = Axis(p, np.arange(n), label=f"{label} ({p.rsplit('_', 1)[1]})" if len(point) > 1 else label,
-                                elements=el, role="point")
-        value = Value(name, arr, axes_list + point_names, unit=unit, label=label, shape=arr.shape,
-                      dtype=str(arr.dtype), point_axes=point_names, elements=named, measured=measured)
+        value = Value(name, arr, axes_list, unit=unit, label=label, shape=arr.shape, dtype=str(arr.dtype),
+                      point_shape=point, elements=named, measured=measured)
+        value._point = _point_axes(value)
+        for p in value._point:
+            if p.name in self.axes or p.name in self.values or p.name in self._point_names():
+                raise LBDError(f"value '{name}' needs the name '{p.name}' for a dimension of its data points in the "
+                               "file, but it is already used; rename that axis or value")
         self.values[name] = value
         if placeholder is not None:
             self._placeholders.add(name)
@@ -653,12 +662,15 @@ class Dataset:
                 else:
                     index.append(slice(None))
                     shape.append(len(ax.data))
+            index += [slice(None)] * len(v.point_shape)       # a data point is always given whole
+            shape += list(v.point_shape)
             arr = np.asarray(data)
             if arr.shape != tuple(shape) and not (arr.size == 1 and shape == []):
                 given_axes = [a for a in v.axes if a in positions]
+                left = [a for a in v.axes if a not in index_of and not self.axes[a].grows]
+                left += [f"a data point of shape {v.point_shape}"] if v.point_shape else []
                 raise LBDError(f"write: '{name}' at {given_axes or 'every place'} needs data of shape {tuple(shape)} "
-                               f"({', '.join(a for a in v.axes if a not in index_of and not self.axes[a].grows) or 'one number'}), "
-                               f"not {arr.shape}")
+                               f"({', '.join(left) or 'one number'}), not {arr.shape}")
             puts.append((name, tuple(index), _check_fits(arr.reshape(shape) if arr.size == 1 and shape == [] else arr,
                                                          v.dtype, name)))
         return {"grow": grow, "puts": puts}
@@ -709,6 +721,12 @@ class Dataset:
         _check_name(name)
         if name in self.axes or name in self.values:
             raise LBDError(f"name '{name}' is already used by an axis or value")
+        if name in self._point_names():
+            raise LBDError(f"name '{name}' is used in the file for a dimension of a value's data points")
+
+    def _point_names(self) -> set:
+        """The names the file gives the dimensions of the values' data points."""
+        return {p.name for v in self.values.values() for p in v._point}
 
     # ---- access ---------------------------------------------------------
 
@@ -728,7 +746,8 @@ class Dataset:
             lines.append(f"  axis  {a.name}[{len(a)}] {a.unit}".rstrip())
         for v in self.values.values():
             dims = ",".join(v.axes)
-            lines.append(f"  value {v.name}({dims}) {v.dtype} {v.unit}".rstrip())
+            point = f" point {v.point_shape}" if v.point_shape else ""
+            lines.append(f"  value {v.name}({dims}){point} {v.dtype} {v.unit}".rstrip())
         return "\n".join(lines)
 
     # ---- saving ---------------------------------------------------------
@@ -845,8 +864,10 @@ class Dataset:
                 raise LBDError(f"axis '{key}' contains NaN or inf")
             if a.elements is not None:
                 _check_elements(a.elements, arr.size, f"axis '{key}'")
-            if a.role not in (None, "point"):
-                raise LBDError(f"axis '{key}' has role {a.role!r}; it must be None (a sweep axis) or 'point'")
+            if a.role is not None:
+                raise LBDError(f"axis '{key}' has role {a.role!r}; the axes of a dataset are sweep axes (None): "
+                               "a value describes its data points with shape= (point_shape)")
+        shared: Dict[str, Axis] = {}          # data-point dimensions by their name in the file
         for key, v in self.values.items():
             if not isinstance(v, Value):
                 raise LBDError(f"values['{key}'] is a {type(v).__name__}, not an lbd.Value")
@@ -862,14 +883,35 @@ class Dataset:
             arr = np.asarray(v.data)
             if arr.dtype.kind not in "biufc" or                     str(_normalize_dtype(np.empty(0, arr.dtype), key, quiet=True).dtype) not in _ALLOWED_DTYPES:
                 raise LBDError(f"value '{key}' has unsupported dtype {arr.dtype}")
-            if len(v.axes) != arr.ndim or len(set(v.axes)) != len(v.axes):
-                raise LBDError(f"value '{key}' has {arr.ndim} dimension(s) but axes={v.axes}")
+            point = tuple(v.point_shape)
+            if len(v.axes) + len(point) != arr.ndim or len(set(v.axes)) != len(v.axes):
+                raise LBDError(f"value '{key}' has {arr.ndim} dimension(s) but axes={v.axes}"
+                               + (f" and point_shape={point}" if point else ""))
+            if list(v.dims) != [(a,) for a in v.axes]:
+                raise LBDError(f"value '{key}': dims={v.dims} doesn't match its axes {v.axes}")
             for i, ax in enumerate(v.axes):
                 if ax not in self.axes:
                     raise LBDError(f"value '{key}' refers to missing axis '{ax}'")
                 if len(self.axes[ax]) != arr.shape[i]:
                     raise LBDError(f"value '{key}': dimension {i} has size {arr.shape[i]} "
                                    f"but axis '{ax}' has length {len(self.axes[ax])}")
+            if point and tuple(arr.shape[len(v.axes):]) != point:
+                raise LBDError(f"value '{key}': its data points have shape {tuple(arr.shape[len(v.axes):])}, "
+                               f"but point_shape={point}")
+            if len(v.elements) != len(point):
+                raise LBDError(f"value '{key}': elements must have one entry per dimension of a data point "
+                               f"({len(point)}), not {len(v.elements)}")
+            for k, (el, n) in enumerate(zip(v.elements, point)):
+                if el is not None:
+                    _check_elements(el, n, f"value '{key}', dimension {k + 1} of a data point")
+            for p in _point_axes(v):
+                if p.name in self.axes or p.name in self.values:
+                    raise LBDError(f"value '{key}': the name '{p.name}' of a dimension of its data points is "
+                                   "also used by an axis or value")
+                other = shared.setdefault(p.name, p)
+                if len(other) != len(p) or other.elements != p.elements:
+                    raise LBDError(f"two values give the dimension '{p.name}' of their data points different "
+                                   "sizes or elements")
             if v.measured is not None and np.shape(v.measured) != arr.shape:
                 raise LBDError(f"value '{key}': its measured mask has shape {np.shape(v.measured)}, not {arr.shape}")
         if not isinstance(self.meta, Mapping):
@@ -887,7 +929,7 @@ class Dataset:
         f.attrs["writer"] = writer
 
         g_axes = f.create_group("axes")
-        for a in self.axes.values():
+        for a in _file_axes(self):
             ds = _create_dataset(g_axes, a.name, _normalize_dtype(np.asarray(a.data), a.name), compression)
             ds.attrs["unit"] = a.unit
             ds.attrs["label"] = a.label
@@ -902,10 +944,10 @@ class Dataset:
             is_bool = data.dtype == np.bool_
             if is_bool:
                 data = data.astype(np.uint8)
-            ds = _create_dataset(g_values, v.name, data, compression)
+            ds = _create_dataset(g_values, v.name, data, compression, whole=len(v.point_shape))
             ds.attrs["unit"] = v.unit
             ds.attrs["label"] = v.label
-            ds.attrs["axes"] = ",".join(v.axes)
+            ds.attrs["axes"] = ",".join(_dim_names(v))
             if is_bool:
                 ds.attrs["lbd_bool"] = np.int64(1)
 
@@ -914,7 +956,8 @@ class Dataset:
         if masks:                             # integer / boolean points never measured (stopped early)
             g_measured = f.create_group("measured")
             for name, m in masks.items():
-                _create_dataset(g_measured, name, np.asarray(m, dtype=np.uint8), compression)
+                _create_dataset(g_measured, name, np.asarray(m, dtype=np.uint8), compression,
+                                whole=len(self.values[name].point_shape))
 
         _write_meta(f.create_group("meta"), self.meta, "meta")
 
@@ -1025,15 +1068,7 @@ def load(path: PathLike, values: Union[None, str, Iterable[str]] = None) -> Data
         _warn(f"{path.name} is still being written, or its writer stopped before finishing "
               "(lbd.writing_status tells which); reading what was written so far")
     with _reading(path, writing) as f:
-        d = _read_header(f, path)
-        for group in ("axes", "values"):
-            if not isinstance(f.get(group), h5py.Group):
-                raise LBDError(f"{path.name} has no /{group} group; it breaks the LBD format")
-        for name, ds in f["axes"].items():
-            d.axes[name] = _read_axis(name, ds, path)
-        described = {name: _describe_value(name, ds, path) for name, ds in f["values"].items()}
-        if writing:                     # a growing axis and its values may be caught mid-write
-            _same_lengths(d.axes, described)
+        d, described = _read_structure(f, path, writing)
         masks = f["measured"] if isinstance(f.get("measured"), h5py.Group) else None
         for name, ds in f["values"].items():
             v = described[name]
@@ -1192,6 +1227,22 @@ def _open(path: Path, mode: str, swmr: bool = False) -> h5py.File:
         raise OSError(f"can't open {path}: {e}") from e
 
 
+def _read_structure(f: h5py.File, path: Path, writing: bool) -> tuple:
+    """Everything but the values' data: the header, every axis whole (axes are small next to
+    the data), and each value described (shape, type, axes). `load` and `info` read files
+    through it; the values' data is read afterwards."""
+    d = _read_header(f, path)
+    for group in ("axes", "values"):
+        if not isinstance(f.get(group), h5py.Group):
+            raise LBDError(f"{path.name} has no /{group} group; it breaks the LBD format")
+    for name, ds in f["axes"].items():
+        d.axes[name] = _read_axis(name, ds, path)
+    described = {name: _describe_value(name, ds, path) for name, ds in f["values"].items()}
+    if writing:                     # a growing axis and its values may be caught mid-write
+        _same_lengths(d.axes, described)
+    return d, described
+
+
 def _read_header(f: h5py.File, path: Path) -> Dataset:
     fmt = _attr_str(f, "lbd_format", "", path)
     if fmt != "LBD":
@@ -1337,12 +1388,83 @@ def _validate_loaded(d: Dataset, path: Path) -> None:
                     f"{path.name}: value '{v.name}': dimension {i} has size {v.shape[i]} but axis '{ax}' "
                     f"has length {len(d.axes[ax])}"
                 )
-        # a data point's axes are the last ones with role "point"
+    # a data point's dimensions are a value's last axes with role "point": they move to the value
+    trailing: Dict[str, int] = {}
+    for v in d.values.values():
         k = len(v.axes)
         while k > 0 and d.axes[v.axes[k - 1]].role == "point":
             k -= 1
-        v.point_axes = v.axes[k:]
-        v.elements = [d.axes[a].elements for a in v.point_axes]
+        for a in v.axes[k:]:
+            trailing[a] = trailing.get(a, 0) + 1
+        v._point = [copy.copy(d.axes[a]) for a in v.axes[k:]]
+        v.axes = v.axes[:k]
+        v.dims = [(a,) for a in v.axes]
+        v.point_shape = tuple(v.shape[k:])
+        v.elements = [p.elements for p in v._point]
+    for name, a in list(d.axes.items()):
+        if a.role != "point":
+            continue
+        swept = [v.name for v in d.values.values() if name in v.axes]
+        if trailing.get(name) and swept:
+            raise LBDError(f"{path.name}: axis '{name}' is a dimension of a data point of some values and a "
+                           f"sweep axis of {swept}; it can't be both")
+        if trailing.get(name):
+            del d.axes[name]
+        else:
+            a.role = None
+            _warn(f"{path.name}: axis '{name}' is marked as a dimension of a data point (role 'point') "
+                  "but no value's data point uses it; it is read as a sweep axis")
+
+
+def _point_axes(v: Value) -> List[Axis]:
+    """The axes the file stores for the dimensions of `v`'s data points (format 1.2: role
+    "point", holding 0 … n−1): their names and labels as known (`v._point`), else as writers
+    make them (`<value>_dim<k>`)."""
+    out = []
+    for k, n in enumerate(v.point_shape):
+        known = v._point[k] if k < len(v._point) else None
+        name = known.name if known is not None else f"{v.name}_dim{k + 1}"
+        label = known.label if known is not None else \
+            (f"{v.label} (dim{k + 1})" if len(v.point_shape) > 1 else v.label)
+        out.append(Axis(name, np.arange(n), unit=known.unit if known is not None else "", label=label,
+                        elements=v.elements[k] if k < len(v.elements) else None, role="point"))
+    return out
+
+
+def _dim_names(v: Value) -> List[str]:
+    """One axis name per dimension of `v.data`, as the file's `axes` attribute lists them."""
+    return list(v.axes) + [p.name for p in _point_axes(v)]
+
+
+def _file_axes(d: Dataset) -> List[Axis]:
+    """Every axis the file stores: the sweep axes, then each value's data-point axes (once
+    each: values read from another program's file may share one)."""
+    out = {a.name: a for a in d.axes.values()}
+    for v in d.values.values():
+        for p in _point_axes(v):
+            out.setdefault(p.name, p)
+    return list(out.values())
+
+
+def _flat_view(d: Dataset) -> Dataset:
+    """`d` with one axis per dimension of every value, as the file lays it out (format 1.2):
+    a data point's dimensions are axes with role "point", listed last in the value's `axes`.
+
+    For drawing code (`lbd.plot`, LBD Viewer), which handles every dimension as an axis. It
+    shares the arrays with `d`; a flat view of a flat view is itself."""
+    if getattr(d, "_flat", False):
+        return d
+    flat = copy.copy(d)
+    flat.axes = dict(d.axes)
+    flat.values = {}
+    for name, v in d.values.items():
+        pts = _point_axes(v)
+        for p in pts:
+            flat.axes.setdefault(p.name, p)
+        names = list(v.axes) + [p.name for p in pts]
+        flat.values[name] = dataclasses.replace(v, axes=names, dims=[(a,) for a in names], _point=[])
+    flat._flat = True
+    return flat
 
 
 # ---- helpers ---------------------------------------------------------------
@@ -1605,10 +1727,37 @@ def _coerce_value(data: Any, dtype: str, name: str) -> np.ndarray:
         return _contiguous(arr.astype(target))
 
 
-def _create_dataset(group: h5py.Group, name: str, data: np.ndarray, compression: Optional[str]) -> h5py.Dataset:
+def _create_dataset(group: h5py.Group, name: str, data: np.ndarray, compression: Optional[str],
+                    whole: int = 0) -> h5py.Dataset:
+    """Uncompressed data is stored in one piece (any part of it can be read directly);
+    compressed data in chunks by `_chunk_shape` (`whole`: last dimensions kept whole)."""
     if compression and data.ndim > 0 and data.size >= _COMPRESS_MIN_SIZE:
-        return group.create_dataset(name, data=data, compression=compression, compression_opts=4, chunks=True)
+        return group.create_dataset(name, data=data, compression=compression, compression_opts=4,
+                                    chunks=_chunk_shape(data.shape, data.dtype.itemsize, whole))
     return group.create_dataset(name, data=data)
+
+
+CHUNK_BYTES = 1 << 20          # a chunk of a saved file: about 1 MB
+
+
+def _chunk_shape(shape: Sequence[int], itemsize: int, whole: int = 0, size: int = CHUNK_BYTES,
+                 grows: bool = False) -> tuple:
+    """Chunks that make reading a part cheap: the inner dimensions whole (a trace, a data point)
+    as far as `size` bytes allow, then as many outer rows as fit; the last `whole` dimensions
+    (a data point) always whole. `grows`: the first dimension is unlimited, so its current
+    length doesn't limit the chunk."""
+    shape = [max(int(n), 1) for n in shape]
+    chunk = [1] * len(shape)
+    budget = max(size // max(itemsize, 1), 1)
+    for i in range(len(shape) - 1, -1, -1):
+        n = budget if grows and i == 0 else shape[i]
+        if i >= len(shape) - whole:
+            chunk[i] = n
+            budget = max(budget // n, 1)
+        else:
+            chunk[i] = max(1, min(n, budget))
+            budget = max(budget // chunk[i], 1) if chunk[i] == n else 1
+    return tuple(chunk)
 
 
 def _write_meta(group: h5py.Group, meta: Mapping[str, Any], where: str) -> None:

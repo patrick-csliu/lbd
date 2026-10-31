@@ -76,16 +76,18 @@ def test_a_vector_per_data_point(path):
     d.add_axis("amp", np.linspace(0, 0.5, 4), unit="V")
     b = np.arange(12.0).reshape(4, 3)
     v = d.add_value("bloch", b, axes=["amp"], shape=(3,), elements=["x", "y", "z"])
-    assert v.axes == ["amp", "bloch_dim1"] and v.point_axes == ["bloch_dim1"] and v.point_shape == (3,)
-    assert d.axes["bloch_dim1"].role == "point" and list(d.axes["bloch_dim1"].data) == [0, 1, 2]
+    assert v.axes == ["amp"] and v.dims == [("amp",)] and v.point_shape == (3,)
+    assert list(d.axes) == ["amp"]                     # the data point isn't a sweep axis
     d.save(path)
     r = lbd.load(path)
     assert np.array_equal(r.values["bloch"].data, b)
-    assert r.values["bloch"].point_axes == ["bloch_dim1"]
-    assert r.values["bloch"].point_shape == (3,)
+    assert r.values["bloch"].axes == ["amp"] and r.values["bloch"].point_shape == (3,)
     assert r.values["bloch"].elements == [["x", "y", "z"]]
-    assert r.axes["bloch_dim1"].elements == ["x", "y", "z"] and r.axes["bloch_dim1"].role == "point"
+    assert list(r.axes) == ["amp"]
     assert lbd.info(path).values["bloch"].point_shape == (3,)
+    with h5py.File(path, "r") as f:                    # the file: as format 1.2 lays it out
+        assert f["values/bloch"].attrs["axes"] == "amp,bloch_dim1"
+        assert f["axes/bloch_dim1"].attrs["role"] == "point" and list(f["axes/bloch_dim1"][()]) == [0, 1, 2]
 
 
 def test_a_matrix_per_data_point_with_one_dimension_numbered(path):
@@ -96,7 +98,7 @@ def test_a_matrix_per_data_point_with_one_dimension_numbered(path):
     r = lbd.load(path)
     assert r.values["cov"].point_shape == (2, 2)
     assert r.values["cov"].elements == [["I", "Q"], None]
-    assert r.values["cov"].axes == ["amp", "cov_dim1", "cov_dim2"]
+    assert r.values["cov"].axes == ["amp"] and r.values["cov"].shape == (4, 2, 2)
 
 
 def test_a_data_point_needs_its_shape_said():
@@ -134,6 +136,9 @@ def test_a_data_point_axis_name_already_used_is_refused():
     d.add_axis("r_dim1", [0, 1, 2])
     with pytest.raises(lbd.LBDError, match="needs the name 'r_dim1'"):
         d.add_value("r", np.zeros((5, 3)), axes=["x"], shape=(3,))
+    d.add_value("s", np.zeros((5, 3)), axes=["x"], shape=(3,))
+    with pytest.raises(lbd.LBDError, match="dimension of a value's data points"):
+        d.add_axis("s_dim1", [0, 1, 2])                # the file needs that name for s
 
 
 def test_older_readers_see_ordinary_axes(path):
@@ -152,4 +157,58 @@ def test_a_one_point_one_value_file_is_unchanged(path):
     d = lbd.Dataset()
     d.add_axis("x", np.arange(5))
     v = d.add_value("y", np.zeros(5), axes="x")
-    assert v.point_axes == [] and v.point_shape == () and v.elements == []
+    assert v.point_shape == () and v.elements == [] and v.dims == [("x",)]
+
+
+def test_a_data_point_changed_by_hand_is_checked_at_save(path):
+    d = lbd.Dataset()
+    d.add_axis("x", np.arange(5))
+    v = d.add_value("r", np.zeros((5, 3)), axes=["x"], shape=(3,), elements=["u", "v", "w"])
+    v.point_shape = (4,)
+    with pytest.raises(lbd.LBDError, match=r"point_shape=\(4,\)"):
+        d.save(path)
+    v.point_shape = (3,)
+    v.elements = [["u", "v"]]
+    with pytest.raises(lbd.LBDError, match="2 elements for 3 positions"):
+        d.save(path)
+    v.elements = [None]
+    d.save(path)
+    assert lbd.load(path).values["r"].elements == [None]
+
+
+def test_a_point_axis_no_value_uses_is_read_as_a_sweep_axis(path):
+    d = lbd.Dataset()
+    d.add_axis("x", np.arange(5))
+    d.save(path)
+    with h5py.File(path, "a") as f:
+        f["axes/x"].attrs["role"] = "point"
+    with pytest.warns(lbd.LBDWarning, match="read as a sweep axis"):
+        r = lbd.load(path)
+    assert r.axes["x"].role is None
+
+
+def test_a_point_axis_also_swept_is_refused(path):
+    d = lbd.Dataset()
+    d.add_axis("x", np.arange(3))
+    d.add_value("r", np.zeros((3, 3)), axes=["x"], shape=(3,))
+    d.add_axis("x2", np.arange(3))
+    d.add_value("s", np.zeros((3, 3)), axes=["x", "x2"])
+    d.save(path)
+    with h5py.File(path, "a") as f:
+        f["values/s"].attrs["axes"] = "r_dim1,x"       # r_dim1 swept first: not s's data point
+    with pytest.raises(lbd.LBDError, match="can't be both"):
+        lbd.load(path)
+
+
+def test_the_flat_view_has_an_axis_per_dimension():
+    """Drawing code (lbd.plot, the viewer) sees the 1.2 layout: one axis per dimension."""
+    from lbd.io import _flat_view
+
+    d = lbd.Dataset()
+    d.add_axis("x", np.arange(5))
+    d.add_value("cov", np.zeros((5, 2, 2)), axes="x", shape=(2, 2), elements=[["I", "Q"], None])
+    flat = _flat_view(d)
+    assert flat.values["cov"].axes == ["x", "cov_dim1", "cov_dim2"]
+    assert flat.axes["cov_dim1"].role == "point" and flat.axes["cov_dim1"].elements == ["I", "Q"]
+    assert flat.values["cov"].data is d.values["cov"].data          # shared, not copied
+    assert _flat_view(flat) is flat and list(d.axes) == ["x"]

@@ -15,6 +15,13 @@ are still written as 1.2).
   `lbd.version()` gives `"2.0"`, the newest format read and written. Writing and reading axis
   groups comes in the next steps of this version.
 
+- **A value's `axes` are what was swept** (Python; MATLAB and Julia follow in this version).
+  The dimensions of a data point (`shape=`) are no longer axes of the dataset: `d.axes` holds
+  only sweep axes (`d.axes["bloch_dim1"]` is gone), `v.axes` lists only them, and the value
+  describes its data point with `point_shape` and `elements`; `v.point_axes` is gone. New:
+  `v.dims`, how the sweep part is stored (`[("amp",)]`). `data` and the file are unchanged
+  (the file still stores a data point's dimensions as axes with `role="point"`).
+
 - **File format 1.1: every file gets an `id`** (every language). It is the measurement's
   identity, so LBD can recognise the same measurement in two places: a UUID version 7 (RFC 9562)
   made at the first save from the time and the operating system's random bits, with nothing to

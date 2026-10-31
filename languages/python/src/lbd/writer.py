@@ -37,7 +37,10 @@ from .io import (
     LBDError,
     Value,
     __version__,
+    _chunk_shape,
     _created_text,
+    _dim_names,
+    _file_axes,
     _normalize_dtype,
     _plot_json,
     _style_json,
@@ -491,7 +494,7 @@ class Writer:
         f.attrs["writer"] = d.writer
         f.attrs["id"] = d.id
         g_axes = f.create_group("axes")
-        for a in d.axes.values():
+        for a in _file_axes(d):
             if a.grows:
                 ds = g_axes.create_dataset(a.name, shape=(0,), maxshape=(None,), dtype="f8", chunks=(1024,))
             else:
@@ -510,28 +513,30 @@ class Writer:
             store = "uint8" if is_bool else v.dtype
             placeholder = v.name in d._placeholders
             fill = complex(np.nan, np.nan) if store.startswith("complex") else np.nan if store.startswith("float") else 0
+            chunks = _chunks(v.data.shape, np.dtype(store).itemsize, len(v.point_shape), grows)
             if grows:
                 ds = g_values.create_dataset(v.name, shape=v.data.shape, maxshape=(None,) + v.data.shape[1:],
-                                             dtype=store, fillvalue=fill, chunks=_chunks(v.data.shape[1:]))
+                                             dtype=store, fillvalue=fill, chunks=chunks)
             elif placeholder:
                 ds = g_values.create_dataset(v.name, shape=v.data.shape, dtype=store, fillvalue=fill,
-                                             chunks=True if v.data.ndim else None)
+                                             chunks=chunks)
             else:
                 data = _normalize_dtype(np.asarray(v.data), v.name)
                 ds = g_values.create_dataset(v.name, data=data.astype(np.uint8) if is_bool else data)
             ds.attrs["unit"] = v.unit
             ds.attrs["label"] = v.label
-            ds.attrs["axes"] = ",".join(v.axes)
+            ds.attrs["axes"] = ",".join(_dim_names(v))
             if is_bool:
                 ds.attrs["lbd_bool"] = np.int64(1)
             if v.measured is not None and placeholder:
                 g_measured = g_measured or f.create_group("measured")
+                mask_chunks = _chunks(v.data.shape, 1, len(v.point_shape), grows)
                 if grows:
                     g_measured.create_dataset(v.name, shape=v.data.shape, maxshape=(None,) + v.data.shape[1:],
-                                              dtype="u1", fillvalue=0, chunks=_chunks(v.data.shape[1:]))
+                                              dtype="u1", fillvalue=0, chunks=mask_chunks)
                 else:
                     g_measured.create_dataset(v.name, shape=v.data.shape, dtype="u1", fillvalue=0,
-                                              chunks=True if v.data.ndim else None)
+                                              chunks=mask_chunks)
             elif v.measured is not None:
                 v.measured = None                # given whole: everything measured
         _write_meta(f.create_group("meta"), d.meta, "meta")
@@ -785,10 +790,14 @@ class Writer:
         return f"<lbd.Writer {self.writing_path if self._state == 'writing' else self.path} ({self._state})>"
 
 
-def _chunks(rest: tuple) -> tuple:
-    """Chunks along a growing axis: about 64 kB, at least one row."""
-    row = int(np.prod(rest)) if rest else 1
-    return (max(1, 8192 // max(row, 1)),) + tuple(rest)
+LIVE_CHUNK_BYTES = 1 << 16     # chunks of a file being written: about 64 kB (it is flushed often)
+
+
+def _chunks(shape: tuple, itemsize: int, whole: int = 0, grows: bool = False) -> Optional[tuple]:
+    """Chunks of a value in a file being written: `_chunk_shape`'s rule (`None` for one number)."""
+    if not shape:
+        return None
+    return _chunk_shape(shape, itemsize, whole, size=LIVE_CHUNK_BYTES, grows=grows)
 
 
 _open_writers: "weakref.WeakSet[Writer]" = weakref.WeakSet()
