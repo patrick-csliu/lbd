@@ -12,9 +12,35 @@ for f = files'
         fprintf('  matlab reads %-7s FAILED: %s\n', lang, err.message);
     end
 end
+for f = dir(fullfile(root, '*', 'live.lbd'))'
+    lang = string(regexp(f.folder, '[^\\/]+$', 'match', 'once'));
+    try
+        checkLive(fullfile(f.folder, f.name));
+        fprintf('  matlab reads %-7s live.lbd OK\n', lang);
+    catch err
+        failed = true;
+        fprintf('  matlab reads %-7s live.lbd FAILED: %s\n', lang, err.message);
+    end
+end
 if failed
     error('crosslang:failed', 'MATLAB cross-language check failed');
 end
+end
+
+function checkLive(p)
+expect(~isfile(p + ".writing"), "the .writing file is left");
+d = lbd.load(p);
+expect(d.Title == "Live – ü", "title: " + d.Title);
+s = d.Values.S21.Data;
+expect(~isreal(s) && isequal(size(s), [3 3]), "S21 size");
+expect(isequal(s(1:2, :), complex([1; 2] * ones(1, 3), ones(2, 1) * (1:3))), "S21 rows 1-2");
+expect(all(isnan(s(3, :))), "power 3 is not measured");
+expect(isequal(d.Axes.time.Data, [0; 1; 2; 3]), "time");
+expect(isequal(d.Values.T.Data, [0; 10; 20; 30]), "T");
+expect(isempty(d.Values.T.Measured) && isempty(d.Values.S21.Measured), "no masks for T, S21");
+expect(isa(d.Values.n.Data, 'int32') && isequal(d.Values.n.Data, int32([0 3 0; 7 0 0])), "n");
+expect(isequal(d.Values.n.Measured, logical([0 1 0; 1 0 0])), "n measured");
+expect(isequal(d.Axes.state.Elements, ["ground" "excited"]), "state elements");
 end
 
 function checkOne(p)

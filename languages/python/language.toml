@@ -31,6 +31,7 @@ command = ["{python}", "-m", "pytest", "-q", "tests"]
 [crosslang]
 write = ["{python}", "crosslang/write.py", "{out}"]
 check = ["{python}", "crosslang/check.py", "{root}"]
+read_live = ["{python}", "crosslang/read_live.py", "{file}"]
 
 [sdk]
 requires = "uv"

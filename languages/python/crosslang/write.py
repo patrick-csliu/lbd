@@ -37,3 +37,21 @@ d.meta = {
 d.plot = {"kind": "heatmap", "values": ["M"]}
 d.style_name = "thesis"
 d.save(out / "fixture.lbd")
+
+# The live fixture: written while "measuring" with lbd.Writer, stopped early.
+with lbd.Writer(out / "live.lbd", title="Live – ü") as w:
+    w.add_axis("power", [1.0, 2.0, 3.0], unit="dBm")
+    w.add_axis("freq", [0.0, 0.5, 1.0], unit="Hz")
+    w.add_axis("state", elements=["ground", "excited"])
+    w.add_axis("time", unit="s", grows=True)
+    w.add_value("S21", axes=["power", "freq"], dtype="complex128")
+    w.add_value("T", axes="time")
+    w.add_value("n", axes=["state", "power"], dtype="int32")
+    for i in range(2):                                   # power 3 is never measured
+        w.write(power=i, S21=(i + 1) + 1j * np.arange(1, 4))
+    w.write(time=0.0, T=0.0)
+    w.write(time=[1.0, 2.0], T=[10.0, 20.0])
+    w.write(time=3.0, T=30.0)
+    w.write(state="excited", power=0, n=7)
+    w.write(state="ground", power=1, n=3)
+    w.close(stopped=True)

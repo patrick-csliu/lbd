@@ -136,7 +136,8 @@ function start!(w::Writer)
         created_text(d.created)
     d.writer = "julia LBD $PACKAGE_VERSION"
     d.id = uuid7()
-    f = h5open(w.writing_path, "w"; libver_bounds=(:latest, :latest))
+    # the HDF5 1.10 format (SWMR needs it): readable by every HDF5 since, unlike :latest
+    f = h5open(w.writing_path, "w"; libver_bounds=(v"1.10", v"1.10"))
     try
         w.guard = take_guard(w.writing_path)    # at once: from now on it reads "measuring"
         create_live!(f, d)

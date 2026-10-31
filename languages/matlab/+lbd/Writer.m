@@ -144,7 +144,7 @@ classdef Writer < handle
             v = lbd.version();
             obj.D.setIdentity(lbd_uuid7(), created, "matlab lbd " + v.package);
             fapl = H5P.create('H5P_FILE_ACCESS');
-            H5P.set_libver_bounds(fapl, 'H5F_LIBVER_LATEST', 'H5F_LIBVER_LATEST');
+            H5P.set_libver_bounds(fapl, 'H5F_LIBVER_V110', 'H5F_LIBVER_V110');   % the 1.10 format: SWMR needs it, every HDF5 since reads it
             fid = H5F.create(obj.WritingPath, 'H5F_ACC_EXCL', 'H5P_DEFAULT', fapl);
             H5P.close(fapl);
             try

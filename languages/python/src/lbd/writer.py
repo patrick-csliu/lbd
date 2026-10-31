@@ -456,7 +456,9 @@ class Writer:
         d.new_id()
         d.writer = f"python lbd {__version__}"
         try:
-            f = h5py.File(self.writing_path, "w-", libver="latest", locking=False)   # the guard locks it
+            # the HDF5 1.10 format (SWMR needs it): readable by every HDF5 since, unlike "latest";
+            # HDF5's own locking off: the guard locks it
+            f = h5py.File(self.writing_path, "w-", libver=("v110", "v110"), locking=False)
         except FileExistsError:
             raise FileExistsError(f"{self.writing_path} exists; lbd.Writer never replaces a file") from None
         try:

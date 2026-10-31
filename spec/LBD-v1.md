@@ -197,8 +197,10 @@ and a crash loses at most the last moments. Such a file is not yet an LBD file; 
 when complete.
 
 - It is named `<name>.lbd.writing` and is written in HDF5's single-writer / multiple-reader
-  (SWMR) mode, which needs the HDF5 1.10 file layout. When complete, the writer closes it and
-  renames it to `<name>.lbd`; the content is not copied.
+  (SWMR) mode, which needs the HDF5 1.10 file format. Writers use exactly that format (HDF5's
+  library version bounds 1.10 to 1.10), not the newest their HDF5 knows, so every HDF5 since
+  1.10 can read the file. When complete, the writer closes it and renames it to `<name>.lbd`;
+  the content is not copied.
 - While written: values may hold `NaN` (or a `0` mask, §1.7) where nothing was measured yet, and
   an axis whose length isn't known in advance (a log, "until stopped") may be shorter than it
   will be, together with the values on it. Every value on such an axis has it as its first axis.

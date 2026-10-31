@@ -18,11 +18,13 @@ with a notice. See [languages/README.md](../../languages/README.md) for adding o
 <!-- --8<-- [start:fixture] -->
 ## What the scripts must do
 
-- **write** creates `<out>/fixture.lbd` with exactly the content below. `<out>` is given as
-  `{out}` / `LBD_OUT`.
-- **check** finds every `<root>/*/fixture.lbd` (`{root}` / `LBD_ROOT`), compares each with the
-  definition, prints one line per file (`<language> reads <writer> OK` or `FAILED: <reason>`),
-  and exits non-zero if any check failed.
+- **write** creates `<out>/fixture.lbd` with exactly the content below, and `<out>/live.lbd`
+  with the language's Writer (the live fixture). `<out>` is given as `{out}` / `LBD_OUT`.
+- **check** finds every `<root>/*/fixture.lbd` and `<root>/*/live.lbd` (`{root}` /
+  `LBD_ROOT`), compares each with its definition, prints one line per file (`<language> reads
+  <writer> OK` or `FAILED: <reason>`), and exits non-zero if any check failed.
+- **read_live** (optional) reads a measurement while Python writes it: see "Reading while
+  measuring" below.
 
 ## Fixture definition (0-based indices i, j, k)
 
@@ -48,7 +50,32 @@ with a notice. See [languages/README.md](../../languages/README.md) for adding o
 | meta | `sample="chip – é"`, `T_mK=12` (int), `names=["a","b"]`, `vec=[1,2,3]`, `mat=[[0,1,2],[3,4,5]]` (2×3), `vna.ifbw_Hz=1000.0`, `vna.averages=4` (int) |
 | plot | `spec={"kind":"heatmap","values":["M"]}`, `style_name="thesis"`, `matplotlib` a non-empty version text (Python writes the installed matplotlib version; MATLAB and Julia write `"3.9.0"`) |
 
-When the format gains a feature, extend this table and every language's `write`/`check`
+## Live fixture definition (written with the Writer; 0-based indices)
+
+| Item | Definition |
+|---|---|
+| file | `<out>/live.lbd`, finished: no `live.lbd.writing` is left |
+| title | `Live – ü` |
+| axes | `power` `[1, 2, 3]` dBm; `freq` `[0, 0.5, 1]` Hz; `state` elements `["ground", "excited"]`; `time` growing, s |
+| value `S21(power, freq)` | complex128, written a trace at a time for powers 0 and 1: `S21[i, j] = (i+1) + (j+1)·1j`; power 2 never measured (`NaN`); no mask |
+| value `T(time)` | float64; written as `time=0, T=0`, then `time=[1, 2], T=[10, 20]`, then `time=3, T=30`: `time = [0, 1, 2, 3]`, `T = [0, 10, 20, 30]`; no mask |
+| value `n(state, power)` | int32, written at `state="excited", power 0` (7) and `state="ground", power 1` (3): data `[[0, 3, 0], [7, 0, 0]]`, mask `/measured/n` `[[0, 1, 0], [1, 0, 0]]` |
+| finish | closed as stopped on purpose (`close(stopped=True)` and its equivalents) |
+
+## Reading while measuring
+
+`run_all.py` then starts every language's `read_live` command (`{file}` / `LBD_FILE`: a
+`measuring.lbd` path) and a Python Writer that writes `measuring.lbd.writing` slowly: 200 rows,
+row `i` (0-based) of `S21(power, freq)` (5 frequencies) all `(i+1)·(1+1j)`, and a growing `time`
+with `T = 10·time`. A reader:
+
+1. creates `ready-<language id>` next to the file once it is running (the writer waits for all);
+2. reads the `.writing` file again and again until it is renamed: every read must show the
+   measured rows as a run from the first, each one right, and `T = 10·time`;
+3. reads the finished `measuring.lbd` (every row measured), and fails unless at least two reads
+   saw the measurement part-way.
+
+When the format gains a feature, extend these tables and every language's `write`/`check`
 script together.
 
 <!-- --8<-- [end:fixture] -->

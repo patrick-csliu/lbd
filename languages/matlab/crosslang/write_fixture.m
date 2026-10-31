@@ -28,4 +28,23 @@ d.Plot = struct('kind', "heatmap", 'values', {{"M"}});
 d.StyleName = "thesis";
 d.Matplotlib = "3.9.0";   % MATLAB has no matplotlib: a fixed version for the test
 d.save(fullfile(out, "fixture.lbd"));
+
+% The live fixture: written while "measuring" with lbd.Writer, stopped early.
+w = lbd.Writer(fullfile(out, "live.lbd"), Title="Live – ü");
+w.addAxis("power", [1 2 3], Unit="dBm");
+w.addAxis("freq", [0 0.5 1], Unit="Hz");
+w.addAxis("state", [], Elements=["ground" "excited"]);
+w.addAxis("time", [], Unit="s", Grows=true);
+w.addValue("S21", [], ["power" "freq"], Dtype="complex128");
+w.addValue("T", [], "time");
+w.addValue("n", [], ["state" "power"], Dtype="int32");
+for i = 1:2                                            % power 3 is never measured
+    w.write(power=i, S21=complex(i, 1:3));
+end
+w.write(time=0, T=0);
+w.write(time=[1 2], T=[10 20]);
+w.write(time=3, T=30);
+w.write(state="excited", power=1, n=7);
+w.write(state="ground", power=2, n=3);
+w.close(Stopped=true);
 end

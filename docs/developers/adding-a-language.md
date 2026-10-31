@@ -49,9 +49,11 @@ Folders whose names start with `_` (like `languages/_template/`) are ignored.
 3. **Write unit tests** in the language's usual framework.
 4. **Write the cross-language scripts** in `crosslang/`, following
    the [cross-language fixture](testing.md#cross-language-fixture):
-   - `write`: create `<out>/fixture.lbd` with exactly the fixture content;
-   - `check`: read **every** `<root>/*/fixture.lbd`, compare it with the fixture definition,
-     print one line per file, and exit non-zero on any mismatch.
+   - `write`: create `<out>/fixture.lbd` with exactly the fixture content, and `<out>/live.lbd`
+     with the language's Writer;
+   - `check`: read **every** `<root>/*/fixture.lbd` and `<root>/*/live.lbd`, compare them with
+     their definitions, print one line per file, and exit non-zero on any mismatch;
+   - `read_live` (optional): read a measurement while Python writes it.
 
    The existing scripts in `python/crosslang/` are the reference.
 5. **Write `example.<ext>`**, the same example as the other languages, and `README.md`.
@@ -115,6 +117,7 @@ command = ["julia", "--project=.", "-e", "using Pkg; Pkg.test()"]
 requires = "julia"
 write = ["julia", "--project=.", "crosslang/write.jl", "{out}"]
 check = ["julia", "--project=.", "crosslang/check.jl", "{root}"]
+read_live = ["julia", "--project=.", "crosslang/read_live.jl", "{file}"]   # optional
 
 [sdk]
 requires = "matlab"        # needed by `build`

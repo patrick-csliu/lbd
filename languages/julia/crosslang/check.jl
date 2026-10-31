@@ -48,6 +48,23 @@ function check(path)
     @test d.matplotlib isa String && !isempty(d.matplotlib)
 end
 
+function check_live(path)
+    @test !isfile(path * ".writing")
+    d = LBD.load(path)
+    @test d.title == "Live – ü"
+    s = d["S21"].data
+    @test eltype(s) == ComplexF64 && size(s) == (3, 3)
+    @test s[1:2, :] == [ComplexF64(i, j) for i in 1:2, j in 1:3]
+    @test all(isnan, s[3, :])
+    @test d["time"].data == [0, 1, 2, 3]
+    @test d["T"].data == [0, 10, 20, 30]
+    @test d["T"].measured === nothing && d["S21"].measured === nothing
+    @test eltype(d["n"].data) == Int32
+    @test d["n"].data == [0 3 0; 7 0 0]
+    @test d["n"].measured == [false true false; true false false]
+    @test d["state"].elements == ["ground", "excited"]
+end
+
 root = ARGS[1]
 failed = false
 for lang in sort(readdir(root))
@@ -55,5 +72,10 @@ for lang in sort(readdir(root))
     isfile(p) || continue
     ts = @testset "julia reads $lang" begin
         check(p)
+    end
+    p = joinpath(root, lang, "live.lbd")
+    isfile(p) || continue
+    @testset "julia reads $lang live.lbd" begin
+        check_live(p)
     end
 end

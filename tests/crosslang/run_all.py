@@ -4,11 +4,13 @@
 
 Languages are discovered from languages/*/language.toml ([crosslang] section); a language whose
 required program is not on PATH is skipped with a notice. The fixture is defined in README.md
-next to this script.
+next to this script. Then a Python measurement is written slowly, and every language with a
+`read_live` command reads it while it is written.
 """
 
 import argparse
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -67,11 +69,45 @@ def main(argv=None) -> int:
         r = lang.run(lang.section("crosslang")["check"], root=root)
         show(r)
         ok &= r.returncode == 0
+    ok &= read_while_measuring(langs, root)
     if not args.keep:
         shutil.rmtree(root, ignore_errors=True)
     n = len(langs)
     print(f"{'ALL OK' if ok else 'FAILURES'} ({n} languages, {n}x{n} reads)")
     return 0 if ok else 1
+
+
+LIVE_ROWS = 200        # written at about 20 rows per second
+
+
+def read_while_measuring(langs, root: Path) -> bool:
+    """A Python measurement read by every language while it is written (needs Python's Writer)."""
+    readers = [lang for lang in langs if lang.section("crosslang").get("read_live")]
+    if not readers or not any(lang.id == "python" for lang in langs):
+        return True
+    print(f"[live] {', '.join(lang.name for lang in readers)} reading a Python measurement while it is written")
+    folder = root / "live-reading"
+    folder.mkdir(parents=True, exist_ok=True)
+    target = folder / "measuring.lbd"
+    procs = [subprocess.Popen(lang.command(lang.section("crosslang")["read_live"], file=target, root=root),
+                              cwd=lang.dir, env=lang.env(file=target, root=root), stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
+             for lang in readers]
+    python = next(lang for lang in langs if lang.id == "python")
+    writer = python.run(["{python}", "crosslang/write_live.py", str(target), str(LIVE_ROWS),
+                         *(lang.id for lang in readers)])
+    show(writer)
+    ok = writer.returncode == 0
+    for lang, proc in zip(readers, procs):
+        try:
+            out, _ = proc.communicate(timeout=180)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            out, _ = proc.communicate()
+            out += f"\n{lang.name}: still reading after 180 s"
+        print("\n".join("    " + line for line in out.strip().splitlines()))
+        ok &= proc.returncode == 0
+    return ok
 
 
 if __name__ == "__main__":

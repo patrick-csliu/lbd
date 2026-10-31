@@ -28,6 +28,7 @@ command = ["julia", "--project=.", "--startup-file=no", "-e", "using Pkg; Pkg.in
 requires = "julia"
 write = ["julia", "--project=.", "--startup-file=no", "crosslang/write.jl", "{out}"]
 check = ["julia", "--project=.", "--startup-file=no", "crosslang/check.jl", "{root}"]
+read_live = ["julia", "--project=.", "--startup-file=no", "crosslang/read_live.jl", "{file}"]
 
 [sdk]
 # Julia packages ship as source; nothing to build.

@@ -30,3 +30,22 @@ d.plot = Dict{String,Any}("kind" => "heatmap", "values" => ["M"])
 d.style_name = "thesis"
 d.matplotlib = "3.9.0"   # Julia has no matplotlib: a fixed version for the test
 LBD.save(joinpath(out, "fixture.lbd"), d)
+
+# The live fixture: written while "measuring" with LBD.Writer, stopped early.
+w = LBD.Writer(joinpath(out, "live.lbd"); title="Live – ü")
+add_axis!(w, "power", [1.0, 2.0, 3.0]; unit="dBm")
+add_axis!(w, "freq", [0.0, 0.5, 1.0]; unit="Hz")
+add_axis!(w, "state"; elements=["ground", "excited"])
+add_axis!(w, "time"; unit="s", grows=true)
+add_value!(w, "S21"; axes=["power", "freq"], dtype=ComplexF64)
+add_value!(w, "T"; axes="time")
+add_value!(w, "n"; axes=["state", "power"], dtype=Int32)
+for i in 1:2                                           # power 3 is never measured
+    write!(w; power=i, S21=[ComplexF64(i, j) for j in 1:3])
+end
+write!(w; time=0.0, T=0.0)
+write!(w; time=[1.0, 2.0], T=[10.0, 20.0])
+write!(w; time=3.0, T=30.0)
+write!(w; state="excited", power=1, n=7)
+write!(w; state="ground", power=2, n=3)
+close(w; stopped=true)

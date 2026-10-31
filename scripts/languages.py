@@ -24,11 +24,11 @@ TOP_KEYS = {"id", "name", "order", "requirements", "example", "check", "notes",
             "version", "format_version", "test", "crosslang", "sdk", "install"}
 SECTION_KEYS = {
     "test": {"requires", "command"},
-    "crosslang": {"requires", "write", "check"},
+    "crosslang": {"requires", "write", "check", "read_live"},
     "sdk": {"requires", "build", "fallback_copy", "copy"},
 }
 INSTALL_KEYS = {"where", "if_exists", "steps", "upgrade", "uninstall"}
-PLACEHOLDERS = ("python", "repo", "lang_dir", "out", "root", "dest", "version")
+PLACEHOLDERS = ("python", "repo", "lang_dir", "out", "root", "dest", "version", "file")
 _PLACEHOLDER_RE = re.compile(r"\{(" + "|".join(PLACEHOLDERS) + r")\}")
 
 
@@ -156,7 +156,8 @@ def load(lang_dir: Path) -> Language:
             fail(f"[{sec}] has unknown keys {sorted(extra)}")
         if "requires" in data[sec]:
             text(data[sec]["requires"], f"[{sec}].requires")
-    for sec, key in (("test", "command"), ("crosslang", "write"), ("crosslang", "check"), ("sdk", "build")):
+    for sec, key in (("test", "command"), ("crosslang", "write"), ("crosslang", "check"), ("crosslang", "read_live"),
+                     ("sdk", "build")):
         cmd = data.get(sec, {}).get(key)
         if cmd is not None:
             strings(cmd, f"[{sec}].{key}", nonempty=True)

@@ -65,13 +65,31 @@ def check(path: Path) -> None:
     assert isinstance(d.matplotlib, str) and d.matplotlib, "plot matplotlib version"
 
 
+def check_live(path: Path) -> None:
+    assert not Path(str(path) + ".writing").exists(), "the .writing file is left"
+    d = lbd.load(path)
+    assert d.title == "Live – ü", d.title
+    s = d["S21"].data
+    assert s.dtype == np.complex128 and s.shape == (3, 3), s.shape
+    np.testing.assert_array_equal(s[:2], np.arange(1, 3)[:, None] + 1j * np.arange(1, 4)[None, :])
+    assert np.all(np.isnan(s[2])), "power 3 is not measured"
+    np.testing.assert_array_equal(d["time"].data, [0, 1, 2, 3])
+    np.testing.assert_array_equal(d["T"].data, [0, 10, 20, 30])
+    assert d["T"].measured is None and d["S21"].measured is None
+    assert d["n"].data.dtype == np.int32
+    np.testing.assert_array_equal(d["n"].data, [[0, 3, 0], [7, 0, 0]])
+    np.testing.assert_array_equal(d["n"].measured, [[False, True, False], [True, False, False]])
+    assert d["state"].elements == ["ground", "excited"]
+
+
 root = Path(sys.argv[1])
 failed = False
-for p in sorted(root.glob("*/fixture.lbd")):
-    try:
-        check(p)
-        print(f"  python reads {p.parent.name:7s} OK")
-    except Exception as e:  # noqa: BLE001 - report every failure, then exit non-zero
-        failed = True
-        print(f"  python reads {p.parent.name:7s} FAILED: {type(e).__name__}: {e}")
+for name, test in (("fixture.lbd", check), ("live.lbd", check_live)):
+    for p in sorted(root.glob(f"*/{name}")):
+        try:
+            test(p)
+            print(f"  python reads {p.parent.name:7s} {name:11s} OK")
+        except Exception as e:  # noqa: BLE001 - report every failure, then exit non-zero
+            failed = True
+            print(f"  python reads {p.parent.name:7s} {name:11s} FAILED: {type(e).__name__}: {e}")
 sys.exit(1 if failed else 0)
