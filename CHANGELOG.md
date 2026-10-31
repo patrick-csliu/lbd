@@ -143,6 +143,15 @@ The file format has its own version (`lbd_version`, currently 1.2).
   fixed axes by index or element, several values at once. `add_axis("time", grows=True)` makes
   an axis of unknown length whose points `write` adds (`d.write(time=t, T=x)`).
 
+- **Writing while measuring** (Python): `lbd.Writer("rabi.lbd")` takes the same calls
+  (`add_axis`, `add_value`, `write`) and writes `rabi.lbd.writing` as the data comes, so the
+  data so far can be read at any time (`lbd.load` reads such a file, with a warning); when the
+  measurement ends (`close()`, or leaving the `with` block) it becomes `rabi.lbd`. A crash or an
+  error leaves the `.writing` file with everything written up to then: `lbd.writing_status`
+  tells "measuring" from "stopped", and `lbd.recover` makes a stopped one an `.lbd` file. Other
+  programs opening it while it is written are refused without disturbing the measurement.
+  Saving at the end with `Dataset.save` is unchanged.
+
 ## 1.2.0 (2026-10-28)
 
 **Changes to how things behave** (read these when upgrading)

@@ -7,6 +7,7 @@ Nothing is dropped or altered without one of the two.
 
 from __future__ import annotations
 
+import contextlib
 import datetime as _dt
 import json
 import os
@@ -17,7 +18,7 @@ import uuid as _uuid
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Union
+from typing import Any, Dict, Iterable, Iterator, List, Mapping, Optional, Sequence, Union
 
 import h5py
 import numpy as np
@@ -293,6 +294,7 @@ class Dataset:
         self.path: Optional[Path] = None
         self._id: Optional[str] = None
         self._parent_id: Optional[str] = None
+        self._placeholders: Optional[set] = None   # lbd.Writer: names of values whose data is in the file
 
     @property
     def id(self) -> Optional[str]:
@@ -493,6 +495,7 @@ class Dataset:
         axes_list = _axes_argument(axes)
         point = _check_shape(shape, name)
         measured = None
+        placeholder = None
         if data is None:                      # filled later by write: "not measured yet"
             for ax in axes_list:
                 if ax not in self.axes:
@@ -501,13 +504,16 @@ class Dataset:
             if kind not in _ALLOWED_DTYPES:
                 raise LBDError(f"value '{name}': unknown dtype {dtype!r}; use one of {', '.join(_ALLOWED_DTYPES)}")
             full = tuple(len(self.axes[a]) for a in axes_list) + point
-            if kind.startswith(("float", "complex")):
-                data = np.full(full, np.nan, dtype=kind)
-            else:
-                data = np.zeros(full, dtype=bool if kind == "bool" else kind)
+            fill = np.nan if kind.startswith(("float", "complex")) else 0
+            if kind not in ("float32", "float64", "complex64", "complex128"):
                 measured = np.zeros(full, dtype=bool)
+            if self._placeholders is not None:   # lbd.Writer: the data lives in the file
+                placeholder = np.broadcast_to(np.array(fill, dtype=kind), full)
+                measured = None if measured is None else np.broadcast_to(np.False_, full)
+            else:
+                data = np.full(full, fill, dtype=kind)
             dtype = "auto"
-        arr = _coerce_value(data, dtype, name)
+        arr = placeholder if placeholder is not None else _coerce_value(data, dtype, name)
         if len(axes_list) + len(point) != arr.ndim:
             if len(axes_list) < arr.ndim and not point:
                 raise LBDError(
@@ -548,6 +554,8 @@ class Dataset:
         value = Value(name, arr, axes_list + point_names, unit=unit, label=label, shape=arr.shape,
                       dtype=str(arr.dtype), point_axes=point_names, elements=named, measured=measured)
         self.values[name] = value
+        if placeholder is not None:
+            self._placeholders.add(name)
         return value
 
     def write(self, names: Optional[Mapping[str, Any]] = None, **more: Any) -> None:
@@ -771,6 +779,9 @@ class Dataset:
         >>> d.save("big.lbd", compression="gzip")
         """
         path = Path(path)
+        if path.name.lower().endswith(WRITING_SUFFIX):
+            raise LBDError(f"{path.name}: a '{WRITING_SUFFIX}' file is written only by lbd.Writer; "
+                           "save to the .lbd name")
         if path.suffix.lower() != ".lbd":
             _warn(f"{path.name}: LBD files should use the .lbd extension")
         if compression not in (None, "gzip"):
@@ -806,8 +817,9 @@ class Dataset:
         self._id, self._parent_id = ident, parent
         return path
 
-    def _check_complete(self) -> None:
-        """Check the whole dataset before writing, including parts changed by hand."""
+    def _check_complete(self, live: bool = False) -> None:
+        """Check the whole dataset before writing, including parts changed by hand (`live`: for
+        lbd.Writer, whose growing axes start empty)."""
         _check_text(self.title, "title")
         _check_text(self.description, "description")
         for key, a in self.axes.items():
@@ -820,6 +832,8 @@ class Dataset:
             _check_text(a.label, f"axis '{key}' label")
             arr = np.asarray(a.data)
             if a.grows and arr.size == 0:
+                if live:
+                    continue
                 raise LBDError(f"the growing axis '{key}' has no points yet; write some before saving")
             if arr.ndim != 1 or arr.size == 0 or arr.dtype.kind not in "iuf":
                 raise LBDError(f"axis '{key}' must hold 1-D, non-empty real numbers; got {arr.dtype} {arr.shape}")
@@ -842,7 +856,7 @@ class Dataset:
             if v.data is None:
                 raise LBDError(f"value '{key}' was not loaded; load the file without `values=` to re-save it")
             arr = np.asarray(v.data)
-            if arr.dtype.kind not in "biufc" or str(_normalize_dtype(arr, key, quiet=True).dtype) not in _ALLOWED_DTYPES:
+            if arr.dtype.kind not in "biufc" or                     str(_normalize_dtype(np.empty(0, arr.dtype), key, quiet=True).dtype) not in _ALLOWED_DTYPES:
                 raise LBDError(f"value '{key}' has unsupported dtype {arr.dtype}")
             if len(v.axes) != arr.ndim or len(set(v.axes)) != len(v.axes):
                 raise LBDError(f"value '{key}' has {arr.ndim} dimension(s) but axes={v.axes}")
@@ -911,6 +925,7 @@ class Dataset:
                 g_plot.attrs["matplotlib"] = mpl
 
 
+WRITING_SUFFIX = ".writing"   # name.lbd.writing: being written by lbd.Writer (spec §7)
 REPLACE_WAIT = 3.0   # seconds `save` waits for a file another program has open (Windows)
 
 
@@ -1000,20 +1015,28 @@ def load(path: PathLike, values: Union[None, str, Iterable[str]] = None) -> Data
         bad = [v for v in wanted if not isinstance(v, str)]
         if bad:
             raise TypeError(f"value names must be strings, got {bad!r}")
-    with _open(path, "r") as f:
+    writing = path.name.lower().endswith(WRITING_SUFFIX)
+    if writing:
+        _warn(f"{path.name} is still being written, or its writer stopped before finishing "
+              "(lbd.writing_status tells which); reading what was written so far")
+    with _reading(path, writing) as f:
         d = _read_header(f, path)
         for group in ("axes", "values"):
             if not isinstance(f.get(group), h5py.Group):
                 raise LBDError(f"{path.name} has no /{group} group; it breaks the LBD format")
         for name, ds in f["axes"].items():
             d.axes[name] = _read_axis(name, ds, path)
+        described = {name: _describe_value(name, ds, path) for name, ds in f["values"].items()}
+        if writing:                     # a growing axis and its values may be caught mid-write
+            _same_lengths(d.axes, described)
         masks = f["measured"] if isinstance(f.get("measured"), h5py.Group) else None
         for name, ds in f["values"].items():
-            v = _describe_value(name, ds, path)
+            v = described[name]
+            part = tuple(slice(0, n) for n in v.shape)
             if wanted is None or name in wanted:
-                v.data = _read_value_data(ds, v, path)
+                v.data = _read_value_data(ds, v, path, part)
                 if masks is not None and name in masks:
-                    m = np.asarray(masks[name][()]).astype(bool)
+                    m = np.asarray(masks[name][part] if masks[name].ndim == len(part) else masks[name][()]).astype(bool)
                     if m.shape == tuple(v.shape):
                         v.measured = m
                     else:
@@ -1132,12 +1155,31 @@ def set_plot(path: PathLike, *, spec: Any = _UNSET, style: Any = _UNSET, style_n
                 g.attrs["matplotlib"] = mpl
 
 
-def _open(path: Path, mode: str) -> h5py.File:
+@contextlib.contextmanager
+def _reading(path: Path, writing: bool) -> Iterator[h5py.File]:
+    """The open file to read; a file this process is writing is read through its Writer (HDF5
+    shares one handle per file within a process)."""
+    if writing:
+        from .writer import _own_writer
+
+        w = _own_writer(path)
+        if w is not None:
+            with w._reading() as f:
+                if f is not None:
+                    yield f
+                    return
+    with _open(path, "r", swmr=writing) as f:
+        yield f
+
+
+def _open(path: Path, mode: str, swmr: bool = False) -> h5py.File:
     if not path.exists():
         raise FileNotFoundError(f"no such file: {path}")
     if path.is_dir():
         raise LBDError(f"{path} is a folder, not an LBD file")
     try:
+        if swmr:                        # a file being written (spec §7): never lock it
+            return h5py.File(path, "r", libver="latest", swmr=True, locking=False)
         return h5py.File(path, mode)
     except OSError as e:
         if not h5py.is_hdf5(path):
@@ -1249,8 +1291,20 @@ def _bool_flag(ds: h5py.Dataset, name: str, path: Path) -> bool:
     return raw == 1
 
 
-def _read_value_data(ds: h5py.Dataset, v: Value, path: Path) -> np.ndarray:
-    arr = np.asarray(ds[()])
+def _same_lengths(axes: Dict[str, Axis], values: Dict[str, Value]) -> None:
+    """In a file being written, cut each axis and the values on it to the length all of them
+    have reached (the writer extends them one after the other)."""
+    for a, axis in axes.items():
+        n = min([len(axis)] + [v.shape[i] for v in values.values() for i, x in enumerate(v.axes)
+                               if x == a and i < len(v.shape)])
+        if n < len(axis):
+            axis.data = axis.data[:n]
+        for v in values.values():
+            v.shape = tuple(min(k, n) if i < len(v.axes) and v.axes[i] == a else k for i, k in enumerate(v.shape))
+
+
+def _read_value_data(ds: h5py.Dataset, v: Value, path: Path, part: tuple = ()) -> np.ndarray:
+    arr = np.asarray(ds[part] if part else ds[()])
     if v.dtype == "bool":
         if arr.size and arr.max() > 1:
             _warn(f"{path.name}: boolean value '{v.name}' contains numbers other than 0 and 1; "

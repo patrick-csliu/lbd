@@ -1,5 +1,6 @@
 """LBD (Lab Data) file format: read and write .lbd files."""
 
+from .writer import Writer, recover, writing_status
 from .io import (
     FORMAT_VERSION,
     Axis,
@@ -30,4 +31,7 @@ __all__ = [
     "set_plot",
     "load",
     "version",
+    "Writer",
+    "recover",
+    "writing_status",
 ]

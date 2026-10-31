@@ -31,6 +31,20 @@ and recipes, see [Reading and writing files](../../python/files.md).
     options:
       heading_level: 3
 
+## Writing while measuring
+
+::: lbd.Writer
+    options:
+      heading_level: 3
+
+::: lbd.writing_status
+    options:
+      heading_level: 3
+
+::: lbd.recover
+    options:
+      heading_level: 3
+
 ## Changing a file's saved view
 
 ::: lbd.set_plot
