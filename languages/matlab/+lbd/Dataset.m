@@ -9,6 +9,11 @@ classdef Dataset < handle
     %   d.addValue("bloch", b, "amp", Shape=3, Elements=["x" "y" "z"]);   % size(b) == [21 3]
     %   d.addValue("S21b", [], ["power" "freq"], Dtype="complex128");   % filled later by write
     %   d.write(power=3, S21b=trace);                   % a trace (power 3, every freq)
+    %   d.addGroup("scan");                             % a variable sweep (format 2.0):
+    %   d.addAxis("A", [], Group="scan"); d.addAxis("B", [], Group="scan");   % B chosen per A
+    %   d.addValue("f", [], ["A" "B"]);                 % one entry per (A, B) point
+    %   i = d.write(A=3); d.write(Parent=i, B=[15 25], f=[1 2]);
+    %   m = d.toDense("f");                             % the full rectangle, gaps NaN
     %   d.Meta.T_mK = 12;
     %   d.save("sweep.lbd");
     %
@@ -31,12 +36,21 @@ classdef Dataset < handle
     end
 
     properties (SetAccess = private)
-        % Axes.<name> = struct(Name, Data, Unit, Label, Elements, Role, Grows): Elements, a text
-        % per position (string.empty: numbered); Role, "point" for an axis of a value's data
-        % point; Grows, true for an axis whose points write adds (addAxis(..., Grows=true))
+        % Axes.<name> = struct(Name, Data, Unit, Label, Elements, Role, Grows, Group, Parent): the
+        % sweep axes. Elements, a text per position (string.empty: numbered); Grows, true for an
+        % axis whose points write adds (addAxis(..., Grows=true)); Group, the axis group it is in
+        % ("" for a fixed axis), whose points Data lists one per point of its level; Parent, for
+        % each point of a group's axis below its first, the index (from 1) of its point in the
+        % level above ([] otherwise). Role is "" (a data point's dimensions aren't axes).
         Axes (1,1) struct = struct()
-        % Values.<name> = struct(Name, Data, Axes, Unit, Label, Shape, Dtype, PointAxes, Elements,
-        % Measured): PointAxes, the axes of one data point (the last of Axes); Elements, a cell
+        % Groups.<name> = struct(Name, Order): axis groups (format 2.0), Order their axes, outer
+        % to inner
+        Groups (1,1) struct = struct()
+        % Values.<name> = struct(Name, Data, Axes, Dims, Unit, Label, Shape, Dtype, PointShape,
+        % Elements, Measured): Axes, the sweep axes it depends on; Dims, how the sweep part is
+        % stored, a cell with the axis names of each dimension ("A" for a fixed axis, ["A" "B"]
+        % for the points of a group's level); PointShape, the size of one data point ([] for a
+        % number); Shape, the data's size (the Dims' lengths, then PointShape); Elements, a cell
         % with each data point dimension's texts (string.empty: numbered); Measured, for an
         % integer or logical value filled by write, true where something was written ([] for
         % every other value: NaN means "not measured")
@@ -57,6 +71,8 @@ classdef Dataset < handle
         % lbd.Writer: values without data take no memory (their data is in the file)
         LiveWriting (1,1) logical = false
         Placeholders string = strings(1, 0)
+        % each group level's points by (parent, coordinate): struct(n, map) per axis
+        Lookups (1,1) struct = struct()
     end
 
     methods
@@ -73,11 +89,28 @@ classdef Dataset < handle
             end
         end
 
+        function group = addGroup(obj, name)
+            %ADDGROUP  Add an axis group (format 2.0): a sweep whose inner points depend on the
+            %   outer ones (B chosen per A, a different number of B per A, adaptive points).
+            %   Add its axes next, outer to inner, with addAxis(name, [], Group=...); write adds
+            %   their points by coordinate, and only measured points are stored. LBD older than
+            %   1.3 can't read such a file: use fixed axes when every combination is planned.
+            %   d.addGroup("scan"); d.addAxis("power", [], Group="scan"); d.addAxis("freq", [], Group="scan")
+            arguments
+                obj
+                name (1,1) string
+            end
+            obj.checkNewName(name);
+            group = struct('Name', name, 'Order', strings(1, 0));
+            obj.Groups.(name) = group;
+        end
+
         function axis = addAxis(obj, name, data, opts)
             %ADDAXIS  Add a 1-D real axis.
             %   d.addAxis("power", -40:4:0, Unit="dBm")
             %   d.addAxis("state", [], Elements=["ground" "excited"])   % numbered 0, 1
             %   d.addAxis("time", [], Unit="s", Grows=true)   % points added by write
+            %   d.addAxis("B", [], Group="scan")              % an axis of a group: write adds its points
             arguments
                 obj
                 name (1,1) string
@@ -86,16 +119,35 @@ classdef Dataset < handle
                 opts.Label string = string.empty
                 opts.Elements = string.empty
                 opts.Grows (1,1) logical = false
+                opts.Group (1,1) string = ""
             end
             obj.checkNewName(name);
+            if strlength(opts.Group) > 0
+                g = opts.Group;
+                if ~isfield(obj.Groups, g)
+                    error('lbd:invalid', 'axis "%s": there is no group "%s"; add it first with addGroup("%s")', name, g, g);
+                end
+                if ~isempty(data) || ~isempty(opts.Elements) || opts.Grows
+                    error('lbd:invalid', ['axis "%s" is in group "%s": give no data, Elements or Grows; write adds ' ...
+                        'its points by coordinate'], name, g);
+                end
+                label = opts.Label;
+                if isempty(label), label = name; end
+                parent = [];
+                if ~isempty(obj.Groups.(g).Order), parent = zeros(0, 1, 'int64'); end
+                axis = lbd.Dataset.axisStruct(name, zeros(0, 1), opts.Unit, label, string.empty, g, parent);
+                obj.Groups.(g).Order(end+1) = name;
+                obj.Axes.(name) = axis;
+                return
+            end
             if opts.Grows
                 if ~isempty(data) || ~isempty(opts.Elements)
                     error('lbd:invalid', 'axis "%s" grows: give no data or Elements; write adds its points', name);
                 end
                 label = opts.Label;
                 if isempty(label), label = name; end
-                axis = struct('Name', name, 'Data', zeros(0, 1), 'Unit', opts.Unit, 'Label', label, ...
-                    'Elements', string.empty, 'Role', "", 'Grows', true);
+                axis = lbd.Dataset.axisStruct(name, zeros(0, 1), opts.Unit, label, string.empty, "", []);
+                axis.Grows = true;
                 obj.Axes.(name) = axis;
                 return
             end
@@ -117,13 +169,14 @@ classdef Dataset < handle
             if ~isempty(elements)
                 lbd.Dataset.checkElements(elements, numel(data), sprintf('axis "%s"', name));
             end
-            axis = struct('Name', name, 'Data', data(:), 'Unit', opts.Unit, 'Label', label, ...
-                'Elements', elements, 'Role', "", 'Grows', false);
+            axis = lbd.Dataset.axisStruct(name, data(:), opts.Unit, label, elements, "", []);
             obj.Axes.(name) = axis;
         end
 
         function value = addValue(obj, name, data, axes, opts)
-            %ADDVALUE  Add an N-D value. AXES lists one axis name per dimension.
+            %ADDVALUE  Add an N-D value. AXES lists the axes it depends on, outer to inner: a
+            %   fixed axis is one dimension; axes of a group are one dimension together, the
+            %   points of their level (["A" "B"] of a group A → B → C; the group's name: all).
             %   d.addValue("S21", s21, ["power" "freq"])
             %   d.addValue("trace", y, "freq")
             %   d.addValue("fit_Q", 1.2e4)                 % scalar, no axes
@@ -147,22 +200,18 @@ classdef Dataset < handle
                 opts.Elements = []
             end
             obj.checkNewName(name);
-            axesList = lbd.Dataset.axesList(axes);
+            dims = obj.parseDims(lbd.Dataset.axesList(axes), sprintf('value "%s"', name));
+            axesList = [strings(1, 0) dims{:}];
             point = opts.Shape(:)';
             if any(point < 1 | point ~= round(point))
                 error('lbd:invalid', 'value "%s": Shape must hold whole numbers of at least 1, not %s', name, mat2str(opts.Shape));
             end
-            nd = numel(axesList);
+            nd = numel(dims);
             total = nd + numel(point);
             measured = [];
             placeholder = false;
             if isempty(data)                   % filled later by write: "not measured yet"
-                for i = 1:nd
-                    if ~isfield(obj.Axes, axesList(i))
-                        error('lbd:invalid', 'value "%s": axis "%s" does not exist; add it with addAxis first', name, axesList(i));
-                    end
-                end
-                shape = [arrayfun(@(a) numel(obj.Axes.(a).Data), axesList), point];
+                shape = [zeros(1, 0) cellfun(@(dm) obj.dimLength(dm), dims), point];
                 kind = opts.Dtype;
                 if kind == "auto", kind = "float64"; end
                 [data, measured] = lbd.Dataset.notMeasured(shape, kind, name, obj.LiveWriting);
@@ -207,18 +256,19 @@ classdef Dataset < handle
                     name, strjoin(axesList, ", "));
             end
             for i = 1:nd
-                ax = axesList(i);
-                if ~isfield(obj.Axes, ax)
-                    error('lbd:invalid', 'value "%s": axis "%s" does not exist; add it with addAxis first', name, ax);
-                end
-                n = numel(obj.Axes.(ax).Data);
+                dm = dims{i};
+                n = obj.dimLength(dm);
                 if n ~= shape(i)
                     hint = '';
                     if ~isempty(point) && ~isequal(shape(nd+1:end), point)
                         hint = '; the value''s axes come first, then the data point (e.g. transpose it)';
                     end
-                    error('lbd:invalid', 'value "%s": dimension %d has size %d but axis "%s" has length %d%s', ...
-                        name, i, shape(i), ax, n, hint);
+                    if obj.isGroupDim(dm)
+                        what = sprintf('the level %s of group "%s" has %d points', strjoin(dm, ","), obj.Axes.(dm(1)).Group, n);
+                    else
+                        what = sprintf('axis "%s" has length %d', dm, n);
+                    end
+                    error('lbd:invalid', 'value "%s": dimension %d has size %d but %s%s', name, i, shape(i), what, hint);
                 end
             end
             if ~isempty(point) && ~isequal(shape(nd+1:end), point)
@@ -228,24 +278,17 @@ classdef Dataset < handle
             named = lbd.Dataset.valueElements(opts.Elements, point, name);
             pointNames = name + "_dim" + string(1:numel(point));
             for k = 1:numel(point)
-                if isfield(obj.Axes, pointNames(k)) || isfield(obj.Values, pointNames(k))
-                    error('lbd:invalid', ['value "%s" needs the name "%s" for an axis of its data points, but ' ...
-                        'it is already used; rename that axis or value'], name, pointNames(k));
+                if isfield(obj.Axes, pointNames(k)) || isfield(obj.Values, pointNames(k)) || isfield(obj.Groups, pointNames(k))
+                    error('lbd:invalid', ['value "%s" needs the name "%s" for a dimension of its data points in the ' ...
+                        'file, but it is already used; rename that axis or value'], name, pointNames(k));
                 end
             end
             label = opts.Label;
             if isempty(label), label = name; end
-            for k = 1:numel(point)
-                plabel = label;
-                if numel(point) > 1, plabel = label + " (dim" + k + ")"; end
-                obj.Axes.(pointNames(k)) = struct('Name', pointNames(k), 'Data', int64(0:point(k) - 1)', ...
-                    'Unit', "", 'Label', plabel, 'Elements', named{k}, 'Role', "point", 'Grows', false);
-            end
-            axesList = [axesList pointNames];
             if isempty(dtypeName), dtypeName = lbd_dtype_name(data); end
-            value = struct('Name', name, 'Data', data, 'Axes', axesList, 'Unit', opts.Unit, ...
-                'Label', label, 'Shape', shape, 'Dtype', dtypeName, ...
-                'PointAxes', pointNames, 'Elements', {named}, 'Measured', measured);
+            value = struct('Name', name, 'Data', data, 'Axes', axesList, 'Dims', {dims}, 'Unit', opts.Unit, ...
+                'Label', label, 'Shape', shape, 'Dtype', dtypeName, 'PointShape', point, ...
+                'Elements', {named}, 'Measured', measured);
             obj.Values.(name) = value;
             if placeholder, obj.Placeholders(end+1) = name; end
         end
@@ -262,9 +305,12 @@ classdef Dataset < handle
             end
         end
 
-        function write(obj, varargin)
+        function index = write(obj, varargin)
             %WRITE  Put measured data into values made by addValue: a point, a trace, a whole
             %   map, or several values at once, at the place the axes say.
+            %   d.write(A=3, B=[15 25], f=[x1 x2])    % axes of a group: coordinates (the same
+            %                                          % coordinates are the same point)
+            %   i = d.write(A=3); d.write(Parent=i, B=25, f=x)   % under the point write returned
             %   d.write(power=3, S21=trace)            % a trace: power 3, every frequency
             %   d.write(power=3, freq=7, S21=z, T=t)   % a point, and T at power 3
             %   d.write(state="excited", power=1, n=7) % a position by its element
@@ -272,9 +318,178 @@ classdef Dataset < handle
             %   d.write("if", 3, "S21", z)             % any name, as text
             %   A fixed axis takes an index (1 = its first point) or one of its elements; a
             %   growing axis its coordinate(s); a value its data, sized as the value's axes that
-            %   weren't given (and its data point), in order. Writing again replaces.
+            %   weren't given (and its data point, always whole), in order. Writing again
+            %   replaces. Returns the index (from 1) of the group's point at the deepest level
+            %   given (a column for several points), for Parent=; a struct by group name for
+            %   several groups; [] without a group.
             plan = obj.planWrite(varargin);
             obj.applyWrite(plan);
+            index = plan.result;
+        end
+
+        function c = coords(obj, name)
+            %COORDS  Each point's coordinates of value NAME: a struct with one array per axis,
+            %   along its dimension of the data. A fixed axis gives its coordinates; the points
+            %   of a group's level, every point's coordinate on each axis down to it.
+            %   c = d.coords("f"); scatter(c.A, c.B, [], d.Values.f.Data)
+            v = obj.valueNamed(name);
+            c = struct();
+            for i = 1:numel(v.Dims)
+                dm = v.Dims{i};
+                if ~obj.isGroupDim(dm)
+                    c.(dm) = obj.Axes.(dm).Data(:);
+                    continue
+                end
+                chain = obj.ancestors(dm);
+                for m = 1:numel(dm)
+                    c.(dm(m)) = obj.Axes.(dm(m)).Data(chain{m});
+                end
+            end
+        end
+
+        function r = rows(obj, name, opts)
+            %ROWS  Value NAME row by row: a cell with one row per point of By's level (per
+            %   position of a fixed axis By): {key, dataset; ...}. The key is the coordinate(s)
+            %   down to By; the dataset (an lbd.Dataset, a copy) holds what lies inside.
+            %   r = d.rows("f", By="A"); for k = 1:size(r, 1), plot(r{k,2}.Axes.B.Data, r{k,2}.Values.f.Data); end
+            arguments
+                obj
+                name (1,1) string
+                opts.By (1,1) string
+            end
+            v = obj.valueNamed(name);
+            by = opts.By;
+            pos = find(cellfun(@(dm) any(dm == by), v.Dims), 1);
+            if isempty(pos)
+                error('lbd:invalid', 'rows: "%s" doesn''t lie on "%s" (its axes: %s)', name, by, strjoin(v.Axes, ", "));
+            end
+            dm = v.Dims{pos};
+            if ~obj.isGroupDim(dm)
+                n = numel(obj.Axes.(by).Data);
+                r = cell(n, 2);
+                for i = 1:n
+                    r{i, 1} = obj.Axes.(by).Data(i);
+                    r{i, 2} = obj.part(v, pos, {"index", i});
+                end
+                return
+            end
+            j = find(dm == by);
+            outer = dm(1:j);
+            keyChain = obj.ancestors(outer);
+            n = obj.dimLength(outer);
+            r = cell(n, 2);
+            anc = obj.ancestors(dm);
+            anc = anc{j};
+            for p = 1:n
+                r{p, 1} = arrayfun(@(m) obj.Axes.(outer(m)).Data(keyChain{m}(p)), 1:j);
+                if j == numel(dm)
+                    r{p, 2} = obj.part(v, pos, {"point", p});
+                else
+                    r{p, 2} = obj.part(v, pos, {"under", j, p, find(anc == p)});
+                end
+            end
+        end
+
+        function m = toDense(obj, name, opts)
+            %TODENSE  Value NAME as a full rectangle: an lbd.Dataset with fixed axes only.
+            %   A group stores only the measured points ("sparse"); this places them in the full
+            %   rectangle ("dense"). Each axis's ticks are the sorted distinct coordinates of the
+            %   value's points; cells not measured hold NaN (0 / false with Measured for integers
+            %   and logicals). It doesn't interpolate; always a copy.
+            %   m = d.toDense("f");
+            %   m = d.toDense("f", Round=9);       % merge coordinates that differ only by rounding
+            %   m = d.toDense("f", RTol=1e-9);     % ... as isclose: |a - b| <= ATol + RTol*|b|
+            %   m = d.toDense("f", Limit=Inf);     % no size limit (default 1e8 cells)
+            arguments
+                obj
+                name (1,1) string
+                opts.Round double = []
+                opts.RTol double = []
+                opts.ATol double = []
+                opts.Limit (1,1) double = 1e8
+            end
+            v = obj.valueNamed(name);
+            if ~isempty(opts.Round) && (~isempty(opts.RTol) || ~isempty(opts.ATol))
+                error('lbd:invalid', 'toDense: give Round or RTol / ATol, not both');
+            end
+            ticks = struct();
+            where = cell(1, numel(v.Dims));
+            for i = 1:numel(v.Dims)
+                dm = v.Dims{i};
+                if ~obj.isGroupDim(dm)
+                    ticks.(dm) = obj.Axes.(dm).Data(:);
+                    continue
+                end
+                chain = obj.ancestors(dm);
+                w = cell(1, numel(dm));
+                for k = 1:numel(dm)
+                    [ticks.(dm(k)), w{k}] = lbd.Dataset.ticksOf(obj.Axes.(dm(k)).Data(chain{k}), dm(k), opts);
+                end
+                where{i} = w;
+            end
+            T = arrayfun(@(a) numel(ticks.(a)), v.Axes);
+            shape = [T v.PointShape];
+            cells = prod(shape);
+            if cells > opts.Limit
+                bits = str2double(regexp(v.Dtype, '\d+', 'match', 'once'));
+                if isnan(bits), bits = 8; end                    % bool: one byte
+                bytes = cells * bits / 8;
+                error('lbd:invalid', ['toDense: "%s" as a rectangle %s has %d cells (%.2f GB), more than Limit=%g. ' ...
+                    'Read it row by row with rows(..., By=...), or give Limit=Inf'], name, mat2str(shape), cells, bytes / 1e9, opts.Limit);
+            end
+            dimLens = [zeros(1, 0) cellfun(@(dm) obj.dimLength(dm), v.Dims)];
+            D = prod(dimLens);
+            P = prod(v.PointShape);
+            grids = cell(1, numel(dimLens));
+            if numel(dimLens) == 1
+                grids{1} = (1:D)';
+            elseif numel(dimLens) > 1
+                ranges = arrayfun(@(n) 1:n, dimLens, 'UniformOutput', false);
+                [grids{:}] = ndgrid(ranges{:});
+            end
+            subs = {};
+            for i = 1:numel(dimLens)
+                if isempty(where{i})
+                    subs{end+1} = grids{i}(:); %#ok<AGROW>
+                else
+                    for k = 1:numel(where{i})
+                        subs{end+1} = where{i}{k}(grids{i}(:)); %#ok<AGROW>
+                    end
+                end
+            end
+            if isempty(subs)
+                lin = 1;
+            elseif numel(subs) == 1
+                lin = subs{1};
+            else
+                lin = sub2ind(T, subs{:});
+            end
+            if numel(unique(lin)) < numel(lin)
+                error('lbd:invalid', ['toDense: two points of "%s" fall into one cell: merging must not drop a ' ...
+                    'result. Use a smaller Round / RTol / ATol'], name);
+            end
+            out = lbd.Dataset.fillLike(v.Data, [max(prod(T), 1) P]);
+            out(lin, :) = reshape(v.Data, D, P);
+            out = reshape(out, [shape ones(1, max(0, 2 - numel(shape)))]);
+            if startsWith(v.Dtype, "complex"), out = complex(out); end
+            measured = [];
+            if ~isfloat(v.Data)
+                mask = false(max(prod(T), 1), P);
+                if isempty(v.Measured), src = true(D, P); else, src = reshape(v.Measured, D, P); end
+                mask(lin, :) = src;
+                if ~all(mask(:)), measured = reshape(mask, size(out)); end
+            end
+            m = lbd.Dataset(obj.Title);
+            for a = v.Axes
+                src = obj.Axes.(a);
+                el = string.empty;
+                if strlength(src.Group) == 0, el = src.Elements; end
+                m.Axes.(a) = lbd.Dataset.axisStruct(a, ticks.(a), src.Unit, src.Label, el, "", []);
+            end
+            m.Values.(name) = struct('Name', name, 'Data', out, 'Axes', v.Axes, ...
+                'Dims', {arrayfun(@(a) a, v.Axes, 'UniformOutput', false)}, 'Unit', v.Unit, 'Label', v.Label, ...
+                'Shape', shape, 'Dtype', v.Dtype, 'PointShape', v.PointShape, 'Elements', {v.Elements}, ...
+                'Measured', measured);
         end
 
         function newId(obj)
@@ -357,6 +572,10 @@ classdef Dataset < handle
 
         function disp(obj)
             fprintf('  lbd.Dataset "%s"\n', obj.Title);
+            gn = fieldnames(obj.Groups);
+            for i = 1:numel(gn)
+                fprintf('    group %s: %s\n', gn{i}, strjoin(obj.Groups.(gn{i}).Order, " -> "));
+            end
             an = fieldnames(obj.Axes);
             for i = 1:numel(an)
                 a = obj.Axes.(an{i});
@@ -376,8 +595,14 @@ classdef Dataset < handle
                 error('lbd:invalid', ['invalid name "%s": must start with a letter and contain only ' ...
                     'letters, digits and ''_'' (max 63)'], name);
             end
-            if isfield(obj.Axes, name) || isfield(obj.Values, name)
-                error('lbd:invalid', 'name "%s" is already used by an axis or value', name);
+            if isfield(obj.Axes, name) || isfield(obj.Values, name) || isfield(obj.Groups, name)
+                error('lbd:invalid', 'name "%s" is already used by an axis, group or value', name);
+            end
+            vn = string(fieldnames(obj.Values))';
+            for k = vn
+                if any(lbd.Dataset.pointNames(obj.Values.(k)) == name)
+                    error('lbd:invalid', 'name "%s" is used in the file for a dimension of the data points of "%s"', name, k);
+                end
             end
         end
 
@@ -405,9 +630,9 @@ classdef Dataset < handle
             end
 
             gid = H5G.create(fid, 'axes', 'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
-            an = fieldnames(obj.Axes);
-            for i = 1:numel(an)
-                a = obj.Axes.(an{i});
+            fa = obj.fileAxes();
+            for i = 1:numel(fa)
+                a = fa{i};
                 did = lbd_write_dataset(gid, a.Name, a.Data, 1, compression);
                 lbd_write_attr(did, 'unit', a.Unit);
                 lbd_write_attr(did, 'label', a.Label);
@@ -419,6 +644,22 @@ classdef Dataset < handle
                     lbd_write_attr(did, 'role', a.Role);
                 end
                 H5D.close(did);
+            end
+            for gname = string(fieldnames(obj.Groups))'     % axis groups (spec 1.8), level by level
+                g = obj.Groups.(gname);
+                ggid = H5G.create(gid, char(gname), 'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
+                lbd_write_attr(ggid, 'order', strjoin(g.Order, ","));
+                for k = 1:numel(g.Order)
+                    a = obj.Axes.(g.Order(k));
+                    did = lbd_write_dataset(ggid, a.Name, a.Data, 1, compression);
+                    lbd_write_attr(did, 'unit', a.Unit);
+                    lbd_write_attr(did, 'label', a.Label);
+                    H5D.close(did);
+                    if k > 1                                 % from 0 in the file
+                        H5D.close(lbd_write_dataset(ggid, a.Name + "._parent", int64(a.Parent(:)) - 1, 1, compression));
+                    end
+                end
+                H5G.close(ggid);
             end
             H5G.close(gid);
 
@@ -432,10 +673,10 @@ classdef Dataset < handle
                 end
                 isBool = islogical(data);
                 if isBool, data = uint8(data); end
-                did = lbd_write_dataset(gid, val.Name, data, numel(val.Axes), compression);
+                did = lbd_write_dataset(gid, val.Name, data, numel(val.Dims) + numel(val.PointShape), compression);
                 lbd_write_attr(did, 'unit', val.Unit);
                 lbd_write_attr(did, 'label', val.Label);
-                lbd_write_attr(did, 'axes', strjoin(val.Axes, ","));
+                lbd_write_attr(did, 'axes', strjoin([val.Axes lbd.Dataset.pointNames(val)], ","));
                 if isBool, lbd_write_attr(did, 'lbd_bool', int64(1)); end
                 H5D.close(did);
             end
@@ -447,7 +688,7 @@ classdef Dataset < handle
                 gid = H5G.create(fid, 'measured', 'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
                 for i = 1:numel(masks)
                     val = obj.Values.(masks{i});
-                    did = lbd_write_dataset(gid, val.Name, uint8(val.Measured), numel(val.Axes), compression);
+                    did = lbd_write_dataset(gid, val.Name, uint8(val.Measured), numel(val.Dims) + numel(val.PointShape), compression);
                     H5D.close(did);
                 end
                 H5G.close(gid);
@@ -514,9 +755,32 @@ classdef Dataset < handle
             [~, fname, fext] = fileparts(path);
             base = fname + fext;
             writing = lower(fext) == ".writing";
+            if ~writing
+                d = lbd.Dataset.readFile(path, loadAll, names, false, base);
+                return
+            end
+            warning('lbd:writing', ['%s is still being written, or its writer stopped before finishing ' ...
+                '(lbd.writingStatus tells which); reading what was written so far'], base);
+            % A file being written can be caught while its writer finishes it (the description
+            % and metadata are rewritten then): read it again a moment later.
+            for attempt = 1:20
+                try
+                    d = lbd.Dataset.readFile(path, loadAll, names, true, base);
+                    return
+                catch err
+                    if attempt == 20 || err.identifier == "lbd:notFound", rethrow(err); end
+                    if ~isfile(path)
+                        error('lbd:notFound', '%s was finished while it was read: open %s', base, ...
+                            extractBefore(base, strlength(base) - strlength(".writing") + 1));
+                    end
+                    pause(0.05);
+                end
+            end
+        end
+
+        function d = readFile(path, loadAll, names, writing, base)
+            %READFILE  One reading of the file (see fromFile).
             if writing
-                warning('lbd:writing', ['%s is still being written, or its writer stopped before finishing ' ...
-                    '(lbd.writingStatus tells which); reading what was written so far'], base);
                 fid = lbd_own_writers("get", path);   % written by this MATLAB: one HDF5 handle per file
                 if isempty(fid)
                     fid = lbd_open_writing(path);
@@ -560,6 +824,13 @@ classdef Dataset < handle
             if H5L.exists(fid, 'axes', 'H5P_DEFAULT')
                 gid = H5G.open(fid, 'axes');
                 for name = lbd_link_names(gid)
+                    oid = H5O.open(gid, char(name), 'H5P_DEFAULT');
+                    isGroup = H5I.get_type(oid) == H5ML.get_constant_value('H5I_GROUP');
+                    H5O.close(oid);
+                    if isGroup
+                        d.readGroup(gid, name, base);
+                        continue
+                    end
                     did = H5D.open(gid, char(name));
                     data = lbd_read_dataset(did);
                     elements = lbd_attr_or(did, 'elements', string.empty);
@@ -574,9 +845,10 @@ classdef Dataset < handle
                             base, name, role);
                         role = "";
                     end
-                    d.Axes.(name) = struct('Name', name, 'Data', data(:), ...
-                        'Unit', lbd_attr_or(did, 'unit', ""), 'Label', lbd_attr_or(did, 'label', name), ...
-                        'Elements', reshape(string(elements), 1, []), 'Role', role, 'Grows', false);
+                    a = lbd.Dataset.axisStruct(name, data(:), lbd_attr_or(did, 'unit', ""), ...
+                        lbd_attr_or(did, 'label', name), reshape(string(elements), 1, []), "", []);
+                    a.Role = role;
+                    d.Axes.(name) = a;
                     H5D.close(did);
                 end
                 H5G.close(gid);
@@ -594,9 +866,9 @@ classdef Dataset < handle
                         if dtype == "bool", data = logical(data); end
                     end
                     d.Values.(name) = struct('Name', name, 'Data', data, ...
-                        'Axes', lbd.Dataset.axesList(lbd_attr_or(did, 'axes', "")), ...
+                        'Axes', lbd.Dataset.axesList(lbd_attr_or(did, 'axes', "")), 'Dims', {{}}, ...
                         'Unit', lbd_attr_or(did, 'unit', ""), 'Label', lbd_attr_or(did, 'label', name), ...
-                        'Shape', shape, 'Dtype', dtype, 'PointAxes', strings(1, 0), 'Elements', {{}}, ...
+                        'Shape', shape, 'Dtype', dtype, 'PointShape', zeros(1, 0), 'Elements', {{}}, ...
                         'Measured', []);
                     found(end+1) = name; %#ok<AGROW>
                     H5D.close(did);
@@ -624,7 +896,8 @@ classdef Dataset < handle
                 end
                 H5G.close(gid);
             end
-            if writing                 % a growing axis and its values may be caught mid-write
+            d.resolveDims(base);
+            if writing                 % a growing axis, a group's levels and their values may be caught mid-write
                 d.sameLengths();
             end
             if ~loadAll && ~isempty(names)
@@ -750,7 +1023,7 @@ classdef Dataset < handle
     methods (Hidden)
         function plan = planWrite(obj, args)
             %PLANWRITE  Check a write against the dataset's shapes; returns what to put where
-            %   (lbd.Writer uses the same plan).
+            %   (lbd.Writer uses the same plan). Nothing is changed.
             if mod(numel(args), 2) ~= 0
                 error('lbd:invalid', 'write: give each name followed by its position or data, e.g. write(power=3, S21=trace)');
             end
@@ -767,6 +1040,16 @@ classdef Dataset < handle
                 [u, ~, j] = unique(names);
                 error('lbd:invalid', 'write: "%s" is given twice', u(find(accumarray(j(:), 1) > 1, 1)));
             end
+            parent = [];
+            k = find(names == "Parent");
+            if ~isempty(k) && ~isfield(obj.Axes, "Parent") && ~isfield(obj.Values, "Parent")
+                parent = given{k};
+                names(k) = [];
+                given(k) = [];
+                if isempty(parent)
+                    error('lbd:invalid', 'write: Parent= takes the index that write returned');
+                end
+            end
             isAxis = arrayfun(@(n) isfield(obj.Axes, n), names);
             isValue = arrayfun(@(n) isfield(obj.Values, n), names);
             if any(~isAxis & ~isValue)
@@ -774,12 +1057,21 @@ classdef Dataset < handle
                     strjoin(names(~isAxis & ~isValue), ", "), strjoin(string(fieldnames(obj.Axes)), ", "), ...
                     strjoin(string(fieldnames(obj.Values)), ", "));
             end
-            if ~any(isValue)
+            inGroup = isAxis & arrayfun(@(n) isfield(obj.Axes, n) && strlength(obj.Axes.(n).Group) > 0, names);
+            if ~any(isValue) && ~any(inGroup)
                 error('lbd:invalid', 'write: give at least one value with its data, e.g. write(power=3, S21=trace)');
+            end
+            if ~isempty(parent) && ~any(inGroup)
+                error('lbd:invalid', ['write: Parent= names an outer point of a group; give the next axes of that ' ...
+                    'group with it, e.g. write(Parent=i, B=25, f=x)']);
+            end
+            points = struct();
+            if any(inGroup)
+                points = obj.planPoints(names(inGroup), given(inGroup), parent);
             end
             pos = struct();
             grow = [];
-            for k = find(isAxis)
+            for k = find(isAxis & ~inGroup)
                 a = names(k);
                 if obj.Axes.(a).Grows
                     if ~isempty(grow)
@@ -803,13 +1095,33 @@ classdef Dataset < handle
                         error('lbd:invalid', 'write: "%s" doesn''t lie on "%s" (its axes: %s)', name, a, strjoin(v.Axes, ", "));
                     end
                 end
-                idx = cell(1, numel(v.Axes));
+                idx = cell(1, numel(v.Dims) + numel(v.PointShape));
                 need = zeros(1, 0);
                 free = strings(1, 0);
-                for i = 1:numel(v.Axes)
-                    a = v.Axes(i);
+                for i = 1:numel(v.Dims)
+                    dm = v.Dims{i};
+                    a = dm(1);
                     ax = obj.Axes.(a);
-                    if ax.Grows
+                    if obj.isGroupDim(dm)
+                        g = ax.Group;
+                        if ~isfield(points, g)              % every point of the level
+                            idx{i} = ':';
+                            need(end+1) = obj.dimLength(dm); %#ok<AGROW>
+                            free(end+1) = strjoin(dm, ","); %#ok<AGROW>
+                            continue
+                        end
+                        p = points.(g);
+                        if p.depth ~= dm(end)
+                            missing = dm(find(dm == p.depth) + 1:end);
+                            error('lbd:invalid', 'write: "%s" lies on the points of %s: give %s too', ...
+                                name, strjoin(dm, ", "), strjoin(missing, ", "));
+                        end
+                        idx{i} = p.index;
+                        if ~isempty(p.n)
+                            need(end+1) = p.n; %#ok<AGROW>
+                            free(end+1) = strjoin(dm, ","); %#ok<AGROW>
+                        end
+                    elseif ax.Grows
                         if isempty(grow) || grow.axis ~= a
                             error('lbd:invalid', ['write: "%s" lies on the growing axis "%s": give its coordinate ' ...
                                 '(%s=...), which adds a point'], name, a, a);
@@ -830,11 +1142,170 @@ classdef Dataset < handle
                         free(end+1) = a; %#ok<AGROW>
                     end
                 end
+                for i = 1:numel(v.PointShape)                 % a data point is always given whole
+                    idx{numel(v.Dims) + i} = ':';
+                    need(end+1) = v.PointShape(i); %#ok<AGROW>
+                    free(end+1) = "data point dimension " + i; %#ok<AGROW>
+                end
                 data = lbd.Dataset.fitsType(given{k}, v.Dtype, name);
                 data = lbd.Dataset.shapedFor(data, need, name, free);
                 puts{end+1} = struct('name', name, 'idx', {idx}, 'data', data); %#ok<AGROW>
             end
-            plan = struct('grow', grow, 'puts', {puts});
+            levels = {};
+            result = [];
+            gs = string(fieldnames(points))';
+            for g = gs
+                levels = [levels points.(g).new]; %#ok<AGROW>
+            end
+            if isscalar(gs)
+                result = points.(gs).index;
+            elseif ~isempty(gs)
+                result = struct();
+                for g = gs, result.(g) = points.(g).index; end
+            end
+            plan = struct('grow', grow, 'levels', {levels}, 'puts', {puts}, 'result', result);
+        end
+
+        function pts = planPoints(obj, names, vals, parent)
+            %PLANPOINTS  The points a write names in each group: found by their coordinates (the
+            %   same coordinates are the same point), or new. Nothing is changed.
+            byGroup = struct();
+            for k = 1:numel(names)
+                g = obj.Axes.(names(k)).Group;
+                if ~isfield(byGroup, g), byGroup.(g) = struct('names', strings(1, 0), 'vals', {{}}); end
+                byGroup.(g).names(end+1) = names(k);
+                byGroup.(g).vals{end+1} = vals{k};
+            end
+            gs = string(fieldnames(byGroup))';
+            if ~isempty(parent) && numel(gs) ~= 1
+                error('lbd:invalid', 'write: Parent= names a point of one group; give the axes of that group (and only one group) with it');
+            end
+            pts = struct();
+            for g = gs
+                order = obj.Groups.(g).Order;
+                given = byGroup.(g);
+                ks = sort(arrayfun(@(a) find(order == a), given.names));
+                s = ks(1);
+                e = ks(end);
+                if ~isequal(ks, s:e)
+                    error('lbd:invalid', 'write: group "%s" (order %s) needs its axes one after the other; %s missing', ...
+                        g, strjoin(order, ", "), strjoin(setdiff(order(s:e), given.names, 'stable'), ", "));
+                end
+                if isempty(parent) && s > 1
+                    error('lbd:invalid', 'write: "%s" means something only under %s: give %s too, or the outer point with Parent=', ...
+                        order(s), strjoin(order(1:s-1), ", "), strjoin(order(1:s-1), ", "));
+                end
+                if ~isempty(parent) && s == 1
+                    error('lbd:invalid', 'write: Parent= names a point of the level above "%s", which is the first axis of group "%s"; leave Parent= out', order(1), g);
+                end
+                cols = cell(1, e - s + 1);
+                lens = zeros(1, 0);
+                for m = s:e
+                    c = given.vals{given.names == order(m)};
+                    if ~(isnumeric(c) && isreal(c) && (isempty(c) || isvector(c)))
+                        error('lbd:invalid', 'write: "%s" is an axis of a group: give its coordinate (a number) or a vector of them', order(m));
+                    end
+                    if any(~isfinite(double(c(:))))
+                        error('lbd:invalid', 'write: "%s" got NaN or Inf; coordinates must be finite numbers', order(m));
+                    end
+                    cols{m - s + 1} = double(c(:)) + 0;          % +0: -0 is the point 0
+                    if ~isscalar(c), lens(end+1) = numel(c); end %#ok<AGROW>
+                end
+                pars = [];
+                if ~isempty(parent)
+                    nAbove = numel(obj.Axes.(order(s - 1)).Data);
+                    if ~(isnumeric(parent) && isreal(parent) && isvector(parent) && all(parent(:) == round(parent(:))))
+                        error('lbd:invalid', 'write: Parent= takes the index (or a vector of indices) that write returned');
+                    end
+                    if any(parent(:) < 1 | parent(:) > nAbove)
+                        error('lbd:invalid', 'write: Parent=%s is not a point of "%s" (it has %d: 1 ... %d)', ...
+                            mat2str(parent), order(s - 1), nAbove, nAbove);
+                    end
+                    pars = double(parent(:));
+                    if ~isscalar(parent), lens(end+1) = numel(parent); end %#ok<AGROW>
+                end
+                lens = unique(lens);
+                if numel(lens) > 1
+                    error('lbd:invalid', 'write: the coordinates given for group "%s" have different lengths %s', g, mat2str(lens));
+                end
+                many = ~isempty(lens);
+                n = 1;
+                if many, n = lens; end
+                for m = 1:numel(cols)
+                    if isscalar(cols{m}), cols{m} = repmat(cols{m}, n, 1); end
+                end
+                if isempty(pars), pars = zeros(n, 1); elseif isscalar(pars), pars = repmat(pars, n, 1); end
+                newCoords = repmat({zeros(0, 1)}, 1, numel(cols));
+                newParents = repmat({zeros(0, 1)}, 1, numel(cols));
+                pending = containers.Map('KeyType', 'char', 'ValueType', 'double');
+                result = zeros(n, 1);
+                for i = 1:n
+                    p = pars(i);
+                    for m = 1:numel(cols)
+                        a = order(s + m - 1);
+                        c = cols{m}(i);
+                        key = sprintf('%d|%d|%.17g', m, p, c);
+                        if isKey(pending, key)
+                            idx = pending(key);
+                        else
+                            idx = obj.findPoint(a, p, c);
+                            if isempty(idx)
+                                idx = numel(obj.Axes.(a).Data) + numel(newCoords{m}) + 1;
+                                newCoords{m}(end+1, 1) = c;
+                                newParents{m}(end+1, 1) = p;
+                                pending(key) = idx;
+                            end
+                        end
+                        p = idx;
+                    end
+                    result(i) = p;
+                end
+                new = {};
+                for m = 1:numel(cols)
+                    if isempty(newCoords{m}), continue; end
+                    a = order(s + m - 1);
+                    if isempty(obj.Axes.(a).Parent) && s + m - 1 == 1
+                        new{end+1} = {a, newCoords{m}, []}; %#ok<AGROW>
+                    else
+                        new{end+1} = {a, newCoords{m}, newParents{m}}; %#ok<AGROW>
+                    end
+                end
+                if many, index = result; nOut = n; else, index = result(1); nOut = []; end
+                pts.(g) = struct('depth', order(e), 'index', index, 'n', nOut, 'new', {new});
+            end
+            withMany = 0;
+            for g = gs, withMany = withMany + ~isempty(pts.(g).n); end
+            if withMany > 1
+                error('lbd:invalid', 'write: give several points of one group at a time (one point of each other group)');
+            end
+        end
+
+        function idx = findPoint(obj, a, p, c)
+            %FINDPOINT  The index of the point of level A with parent P and coordinate C, or [].
+            lk = obj.lookup(a);
+            key = sprintf('%d|%.17g', p, c);
+            idx = [];
+            if isKey(lk.map, key), idx = lk.map(key); end
+        end
+
+        function lk = lookup(obj, a)
+            %LOOKUP  Level A's points by (parent, coordinate); rebuilt when the level changed by hand.
+            ax = obj.Axes.(a);
+            n = numel(ax.Data);
+            if isfield(obj.Lookups, a) && obj.Lookups.(a).n == n
+                lk = obj.Lookups.(a);
+                return
+            end
+            map = containers.Map('KeyType', 'char', 'ValueType', 'double');
+            if n > 0
+                parents = zeros(n, 1);
+                if ~isempty(ax.Parent), parents = double(ax.Parent(:)); end
+                keys = compose("%d|%.17g", parents, double(ax.Data(:)) + 0);
+                [u, first] = unique(keys, 'stable');
+                map = containers.Map(cellstr(u), num2cell(first(:)'));
+            end
+            lk = struct('n', n, 'map', map);
+            obj.Lookups.(a) = lk;
         end
 
         function i = position(obj, a, x)
@@ -863,25 +1334,12 @@ classdef Dataset < handle
             if ~isempty(plan.grow)
                 g = plan.grow.axis;
                 c = plan.grow.coords;
-                ax = obj.Axes.(g);
-                ax.Data = [double(ax.Data); c];
-                obj.Axes.(g) = ax;
-                vn = string(fieldnames(obj.Values))';
-                for name = vn
-                    v = obj.Values.(name);
-                    if isempty(v.Axes) || v.Axes(1) ~= g, continue; end
-                    sz = size(v.Data);
-                    sz(1) = numel(c);
-                    if ~isfloat(v.Data) && isempty(v.Measured)
-                        v.Measured = true(size(v.Data));
-                    end
-                    v.Data = cat(1, v.Data, lbd.Dataset.fillLike(v.Data, sz));
-                    if ~isempty(v.Measured)
-                        v.Measured = cat(1, v.Measured, false(sz));
-                    end
-                    v.Shape(1) = v.Shape(1) + numel(c);
-                    obj.Values.(name) = v;
-                end
+                obj.Axes.(g).Data = [double(obj.Axes.(g).Data); c];
+                obj.extendValues(g, numel(c));
+            end
+            obj.growLevels(plan);
+            for k = 1:numel(plan.levels)
+                obj.extendValues(plan.levels{k}{1}, numel(plan.levels{k}{2}));
             end
             for k = 1:numel(plan.puts)
                 p = plan.puts{k};
@@ -900,34 +1358,386 @@ classdef Dataset < handle
             end
         end
 
-        function sameLengths(obj)
-            %SAMELENGTHS  In a file being written, cut each axis and the values on it to the
-            %   length all of them have reached (the writer extends them one after the other).
-            an = string(fieldnames(obj.Axes))';
-            vn = string(fieldnames(obj.Values))';
-            for a = an
-                n = numel(obj.Axes.(a).Data);
-                for name = vn
-                    k = find(obj.Values.(name).Axes == a, 1);
-                    if ~isempty(k) && k <= numel(obj.Values.(name).Shape)
-                        n = min(n, obj.Values.(name).Shape(k));
+        function growLevels(obj, plan)
+            %GROWLEVELS  Add a write's new group points to their levels (coordinates, parents,
+            %   lookups); warn about a new point that differs from one there only by rounding.
+            near = strings(1, 0);
+            for k = 1:numel(plan.levels)
+                a = plan.levels{k}{1};
+                c = plan.levels{k}{2};
+                p = plan.levels{k}{3};
+                ax = obj.Axes.(a);
+                start = numel(ax.Data);
+                lk = [];
+                if isfield(obj.Lookups, a) && obj.Lookups.(a).n == start, lk = obj.Lookups.(a); end
+                all = [double(ax.Data(:)); c];
+                if any(all ~= round(all))                    % integers are never near-equal
+                    scale = max([max(all) - min(all), abs(min(all)), abs(max(all))]);
+                    if isempty(p), parents = zeros(size(c)); old = zeros(start, 1); else, parents = p; old = double(ax.Parent(:)); end
+                    for q = unique(parents)'
+                        s = unique([double(ax.Data(old == q)); c(parents == q)]);
+                        close = find(diff(s) <= 1e-9 * scale, 1);
+                        if ~isempty(close)
+                            near(end+1) = sprintf('%s = %.17g is a new point next to %.17g', a, s(close + 1), s(close)); %#ok<AGROW>
+                        end
                     end
                 end
-                if n < numel(obj.Axes.(a).Data)
-                    obj.Axes.(a).Data = obj.Axes.(a).Data(1:n);
-                end
-                for name = vn
-                    v = obj.Values.(name);
-                    k = find(v.Axes == a, 1);
-                    if isempty(k) || v.Shape(k) <= n, continue; end
-                    v.Shape(k) = n;
-                    sz = v.Shape;
-                    if numel(sz) == 1, sz = [sz 1]; end
-                    if ~isempty(v.Data), v.Data = lbd.Dataset.cutTo(v.Data, sz); end
-                    if ~isempty(v.Measured), v.Measured = lbd.Dataset.cutTo(v.Measured, sz); end
-                    obj.Values.(name) = v;
+                ax.Data = all;
+                if ~isempty(p), ax.Parent = [ax.Parent(:); int64(p)]; end
+                obj.Axes.(a) = ax;
+                if ~isempty(lk)
+                    if isempty(p), pp = zeros(size(c)); else, pp = p; end
+                    for i = 1:numel(c)
+                        lk.map(sprintf('%d|%.17g', pp(i), c(i))) = start + i;
+                    end
+                    lk.n = start + numel(c);
+                    obj.Lookups.(a) = lk;
                 end
             end
+            if ~isempty(near)
+                warning('lbd:nearEqual', ['write: %s. Coordinates are compared exactly: round the coordinate, or ' ...
+                    'write with Parent= (the index write returned)'], strjoin(near(1:min(3, end)), "; "));
+            end
+        end
+
+        function extendValues(obj, axis, k)
+            %EXTENDVALUES  K points were added to AXIS (a growing axis, or a group's level): every
+            %   value on it grows along that dimension, the new points not measured.
+            for name = string(fieldnames(obj.Values))'
+                v = obj.Values.(name);
+                for pos = 1:numel(v.Dims)
+                    if v.Dims{pos}(end) ~= axis, continue; end
+                    sz = size(v.Data, 1:max(ndims(v.Data), pos));
+                    sz(pos) = k;
+                    if ~isfloat(v.Data) && isempty(v.Measured)
+                        v.Measured = true(size(v.Data));
+                    end
+                    v.Data = cat(pos, v.Data, lbd.Dataset.fillLike(v.Data, sz));
+                    if ~isempty(v.Measured)
+                        v.Measured = cat(pos, v.Measured, false(sz));
+                    end
+                    v.Shape(pos) = v.Shape(pos) + k;
+                end
+                obj.Values.(name) = v;
+            end
+        end
+
+        function sameLengths(obj)
+            %SAMELENGTHS  In a file being written, keep what is complete: each group level's
+            %   points up to the first whose parent isn't there yet, and each axis (or level) and
+            %   the values along it cut to the length all of them have reached.
+            changed = true;
+            while changed
+                changed = false;
+                for g = string(fieldnames(obj.Groups))'
+                    above = Inf;
+                    for k = 1:numel(obj.Groups.(g).Order)
+                        a = obj.Groups.(g).Order(k);
+                        ax = obj.Axes.(a);
+                        n = numel(ax.Data);
+                        if k > 1
+                            n = min(n, numel(ax.Parent));
+                            late = find(ax.Parent(1:n) > above, 1);
+                            if ~isempty(late), n = late - 1; end
+                        end
+                        if n < numel(ax.Data) || (k > 1 && n < numel(ax.Parent))
+                            ax.Data = ax.Data(1:n);
+                            if k > 1, ax.Parent = ax.Parent(1:n); end
+                            obj.Axes.(a) = ax;
+                            changed = true;
+                        end
+                        above = n;
+                    end
+                end
+                vn = string(fieldnames(obj.Values))';
+                for a = string(fieldnames(obj.Axes))'
+                    n = numel(obj.Axes.(a).Data);
+                    for name = vn
+                        v = obj.Values.(name);
+                        for i = 1:min(numel(v.Dims), numel(v.Shape))
+                            if v.Dims{i}(end) == a, n = min(n, v.Shape(i)); end
+                        end
+                    end
+                    if n < numel(obj.Axes.(a).Data)
+                        obj.Axes.(a).Data = obj.Axes.(a).Data(1:n);
+                        if ~isempty(obj.Axes.(a).Parent), obj.Axes.(a).Parent = obj.Axes.(a).Parent(1:n); end
+                        changed = true;
+                    end
+                    for name = vn
+                        v = obj.Values.(name);
+                        cut = false;
+                        for i = 1:min(numel(v.Dims), numel(v.Shape))
+                            if v.Dims{i}(end) == a && v.Shape(i) > n
+                                v.Shape(i) = n;
+                                cut = true;
+                            end
+                        end
+                        if ~cut, continue; end
+                        sz = v.Shape;
+                        if numel(sz) == 1, sz = [sz 1]; end
+                        if ~isempty(v.Data), v.Data = lbd.Dataset.cutTo(v.Data, sz); end
+                        if ~isempty(v.Measured), v.Measured = lbd.Dataset.cutTo(v.Measured, sz); end
+                        obj.Values.(name) = v;
+                    end
+                end
+            end
+        end
+
+        function dims = parseDims(obj, names, where)
+            %PARSEDIMS  A value's dimensions from its axis names: a fixed axis is one dimension;
+            %   consecutive axes of one group, from its first, are one (a level); a group's name
+            %   means all its axes.
+            dims = {};
+            seen = strings(1, 0);
+            i = 1;
+            while i <= numel(names)
+                name = names(i);
+                if isfield(obj.Groups, name)
+                    order = obj.Groups.(name).Order;
+                    if isempty(order)
+                        error('lbd:invalid', '%s: group "%s" has no axes yet; add them with addAxis(..., Group="%s")', where, name, name);
+                    end
+                    dm = order;
+                    owner = name;
+                    i = i + 1;
+                elseif isfield(obj.Axes, name) && strlength(obj.Axes.(name).Group) > 0
+                    owner = obj.Axes.(name).Group;
+                    order = obj.Groups.(owner).Order;
+                    if name ~= order(1)
+                        k = find(order == name);
+                        error('lbd:invalid', ['%s: "%s" is an inner axis of group "%s" (order %s); a value lies on an ' ...
+                            'outer part of a group: give %s, not "%s" alone'], where, name, owner, strjoin(order, ", "), ...
+                            strjoin(order(1:k), ", "), name);
+                    end
+                    k = 1;
+                    while i + k <= numel(names) && k < numel(order) && names(i + k) == order(k + 1)
+                        k = k + 1;
+                    end
+                    if i + k <= numel(names) && any(order == names(i + k))
+                        error('lbd:invalid', '%s: the axes of group "%s" must be given in its order (%s), one after the other from "%s"', ...
+                            where, owner, strjoin(order, ", "), order(1));
+                    end
+                    dm = order(1:k);
+                    i = i + k;
+                else
+                    if ~isfield(obj.Axes, name)
+                        error('lbd:invalid', '%s: axis "%s" does not exist; add it with addAxis first', where, name);
+                    end
+                    dm = name;
+                    owner = name;
+                    i = i + 1;
+                end
+                if any(seen == owner)
+                    error('lbd:invalid', '%s: "%s" appears more than once in %s', where, owner, strjoin(names, ", "));
+                end
+                seen(end+1) = owner; %#ok<AGROW>
+                dims{end+1} = dm; %#ok<AGROW>
+            end
+        end
+
+        function n = dimLength(obj, dm)
+            %DIMLENGTH  A dimension's length: its axis's points, or its level's.
+            n = numel(obj.Axes.(dm(end)).Data);
+        end
+
+        function tf = isGroupDim(obj, dm)
+            tf = strlength(obj.Axes.(dm(1)).Group) > 0;
+        end
+
+        function out = ancestors(obj, dm)
+            %ANCESTORS  For each point of the level DM ends at, its point at every level of DM
+            %   (outer first; the last is 1 ... n).
+            idx = (1:obj.dimLength(dm))';
+            out = cell(1, numel(dm));
+            out{end} = idx;
+            for m = numel(dm):-1:2
+                idx = double(obj.Axes.(dm(m)).Parent(idx));
+                idx = idx(:);
+                out{m - 1} = idx;
+            end
+        end
+
+        function v = valueNamed(obj, name)
+            if ~isfield(obj.Values, name)
+                error('lbd:notFound', 'no value named "%s"; values: %s', name, strjoin(string(fieldnames(obj.Values)), ", "));
+            end
+            v = obj.Values.(name);
+        end
+
+        function nd = part(obj, v, pos, sel)
+            %PART  A new dataset with the part of V that SEL picks along dimension POS:
+            %   {"index", i} of a fixed axis, {"point", p} of a level, or {"under", j, p, pts}:
+            %   the points under point p of level j. A copy.
+            nd = lbd.Dataset(obj.Title);
+            idx = {};
+            dims = {};
+            for i = 1:numel(v.Dims)
+                dm = v.Dims{i};
+                if i ~= pos
+                    obj.copyDim(nd, dm);
+                    idx{end+1} = ':'; %#ok<AGROW>
+                    dims{end+1} = dm; %#ok<AGROW>
+                    continue
+                end
+                if sel{1} == "index" || sel{1} == "point"
+                    idx{end+1} = sel{2}; %#ok<AGROW>
+                    continue
+                end
+                j = sel{2}; p = sel{3}; pts = sel{4};
+                rest = dm(j + 1:end);
+                if isscalar(rest)
+                    src = obj.Axes.(rest);
+                    nd.Axes.(rest) = lbd.Dataset.axisStruct(rest, src.Data(pts), src.Unit, src.Label, string.empty, "", []);
+                    idx{end+1} = pts; %#ok<AGROW>
+                else
+                    g = obj.Axes.(dm(1)).Group;
+                    nd.Groups.(g) = struct('Name', g, 'Order', rest);
+                    keepAbove = [];
+                    for m = j + 1:numel(dm)
+                        chain = obj.ancestors(dm(1:m));
+                        keep = find(chain{j} == p);
+                        src = obj.Axes.(dm(m));
+                        parent = [];
+                        if ~isempty(keepAbove) || m > j + 1
+                            [~, loc] = ismember(double(src.Parent(keep)), keepAbove);
+                            parent = int64(loc(:));
+                        end
+                        nd.Axes.(dm(m)) = lbd.Dataset.axisStruct(dm(m), src.Data(keep), src.Unit, src.Label, string.empty, g, parent);
+                        keepAbove = keep;
+                    end
+                    idx{end+1} = keepAbove; %#ok<AGROW>
+                end
+                dims{end+1} = rest; %#ok<AGROW>
+            end
+            idx = [idx repmat({':'}, 1, numel(v.PointShape))];
+            shape = [zeros(1, 0) cellfun(@(dm) nd.dimLength(dm), dims) v.PointShape];
+            sz = [shape ones(1, max(0, 2 - numel(shape)))];
+            if numel(shape) == 1, sz = [shape 1]; end
+            data = reshape(lbd.Dataset.pick(v.Data, idx), sz);
+            if startsWith(v.Dtype, "complex"), data = complex(data); end
+            measured = [];
+            if ~isempty(v.Measured), measured = reshape(lbd.Dataset.pick(v.Measured, idx), sz); end
+            nd.Values.(v.Name) = struct('Name', v.Name, 'Data', data, 'Axes', [strings(1, 0) dims{:}], 'Dims', {dims}, ...
+                'Unit', v.Unit, 'Label', v.Label, 'Shape', shape, 'Dtype', v.Dtype, 'PointShape', v.PointShape, ...
+                'Elements', {v.Elements}, 'Measured', measured);
+        end
+
+        function copyDim(obj, nd, dm)
+            if obj.isGroupDim(dm)
+                g = obj.Axes.(dm(1)).Group;
+                if ~isfield(nd.Groups, g), nd.Groups.(g) = struct('Name', g, 'Order', dm); end
+            end
+            for a = dm
+                nd.Axes.(a) = obj.Axes.(a);
+            end
+        end
+
+        function fa = fileAxes(obj)
+            %FILEAXES  The axes the file stores at its top: the fixed axes, then each value's
+            %   data point dimensions (format 1.2: role "point", 0 ... n-1).
+            fa = {};
+            for name = string(fieldnames(obj.Axes))'
+                if strlength(obj.Axes.(name).Group) == 0, fa{end+1} = obj.Axes.(name); end %#ok<AGROW>
+            end
+            done = strings(1, 0);
+            for name = string(fieldnames(obj.Values))'
+                v = obj.Values.(name);
+                pn = lbd.Dataset.pointNames(v);
+                for k = 1:numel(v.PointShape)
+                    if any(done == pn(k)), continue; end
+                    done(end+1) = pn(k); %#ok<AGROW>
+                    label = v.Label;
+                    if numel(v.PointShape) > 1, label = v.Label + " (dim" + k + ")"; end
+                    el = string.empty;
+                    if k <= numel(v.Elements), el = v.Elements{k}; end
+                    a = lbd.Dataset.axisStruct(pn(k), int64(0:v.PointShape(k) - 1)', "", label, el, "", []);
+                    a.Role = "point";
+                    fa{end+1} = a; %#ok<AGROW>
+                end
+            end
+        end
+
+        function resolveDims(obj, base)
+            %RESOLVEDIMS  Each value's axes as the file lists them -> its dimensions: the last
+            %   ones with role "point" are its data point's (they leave Axes), the others sweep
+            %   dimensions (a fixed axis, or a group's level).
+            trailing = strings(1, 0);
+            for name = string(fieldnames(obj.Values))'
+                v = obj.Values.(name);
+                names = v.Axes;
+                k = numel(names);
+                while k > 0 && isfield(obj.Axes, names(k)) && obj.Axes.(names(k)).Role == "point"
+                    k = k - 1;
+                end
+                trailing = [trailing names(k+1:end)]; %#ok<AGROW>
+                try
+                    dims = obj.parseDims(names(1:k), sprintf('value "%s"', name));
+                catch err
+                    error('lbd:invalid', '%s: %s', base, err.message);
+                end
+                if numel(dims) + numel(names) - k ~= numel(v.Shape)
+                    error('lbd:invalid', '%s: value "%s" has %d dimension(s) but axes=%s', base, name, numel(v.Shape), strjoin(names, ","));
+                end
+                v.Elements = arrayfun(@(a) obj.Axes.(a).Elements, names(k+1:end), 'UniformOutput', false);
+                v.Axes = [strings(1, 0) dims{:}];
+                v.Dims = dims;
+                v.PointShape = v.Shape(numel(dims)+1:end);
+                obj.Values.(name) = v;
+            end
+            for a = string(fieldnames(obj.Axes))'
+                if obj.Axes.(a).Role ~= "point", continue; end
+                swept = false;
+                for name = string(fieldnames(obj.Values))'
+                    swept = swept || any(obj.Values.(name).Axes == a);
+                end
+                if any(trailing == a) && swept
+                    error('lbd:invalid', '%s: axis "%s" is a dimension of a data point of some values and a sweep axis of others; it can''t be both', base, a);
+                elseif any(trailing == a)
+                    obj.Axes = rmfield(obj.Axes, a);
+                else
+                    obj.Axes.(a).Role = "";
+                    warning('lbd:badRole', ['%s: axis "%s" is marked as a dimension of a data point (role "point") but ' ...
+                        'no value''s data point uses it; it is read as a sweep axis'], base, a);
+                end
+            end
+        end
+
+        function readGroup(obj, gid, name, base)
+            %READGROUP  An axis group (spec 1.8): its axes level by level, each point's parent.
+            if isfield(obj.Axes, name)
+                error('lbd:invalid', '%s: "%s" is used by an axis and a group', base, name);
+            end
+            ggid = H5G.open(gid, char(name));
+            closer = onCleanup(@() H5G.close(ggid));
+            order = lbd.Dataset.axesList(string(lbd_attr_or(ggid, 'order', "")));
+            if isempty(order)
+                error('lbd:invalid', '%s: the axis group "%s" has no ''order'' attribute; it breaks the LBD format', base, name);
+            end
+            for k = 1:numel(order)
+                a = order(k);
+                if isfield(obj.Axes, a) || isfield(obj.Groups, a)
+                    error('lbd:invalid', '%s: "%s" (in group "%s") is used twice', base, a, name);
+                end
+                if ~H5L.exists(ggid, char(a), 'H5P_DEFAULT')
+                    error('lbd:invalid', '%s: /axes/%s/%s is missing', base, name, a);
+                end
+                did = H5D.open(ggid, char(a));
+                data = lbd_read_dataset(did);
+                ax = lbd.Dataset.axisStruct(a, double(data(:)), lbd_attr_or(did, 'unit', ""), lbd_attr_or(did, 'label', a), ...
+                    string.empty, name, []);
+                H5D.close(did);
+                if k > 1
+                    if ~H5L.exists(ggid, char(a + "._parent"), 'H5P_DEFAULT')
+                        error('lbd:invalid', '%s: axis "%s" of group "%s" has no "%s._parent"; it breaks the LBD format', base, a, name, a);
+                    end
+                    did = H5D.open(ggid, char(a + "._parent"));
+                    p = lbd_read_dataset(did);
+                    H5D.close(did);
+                    ax.Parent = int64(p(:)) + 1;                     % from 1 in MATLAB
+                end
+                obj.Axes.(a) = ax;
+            end
+            obj.Groups.(name) = struct('Name', name, 'Order', order);
         end
 
         function appendCoordinates(obj, axis, coords)
@@ -999,6 +1809,59 @@ classdef Dataset < handle
             end
         end
 
+        function a = axisStruct(name, data, unit, label, elements, group, parent)
+            %AXISSTRUCT  One axis, as Axes holds it.
+            a = struct('Name', name, 'Data', data, 'Unit', unit, 'Label', label, 'Elements', elements, ...
+                'Role', "", 'Grows', false, 'Group', group, 'Parent', parent);
+        end
+
+        function names = pointNames(v)
+            %POINTNAMES  The file's names for the dimensions of V's data points.
+            names = v.Name + "_dim" + string(1:numel(v.PointShape));
+            if isempty(v.PointShape), names = strings(1, 0); end
+        end
+
+        function x = pick(data, idx)
+            %PICK  DATA at IDX (one entry per dimension; a 1-D value is a column).
+            if isvector(data) && numel(idx) == 1
+                x = data(idx{1});
+            else
+                x = data(idx{:});
+            end
+        end
+
+        function [t, inv] = ticksOf(c, name, opts)
+            %TICKSOF  An axis's ticks (sorted) from its points' coordinates, and each point's tick.
+            c = double(c(:));
+            if ~isempty(opts.Round), c = round(c, opts.Round); end
+            [u, ~, inv] = unique(c);
+            if ~isempty(opts.RTol) || ~isempty(opts.ATol)
+                r = 0; a = 0;
+                if ~isempty(opts.RTol), r = opts.RTol; end
+                if ~isempty(opts.ATol), a = opts.ATol; end
+                cl = zeros(size(u));
+                first = NaN; k = 0;
+                for i = 1:numel(u)
+                    if isnan(first) || abs(u(i) - first) > a + r * abs(first)
+                        first = u(i); k = k + 1;
+                    end
+                    cl(i) = k;
+                end
+                t = accumarray(cl, u, [], @mean);
+                inv = cl(inv);
+                return
+            end
+            if isempty(opts.Round) && numel(u) > 1 && any(u ~= round(u))
+                scale = max([u(end) - u(1), abs(u(1)), abs(u(end))]);
+                close = find(diff(u) <= 1e-9 * scale);
+                if ~isempty(close)
+                    warning('lbd:nearEqual', ['toDense: "%s" has coordinates that differ only by rounding (%.17g and %.17g): ' ...
+                        'they become separate ticks. Merge them with Round= or RTol= / ATol='], name, u(close(1)), u(close(1) + 1));
+                end
+            end
+            t = u;
+        end
+
         function x = fillLike(data, sz)
             %FILLLIKE  Rows of "not measured" of DATA's type: NaN, or 0 / false.
             if isfloat(data)
@@ -1014,30 +1877,44 @@ classdef Dataset < handle
 
     methods (Access = private)
         function validateLoaded(obj)
+            for g = string(fieldnames(obj.Groups))'
+                order = obj.Groups.(g).Order;
+                above = 0;
+                for k = 1:numel(order)
+                    ax = obj.Axes.(order(k));
+                    if any(~isfinite(ax.Data))
+                        error('lbd:invalid', 'axis "%s" of group "%s" contains NaN or Inf', order(k), g);
+                    end
+                    keys = [zeros(numel(ax.Data), 1) ax.Data(:)];
+                    if k > 1
+                        if numel(ax.Parent) ~= numel(ax.Data)
+                            error('lbd:invalid', '"%s._parent" has %d entries for %d points', order(k), numel(ax.Parent), numel(ax.Data));
+                        end
+                        if any(ax.Parent < 1 | ax.Parent > above)
+                            error('lbd:invalid', '"%s._parent" points outside "%s" (0 ... %d in the file)', order(k), order(k-1), above - 1);
+                        end
+                        keys(:, 1) = double(ax.Parent(:));
+                    end
+                    if size(unique(keys, 'rows'), 1) < size(keys, 1)
+                        warning('lbd:duplicatePoint', ['group "%s" has the same point twice on level "%s" (same coordinate ' ...
+                            'under the same outer point); both are kept'], g, order(k));
+                    end
+                    above = numel(ax.Data);
+                end
+            end
             vn = fieldnames(obj.Values);
             for i = 1:numel(vn)
                 v = obj.Values.(vn{i});
-                if numel(v.Axes) ~= numel(v.Shape)
-                    error('lbd:invalid', 'value "%s" has %d dimension(s) but axes=%s', v.Name, numel(v.Shape), strjoin(v.Axes, ","));
+                if isfield(obj.Axes, v.Name) || isfield(obj.Groups, v.Name)
+                    error('lbd:invalid', '"%s" is used by an axis or group and a value', v.Name);
                 end
-                for k = 1:numel(v.Axes)
-                    ax = v.Axes(k);
-                    if ~isfield(obj.Axes, ax)
-                        error('lbd:invalid', 'value "%s" refers to missing axis "%s"', v.Name, ax);
-                    end
-                    if numel(obj.Axes.(ax).Data) ~= v.Shape(k)
-                        error('lbd:invalid', 'value "%s": dimension %d has size %d but axis "%s" has length %d', ...
-                            v.Name, k, v.Shape(k), ax, numel(obj.Axes.(ax).Data));
+                for k = 1:numel(v.Dims)
+                    n = obj.dimLength(v.Dims{k});
+                    if n ~= v.Shape(k)
+                        error('lbd:invalid', 'value "%s": dimension %d has size %d but %s has %d points', ...
+                            v.Name, k, v.Shape(k), strjoin(v.Dims{k}, ","), n);
                     end
                 end
-                % a data point's axes are the last ones with role "point"
-                k = numel(v.Axes);
-                while k > 0 && obj.Axes.(v.Axes(k)).Role == "point"
-                    k = k - 1;
-                end
-                v.PointAxes = v.Axes(k+1:end);
-                v.Elements = arrayfun(@(a) obj.Axes.(a).Elements, v.PointAxes, 'UniformOutput', false);
-                obj.Values.(vn{i}) = v;
             end
         end
     end

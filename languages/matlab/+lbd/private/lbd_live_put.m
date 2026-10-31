@@ -1,9 +1,33 @@
 function lbd_live_put(fid, path, idx, data, shape)
-% Write DATA at the place IDX (one entry per logical dimension: an index, a range, or ':') of
-% the dataset at PATH, whose logical size is SHAPE.
+% Write DATA at the place IDX (one entry per logical dimension: an index, a range, a list of
+% indices, or ':') of the dataset at PATH, whose logical size is SHAPE.
+nd = numel(shape);
+for i = 1:nd                     % indices that aren't one run (points of a group): run by run
+    if isnumeric(idx{i}) && numel(idx{i}) > 1 && any(diff(idx{i}(:)) ~= 1)
+        count = zeros(1, nd);
+        for k = 1:nd
+            if ischar(idx{k}) || isstring(idx{k}), count(k) = shape(k); else, count(k) = numel(idx{k}); end
+        end
+        wasComplex = ~isreal(data);
+        block = reshape(data, [count 1]);
+        if wasComplex, block = complex(block); end
+        list = idx{i}(:);
+        starts = [1; find(diff(list) ~= 1) + 1];
+        stops = [starts(2:end) - 1; numel(list)];
+        for r = 1:numel(starts)
+            sub = idx;
+            sub{i} = list(starts(r):stops(r));
+            pick = repmat({':'}, 1, max(nd, 2));
+            pick{i} = starts(r):stops(r);
+            part = block(pick{:});
+            if wasComplex, part = complex(part); end
+            lbd_live_put(fid, path, sub, part, shape);
+        end
+        return
+    end
+end
 did = H5D.open(fid, char(path));
 cleanup = onCleanup(@() H5D.close(did));
-nd = numel(shape);
 wasComplex = ~isreal(data);
 [~, mt, toClose] = lbd_h5_types(data);
 cleanTypes = onCleanup(@() cellfun(@H5T.close, toClose));

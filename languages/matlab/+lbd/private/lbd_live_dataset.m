@@ -1,6 +1,7 @@
 function did = lbd_live_dataset(loc, name, dtype, shape, grows, fill)
 % A chunked dataset for lbd.Writer: logical SHAPE (C order), reading FILL (NaN, or 0) where
-% nothing was written; GROWS: unlimited along its first dimension. Caller closes it.
+% nothing was written; GROWS: the logical dimensions that are unlimited (a growing axis, a group's
+% level; true: the first). Caller closes it.
 sample = sampleOf(dtype);
 [ft, mt, toClose] = lbd_h5_types(sample);
 cleanTypes = onCleanup(@() cellfun(@H5T.close, toClose));
@@ -10,11 +11,13 @@ cleanPlist = onCleanup(@() H5P.close(dcpl));
 if nd == 0
     sp = H5S.create('H5S_SCALAR');
 else
+    if islogical(grows), grows = find(grows, 1); end
     maxdims = num2cell(shape);
-    if grows, maxdims{1} = 'H5S_UNLIMITED'; end
+    for g = grows(:)', maxdims{g} = 'H5S_UNLIMITED'; end
     sp = H5S.create_simple(nd, shape, maxdims);
     chunk = max(shape, 1);
-    if grows, chunk(1) = max(1, floor(8192 / max(1, prod(chunk(2:end))))); end
+    chunk(grows) = 1;
+    for g = grows(:)', chunk(g) = max(1, floor(8192 / max(1, prod(chunk)))); end
     while prod(chunk) > 2^17 && any(chunk > 1)
         [~, k] = max(chunk);
         chunk(k) = ceil(chunk(k) / 2);

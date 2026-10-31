@@ -393,15 +393,20 @@ d = lbd.Dataset("shape");
 d.addAxis("amp", linspace(0, 0.5, 4), Unit="V");
 b = reshape(1:12, 4, 3);
 v = d.addValue("bloch", b, "amp", Shape=3, Elements=["x" "y" "z"]);
-tc.verifyEqual(v.Axes, ["amp" "bloch_dim1"]);
-tc.verifyEqual(d.Axes.bloch_dim1.Role, "point");
+tc.verifyEqual(v.Axes, "amp");                      % what was swept
+tc.verifyEqual(v.PointShape, 3);                    % one data point
+tc.verifyEqual(v.Dims, {"amp"});
+tc.verifyFalse(isfield(d.Axes, "bloch_dim1"));      % a data point isn't a sweep axis
 d.addValue("cov", zeros(4, 2, 2), "amp", Shape=[2 2], Elements={["I" "Q"], []});
 d.save(p);
 r = lbd.load(p);
 tc.verifyEqual(r.Values.bloch.Data, b);
-tc.verifyEqual(r.Values.bloch.PointAxes, "bloch_dim1");
+tc.verifyEqual(r.Values.bloch.PointShape, 3);
+tc.verifyEqual(fieldnames(r.Axes), {'amp'});
 tc.verifyEqual(r.Values.bloch.Elements, {["x" "y" "z"]});
-tc.verifyEqual(r.Values.cov.Axes, ["amp" "cov_dim1" "cov_dim2"]);
+tc.verifyEqual(r.Values.cov.Axes, "amp");
+tc.verifyEqual(r.Values.cov.PointShape, [2 2]);
+tc.verifyEqual(r.Values.cov.Shape, [4 2 2]);
 tc.verifyEqual(r.Values.cov.Elements{1}, ["I" "Q"]);
 tc.verifyEmpty(r.Values.cov.Elements{2});
 tc.verifyEqual(string(h5readatt(p, '/values/bloch', 'axes')), "amp,bloch_dim1");
@@ -591,4 +596,183 @@ tc.verifyEqual(lbd.writingStatus(fullfile(tc.TestData.dir, "meta.lbd")), "measur
 w.Meta = struct();
 w.write(x=2, y=2);
 tc.verifyEqual(lbd.load(w.close()).Values.y.Data, [1; 2]);
+end
+
+% ---- axis groups (format 2.0): the data API's cases --------------------------------
+
+function d = groupCase2()
+% Case 2: group A -> B, B chosen per A (A=1: B=10; A=2: B=10, 20; A=3: B=15, 25, 35)
+d = lbd.Dataset("case 2");
+d.addGroup("AB");
+d.addAxis("A", [], Group="AB");
+d.addAxis("B", [], Group="AB");
+d.addValue("f", [], ["A" "B"]);
+d.addValue("q", [], "A");
+bs = {10, [10 20], [15 25 35]};
+for a = 1:3
+    for b = bs{a}
+        d.write(A=a, B=b, f=100 * a + b);
+    end
+    d.write(A=a, q=1.5 * a);
+end
+end
+
+function d = groupCase4(byParent)
+% Case 4: group A -> B -> C, B in 0:A-1, C in 0:B-1; f per (A, B), g per (A, B, C)
+d = lbd.Dataset("case 4");
+d.addGroup("ABC");
+for a = ["A" "B" "C"], d.addAxis(a, [], Group="ABC"); end
+d.addValue("f", [], ["A" "B"]);
+d.addValue("g", [], "ABC");
+for a = 1:3
+    if byParent, i = d.write(A=a); end
+    for b = 0:a - 1
+        c = 0:b - 1;
+        if byParent
+            k = d.write(Parent=i, B=b, f=10 * a + b);
+            d.write(Parent=k, C=c, g=100 * a + 10 * b + c);
+        else
+            d.write(A=a, B=b, f=10 * a + b);
+            d.write(A=a, B=b, C=c, g=100 * a + 10 * b + c);
+        end
+    end
+end
+end
+
+function testGroupCase2(tc)
+for loaded = [false true]
+    d = groupCase2();
+    if loaded
+        p = fullfile(tc.TestData.dir, "case2.lbd");
+        d.save(p);
+        d = lbd.load(p);
+        tc.verifyEqual(d.LbdVersion, "2.0");
+    end
+    tc.verifyEqual(d.Groups.AB.Order, ["A" "B"]);
+    tc.verifyEqual(d.Axes.A.Data', [1 2 3]);
+    tc.verifyEqual(d.Axes.B.Data', [10 10 20 15 25 35]);
+    tc.verifyEqual(d.Axes.B.Parent', int64([1 2 2 3 3 3]));         % from 1 in MATLAB
+    tc.verifyEqual(d.Axes.B.Group, "AB");
+    f = d.Values.f;
+    tc.verifyEqual(f.Axes, ["A" "B"]);
+    tc.verifyEqual(f.Dims, {["A" "B"]});
+    tc.verifyEqual(f.Data', [110 210 220 315 325 335]);
+    tc.verifyEqual(d.Values.q.Dims, {"A"});
+    c = d.coords("f");
+    tc.verifyEqual(c.A', [1 2 2 3 3 3]);
+    tc.verifyEqual(c.B', [10 10 20 15 25 35]);
+    m = d.toDense("f");
+    tc.verifyEqual(m.Axes.B.Data', [10 15 20 25 35]);
+    expected = nan(3, 5);
+    expected(1, 1) = 110; expected(2, 1) = 210; expected(2, 3) = 220;
+    expected(3, 2) = 315; expected(3, 4) = 325; expected(3, 5) = 335;
+    tc.verifyEqual(m.Values.f.Data, expected);
+    tc.verifyEqual(m.Values.f.Dims, {"A", "B"});
+    r = d.rows("f", By="A");
+    tc.verifyEqual([r{:, 1}], [1 2 3]);
+    tc.verifyEqual(r{3, 2}.Axes.B.Data', [15 25 35]);
+    tc.verifyEqual(r{3, 2}.Values.f.Data', [315 325 335]);
+end
+end
+
+function testGroupCase4BothWays(tc)
+a = groupCase4(false);
+b = groupCase4(true);
+for d = {a, b}
+    d = d{1}; %#ok<FXSET>
+    tc.verifyEqual(d.Axes.B.Data', [0 0 1 0 1 2]);
+    tc.verifyEqual(d.Axes.C.Data', [0 0 0 1]);
+    tc.verifyEqual(d.Axes.C.Parent', int64([3 5 6 6]));
+    tc.verifyEqual(d.Values.f.Data', [10 20 21 30 31 32]);
+    tc.verifyEqual(d.Values.g.Data', [210 310 320 321]);
+end
+p = fullfile(tc.TestData.dir, "case4.lbd");
+a.save(p);
+tc.verifyEqual(h5read(p, '/axes/ABC/C._parent')', int64([2 4 5 5]));   % from 0 in the file
+tc.verifyEqual(string(h5readatt(p, '/values/g', 'axes')), "A,B,C");
+r = lbd.load(p);
+g = r.toDense("g");
+tc.verifyEqual(size(g.Values.g.Data), [2 2 2]);
+tc.verifyEqual(g.Axes.A.Data', [2 3]);
+rows = r.rows("g", By="A");
+tc.verifyEqual(rows{3, 2}.Groups.ABC.Order, ["B" "C"]);
+tc.verifyEqual(rows{3, 2}.Axes.C.Parent', int64([2 3 3]));
+tc.verifyEqual(rows{3, 2}.Values.g.Data', [310 320 321]);
+byB = r.rows("g", By="B");
+tc.verifyEqual(byB{6, 1}, [3 2]);
+tc.verifyEqual(byB{6, 2}.Axes.C.Data', [0 1]);
+end
+
+function testGroupWithFixedAxisAndMatrix(tc)
+d = lbd.Dataset("case 3 and 5b");
+d.addGroup("AB");
+d.addAxis("A", [], Group="AB");
+d.addAxis("B", [], Group="AB");
+d.addAxis("C", [0.1 0.2 0.3]);
+d.addValue("h", [], ["A" "B" "C"]);
+d.addValue("cov", [], ["A" "B"], Shape=[2 2]);
+d.write(A=1, B=[10 20], h=[1 2 3; 4 5 6], cov=ones(2, 2, 2));
+d.write(A=2, B=10, C=2, h=7);
+tc.verifyEqual(d.Values.h.Dims, {["A" "B"], "C"});
+tc.verifyEqual(d.Values.h.Data(3, :), [NaN 7 NaN]);
+tc.verifyEqual(size(d.Values.cov.Data), [3 2 2]);
+p = fullfile(tc.TestData.dir, "case3.lbd");
+d.save(p);
+r = lbd.load(p);
+tc.verifyEqual(r.Values.h.Data, d.Values.h.Data);
+tc.verifyEqual(r.Values.cov.PointShape, [2 2]);
+m = r.toDense("h");
+tc.verifyEqual(size(m.Values.h.Data), [2 2 3]);
+tc.verifyEqual(squeeze(m.Values.h.Data(1, 2, :))', [4 5 6]);
+end
+
+function testGroupRefusalsAndNearEqual(tc)
+d = groupCase2();
+tc.verifyError(@() d.write(B=10, f=1), 'lbd:invalid');           % B only under A
+tc.verifyError(@() d.write(A=3, f=1), 'lbd:invalid');            % f needs B too
+tc.verifyError(@() d.write(A=NaN, B=1, f=1), 'lbd:invalid');
+tc.verifyError(@() d.addValue("x", [], "B"), 'lbd:invalid');     % an inner axis alone
+tc.verifyError(@() d.toDense("f", Limit=10), 'lbd:invalid');
+tc.verifyEqual(numel(d.Axes.B.Data), 6);
+e = lbd.Dataset();
+e.addGroup("AB");
+e.addAxis("A", [], Group="AB");
+e.addAxis("B", [], Group="AB");
+e.addValue("f", [], ["A" "B"]);
+e.write(A=0.3, B=1, f=1);
+tc.verifyWarning(@() e.write(A=0.1 + 0.2, B=2, f=2), 'lbd:nearEqual');
+tc.verifyWarning(@() e.toDense("f"), 'lbd:nearEqual');
+m = e.toDense("f", Round=9);
+tc.verifyEqual(size(m.Values.f.Data), [1 2]);
+m = e.toDense("f", RTol=1e-9);
+tc.verifyEqual(m.Values.f.Data, [1 2]);
+end
+
+function testWriterGroupLive(tc)
+p = fullfile(tc.TestData.dir, "live_group.lbd");
+w = lbd.Writer(p, Title="variable");
+w.addGroup("ABC");
+for a = ["A" "B" "C"], w.addAxis(a, [], Group="ABC"); end
+w.addValue("f", [], ["A" "B"]);
+w.addValue("g", [], "ABC");
+w.addValue("n", [], "A", Dtype="int16");
+for a = 1:3
+    i = w.write(A=a, n=a);
+    tc.verifyEqual(i, a);
+    for b = 0:a - 1
+        k = w.write(Parent=i, B=b, f=10 * a + b);
+        c = 0:b - 1;
+        w.write(Parent=k, C=c, g=100 * a + 10 * b + c);
+    end
+end
+w.flush();
+live = tc.verifyWarning(@() lbd.load(w.WritingPath), 'lbd:writing');
+w.close();
+r = lbd.load(p);
+tc.verifyEqual(r.LbdVersion, "2.0");
+tc.verifyEqual(r.Axes.C.Parent', int64([3 5 6 6]));
+tc.verifyEqual(r.Values.g.Data', [210 310 320 321]);
+tc.verifyEqual(r.Values.f.Data', [10 20 21 30 31 32]);
+tc.verifyEqual(r.Values.n.Data', int16([1 2 3]));
+tc.verifyEmpty(r.Values.n.Measured);
 end

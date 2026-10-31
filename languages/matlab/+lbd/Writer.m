@@ -103,6 +103,14 @@ classdef Writer < handle
         function set.StyleName(obj, v), obj.D.StyleName = v; end
 
         function a = axes(obj), a = obj.D.Axes; end
+        function g = groups(obj), g = obj.D.Groups; end
+
+        function group = addGroup(obj, name)
+            %ADDGROUP  As lbd.Dataset/addGroup; before the first write. Its points are written
+            %   into the file as write adds them.
+            obj.beforeStart("addGroup");
+            group = obj.D.addGroup(name);
+        end
         function v = values(obj), v = obj.D.Values; end
         function id = id(obj), id = obj.D.Id; end
 
@@ -169,8 +177,9 @@ classdef Writer < handle
             lbd_own_writers("add", obj.WritingPath, fid);
         end
 
-        function write(obj, varargin)
-            %WRITE  Put measured data in its place: as lbd.Dataset/write.
+        function index = write(obj, varargin)
+            %WRITE  Put measured data in its place: as lbd.Dataset/write, with the same return
+            %   value (the index of a group's point, for Parent=).
             %   It returns at once; the data reaches the file within FlushEvery seconds (or at
             %   flush / close).
             obj.raiseFailure();
@@ -184,10 +193,17 @@ classdef Writer < handle
                 obj.D.appendCoordinates(plan.grow.axis, plan.grow.coords);
                 obj.Pending{end+1} = {"grow", plan.grow.axis, plan.grow.coords, numel(ax.Data) + numel(plan.grow.coords)};
             end
+            obj.D.growLevels(plan);                      % the points in memory (lookups), at once
+            for k = 1:numel(plan.levels)
+                lv = plan.levels{k};
+                obj.Pending{end+1} = {"level", lv{1}, lv{2}, lv{3}, numel(obj.D.Axes.(lv{1}).Data)};
+            end
             for k = 1:numel(plan.puts)
                 p = plan.puts{k};
+                if isempty(p.data), continue; end           % no points (e.g. an (A, B) without C)
                 obj.Pending{end+1} = {"put", p.name, p.idx, p.data};
             end
+            index = plan.result;
             if toc(obj.LastFlush) >= obj.FlushEvery
                 obj.writePending();
                 obj.raiseFailure();
@@ -337,8 +353,10 @@ classdef Writer < handle
             lbd_write_attr(fid, 'writer', d.Writer);
             lbd_write_attr(fid, 'id', d.Id);
             gid = H5G.create(fid, 'axes', 'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
-            for name = string(fieldnames(d.Axes))'
-                a = d.Axes.(name);
+            fa = d.fileAxes();
+            for i = 1:numel(fa)
+                a = fa{i};
+                name = a.Name;
                 if a.Grows
                     did = lbd_live_dataset(gid, name, "float64", 0, true, NaN);
                 else
@@ -350,23 +368,38 @@ classdef Writer < handle
                 if strlength(a.Role) > 0, lbd_write_attr(did, 'role', a.Role); end
                 H5D.close(did);
             end
+            for gname = string(fieldnames(d.Groups))'     % each level grows as write adds points
+                order = d.Groups.(gname).Order;
+                ggid = H5G.create(gid, char(gname), 'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
+                lbd_write_attr(ggid, 'order', strjoin(order, ","));
+                for k = 1:numel(order)
+                    did = lbd_live_dataset(ggid, order(k), "float64", 0, 1, NaN);
+                    lbd_write_attr(did, 'unit', d.Axes.(order(k)).Unit);
+                    lbd_write_attr(did, 'label', d.Axes.(order(k)).Label);
+                    H5D.close(did);
+                    if k > 1
+                        H5D.close(lbd_live_dataset(ggid, order(k) + "._parent", "int64", 0, 1, 0));
+                    end
+                end
+                H5G.close(ggid);
+            end
             H5G.close(gid);
             gid = H5G.create(fid, 'values', 'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
             masks = strings(1, 0);
             for name = string(fieldnames(d.Values))'
                 v = d.Values.(name);
-                grows = ~isempty(v.Axes) && d.Axes.(v.Axes(1)).Grows;
+                grows = obj.growingDims(v);
                 if any(d.Placeholders == name)
                     did = lbd_live_dataset(gid, name, v.Dtype, v.Shape, grows, NaN);
                     if ~startsWith(v.Dtype, ["float" "complex"]), masks(end+1) = name; end %#ok<AGROW>
                 else
                     data = v.Data;
                     if islogical(data), data = uint8(data); end
-                    did = lbd_write_dataset(gid, name, data, numel(v.Axes), false);
+                    did = lbd_write_dataset(gid, name, data, numel(v.Dims) + numel(v.PointShape), false);
                 end
                 lbd_write_attr(did, 'unit', v.Unit);
                 lbd_write_attr(did, 'label', v.Label);
-                lbd_write_attr(did, 'axes', strjoin(v.Axes, ","));
+                lbd_write_attr(did, 'axes', strjoin([v.Axes lbd.Dataset.pointNames(v)], ","));
                 if v.Dtype == "bool", lbd_write_attr(did, 'lbd_bool', int64(1)); end
                 H5D.close(did);
             end
@@ -375,8 +408,7 @@ classdef Writer < handle
                 gid = H5G.create(fid, 'measured', 'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
                 for name = masks
                     v = d.Values.(name);
-                    grows = ~isempty(v.Axes) && d.Axes.(v.Axes(1)).Grows;
-                    H5D.close(lbd_live_dataset(gid, name, "uint8", v.Shape, grows, 0));
+                    H5D.close(lbd_live_dataset(gid, name, "uint8", v.Shape, obj.growingDims(v), 0));
                 end
                 H5G.close(gid);
             end
@@ -387,33 +419,50 @@ classdef Writer < handle
 
         function apply(obj, item)
             fid = obj.Fid;
-            if item{1} == "grow"
+            if item{1} == "grow" || item{1} == "level"
                 g = item{2};
-                n = item{4};
-                for name = string(fieldnames(obj.D.Values))'
+                n = item{end};
+                for name = string(fieldnames(obj.D.Values))'     % values first: readers cut to the shortest
                     v = obj.D.Values.(name);
-                    if isempty(v.Axes) || v.Axes(1) ~= g, continue; end
-                    lbd_live_extend(fid, "/values/" + name, n);
-                    if H5L.exists(fid, '/measured', 'H5P_DEFAULT') && H5L.exists(fid, char("/measured/" + name), 'H5P_DEFAULT')
-                        lbd_live_extend(fid, "/measured/" + name, n);
+                    for pos = 1:numel(v.Dims)
+                        if v.Dims{pos}(end) ~= g, continue; end
+                        lbd_live_extend(fid, "/values/" + name, n, pos);
+                        if H5L.exists(fid, '/measured', 'H5P_DEFAULT') && H5L.exists(fid, char("/measured/" + name), 'H5P_DEFAULT')
+                            lbd_live_extend(fid, "/measured/" + name, n, pos);
+                        end
                     end
                 end
-                lbd_live_extend(fid, "/axes/" + g, n);
+                where = "/axes/";
+                if strlength(obj.D.Axes.(g).Group) > 0, where = "/axes/" + obj.D.Axes.(g).Group + "/"; end
                 c = item{3};
-                lbd_live_put(fid, "/axes/" + g, {n - numel(c) + (1:numel(c))}, c, n);
+                if item{1} == "level" && ~isempty(item{4})
+                    lbd_live_extend(fid, where + g + "._parent", n);
+                    lbd_live_put(fid, where + g + "._parent", {n - numel(c) + (1:numel(c))}, int64(item{4}) - 1, n);
+                end
+                lbd_live_extend(fid, where + g, n);
+                lbd_live_put(fid, where + g, {n - numel(c) + (1:numel(c))}, c, n);
             else
                 name = item{2};
                 v = obj.D.Values.(name);
                 data = item{4};
                 if islogical(data), data = uint8(data); end
                 shape = v.Shape;
-                for i = 1:numel(v.Axes)            % a growing axis: its length now
-                    if obj.D.Axes.(v.Axes(i)).Grows, shape(i) = numel(obj.D.Axes.(v.Axes(i)).Data); end
+                for i = 1:numel(v.Dims)            % a growing axis, a group's level: its length now
+                    shape(i) = obj.D.dimLength(v.Dims{i});
                 end
                 lbd_live_put(fid, "/values/" + name, item{3}, data, shape);
                 if H5L.exists(fid, '/measured', 'H5P_DEFAULT') && H5L.exists(fid, char("/measured/" + name), 'H5P_DEFAULT')
                     lbd_live_put(fid, "/measured/" + name, item{3}, ones(size(data), 'uint8'), shape);
                 end
+            end
+        end
+
+        function grows = growingDims(obj, v)
+            % The dimensions of V that grow while it is written: a growing axis, a group's level.
+            grows = zeros(1, 0);
+            for i = 1:numel(v.Dims)
+                a = obj.D.Axes.(v.Dims{i}(end));
+                if a.Grows || strlength(a.Group) > 0, grows(end+1) = i; end %#ok<AGROW>
             end
         end
 

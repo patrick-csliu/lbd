@@ -133,8 +133,10 @@ d.addAxis("state", [], Elements=["ground" "excited"]);                  % positi
 d.addValue("bloch", zeros(numel(v), 3), "t", Shape=3, Elements=["x" "y" "z"]);   % a vector per point
 ```
 
-LBD makes one axis per dimension of a data point (`bloch_dim1`, with `Role="point"`); the value's
-`PointAxes` and `Elements` fields list them.
+A value's `Axes` are what was swept (`"t"`); its data point is described by `PointShape` (`3`)
+and `Elements`, and `Shape` is the data's size (`[numel(v) 3]`: the sweep, then the data point).
+In the file, each dimension of a data point is an axis of its own (`bloch_dim1`, with
+`role="point"`), so every reader reads it.
 
 ### `write`
 

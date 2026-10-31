@@ -79,9 +79,9 @@ expect(isequal(d.Axes.state.Elements, ["ground" "état 1" "量子"]), "state ele
 expect(isequal(double(d.Axes.state.Data'), [0 1 2]), "state data");
 expect(isequal(d.Values.S.Data, [0.5 1.5 2.5]'), "S");
 [I2, R2, C2] = ndgrid(0:2, 0:1, 0:1);
-expect(isequal(d.Values.C.Axes, ["a" "C_dim1" "C_dim2"]) && isequal(d.Values.C.PointAxes, ["C_dim1" "C_dim2"]), "C axes");
+expect(isequal(d.Values.C.Axes, "a") && isequal(d.Values.C.PointShape, [2 2]), "C axes");
 expect(isequal(d.Values.C.Elements{1}, ["I" "Q"]) && isempty(d.Values.C.Elements{2}), "C elements");
-expect(d.Axes.C_dim1.Role == "point" && d.Axes.a.Role == "", "roles");
+expect(~isfield(d.Axes, "C_dim1") && d.Axes.a.Role == "", "roles");
 expect(isequal(d.Values.C.Data, 100*I2 + 10*R2 + C2), "C");
 m = d.Meta;
 expect(m.sample == "chip – é", "meta sample");

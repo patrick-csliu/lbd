@@ -22,10 +22,15 @@ are still written as 1.2).
   points. Reading: `v.coords()` (each point's coordinates), `v.rows(by="A")` (row by row, each
   an `lbd.Dataset`) and `v.to_dense()` (the full rectangle, gaps `NaN`; `round=` or
   `rtol=` / `atol=` merge coordinates that differ only by rounding; `limit=`), also as
-  `d.coords("f")`, `d.rows("f", by=...)`, `d.to_dense("f")`. MATLAB, Julia, `lbd.Writer` and
-  the viewer follow in this version.
+  `d.coords("f")`, `d.rows("f", by=...)`, `d.to_dense("f")`. **MATLAB** the same:
+  `d.addGroup`, `d.addAxis(name, [], Group=)`, `i = d.write(A=3)`, `d.write(Parent=i, B=25, f=x)`
+  (indices from 1), `d.coords("f")`, `d.rows("f", By="A")` (a cell `{key, dataset}`),
+  `d.toDense("f", Round=, RTol=, ATol=, Limit=)`, and `lbd.Writer` with groups. Julia and the
+  viewer follow in this version.
 
-- **A value's `axes` are what was swept** (Python; MATLAB and Julia follow in this version).
+- **A value's `axes` are what was swept** (Python and MATLAB; Julia follows in this version).
+  In MATLAB: `Values.<name>.Axes` lists the sweep axes, `PointShape` and `Elements` describe the
+  data point, `Dims` is new; `PointAxes` and the `<value>_dim<k>` entries of `Axes` are gone.
   The dimensions of a data point (`shape=`) are no longer axes of the dataset: `d.axes` holds
   only sweep axes (`d.axes["bloch_dim1"]` is gone), `v.axes` lists only them, and the value
   describes its data point with `point_shape` and `elements`; `v.point_axes` is gone. New:
