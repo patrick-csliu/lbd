@@ -445,3 +445,73 @@ def test_docs_site_is_published_from_releases_only():
     # Inputs reach the script as variables, never pasted into it (script injection).
     assert not any("${{" in s.get("run", "") for s in steps)
     assert re.search(r"^site_url: https://patrick-csliu\.github\.io/lbd/", (REPO / "mkdocs.yml").read_text(encoding="utf-8"), re.M)
+
+
+def test_test_all_runs_what_a_change_affects(load_module):
+    ta = load_module("scripts/test_all.py")
+    every = {"python", "matlab", "julia", "viewer", "tools", "web", "docs", "examples", "crosslang", "e2e"}
+    langs = ["python", "matlab", "julia"]
+
+    def picked(*paths):
+        return sorted(ta.affected(list(paths), every, langs))
+
+    assert picked("languages/matlab/+lbd/Dataset.m") == ["crosslang", "examples", "matlab"]
+    assert picked("languages/julia/crosslang/check.jl") == ["crosslang"]
+    assert {"viewer", "e2e", "tools"} <= set(picked("languages/python/src/lbd/io.py"))   # the viewer is built on it
+    assert picked("viewer/web/src/App.tsx") == ["e2e", "web"]
+    assert picked("docs/matlab.md") == ["docs", "examples"]
+    assert picked("planning/plans/x.md", "CLAUDE.md") == []
+    assert picked("something/new.txt") == sorted(every)                  # not known: everything
+    assert picked("viewer/src/lbd_viewer/server.py", "spec/LBD-v1.md") == ["docs", "e2e", "viewer"]
+
+
+def test_test_all_only_and_side_by_side(load_module, monkeypatch, capsys):
+    ta = load_module("scripts/test_all.py")
+    ran = []
+
+    class R:
+        returncode, stdout, stderr = 0, "", ""
+
+    def run(cmd, cwd):
+        ran.append(" ".join(map(str, cmd)))
+        return R()
+
+    monkeypatch.setattr(ta, "run", run)
+    monkeypatch.setattr(ta.shutil, "which", lambda name: None)
+    monkeypatch.setattr(ta, "discover", lambda: [])
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    assert ta.main(["--only", "docs", "tools", "--jobs", "4"]) == 0
+    out = capsys.readouterr().out
+    assert "Docs build (strict)" in out and "Script and packaging tests" in out and "Viewer tests" not in out
+    assert "PASSED (2 of" in out and len(ran) == 2
+    with pytest.raises(SystemExit):
+        ta.main(["--only", "nonsense"])
+    ran.clear()
+    assert ta.main(["--fast", "--jobs", "1"]) == 0 and len(ran) == 4       # one after the other: the same suites
+
+
+def test_test_all_reruns_viewer_tests_that_failed_side_by_side(load_module, monkeypatch, capsys):
+    ta = load_module("scripts/test_all.py")
+    calls = []
+
+    class R:
+        def __init__(self, code, out=""):
+            self.returncode, self.stdout, self.stderr = code, out, ""
+
+    def run(cmd, cwd):
+        calls.append(cmd)
+        if "--lf" in cmd:
+            return R(0)                                    # alone: passes
+        if "viewer/tests/e2e" in cmd:
+            return R(1, "FAILED viewer/tests/e2e/test_x.py::test_slow - timeout\n")
+        return R(0)
+
+    monkeypatch.setattr(ta, "run", run)
+    monkeypatch.setattr(ta.shutil, "which", lambda name: None)
+    monkeypatch.setattr(ta, "discover", lambda: [])
+    monkeypatch.setattr(ta, "_e2e_missing", lambda: "")
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    assert ta.main(["--only", "e2e"]) == 0
+    out = capsys.readouterr().out
+    assert "test_slow failed side by side, passed alone" in out
+    assert any("--lf" in c for c in calls)

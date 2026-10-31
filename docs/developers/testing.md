@@ -1,20 +1,40 @@
 # Testing
 
 ```bash
-uv run python scripts/test_all.py          # everything; prints a passed / skipped / failed table
-uv run python scripts/test_all.py --fast   # without the cross-language matrix and the browser tests
+uv run python scripts/test_all.py                  # everything; prints a passed / skipped / failed table
+uv run python scripts/test_all.py --fast           # without the cross-language matrix and the browser tests
+uv run python scripts/test_all.py --changed        # only what the changes since the last commit can affect
+uv run python scripts/test_all.py --changed main   # ... since main
+uv run python scripts/test_all.py --only matlab crosslang   # these suites
 ```
 
-`test_all.py` runs, in order:
-1. each language's unit tests, as given by `[test]` in its `language.toml`;
-2. the viewer tests;
-3. the tests of `scripts/`, `packaging/` and `examples/` (`tests/scripts`, `tests/packaging`);
-4. the web UI type check;
+`test_all.py` has these suites (their names for `--only` in brackets):
+1. each language's unit tests, as given by `[test]` in its `language.toml` [`python`, `matlab`,
+   `julia`, …];
+2. the viewer tests [`viewer`];
+3. the tests of `scripts/`, `packaging/` and `examples/` (`tests/scripts`, `tests/packaging`) [`tools`];
+4. the web UI type check [`web`];
 5. the documentation: a strict site build (broken links, missing anchors or bad API
-   references fail it) and every code example in the docs;
-6. the cross-language matrix;
-7. the viewer in a real browser (see [Several viewer pages](#several-viewer-pages));
-8. the Explore benchmark, only when the drawing code changed (see [Performance](#performance)).
+   references fail it) [`docs`] and every code example in the docs [`examples`];
+6. the cross-language matrix [`crosslang`];
+7. the viewer in a real browser [`e2e`] (see [Several viewer pages](#several-viewer-pages));
+8. the Explore benchmark [`benchmark`], only when the drawing code changed (see
+   [Performance](#performance)).
+
+The suites run side by side, four at a time (`--jobs N`; `--jobs 1` runs them one after the
+other), the longest first, so a whole run takes about as long as the browser tests. The
+benchmark runs alone afterwards, since it measures time. The viewer's tests and the browser
+tests depend on timing: a test of theirs that fails while the other suites load the computer
+runs again alone at the end, and the summary names it ("failed side by side, passed alone"); a
+test that fails alone too fails the run.
+
+`--changed` picks the suites from the files changed (committed since the given commit, or not
+committed yet): a language's folder runs its tests, the cross-language matrix and the doc
+examples; the Python module also runs everything built on it (viewer, browser tests, tools);
+`viewer/src/` runs the viewer and browser tests; `viewer/web/` the type check and the browser
+tests; `docs/` the docs build and examples; `scripts/`, `packaging/` and `tests/` the tools;
+`planning/` nothing; a file it doesn't know runs everything. It prints which suites it chose and
+why. Run everything before a release, and when a change is wide.
 
 A suite whose program (e.g. `matlab`, or Playwright's Chromium) is missing is reported as
 skipped, not failed.
