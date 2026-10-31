@@ -115,6 +115,30 @@ def test_cursors_can_be_switched_off_and_back_on(small_map, new_page):
     expect(readout(page).first).to_contain_text("value = 13")
 
 
+def test_a_late_cursor_answer_does_not_switch_them_back_on(small_map, new_page):
+    """The cursors asked for with a new picture answer after K switched them off: K still wins."""
+    page = new_page("Explore")
+    meta = frames(page, lambda: row(page, "small_map.lbd").dblclick())
+    cursor_answer(page, lambda: page.mouse.click(*at(page, meta, 8, 30)))
+    expect(readout(page).first).to_contain_text("value = 13")
+    held = []
+    page.route("**/cursors", lambda route: held.append(route))
+    page.keyboard.press("+")                                          # zoom: a new picture, its cursors held back
+    for _ in range(100):
+        if held:
+            break
+        page.wait_for_timeout(50)
+    assert held, "the new picture asked for no cursors"
+    page.keyboard.press("k")
+    expect(explore(page).locator(".explore-readout")).to_contain_text("No cursor type chosen")
+    with page.expect_response(lambda r: r.url.endswith("/cursors")):
+        for route in held:
+            route.continue_()
+    page.unroute("**/cursors")
+    page.wait_for_timeout(300)                                         # the late answer has had its chance
+    expect(explore(page).locator(".explore-readout")).to_contain_text("No cursor type chosen")
+
+
 def test_the_list_of_rows_folds(small_map, new_page):
     page = new_page("Explore")
     frames(page, lambda: row(page, "small_map.lbd").dblclick())

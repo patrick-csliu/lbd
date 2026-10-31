@@ -122,6 +122,8 @@ are still written as 1.2).
   switched off). Two values of different units in one panel get a right-hand axis.
 - Explore: a narrow plot no longer cuts off its last horizontal tick label, and never shows the
   stand-in tick numbers ("−8.888888") it uses to lay itself out.
+- Explore: cursors switched off (key K) or removed (Escape) just as a new picture arrives stay
+  off; before, the cursors read for that picture could bring them back, as if the key was lost.
 - Explore views remembered before panels open as one panel; a panel that no longer fits a
   changed file is left out with a note, the others stay.
 - Nothing in Explore is hidden silently: points a log scale can't show are counted in a note above

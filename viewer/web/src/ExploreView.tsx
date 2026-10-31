@@ -286,6 +286,9 @@ export default function ExploreView({
   const answered = useRef(""); // cursorsKey of the last answer: an echo of it asks nothing
   const cursorBusy = useRef(false);
   const cursorNext = useRef<CursorAsk[] | null>(null);
+  // Counts the times cursors were switched off or removed: an answer asked for before that
+  // (with a new picture, or a move) is dropped, so it never brings them back.
+  const cursorsGone = useRef(0);
   const drag = useRef<number | null>(null); // the cursor being dragged
   const topCut = useRef<HTMLCanvasElement>(null);
   const rightCut = useRef<HTMLCanvasElement>(null);
@@ -486,13 +489,13 @@ export default function ExploreView({
 
   /** Ask for these cursor positions as seen in view `m`; the answer is what is drawn. */
   const askCursors = useCallback((at: CursorAsk[], m: Mapping): Promise<void> => {
-    const sid = session.current, st = cursorsRef.current;
+    const sid = session.current, st = cursorsRef.current, gone = cursorsGone.current;
     if (!sid || !at.length) return Promise.resolve();
     const cuts = st.cuts && kindRef.current === "heatmap";
     return api
       .exploreCursors(sid, { cursors: at, type: st.type, xlim: m.view.xlim, ylim: m.view.ylim, width: m.plot[2], height: m.plot[3], cuts })
       .then((a) => {
-        if (session.current !== sid) return;
+        if (session.current !== sid || cursorsGone.current !== gone) return;
         readingRef.current = a;
         setReading(a);
         onReadingRef.current(a);
@@ -527,6 +530,7 @@ export default function ExploreView({
   );
 
   const clearCursors = useCallback(() => {
+    cursorsGone.current++;
     cursorNext.current = null;
     readingRef.current = null;
     answered.current = cursorsKey(cursorsRef.current.type, [], cursorsRef.current.cuts, cursorsRef.current.on);
@@ -547,6 +551,7 @@ export default function ExploreView({
     if (!haveFrame || cursorsNow === answered.current) return;
     const st = cursorsRef.current;
     if (!st.on) {
+      cursorsGone.current++;
       cursorNext.current = null;
       readingRef.current = null;
       answered.current = cursorsNow;
