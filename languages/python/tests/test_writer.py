@@ -358,3 +358,122 @@ def test_a_status_checker_in_another_process(tmp_path):
     status = run_python("import sys, lbd; print(lbd.writing_status(sys.argv[1]))", w.writing_path)
     assert status.communicate(timeout=60)[0].strip() == "measuring"
     w.close()
+
+
+# ---- axis groups (format 2.0) ------------------------------------------------
+
+
+# A variable sweep in another process (case 4 of the data API, growing): for each A, B in
+# range(A), C in range(B); f per (A, B) point, g per (A, B, C) point, written with parent=.
+MEASURE_GROUP = """
+    import sys, time, os
+    import numpy as np, lbd
+    path, rows, crash = sys.argv[1], int(sys.argv[2]), sys.argv[3] == "crash"
+    w = lbd.Writer(path, title="variable", flush_every=0.05)
+    w.add_group("ABC")
+    for a in "ABC":
+        w.add_axis(a, group="ABC")
+    w.add_value("f", axes=["A", "B"])
+    w.add_value("g", axes=["ABC"])
+    for a in range(1, rows + 1):
+        i = w.write(A=a)
+        for b in range(a):
+            k = w.write(parent=i, B=b, f=10 * a + b)
+            c = np.arange(b)
+            w.write(parent=k, C=c, g=100 * a + 10 * b + c)
+        if a == 1:
+            w.flush()
+            print("started", flush=True)
+        time.sleep(0.03)
+    w.flush()
+    if crash:
+        print("crashing", flush=True)
+        os._exit(3)
+    w.close()
+    print("finished", flush=True)
+"""
+
+
+def check_group(d):
+    """What a reader sees of MEASURE_GROUP: consistent levels (load checks the parents), and
+    every value either right for its point's coordinates or not measured yet."""
+    c = d.coords("f")
+    f = d.values["f"].data
+    ok = np.isnan(f) | (f == 10 * c["A"] + c["B"])
+    assert ok.all(), (f, c)
+    c = d.coords("g")
+    g = d.values["g"].data
+    assert (np.isnan(g) | (g == 100 * c["A"] + 10 * c["B"] + c["C"])).all()
+    return len(d.axes["B"].data)
+
+
+def test_a_group_written_live_makes_the_same_file_as_in_memory(tmp_path):
+    with lbd.Writer(tmp_path / "live.lbd") as w:
+        w.add_group("ABC")
+        for a in "ABC":
+            w.add_axis(a, group="ABC")
+        w.add_value("f", axes=["A", "B"])
+        w.add_value("g", axes=["ABC"])
+        w.add_value("n", axes=["A"], dtype="int16")
+        for a in [1, 2, 3]:
+            assert w.write(A=a, n=a) == a - 1
+            for b in range(a):
+                w.write(A=a, B=b, f=10 * a + b)
+                c = np.arange(b)
+                w.write(A=a, B=b, C=c, g=100 * a + 10 * b + c)
+    d = lbd.load(tmp_path / "live.lbd")
+    assert d.lbd_version == "2.0" and d.groups["ABC"].order == ["A", "B", "C"]
+    assert list(d.axes["B"].data) == [0, 0, 1, 0, 1, 2] and list(d.axes["C"].parent) == [2, 4, 5, 5]
+    assert list(d.values["f"].data) == [10, 20, 21, 30, 31, 32] and list(d.values["g"].data) == [210, 310, 320, 321]
+    assert list(d.values["n"].data) == [1, 2, 3] and d.values["n"].measured is None
+
+
+def test_a_group_value_on_a_fixed_axis_too_grows_along_the_group(tmp_path):
+    with lbd.Writer(tmp_path / "h.lbd") as w:
+        w.add_group("AB")
+        w.add_axis("A", group="AB")
+        w.add_axis("B", group="AB")
+        w.add_axis("C", [0.1, 0.2, 0.3])
+        w.add_value("h", axes=["C", "A", "B"])            # the group's dimension isn't the first
+        w.add_value("cov", axes=["A", "B"], shape=(2, 2))
+        w.write(A=1, B=[10, 20], h=[[1, 2], [3, 4], [5, 6]], cov=np.ones((2, 2, 2)))
+        w.write(A=2, B=10, C=1, h=7)
+    d = lbd.load(tmp_path / "h.lbd")
+    h = d.values["h"]
+    assert h.dims == [("C",), ("A", "B")] and h.shape == (3, 3)
+    assert h.data[1].tolist() == [3, 4, 7] and np.isnan(h.data[0, 2])
+    assert d.values["cov"].shape == (3, 2, 2) and np.all(np.isnan(d.values["cov"].data[2]))
+
+
+def test_another_process_reads_a_group_live(tmp_path):
+    path = tmp_path / "var.lbd"
+    writing = tmp_path / "var.lbd.writing"
+    w = run_python(MEASURE_GROUP, path, 25, "finish")
+    assert w.stdout.readline().strip() == "started", w.stderr.read()
+    seen = []
+    while w.poll() is None and writing.exists():
+        try:
+            d = load_writing(writing)
+        except (FileNotFoundError, OSError):
+            if not writing.exists():
+                break
+            raise
+        seen.append(check_group(d))
+        time.sleep(0.05)
+    out, err = w.communicate(timeout=60)
+    assert "finished" in out, err
+    assert len(seen) >= 2 and seen == sorted(seen)
+    d = lbd.load(path)
+    assert check_group(d) == 25 * 26 // 2 and not np.isnan(d.values["f"].data).any()
+
+
+def test_a_stopped_group_file_recovers(tmp_path):
+    path = tmp_path / "var.lbd"
+    writing = tmp_path / "var.lbd.writing"
+    w = run_python(MEASURE_GROUP, path, 6, "crash")
+    out, err = w.communicate(timeout=60)
+    assert w.returncode == 3 and "crashing" in out, err
+    assert check_group(load_writing(writing)) == 21
+    assert lbd.recover(writing) == path
+    d = lbd.load(path)
+    assert check_group(d) == 21 and d.lbd_version == "2.0" and d.title == "variable"

@@ -34,6 +34,7 @@ from .io import (
     WRITING_SUFFIX,
     Axis,
     Dataset,
+    Group,
     LBDError,
     Value,
     __version__,
@@ -424,11 +425,22 @@ class Writer:
         """The measurement's id, given when the file is created (the first `write`)."""
         return self._d.id
 
+    @property
+    def groups(self) -> Dict[str, Group]:
+        return self._d.groups
+
+    def add_group(self, name: str) -> Group:
+        """As [`Dataset.add_group`][lbd.Dataset.add_group]; before the first `write`. Its points
+        are written into the file as `write` adds them."""
+        self._before_start("add_group")
+        return self._d.add_group(name)
+
     def add_axis(self, name: str, data: Any = None, unit: str = "", label: Optional[str] = None,
-                 elements: Optional[Sequence[str]] = None, grows: bool = False) -> Axis:
+                 elements: Optional[Sequence[str]] = None, grows: bool = False,
+                 group: Optional[str] = None) -> Axis:
         """As [`Dataset.add_axis`][lbd.Dataset.add_axis]; before the first `write`."""
         self._before_start("add_axis")
-        return self._d.add_axis(name, data, unit=unit, label=label, elements=elements, grows=grows)
+        return self._d.add_axis(name, data, unit=unit, label=label, elements=elements, grows=grows, group=group)
 
     def add_value(self, name: str, data: Any = None, axes: Union[str, Sequence[str], None] = None,
                   unit: str = "", label: Optional[str] = None, dtype: str = "auto",
@@ -505,17 +517,29 @@ class Writer:
                 ds.attrs.create("elements", np.array(a.elements, dtype=object), dtype=h5py.string_dtype("utf-8"))
             if a.role is not None:
                 ds.attrs["role"] = a.role
+        for g in d.groups.values():                 # each level grows as write adds points
+            gg = g_axes.create_group(g.name)
+            gg.attrs["order"] = ",".join(g.order)
+            for k, name in enumerate(g.order):
+                ds = gg.create_dataset(name, shape=(0,), maxshape=(None,), dtype="f8",
+                                       chunks=_chunks((0,), 8, grows=(0,)))
+                ds.attrs["unit"] = d.axes[name].unit
+                ds.attrs["label"] = d.axes[name].label
+                if k:
+                    gg.create_dataset(name + "._parent", shape=(0,), maxshape=(None,), dtype="i8",
+                                      chunks=_chunks((0,), 8, grows=(0,)))
         g_values = f.create_group("values")
         g_measured = None
         for v in d.values.values():
-            grows = bool(v.axes) and d.axes[v.axes[0]].grows
+            grows = _growing_dims(d, v)
             is_bool = v.dtype == "bool"
             store = "uint8" if is_bool else v.dtype
             placeholder = v.name in d._placeholders
             fill = complex(np.nan, np.nan) if store.startswith("complex") else np.nan if store.startswith("float") else 0
             chunks = _chunks(v.data.shape, np.dtype(store).itemsize, len(v.point_shape), grows)
+            maxshape = tuple(None if i in grows else n for i, n in enumerate(v.data.shape))
             if grows:
-                ds = g_values.create_dataset(v.name, shape=v.data.shape, maxshape=(None,) + v.data.shape[1:],
+                ds = g_values.create_dataset(v.name, shape=v.data.shape, maxshape=maxshape,
                                              dtype=store, fillvalue=fill, chunks=chunks)
             elif placeholder:
                 ds = g_values.create_dataset(v.name, shape=v.data.shape, dtype=store, fillvalue=fill,
@@ -532,7 +556,7 @@ class Writer:
                 g_measured = g_measured or f.create_group("measured")
                 mask_chunks = _chunks(v.data.shape, 1, len(v.point_shape), grows)
                 if grows:
-                    g_measured.create_dataset(v.name, shape=v.data.shape, maxshape=(None,) + v.data.shape[1:],
+                    g_measured.create_dataset(v.name, shape=v.data.shape, maxshape=maxshape,
                                               dtype="u1", fillvalue=0, chunks=mask_chunks)
                 else:
                     g_measured.create_dataset(v.name, shape=v.data.shape, dtype="u1", fillvalue=0,
@@ -541,8 +565,9 @@ class Writer:
                 v.measured = None                # given whole: everything measured
         _write_meta(f.create_group("meta"), d.meta, "meta")
 
-    def write(self, names: Optional[Mapping[str, Any]] = None, **more: Any) -> None:
-        """Put measured data in its place: as [`Dataset.write`][lbd.Dataset.write].
+    def write(self, names: Optional[Mapping[str, Any]] = None, *, parent: Any = None, **more: Any) -> Any:
+        """Put measured data in its place: as [`Dataset.write`][lbd.Dataset.write], with the
+        same return value (the index of a group's point, for `parent=`).
 
         It returns at once: the data is written to the file by a background thread within
         `flush_every` seconds (or at [`flush`][lbd.Writer.flush] / the finish).
@@ -558,18 +583,22 @@ class Writer:
             self.start()
         if self._state != "writing":
             raise LBDError(f"{self.path.name}: the Writer is closed; nothing more can be written")
-        plan = self._d._plan_write(names, more)
+        plan = self._d._plan_write(names, more, parent)
         items: List[tuple] = []
         if plan["grow"] is not None:
             g, coords = plan["grow"]
             ax = self._d.axes[g]
             ax.data = np.concatenate([ax.data, np.atleast_1d(coords).astype(float)])
             items.append(("grow", g, np.atleast_1d(coords).astype(float), len(ax.data)))
+        self._d._grow_levels(plan)                      # the points in memory (lookups), at once
+        for a, coords, parents in plan["levels"]:
+            items.append(("level", a, coords.astype(float), parents, len(self._d.axes[a].data)))
         for name, index, arr in plan["puts"]:
             store = "uint8" if self._d.values[name].dtype == "bool" else self._d.values[name].dtype
             items.append(("put", name, index, np.array(arr, dtype=store)))   # a copy: the caller may reuse its buffer
         with self._lock:
             self._pending.extend(items)
+        return plan["result"]
 
     def flush(self) -> None:
         """Write everything collected so far to the file now (readers see it)."""
@@ -611,14 +640,21 @@ class Writer:
         f = self._file
         d = self._d
         for item in items:
-            if item[0] == "grow":
-                _, g, coords, n = item
+            if item[0] in ("grow", "level"):
+                g, coords, n = item[1], item[2], item[-1]
                 for v in d.values.values():           # values first: readers cut to the shortest
-                    if v.axes and v.axes[0] == g:
-                        f["values"][v.name].resize(n, axis=0)
-                        if "measured" in f and v.name in f["measured"]:
-                            f["measured"][v.name].resize(n, axis=0)
-                ds = f["axes"][g]
+                    for pos, dim in enumerate(v.dims):
+                        if dim[-1] == g:
+                            f["values"][v.name].resize(n, axis=pos)
+                            if "measured" in f and v.name in f["measured"]:
+                                f["measured"][v.name].resize(n, axis=pos)
+                ax = d.axes[g]
+                where = f["axes"] if ax.group is None else f["axes"][ax.group]
+                if item[0] == "level" and item[3] is not None:
+                    par = where[g + "._parent"]
+                    par.resize(n, axis=0)
+                    par[n - coords.size:] = item[3]
+                ds = where[g]
                 ds.resize(n, axis=0)
                 ds[n - coords.size:] = coords
             else:
@@ -793,7 +829,12 @@ class Writer:
 LIVE_CHUNK_BYTES = 1 << 16     # chunks of a file being written: about 64 kB (it is flushed often)
 
 
-def _chunks(shape: tuple, itemsize: int, whole: int = 0, grows: bool = False) -> Optional[tuple]:
+def _growing_dims(d: Dataset, v: Value) -> tuple:
+    """The dimensions of `v` that grow while it is written: a growing axis, a group's level."""
+    return tuple(i for i, dim in enumerate(v.dims) if d.axes[dim[-1]].grows or d.axes[dim[-1]].group is not None)
+
+
+def _chunks(shape: tuple, itemsize: int, whole: int = 0, grows: Sequence[int] = ()) -> Optional[tuple]:
     """Chunks of a value in a file being written: `_chunk_shape`'s rule (`None` for one number)."""
     if not shape:
         return None

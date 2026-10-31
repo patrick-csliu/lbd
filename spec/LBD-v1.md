@@ -266,7 +266,10 @@ when complete.
   finishing). A stopped file holds everything written before the last flush and is made into
   an LBD file by copying its content into `<name>.lbd`.
 - Readers open a `.lbd.writing` file in SWMR read mode with HDF5 file locking turned off, read
-  what they need and close it again; they must not keep it open or write to it. Other programs
+  what they need and close it again; they must not keep it open or write to it. When the writer
+  finishes, it rewrites the description and metadata outside SWMR, just before the rename: a
+  reader that fails to read the file then should read it again a moment later (or find it
+  finished, renamed to `<name>.lbd`). Other programs
   opening it in the ordinary way are refused by HDF5 while it is written; this does not
   disturb the writer.
 

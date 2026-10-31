@@ -158,6 +158,14 @@ are still written as 1.2).
 
 **File format and languages**
 
+- **`lbd.Writer` writes variable sweeps** (Python): `w.add_group`, `w.add_axis(..., group=)`,
+  and `w.write` with coordinates or `parent=`, as for a dataset; each group's levels grow in the
+  file as points are measured, and readers see complete points only.
+
+- Reading a file being written no longer fails now and then at the moment its writer finishes it
+  (Python): the writer rewrites the description and metadata then, and the reader reads again
+  a moment later, or says the file was finished.
+
 - **File format 1.2: elements and the shape of a data point** (every language). An axis's
   positions can have names: `add_axis("state", elements=["ground", "excited"])` (numbered 0, 1
   by itself). A value's data point can be a vector or a matrix, said like numpy:
@@ -194,6 +202,13 @@ are still written as 1.2).
 - A new page, **Writing while measuring** (Getting started): the Writer in every language, what
   `write` takes, growing axes, points not measured, what other programs see, and Recover.
   `viewer/tests/mock_live.py` writes a file slowly (and leaves a stopped one) to try the viewer.
+
+**For developers**
+
+- `scripts/test_all.py` runs the suites side by side (`--jobs`, default 4), the longest first:
+  a whole run takes about as long as the browser tests instead of the sum of all. `--changed
+  [REF]` runs only the suites the changed files can affect, `--only` names suites. Viewer and
+  browser tests that fail side by side run again alone, and the summary says so.
 
 ## 1.2.0 (2026-10-28)
 

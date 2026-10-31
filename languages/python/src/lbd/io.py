@@ -921,6 +921,22 @@ class Dataset:
             ax = self.axes[g]
             ax.data = groups.grown(self, ("axis", g), np.asarray(ax.data), 0, k, np.atleast_1d(coords), coords.dtype)
             self._extend_values(g, k)
+        self._grow_levels(plan)
+        for a, coords, _ in plan.get("levels", ()):
+            self._extend_values(a, len(coords))
+        for name, index, arr in plan["puts"]:
+            v = self.values[name]
+            if v.data is None:
+                raise LBDError(f"write: value '{name}' was not loaded; load the file without `values=`")
+            v.data[index] = arr
+            if v.measured is not None:
+                v.measured[index] = True
+
+    def _grow_levels(self, plan: Dict[str, Any]) -> None:
+        """Add a write's new group points to their levels (coordinates, parents, lookups);
+        warn about a new point that differs from one already there only by rounding."""
+        from . import groups
+
         near = []
         for a, coords, parents in plan.get("levels", ()):
             ax = self.axes[a]
@@ -934,18 +950,10 @@ class Dataset:
                     other = lk.add(p, float(c), start + i)
                     if other is not None and coords.dtype.kind == "f":
                         near.append((a, c, other))
-            self._extend_values(a, k)
         if near:
             shown = "; ".join(f"{a} = {c!r} is a new point next to {o!r}" for a, c, o in near[:3])
             _warn(f"write: {shown}{' …' if len(near) > 3 else ''}. Coordinates are compared exactly: round the "
                   "coordinate, or write with parent= (the index write returned)")
-        for name, index, arr in plan["puts"]:
-            v = self.values[name]
-            if v.data is None:
-                raise LBDError(f"write: value '{name}' was not loaded; load the file without `values=`")
-            v.data[index] = arr
-            if v.measured is not None:
-                v.measured[index] = True
 
     def _extend_values(self, axis: str, k: int) -> None:
         """`k` points were added to `axis` (a growing axis, or a group's level): every value on
@@ -1390,6 +1398,29 @@ def load(path: PathLike, values: Union[None, str, Iterable[str]] = None) -> Data
     if writing:
         _warn(f"{path.name} is still being written, or its writer stopped before finishing "
               "(lbd.writing_status tells which); reading what was written so far")
+    for attempt in range(WRITING_READ_ATTEMPTS if writing else 1):
+        try:
+            d = _load_once(path, writing, wanted)
+            break
+        except (OSError, RuntimeError, LBDError) as e:
+            # a file being written can be caught while its writer finishes it (the description
+            # and metadata are rewritten then, outside SWMR): read it again in a moment
+            if not writing or isinstance(e, FileNotFoundError) or attempt == WRITING_READ_ATTEMPTS - 1:
+                raise
+            if not path.exists():
+                raise FileNotFoundError(f"{path.name} was finished while it was read: open "
+                                        f"{path.name[:-len(WRITING_SUFFIX)]}") from None
+            time.sleep(WRITING_READ_PAUSE)
+    _validate_loaded(d, path)
+    return d
+
+
+WRITING_READ_ATTEMPTS = 20     # tries to read a file being written that changes under the reader
+WRITING_READ_PAUSE = 0.05      # seconds between them
+
+
+def _load_once(path: Path, writing: bool, wanted: Optional[set]) -> Dataset:
+    """One reading of the file (see load)."""
     with _reading(path, writing) as f:
         d, described = _read_structure(f, path, writing)
         masks = f["measured"] if isinstance(f.get("measured"), h5py.Group) else None
@@ -1410,7 +1441,6 @@ def load(path: PathLike, values: Union[None, str, Iterable[str]] = None) -> Data
             missing = wanted - set(d.values)
             if missing:
                 raise KeyError(f"{path.name}: no value(s) named {sorted(missing)}; it has {list(d.values)}")
-    _validate_loaded(d, path)
     return d
 
 
@@ -2156,16 +2186,16 @@ CHUNK_BYTES = 1 << 20          # a chunk of a saved file: about 1 MB
 
 
 def _chunk_shape(shape: Sequence[int], itemsize: int, whole: int = 0, size: int = CHUNK_BYTES,
-                 grows: bool = False) -> tuple:
+                 grows: Sequence[int] = ()) -> tuple:
     """Chunks that make reading a part cheap: the inner dimensions whole (a trace, a data point)
     as far as `size` bytes allow, then as many outer rows as fit; the last `whole` dimensions
-    (a data point) always whole. `grows`: the first dimension is unlimited, so its current
-    length doesn't limit the chunk."""
+    (a data point) always whole. `grows`: the dimensions that are unlimited (a growing axis, a
+    group's level), whose current length doesn't limit the chunk."""
     shape = [max(int(n), 1) for n in shape]
     chunk = [1] * len(shape)
     budget = max(size // max(itemsize, 1), 1)
     for i in range(len(shape) - 1, -1, -1):
-        n = budget if grows and i == 0 else shape[i]
+        n = budget if i in grows else shape[i]
         if i >= len(shape) - whole:
             chunk[i] = n
             budget = max(budget // n, 1)
