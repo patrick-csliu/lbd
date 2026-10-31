@@ -456,15 +456,18 @@ class Writer:
         d.new_id()
         d.writer = f"python lbd {__version__}"
         try:
-            f = h5py.File(self.writing_path, "w-", libver="latest")
+            f = h5py.File(self.writing_path, "w-", libver="latest", locking=False)   # the guard locks it
         except FileExistsError:
             raise FileExistsError(f"{self.writing_path} exists; lbd.Writer never replaces a file") from None
         try:
+            self._guard = _take_guard(self.writing_path)   # at once: from now on it reads "measuring"
             self._create(f)
             f.swmr_mode = True
-            self._guard = _take_guard(self.writing_path)
         except BaseException:
             f.close()
+            if self._guard is not None:
+                os.close(self._guard)
+                self._guard = None
             self.writing_path.unlink()
             raise
         self._file = f

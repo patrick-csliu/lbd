@@ -136,21 +136,24 @@ The file format has its own version (`lbd_version`, currently 1.2).
   read these files. Data with more dimensions than axes needs `shape=` (a clear error says so).
   1.1 files stay valid; readers for 1.1 read 1.2 files with a warning.
 
-- **Filling a file piece by piece** (Python): `add_value("S21", axes=["power", "freq"],
+- **Filling a file piece by piece** (Python, MATLAB): `add_value("S21", axes=["power", "freq"],
   dtype="complex128")` without data makes a value that is "not measured yet" (`NaN`; for
   integers and booleans a `measured` mask, saved as `/measured/<value>` when something is
   missing), and `d.write(power=i, S21=trace)` puts a point, a trace or a whole map in its place —
   fixed axes by index or element, several values at once. `add_axis("time", grows=True)` makes
-  an axis of unknown length whose points `write` adds (`d.write(time=t, T=x)`).
+  an axis of unknown length whose points `write` adds (`d.write(time=t, T=x)`). In MATLAB:
+  `d.addValue("S21", [], ["power" "freq"], Dtype="complex128")`, `d.write(power=i, S21=trace)`
+  (indices count from 1), `d.addAxis("time", [], Grows=true)`.
 
-- **Writing while measuring** (Python): `lbd.Writer("rabi.lbd")` takes the same calls
+- **Writing while measuring** (Python, MATLAB): `lbd.Writer("rabi.lbd")` takes the same calls
   (`add_axis`, `add_value`, `write`) and writes `rabi.lbd.writing` as the data comes, so the
   data so far can be read at any time (`lbd.load` reads such a file, with a warning); when the
   measurement ends (`close()`, or leaving the `with` block) it becomes `rabi.lbd`. A crash or an
   error leaves the `.writing` file with everything written up to then: `lbd.writing_status`
   tells "measuring" from "stopped", and `lbd.recover` makes a stopped one an `.lbd` file. Other
   programs opening it while it is written are refused without disturbing the measurement.
-  Saving at the end with `Dataset.save` is unchanged.
+  Saving at the end with `Dataset.save` is unchanged. In MATLAB: `w = lbd.Writer("rabi.lbd")`
+  … `w.close()`, with `w.abort()` on an error; `lbd.writingStatus`, `lbd.recover`.
 
 ## 1.2.0 (2026-10-28)
 

@@ -7,6 +7,8 @@ classdef Dataset < handle
     %   d.addValue("S21", s21, ["power" "freq"]);      % size(s21) == [11 401]
     %   d.addAxis("state", [], Elements=["ground" "excited"]);   % named positions, numbered 0, 1
     %   d.addValue("bloch", b, "amp", Shape=3, Elements=["x" "y" "z"]);   % size(b) == [21 3]
+    %   d.addValue("S21b", [], ["power" "freq"], Dtype="complex128");   % filled later by write
+    %   d.write(power=3, S21b=trace);                   % a trace (power 3, every freq)
     %   d.Meta.T_mK = 12;
     %   d.save("sweep.lbd");
     %
@@ -29,12 +31,15 @@ classdef Dataset < handle
     end
 
     properties (SetAccess = private)
-        % Axes.<name> = struct(Name, Data, Unit, Label, Elements, Role): Elements, a text per
-        % position (string.empty: numbered); Role, "point" for an axis of a value's data point
+        % Axes.<name> = struct(Name, Data, Unit, Label, Elements, Role, Grows): Elements, a text
+        % per position (string.empty: numbered); Role, "point" for an axis of a value's data
+        % point; Grows, true for an axis whose points write adds (addAxis(..., Grows=true))
         Axes (1,1) struct = struct()
-        % Values.<name> = struct(Name, Data, Axes, Unit, Label, Shape, Dtype, PointAxes, Elements):
-        % PointAxes, the axes of one data point (the last of Axes); Elements, a cell with each
-        % data point dimension's texts (string.empty: numbered)
+        % Values.<name> = struct(Name, Data, Axes, Unit, Label, Shape, Dtype, PointAxes, Elements,
+        % Measured): PointAxes, the axes of one data point (the last of Axes); Elements, a cell
+        % with each data point dimension's texts (string.empty: numbered); Measured, for an
+        % integer or logical value filled by write, true where something was written ([] for
+        % every other value: NaN means "not measured")
         Values (1,1) struct = struct()
         Writer string = string.empty
         LbdVersion (1,1) string = "1.2"
@@ -46,6 +51,12 @@ classdef Dataset < handle
         Id string = string.empty
         % The Id of the file this one was made from (saved to another file, newId), if any.
         ParentId string = string.empty
+    end
+
+    properties (Hidden)
+        % lbd.Writer: values without data take no memory (their data is in the file)
+        LiveWriting (1,1) logical = false
+        Placeholders string = strings(1, 0)
     end
 
     methods
@@ -66,6 +77,7 @@ classdef Dataset < handle
             %ADDAXIS  Add a 1-D real axis.
             %   d.addAxis("power", -40:4:0, Unit="dBm")
             %   d.addAxis("state", [], Elements=["ground" "excited"])   % numbered 0, 1
+            %   d.addAxis("time", [], Unit="s", Grows=true)   % points added by write
             arguments
                 obj
                 name (1,1) string
@@ -73,8 +85,20 @@ classdef Dataset < handle
                 opts.Unit (1,1) string = ""
                 opts.Label string = string.empty
                 opts.Elements = string.empty
+                opts.Grows (1,1) logical = false
             end
             obj.checkNewName(name);
+            if opts.Grows
+                if ~isempty(data) || ~isempty(opts.Elements)
+                    error('lbd:invalid', 'axis "%s" grows: give no data or Elements; write adds its points', name);
+                end
+                label = opts.Label;
+                if isempty(label), label = name; end
+                axis = struct('Name', name, 'Data', zeros(0, 1), 'Unit', opts.Unit, 'Label', label, ...
+                    'Elements', string.empty, 'Role', "", 'Grows', true);
+                obj.Axes.(name) = axis;
+                return
+            end
             elements = lbd.Dataset.checkElements(opts.Elements, [], sprintf('axis "%s"', name));
             if isempty(data)
                 if isempty(elements)
@@ -94,7 +118,7 @@ classdef Dataset < handle
                 lbd.Dataset.checkElements(elements, numel(data), sprintf('axis "%s"', name));
             end
             axis = struct('Name', name, 'Data', data(:), 'Unit', opts.Unit, 'Label', label, ...
-                'Elements', elements, 'Role', "");
+                'Elements', elements, 'Role', "", 'Grows', false);
             obj.Axes.(name) = axis;
         end
 
@@ -106,12 +130,15 @@ classdef Dataset < handle
             %   d.addValue("v", x, "freq", Dtype="float32")
             %   d.addValue("bloch", b, "amp", Shape=3, Elements=["x" "y" "z"])   % a vector per point
             %   d.addValue("cov", c, "amp", Shape=[2 2], Elements={["I" "Q"], ["I" "Q"]})
+            %   d.addValue("S21", [], ["power" "freq"], Dtype="complex128")   % filled by write
             %   Each data point is one number unless Shape says otherwise; DATA's dimensions are
-            %   the value's axes first, then the data point's.
+            %   the value's axes first, then the data point's. DATA empty ([]): every point
+            %   starts as NaN (not measured yet), or for integers and logicals as 0 with
+            %   Measured false; write fills it.
             arguments
                 obj
                 name (1,1) string
-                data
+                data = []
                 axes = string.empty
                 opts.Unit (1,1) string = ""
                 opts.Label string = string.empty
@@ -121,14 +148,33 @@ classdef Dataset < handle
             end
             obj.checkNewName(name);
             axesList = lbd.Dataset.axesList(axes);
-            data = lbd.Dataset.coerce(data, opts.Dtype, name);
             point = opts.Shape(:)';
             if any(point < 1 | point ~= round(point))
                 error('lbd:invalid', 'value "%s": Shape must hold whole numbers of at least 1, not %s', name, mat2str(opts.Shape));
             end
             nd = numel(axesList);
             total = nd + numel(point);
-            if total == 0
+            measured = [];
+            placeholder = false;
+            if isempty(data)                   % filled later by write: "not measured yet"
+                for i = 1:nd
+                    if ~isfield(obj.Axes, axesList(i))
+                        error('lbd:invalid', 'value "%s": axis "%s" does not exist; add it with addAxis first', name, axesList(i));
+                    end
+                end
+                shape = [arrayfun(@(a) numel(obj.Axes.(a).Data), axesList), point];
+                kind = opts.Dtype;
+                if kind == "auto", kind = "float64"; end
+                [data, measured] = lbd.Dataset.notMeasured(shape, kind, name, obj.LiveWriting);
+                placeholder = obj.LiveWriting;
+                dtypeName = kind;
+            else
+                data = lbd.Dataset.coerce(data, opts.Dtype, name);
+                dtypeName = string.empty;
+            end
+            if ~isempty(dtypeName)
+                % the shape is known: no data to look at
+            elseif total == 0
                 if ~isscalar(data)
                     error('lbd:invalid', 'value "%s" is not scalar, so it needs axes', name);
                 end
@@ -154,6 +200,11 @@ classdef Dataset < handle
                         name, ndims(data), total);
                 end
                 shape = size(data, 1:total);
+            end
+            growing = axesList(arrayfun(@(a) isfield(obj.Axes, a) && obj.Axes.(a).Grows, axesList));
+            if numel(growing) > 1 || (~isempty(growing) && axesList(1) ~= growing(1))
+                error('lbd:invalid', 'value "%s": a growing axis must be its first axis, and only one (here %s)', ...
+                    name, strjoin(axesList, ", "));
             end
             for i = 1:nd
                 ax = axesList(i);
@@ -188,13 +239,15 @@ classdef Dataset < handle
                 plabel = label;
                 if numel(point) > 1, plabel = label + " (dim" + k + ")"; end
                 obj.Axes.(pointNames(k)) = struct('Name', pointNames(k), 'Data', int64(0:point(k) - 1)', ...
-                    'Unit', "", 'Label', plabel, 'Elements', named{k}, 'Role', "point");
+                    'Unit', "", 'Label', plabel, 'Elements', named{k}, 'Role', "point", 'Grows', false);
             end
             axesList = [axesList pointNames];
+            if isempty(dtypeName), dtypeName = lbd_dtype_name(data); end
             value = struct('Name', name, 'Data', data, 'Axes', axesList, 'Unit', opts.Unit, ...
-                'Label', label, 'Shape', shape, 'Dtype', lbd_dtype_name(data), ...
-                'PointAxes', pointNames, 'Elements', {named});
+                'Label', label, 'Shape', shape, 'Dtype', dtypeName, ...
+                'PointAxes', pointNames, 'Elements', {named}, 'Measured', measured);
             obj.Values.(name) = value;
+            if placeholder, obj.Placeholders(end+1) = name; end
         end
 
         function item = get(obj, name)
@@ -207,6 +260,21 @@ classdef Dataset < handle
             else
                 error('lbd:notFound', 'no value or axis named "%s"', name);
             end
+        end
+
+        function write(obj, varargin)
+            %WRITE  Put measured data into values made by addValue: a point, a trace, a whole
+            %   map, or several values at once, at the place the axes say.
+            %   d.write(power=3, S21=trace)            % a trace: power 3, every frequency
+            %   d.write(power=3, freq=7, S21=z, T=t)   % a point, and T at power 3
+            %   d.write(state="excited", power=1, n=7) % a position by its element
+            %   d.write(time=12.5, T=4.2)              % a growing axis: adds a point
+            %   d.write("if", 3, "S21", z)             % any name, as text
+            %   A fixed axis takes an index (1 = its first point) or one of its elements; a
+            %   growing axis its coordinate(s); a value its data, sized as the value's axes that
+            %   weren't given (and its data point), in order. Writing again replaces.
+            plan = obj.planWrite(varargin);
+            obj.applyWrite(plan);
         end
 
         function newId(obj)
@@ -228,8 +296,17 @@ classdef Dataset < handle
                 opts.Compression (1,1) logical = false
             end
             [~, ~, ext] = fileparts(path);
+            if lower(ext) == ".writing"
+                error('lbd:invalid', '%s: a ".writing" file is written only by lbd.Writer; save to the .lbd name', path);
+            end
             if lower(ext) ~= ".lbd"
                 warning('lbd:extension', '%s: LBD files should use the .lbd extension', path);
+            end
+            anames = fieldnames(obj.Axes);
+            for i = 1:numel(anames)
+                if obj.Axes.(anames{i}).Grows && isempty(obj.Axes.(anames{i}).Data)
+                    error('lbd:invalid', 'the growing axis "%s" has no points yet; write some before saving', anames{i});
+                end
             end
             vnames = fieldnames(obj.Values);
             for i = 1:numel(vnames)
@@ -349,6 +426,9 @@ classdef Dataset < handle
             for i = 1:numel(vn)
                 val = obj.Values.(vn{i});
                 data = val.Data;
+                if startsWith(val.Dtype, "complex") && isreal(data)
+                    data = complex(data);           % MATLAB drops an all-zero imaginary part
+                end
                 isBool = islogical(data);
                 if isBool, data = uint8(data); end
                 did = lbd_write_dataset(gid, val.Name, data, numel(val.Axes), compression);
@@ -359,6 +439,18 @@ classdef Dataset < handle
                 H5D.close(did);
             end
             H5G.close(gid);
+
+            % integer / logical points never measured (stopped early)
+            masks = vn(cellfun(@(k) ~isempty(obj.Values.(k).Measured) && ~all(obj.Values.(k).Measured(:)), vn));
+            if ~isempty(masks)
+                gid = H5G.create(fid, 'measured', 'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
+                for i = 1:numel(masks)
+                    val = obj.Values.(masks{i});
+                    did = lbd_write_dataset(gid, val.Name, uint8(val.Measured), numel(val.Axes), compression);
+                    H5D.close(did);
+                end
+                H5G.close(gid);
+            end
 
             gid = H5G.create(fid, 'meta', 'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
             lbd_write_meta(gid, obj.Meta, "meta");
@@ -420,8 +512,19 @@ classdef Dataset < handle
             end
             [~, fname, fext] = fileparts(path);
             base = fname + fext;
-            fid = H5F.open(path, 'H5F_ACC_RDONLY', 'H5P_DEFAULT');
-            closer = onCleanup(@() H5F.close(fid));
+            writing = lower(fext) == ".writing";
+            if writing
+                warning('lbd:writing', ['%s is still being written, or its writer stopped before finishing ' ...
+                    '(lbd.writingStatus tells which); reading what was written so far'], base);
+                fid = lbd_own_writers("get", path);   % written by this MATLAB: one HDF5 handle per file
+                if isempty(fid)
+                    fid = lbd_open_writing(path);
+                    closer = onCleanup(@() H5F.close(fid));
+                end
+            else
+                fid = H5F.open(path, 'H5F_ACC_RDONLY', 'H5P_DEFAULT');
+                closer = onCleanup(@() H5F.close(fid));
+            end
 
             if lbd_attr_or(fid, 'lbd_format', "") ~= "LBD"
                 error('lbd:invalid', '%s is not an LBD file (missing lbd_format="LBD")', base);
@@ -472,7 +575,7 @@ classdef Dataset < handle
                     end
                     d.Axes.(name) = struct('Name', name, 'Data', data(:), ...
                         'Unit', lbd_attr_or(did, 'unit', ""), 'Label', lbd_attr_or(did, 'label', name), ...
-                        'Elements', reshape(string(elements), 1, []), 'Role', role);
+                        'Elements', reshape(string(elements), 1, []), 'Role', role, 'Grows', false);
                     H5D.close(did);
                 end
                 H5G.close(gid);
@@ -492,11 +595,36 @@ classdef Dataset < handle
                     d.Values.(name) = struct('Name', name, 'Data', data, ...
                         'Axes', lbd.Dataset.axesList(lbd_attr_or(did, 'axes', "")), ...
                         'Unit', lbd_attr_or(did, 'unit', ""), 'Label', lbd_attr_or(did, 'label', name), ...
-                        'Shape', shape, 'Dtype', dtype, 'PointAxes', strings(1, 0), 'Elements', {{}});
+                        'Shape', shape, 'Dtype', dtype, 'PointAxes', strings(1, 0), 'Elements', {{}}, ...
+                        'Measured', []);
                     found(end+1) = name; %#ok<AGROW>
                     H5D.close(did);
                 end
                 H5G.close(gid);
+            end
+            if H5L.exists(fid, 'measured', 'H5P_DEFAULT')
+                gid = H5G.open(fid, 'measured');
+                for name = lbd_link_names(gid)
+                    if ~isfield(d.Values, name) || isempty(d.Values.(name).Data), continue; end
+                    did = H5D.open(gid, char(name));
+                    m = logical(lbd_read_dataset(did));
+                    H5D.close(did);
+                    v = d.Values.(name);
+                    if writing
+                        m = lbd.Dataset.cutTo(m, size(v.Data));
+                    end
+                    if isequal(size(m), size(v.Data))
+                        v.Measured = m;
+                        d.Values.(name) = v;
+                    else
+                        warning('lbd:badMask', '%s: the measured mask of "%s" has size %s, not %s; it is ignored', ...
+                            base, name, mat2str(size(m)), mat2str(size(v.Data)));
+                    end
+                end
+                H5G.close(gid);
+            end
+            if writing                 % a growing axis and its values may be caught mid-write
+                d.sameLengths();
             end
             if ~loadAll && ~isempty(names)
                 missing = setdiff(names, found);
@@ -505,6 +633,33 @@ classdef Dataset < handle
                 end
             end
             d.validateLoaded();
+        end
+
+        function [data, measured] = notMeasured(shape, kind, name, live)
+            %NOTMEASURED  A value of SHAPE where nothing is measured yet: NaN, or 0 with a false
+            %   mask for integers and logicals. LIVE: no data at all (lbd.Writer keeps it in the file).
+            sz = [shape ones(1, max(0, 2 - numel(shape)))];
+            if numel(shape) == 1, sz = [shape 1]; end
+            if live, sz = [0 0]; end
+            measured = [];
+            switch kind
+                case "float64", data = nan(sz);
+                case "float32", data = nan(sz, 'single');
+                case "complex128", data = complex(nan(sz), nan(sz));
+                case "complex64", data = complex(nan(sz, 'single'), nan(sz, 'single'));
+                case "bool", data = false(sz); measured = false(sz);
+                case {"int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64"}
+                    data = zeros(sz, char(kind)); measured = false(sz);
+                otherwise
+                    error('lbd:invalid', 'value "%s": unsupported Dtype "%s"', name, kind);
+            end
+            if live, measured = []; end
+        end
+
+        function x = cutTo(x, sz)
+            %CUTTO  The first SZ(k) entries along each dimension (a file being written).
+            idx = arrayfun(@(k) 1:min(size(x, k), sz(k)), 1:numel(sz), 'UniformOutput', false);
+            x = x(idx{:});
         end
 
         function list = axesList(axes)
@@ -587,6 +742,271 @@ classdef Dataset < handle
         function data = realOnly(data, dtype, name)
             if ~isreal(data)
                 error('lbd:invalid', 'value "%s" is complex; refusing to drop the imaginary part (Dtype="%s")', name, dtype);
+            end
+        end
+    end
+
+    methods (Hidden)
+        function plan = planWrite(obj, args)
+            %PLANWRITE  Check a write against the dataset's shapes; returns what to put where
+            %   (lbd.Writer uses the same plan).
+            if mod(numel(args), 2) ~= 0
+                error('lbd:invalid', 'write: give each name followed by its position or data, e.g. write(power=3, S21=trace)');
+            end
+            names = strings(1, numel(args) / 2);
+            for k = 1:numel(names)
+                n = args{2*k - 1};
+                if ~(ischar(n) || (isstring(n) && isscalar(n)))
+                    error('lbd:invalid', 'write: names must be texts, e.g. write("power", 3, "S21", trace)');
+                end
+                names(k) = string(n);
+            end
+            given = args(2:2:end);
+            if numel(unique(names)) < numel(names)
+                [u, ~, j] = unique(names);
+                error('lbd:invalid', 'write: "%s" is given twice', u(find(accumarray(j(:), 1) > 1, 1)));
+            end
+            isAxis = arrayfun(@(n) isfield(obj.Axes, n), names);
+            isValue = arrayfun(@(n) isfield(obj.Values, n), names);
+            if any(~isAxis & ~isValue)
+                error('lbd:invalid', 'write: no axis or value named %s; axes: %s; values: %s', ...
+                    strjoin(names(~isAxis & ~isValue), ", "), strjoin(string(fieldnames(obj.Axes)), ", "), ...
+                    strjoin(string(fieldnames(obj.Values)), ", "));
+            end
+            if ~any(isValue)
+                error('lbd:invalid', 'write: give at least one value with its data, e.g. write(power=3, S21=trace)');
+            end
+            pos = struct();
+            grow = [];
+            for k = find(isAxis)
+                a = names(k);
+                if obj.Axes.(a).Grows
+                    if ~isempty(grow)
+                        error('lbd:invalid', 'write: one growing axis at a time, not "%s" and "%s"', grow.axis, a);
+                    end
+                    c = given{k};
+                    if ~(isnumeric(c) && isreal(c) && (isscalar(c) || isvector(c)) && all(isfinite(double(c(:)))))
+                        error('lbd:invalid', 'write: "%s" takes a coordinate or a vector of them, finite numbers', a);
+                    end
+                    grow = struct('axis', a, 'coords', double(c(:)), 'scalar', isscalar(c));
+                else
+                    pos.(a) = obj.position(a, given{k});
+                end
+            end
+            puts = {};
+            for k = find(isValue)
+                name = names(k);
+                v = obj.Values.(name);
+                for a = names(isAxis)
+                    if ~any(v.Axes == a)
+                        error('lbd:invalid', 'write: "%s" doesn''t lie on "%s" (its axes: %s)', name, a, strjoin(v.Axes, ", "));
+                    end
+                end
+                idx = cell(1, numel(v.Axes));
+                need = zeros(1, 0);
+                free = strings(1, 0);
+                for i = 1:numel(v.Axes)
+                    a = v.Axes(i);
+                    ax = obj.Axes.(a);
+                    if ax.Grows
+                        if isempty(grow) || grow.axis ~= a
+                            error('lbd:invalid', ['write: "%s" lies on the growing axis "%s": give its coordinate ' ...
+                                '(%s=...), which adds a point'], name, a, a);
+                        end
+                        start = numel(ax.Data);
+                        if grow.scalar
+                            idx{i} = start + 1;
+                        else
+                            idx{i} = start + (1:numel(grow.coords));
+                            need(end+1) = numel(grow.coords); %#ok<AGROW>
+                            free(end+1) = a; %#ok<AGROW>
+                        end
+                    elseif isfield(pos, a)
+                        idx{i} = pos.(a);
+                    else
+                        idx{i} = ':';
+                        need(end+1) = numel(ax.Data); %#ok<AGROW>
+                        free(end+1) = a; %#ok<AGROW>
+                    end
+                end
+                data = lbd.Dataset.fitsType(given{k}, v.Dtype, name);
+                data = lbd.Dataset.shapedFor(data, need, name, free);
+                puts{end+1} = struct('name', name, 'idx', {idx}, 'data', data); %#ok<AGROW>
+            end
+            plan = struct('grow', grow, 'puts', {puts});
+        end
+
+        function i = position(obj, a, x)
+            %POSITION  An index of a fixed axis (1 = its first point), from an index or an element.
+            ax = obj.Axes.(a);
+            n = numel(ax.Data);
+            if ischar(x) || (isstring(x) && isscalar(x))
+                i = find(ax.Elements == string(x), 1);
+                if isempty(i)
+                    if isempty(ax.Elements)
+                        error('lbd:invalid', 'write: "%s" has no element "%s"; give an index (1 ... %d)', a, x, n);
+                    end
+                    error('lbd:invalid', 'write: "%s" has no element "%s"; its elements: %s', a, x, strjoin(ax.Elements, ", "));
+                end
+            elseif isnumeric(x) && isscalar(x) && isreal(x) && x == round(x)
+                if x < 1 || x > n
+                    error('lbd:invalid', 'write: index %d is out of range for "%s" (it has %d points: 1 ... %d)', x, a, n, n);
+                end
+                i = double(x);
+            else
+                error('lbd:invalid', 'write: "%s" takes one position: an index (1 ... %d) or one of its elements', a, n);
+            end
+        end
+
+        function applyWrite(obj, plan)
+            if ~isempty(plan.grow)
+                g = plan.grow.axis;
+                c = plan.grow.coords;
+                ax = obj.Axes.(g);
+                ax.Data = [double(ax.Data); c];
+                obj.Axes.(g) = ax;
+                vn = string(fieldnames(obj.Values))';
+                for name = vn
+                    v = obj.Values.(name);
+                    if isempty(v.Axes) || v.Axes(1) ~= g, continue; end
+                    sz = size(v.Data);
+                    sz(1) = numel(c);
+                    if ~isfloat(v.Data) && isempty(v.Measured)
+                        v.Measured = true(size(v.Data));
+                    end
+                    v.Data = cat(1, v.Data, lbd.Dataset.fillLike(v.Data, sz));
+                    if ~isempty(v.Measured)
+                        v.Measured = cat(1, v.Measured, false(sz));
+                    end
+                    v.Shape(1) = v.Shape(1) + numel(c);
+                    obj.Values.(name) = v;
+                end
+            end
+            for k = 1:numel(plan.puts)
+                p = plan.puts{k};
+                v = obj.Values.(p.name);
+                if isempty(p.idx)
+                    v.Data = p.data;
+                    if ~isempty(v.Measured), v.Measured = true; end
+                else
+                    v.Data(p.idx{:}) = p.data;
+                    if ~isempty(v.Measured), v.Measured(p.idx{:}) = true; end
+                end
+                if startsWith(v.Dtype, "complex") && isreal(v.Data)
+                    v.Data = complex(v.Data);       % MATLAB drops an all-zero imaginary part
+                end
+                obj.Values.(p.name) = v;
+            end
+        end
+
+        function sameLengths(obj)
+            %SAMELENGTHS  In a file being written, cut each axis and the values on it to the
+            %   length all of them have reached (the writer extends them one after the other).
+            an = string(fieldnames(obj.Axes))';
+            vn = string(fieldnames(obj.Values))';
+            for a = an
+                n = numel(obj.Axes.(a).Data);
+                for name = vn
+                    k = find(obj.Values.(name).Axes == a, 1);
+                    if ~isempty(k) && k <= numel(obj.Values.(name).Shape)
+                        n = min(n, obj.Values.(name).Shape(k));
+                    end
+                end
+                if n < numel(obj.Axes.(a).Data)
+                    obj.Axes.(a).Data = obj.Axes.(a).Data(1:n);
+                end
+                for name = vn
+                    v = obj.Values.(name);
+                    k = find(v.Axes == a, 1);
+                    if isempty(k) || v.Shape(k) <= n, continue; end
+                    v.Shape(k) = n;
+                    sz = v.Shape;
+                    if numel(sz) == 1, sz = [sz 1]; end
+                    if ~isempty(v.Data), v.Data = lbd.Dataset.cutTo(v.Data, sz); end
+                    if ~isempty(v.Measured), v.Measured = lbd.Dataset.cutTo(v.Measured, sz); end
+                    obj.Values.(name) = v;
+                end
+            end
+        end
+
+        function appendCoordinates(obj, axis, coords)
+            %APPENDCOORDINATES  Points added to a growing axis (lbd.Writer).
+            obj.Axes.(axis).Data = [double(obj.Axes.(axis).Data); coords(:)];
+        end
+
+        function keepIdentityAt(obj, path)
+            %KEEPIDENTITYAT  Saving to PATH keeps the Id (lbd.recover: the same measurement).
+            obj.Path = string(path);
+        end
+
+        function setIdentity(obj, id, created, writer)
+            obj.Id = id;
+            obj.Created = created;
+            obj.Writer = writer;
+        end
+    end
+
+    methods (Static, Hidden)
+        function x = fitsType(x, dtype, name)
+            %FITSTYPE  Data for a value of type DTYPE: complex refused for real values, integers
+            %   and logicals only when exactly representable.
+            if ~(isnumeric(x) || islogical(x))
+                error('lbd:invalid', 'write: "%s" takes numbers, not %s', name, class(x));
+            end
+            if ~isreal(x) && ~startsWith(dtype, "complex")
+                error('lbd:invalid', 'write: "%s" is real (%s); refusing to drop an imaginary part', name, dtype);
+            end
+            switch dtype
+                case "bool"
+                    if ~islogical(x) && ~all(x(:) == 0 | x(:) == 1)
+                        error('lbd:invalid', 'write: "%s" is logical; give true/false (or 0/1)', name);
+                    end
+                    x = logical(x);
+                case {"int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64"}
+                    if ~isinteger(x) && ~islogical(x) && any(~isfinite(x(:)) | x(:) ~= round(x(:)))
+                        error('lbd:invalid', 'write: "%s" holds whole numbers (%s)', name, dtype);
+                    end
+                    if ~isempty(x) && (double(min(x(:))) < double(intmin(dtype)) || double(max(x(:))) > double(intmax(dtype)))
+                        error('lbd:invalid', 'write: "%s" (%s) can''t hold %g ... %g', name, dtype, double(min(x(:))), double(max(x(:))));
+                    end
+                    x = cast(x, char(dtype));
+                case "float64", x = double(x);
+                case "float32", x = single(x);
+                case "complex128", x = complex(double(x));
+                case "complex64", x = complex(single(x));
+            end
+        end
+
+        function x = shapedFor(x, need, name, free)
+            %SHAPEDFOR  X arranged as the place it goes: NEED, the sizes of the axes not given.
+            if isempty(need)
+                ok = isscalar(x);
+            elseif isscalar(need)
+                ok = isvector(x) && numel(x) == need;
+                if ok
+                    wasComplex = ~isreal(x);
+                    x = reshape(x, [need 1]);
+                    if wasComplex, x = complex(x); end
+                end
+            else
+                ok = ndims(x) <= numel(need) && isequal(size(x, 1:numel(need)), need);
+            end
+            if ~ok
+                if isempty(free), what = "one number"; else, what = strjoin(free, ", "); end
+                error('lbd:invalid', 'write: "%s" needs data of size %s (%s), not %s', ...
+                    name, mat2str([need ones(1, max(0, 1 - numel(need)))]), what, mat2str(size(x)));
+            end
+        end
+
+        function x = fillLike(data, sz)
+            %FILLLIKE  Rows of "not measured" of DATA's type: NaN, or 0 / false.
+            if isfloat(data)
+                x = nan(sz, class(data));
+                if ~isreal(data), x = complex(x, x); end
+            elseif islogical(data)
+                x = false(sz);
+            else
+                x = zeros(sz, class(data));
             end
         end
     end

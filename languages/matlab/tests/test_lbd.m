@@ -420,3 +420,171 @@ h5writeatt(p, '/axes/state', 'elements', 'one');
 r = tc.verifyWarning(@() lbd.load(p), 'lbd:badElements');
 tc.verifyEmpty(r.Axes.state.Elements);
 end
+
+function d = makePlanned()
+d = lbd.Dataset("planned");
+d.addAxis("power", linspace(-60, 0, 4), Unit="dBm");
+d.addAxis("freq", linspace(6e9, 7e9, 5), Unit="Hz");
+d.addAxis("state", [], Elements=["ground" "excited"]);
+d.addValue("S21", [], ["power" "freq"], Dtype="complex128");
+d.addValue("T", [], "power");
+d.addValue("n", [], ["state" "power"], Dtype="int32");
+end
+
+function testWriteFillsValues(tc)
+d = makePlanned();
+tc.verifyTrue(all(isnan(d.Values.S21.Data(:))));
+tc.verifySize(d.Values.S21.Data, [4 5]);
+tc.verifyEqual(d.Values.n.Measured, false(2, 4));
+d.write(power=2, S21=(1:5) * 1i, T=4.2);                 % a trace and a point
+d.write(power=3, freq=4, S21=1 + 2i);
+d.write(state="excited", power=4, n=7);
+d.write("state", 1, "power", 1, "n", 3);                 % any name as text
+tc.verifyEqual(d.Values.S21.Data(2, :), (1:5) * 1i);
+tc.verifyEqual(d.Values.S21.Data(3, 4), 1 + 2i);
+tc.verifyTrue(isnan(d.Values.S21.Data(3, 1)));
+tc.verifyEqual(d.Values.T.Data(2), 4.2);
+tc.verifyEqual(d.Values.n.Data(2, 4), int32(7));
+tc.verifyEqual(nnz(d.Values.n.Measured), 2);
+d.write(S21=ones(4, 5));                                 % the whole map
+tc.verifyEqual(d.Values.S21.Data, complex(ones(4, 5)));
+p = fullfile(tc.TestData.dir, "filled.lbd");
+d.save(p);
+r = lbd.load(p);
+tc.verifyEqual(r.Values.n.Measured, d.Values.n.Measured);
+tc.verifyEmpty(r.Values.T.Measured);
+tc.verifyEqual(string(h5info(p, '/measured').Datasets.Name), "n");
+d.write(n=ones(2, 4));                                   % now everything is measured
+d.save(p);
+tc.verifyEmpty(lbd.load(p).Values.n.Measured);
+end
+
+function testWriteErrors(tc)
+d = makePlanned();
+tc.verifyError(@() d.write(power=2, S21=ones(1, 4)), 'lbd:invalid');   % 5 frequencies
+tc.verifyError(@() d.write(power=9, T=1), 'lbd:invalid');              % out of range
+tc.verifyError(@() d.write(power=0, T=1), 'lbd:invalid');              % 1-based
+tc.verifyError(@() d.write(freq=1, T=1), 'lbd:invalid');               % T isn't on freq
+tc.verifyError(@() d.write(S21=1), 'lbd:invalid');                     % needs the whole map
+tc.verifyError(@() d.write(state="mid", power=1, n=1), 'lbd:invalid');
+tc.verifyError(@() d.write(state=1, power=1, n=1.5), 'lbd:invalid');
+tc.verifyError(@() d.write(power=1, T=1i), 'lbd:invalid');
+tc.verifyError(@() d.write(power=1), 'lbd:invalid');                   % no value
+tc.verifyError(@() d.write(nope=1, T=1), 'lbd:invalid');
+tc.verifyError(@() d.write("power", 1, "power", 2, "T", 1), 'lbd:invalid');
+tc.verifyTrue(all(isnan(d.Values.T.Data)));                            % nothing half written
+end
+
+function testGrowingAxis(tc)
+d = lbd.Dataset("log");
+d.addAxis("time", [], Unit="s", Grows=true);
+d.addAxis("ch", [1 2]);
+d.addValue("T", [], "time");
+d.addValue("V", [], ["time" "ch"]);
+d.addValue("ok", [], "time", Dtype="bool");
+tc.verifyError(@() d.addValue("bad", [], ["ch" "time"]), 'lbd:invalid');
+tc.verifyError(@() d.save(fullfile(tc.TestData.dir, "empty.lbd")), 'lbd:invalid');
+d.write(time=0.5, T=1, V=[1 2], ok=true);
+d.write(time=[1 1.5], T=[2 3]);
+tc.verifyEqual(d.Axes.time.Data, [0.5; 1; 1.5]);
+tc.verifyEqual(d.Values.T.Data, [1; 2; 3]);
+tc.verifyTrue(all(isnan(d.Values.V.Data(2:3, :)), 'all'));
+tc.verifyEqual(d.Values.ok.Measured, [true; false; false]);
+tc.verifyError(@() d.write(T=1), 'lbd:invalid');
+p = fullfile(tc.TestData.dir, "log.lbd");
+d.save(p);
+r = lbd.load(p);
+tc.verifyEqual(r.Axes.time.Data, [0.5; 1; 1.5]);
+tc.verifyEqual(r.Values.ok.Measured, [true; false; false]);
+end
+
+function w = makeWriter(path)
+w = lbd.Writer(path, Title="live", FlushEvery=60);
+w.addAxis("power", 1:3);
+w.addAxis("freq", linspace(0, 1, 4));
+w.addValue("S21", [], ["power" "freq"], Dtype="complex128");
+w.addValue("n", [], "power", Dtype="int64");
+w.addAxis("time", [], Grows=true);
+w.addValue("T", [], "time");
+end
+
+function testWriterLive(tc)
+p = fullfile(tc.TestData.dir, "live.lbd");
+w = makeWriter(p);
+w.Meta.sample = "R7";
+w.write(power=1, S21=(1:4) + 1i, n=5);
+w.write(time=[0 1], T=[10 11]);
+w.write(time=2, T=12);
+tc.verifyTrue(isfile(p + ".writing"));
+tc.verifyEqual(lbd.writingStatus(p + ".writing"), "measuring");
+w.flush();
+r = tc.verifyWarning(@() lbd.load(p + ".writing"), 'lbd:writing');
+tc.verifyEqual(r.Values.S21.Data(1, :), (1:4) + 1i);
+tc.verifyEqual(r.Axes.time.Data, [0; 1; 2]);
+tc.verifyEqual(r.Values.T.Data, [10; 11; 12]);
+tc.verifyError(@() w.addAxis("late", 1), 'lbd:invalid');
+tc.verifyError(@() lbd.Writer(p), 'lbd:exists');
+tc.verifyError(@() lbd.recover(p + ".writing"), 'lbd:held');
+w.write(power=2, S21=ones(1, 4), n=6);
+w.Description = "changed while measuring";
+out = tc.verifyWarning(@() w.close(), 'lbd:notMeasured');       % n at power 3
+tc.verifyEqual(out, p);
+tc.verifyFalse(isfile(p + ".writing"));
+r = lbd.load(p);
+tc.verifyEqual(r.Description, "changed while measuring");
+tc.verifyEqual(r.Meta.sample, "R7");
+tc.verifyEqual(real(r.Values.S21.Data(2, :)), ones(1, 4));
+tc.verifyFalse(isreal(r.Values.S21.Data));
+tc.verifyTrue(all(isnan(r.Values.S21.Data(3, :))));
+tc.verifyEqual(r.Values.n.Measured, [true; true; false]);
+tc.verifyEqual(r.Values.T.Data, [10; 11; 12]);
+tc.verifyEqual(r.Id, w.id());
+tc.verifyError(@() w.write(power=3, n=1), 'lbd:closed');
+end
+
+function testWriterAbortAndRecover(tc)
+p = fullfile(tc.TestData.dir, "stopped.lbd");
+w = makeWriter(p);
+w.write(power=1, S21=(1:4) * 1i, n=1);
+w.write(time=0, T=5);
+w.abort();
+tc.verifyEqual(lbd.writingStatus(p), "stopped");
+r = tc.verifyWarning(@() lbd.load(p + ".writing"), 'lbd:writing');
+tc.verifyEqual(r.Values.T.Data, 5);
+out = lbd.recover(p + ".writing");
+tc.verifyEqual(out, p);
+tc.verifyFalse(isfile(p + ".writing"));
+r = lbd.load(p);
+tc.verifyEqual(r.Id, w.id());
+tc.verifyEqual(r.Values.S21.Data(1, :), (1:4) * 1i);
+tc.verifyEqual(r.Values.n.Measured, [true; false; false]);
+end
+
+function testWriterStoppedAndNameTaken(tc)
+p = fullfile(tc.TestData.dir, "taken.lbd");
+w = makeWriter(p);
+w.write(power=1, n=1);
+fid = fopen(p, 'w'); fwrite(fid, 'x'); fclose(fid);
+out = tc.verifyWarning(@() w.close(Stopped=true), 'lbd:exists');
+tc.verifyEqual(out, fullfile(tc.TestData.dir, "taken (2).lbd"));
+tc.verifyEqual(lbd.load(out).Values.n.Measured, [true; false; false]);
+end
+
+function testWriterRefusals(tc)
+tc.verifyError(@() lbd.Writer(fullfile(tc.TestData.dir, "a.h5")), 'lbd:invalid');
+d = lbd.Dataset();
+d.addAxis("x", 1);
+d.addValue("y", 1, "x");
+tc.verifyError(@() d.save(fullfile(tc.TestData.dir, "a.lbd.writing")), 'lbd:invalid');
+tc.verifyError(@() lbd.writingStatus(fullfile(tc.TestData.dir, "none.lbd")), 'lbd:notFound');
+w = lbd.Writer(fullfile(tc.TestData.dir, "meta.lbd"));
+w.addAxis("x", 1:2);
+w.addValue("y", [], "x");
+w.write(x=1, y=1);
+w.Meta.bad = {1};
+tc.verifyError(@() w.close(), 'lbd:invalid');
+tc.verifyEqual(lbd.writingStatus(fullfile(tc.TestData.dir, "meta.lbd")), "measuring");
+w.Meta = struct();
+w.write(x=2, y=2);
+tc.verifyEqual(lbd.load(w.close()).Values.y.Data, [1; 2]);
+end
