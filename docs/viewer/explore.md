@@ -95,6 +95,15 @@ its own unit. Both axes zoom together. A panel shows two units at most: a value 
 can't be ticked; show it in another panel. Operations and equations make one quantity of the
 values (without a unit), so with them the panel has one axis.
 
+## Named positions and data points
+
+- An axis with **elements** (format 1.2, e.g. a qubit prepared in `ground` or `excited`) shows
+  them instead of its numbers: as tick labels, in the legend, in cursor read-outs and on its
+  slider. Type an element into the slider's box to go to it.
+- A value whose **data points are vectors or matrices** (a Bloch vector `x, y, z`, an I/Q
+  covariance) opens as one curve per element against the sweep; a matrix's second dimension gets
+  a slider.
+
 ## Reading values
 
 ![Two cursors on a map, with its cuts](img/reading.png)

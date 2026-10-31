@@ -72,7 +72,7 @@ Access data with `d.Values.S21.Data` and `d.Axes.freq.Data`, or with [`d.get("S2
 
 <!-- no-check -->
 ```matlab
-d.addAxis(name, data, Unit="", Label=name)
+d.addAxis(name, data, Unit="", Label=name, Elements=[])
 ```
 
 Adds a 1-D axis.
@@ -80,9 +80,10 @@ Adds a 1-D axis.
 | Argument | Meaning |
 |---|---|
 | `name` | Axis name ([naming rules](getting-started/concepts.md#names)). |
-| `data` | A real numeric vector, row or column. It is stored as a column. |
+| `data` | A real numeric vector, row or column. It is stored as a column. May be `[]` when `Elements` is given: the positions are then 0, 1, 2 … |
 | `Unit` | Unit string. Prefer plain SI units (`"Hz"`, not `"GHz"`). |
 | `Label` | Display text. Defaults to `name`. |
+| `Elements` | A text for each position (format 1.2), e.g. `["ground" "excited"]`: the viewer shows them instead of the numbers. |
 
 **Returns** the axis struct. **Errors** with `lbd:invalid` if the name is invalid or already
 used, or if `data` is not a real numeric vector.
@@ -91,7 +92,7 @@ used, or if `data` is not a real numeric vector.
 
 <!-- no-check -->
 ```matlab
-d.addValue(name, data, axes, Unit="", Label=name, Dtype="auto")
+d.addValue(name, data, axes, Unit="", Label=name, Dtype="auto", Shape=[], Elements=[])
 ```
 
 Adds an N-D value.
@@ -104,6 +105,8 @@ Adds an N-D value.
 | `Unit` | Unit string. |
 | `Label` | Display text. Defaults to `name`. |
 | `Dtype` | `"auto"` keeps the class of `data`. Or force one of `"float64"`, `"float32"`, `"complex128"`, `"complex64"`, `"bool"`, `"int8"`…`"int64"`, `"uint8"`…`"uint64"`. |
+| `Shape` | The size of one data point (format 1.2): `3` for a vector of 3, `[2 2]` for a matrix. Empty: one number. `data`'s dimensions are the value's axes first, then the data point's. |
+| `Elements` | A data point's position texts: a string array for a vector (`["x" "y" "z"]`), a cell with one string array per dimension for a matrix (`{["I" "Q"], ["I" "Q"]}`; `[]` leaves a dimension numbered). |
 
 - **Vectors:** a value with one axis accepts a row or a column vector and stores it as a column.
 - **Matrices:** `size(data)` must equal the axis lengths in order. MATLAB drops trailing
@@ -125,7 +128,12 @@ d.addValue("trace", v, "t", Unit="V");
 d.addValue("mask", v > 0.5, "t");                  % logical -> bool
 d.addValue("raw", counts, "t", Dtype="float32");   % force a type
 d.addValue("fit_Q", 12345.6);                      % scalar
+d.addAxis("state", [], Elements=["ground" "excited"]);                  % positions 0, 1
+d.addValue("bloch", zeros(numel(v), 3), "t", Shape=3, Elements=["x" "y" "z"]);   % a vector per point
 ```
+
+LBD makes one axis per dimension of a data point (`bloch_dim1`, with `Role="point"`); the value's
+`PointAxes` and `Elements` fields list them.
 
 ### `save`
 

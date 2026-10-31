@@ -66,6 +66,42 @@ print(d)                                                     # one line per axis
   value can't share a name.
 - `d["S21"]` returns the value (or else the axis) with that name; `"S21" in d` tests for one.
 
+### Elements and data points
+
+An axis can name its positions (**elements**), and a value's data point can be a vector or a
+matrix (its **shape**, as in numpy). Format 1.2.
+
+```python
+import numpy as np
+import lbd
+
+amp = np.linspace(0, 0.5, 21)
+d = lbd.Dataset(title="Tomography")
+d.add_axis("state", elements=["ground", "excited"])            # numbered 0, 1 by itself
+d.add_axis("amp", amp, unit="V", label="Drive amplitude")
+d.add_value("P1", np.zeros((2, 21)), axes=["state", "amp"])
+
+bloch = np.stack([np.sin(amp), np.zeros(21), np.cos(amp)], axis=1)   # (21, 3): amp first
+d.add_value("bloch", bloch, axes="amp", shape=(3,), elements=["x", "y", "z"])
+cov = np.zeros((21, 2, 2))
+d.add_value("cov", cov, axes="amp", shape=(2, 2), elements=[["I", "Q"], ["I", "Q"]])
+
+print(d.axes["state"].elements)          # ['ground', 'excited']
+print(d.values["bloch"].point_shape)     # (3,)
+print(d.values["bloch"].axes)            # ['amp', 'bloch_dim1']
+```
+
+- **`elements`** on an axis: one text per position, in order (repeats allowed). Give the
+  coordinates too if they mean something (`add_axis("device", [1, 2, 5], elements=[...])`).
+- **`shape`**: the shape of one data point. The data's dimensions are the value's axes **first**,
+  then the data point's; `np.array([u, v, w])` (3 × N) needs `.T`, and LBD says so. Data with
+  more dimensions than axes needs `shape=`: LBD doesn't guess.
+- **`elements`** on a value names a data point's positions: one list for a vector, one list per
+  dimension for a matrix (`None` leaves a dimension numbered).
+- LBD makes one axis per dimension of a data point (`bloch_dim1`, `cov_dim1`, `cov_dim2`,
+  `role="point"`): readers of every version read the file, and the viewer draws the vector as one
+  curve per element against `amp`.
+
 ### Metadata
 
 `d.meta` is a plain dict for everything else about the measurement: temperatures, instrument

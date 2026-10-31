@@ -23,6 +23,16 @@ is not plotted: the viewer lists it with its value, e.g. *Q = 12346*.
 Several values can share axes. A sweep can store `S21`, `S11` and a fitted `f0(power)` in one
 file, all using the same `power` axis.
 
+**Elements** (format 1.2): an axis's positions can have names, e.g. a qubit prepared in
+`ground` or `excited`, devices `Q1`, `Q2`, `Q3`. The axis still holds numbers (0, 1, 2 …); plots,
+cursors and sliders show the names.
+
+**Data points with a shape** (format 1.2): each data point of a value is one number, unless you
+say otherwise. A Bloch vector per drive amplitude is a value whose data points have shape `(3,)`
+(elements `x`, `y`, `z`); an I/Q covariance is a `(2, 2)` matrix per point. The value's array is
+then *its axes first, then the data point*: 21 amplitudes × 3 → shape 21 × 3. LBD stores one
+small axis for each dimension of a data point (`bloch_dim1`), so every program reads the file.
+
 ## Dimension order is the same in every language
 
 Some languages store arrays row by row (Python/NumPy, C), others column by column (MATLAB,

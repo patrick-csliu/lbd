@@ -71,7 +71,7 @@ haskey(d, "S21")   # true if an axis or value has that name
 ## `add_axis!`
 
 ```julia
-add_axis!(d, name, data; unit="", label=name) -> Axis
+add_axis!(d, name, data=nothing; unit="", label=name, elements=nothing) -> Axis
 ```
 
 Adds a 1-D axis.
@@ -82,13 +82,15 @@ Adds a 1-D axis.
 | `data` | A 1-D collection of real numbers. Ranges work and are `collect`ed. `Bool` is not allowed. |
 | `unit` | Unit string. Prefer plain SI units. |
 | `label` | Display text. |
+| `elements` | A text for each position (format 1.2), e.g. `["ground", "excited"]`; `data` may then be left out (positions 0, 1, 2 …). |
 
-**Throws** `LBDError` if the name is invalid or used, `data` isn't 1-D, or `data` isn't real.
+**Throws** `LBDError` if the name is invalid or used, `data` isn't 1-D, `data` isn't real, or
+`elements` don't fit the positions.
 
 ## `add_value!`
 
 ```julia
-add_value!(d, name, data, axes=String[]; unit="", label=name, dtype=:auto) -> Value
+add_value!(d, name, data, axes=String[]; unit="", label=name, dtype=:auto, shape=(), elements=nothing) -> Value
 ```
 
 Adds an N-D value.
@@ -101,6 +103,8 @@ Adds an N-D value.
 | `unit` | Unit string. |
 | `label` | Display text. |
 | `dtype` | `:auto` keeps the element type, or pass a type to force it: `Float32`, `Float64`, `Int8`…`Int64`, `UInt8`…`UInt64`, `ComplexF32`, `ComplexF64`, `Bool`. |
+| `shape` | The shape of one data point (format 1.2): `(3,)` for a vector, `(2, 2)` for a matrix; `()`: one number. `data`'s dimensions are the value's axes first, then the data point's. |
+| `elements` | A data point's position texts: one vector for a vector (`["x", "y", "z"]`), one per dimension for a matrix (`[["I", "Q"], nothing]`). |
 
 `size(data)` must equal the axis lengths in order.
 
@@ -117,7 +121,12 @@ add_value!(d, "trace", v, "t"; unit="V")
 add_value!(d, "mask", v .> 0.5, "t")            # Bool
 add_value!(d, "raw", counts, "t"; dtype=Float32)
 add_value!(d, "fit_Q", 12345.6)                 # scalar
+add_axis!(d, "state"; elements=["ground", "excited"])                      # positions 0, 1
+add_value!(d, "bloch", zeros(length(v), 3), "t"; shape=(3,), elements=["x", "y", "z"])
 ```
+
+LBD makes one axis per dimension of a data point (`bloch_dim1`, `role == "point"`);
+`v.point_axes`, `v.elements` and `LBD.point_shape(v)` describe it.
 
 ## `LBD.save`
 
