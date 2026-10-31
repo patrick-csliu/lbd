@@ -82,9 +82,36 @@ def check_live(path: Path) -> None:
     assert d["state"].elements == ["ground", "excited"]
 
 
+def check_groups(path: Path) -> None:
+    d = lbd.load(path)
+    assert d.lbd_version == "2.0", d.lbd_version
+    assert d.groups["AB"].order == ["A", "B"] and d.groups["PQR"].order == ["P", "Q", "R"]
+    np.testing.assert_array_equal(d["A"].data, [1, 2, 3])
+    np.testing.assert_array_equal(d["B"].data, [10, 10, 20, 15, 25, 35])
+    np.testing.assert_array_equal(d["B"].parent, [0, 1, 1, 2, 2, 2])
+    assert d["A"].unit == "V" and d["B"].group == "AB" and d["C"].group is None
+    assert d["f"].dims == [("A", "B")] and d["h"].dims == [("A", "B"), ("C",)]
+    np.testing.assert_array_equal(d["f"].data, [110, 210, 220, 315, 325, 335])
+    np.testing.assert_array_equal(d["q"].data, [1.5, 3.0, 4.5])
+    assert d["h"].shape == (6, 3)
+    np.testing.assert_array_equal(d["h"].data[5], [3, 35, 38])
+    assert d["cov"].point_shape == (2, 2) and d["cov"].shape == (6, 2, 2)
+    np.testing.assert_array_equal(d["cov"].data[4], [[3, 25], [25, -3]])
+    assert d["n"].data.dtype == np.int16
+    np.testing.assert_array_equal(d["n"].data, [1, 0, 0, 0, 2, 0])
+    np.testing.assert_array_equal(d["n"].measured, [True, False, False, False, True, False])
+    np.testing.assert_array_equal(d["Q"].data, [0, 0, 1, 0, 1, 2])
+    np.testing.assert_array_equal(d["R"].parent, [2, 4, 5, 5])
+    np.testing.assert_array_equal(d["u"].data, [10, 20, 21, 30, 31, 32])
+    np.testing.assert_array_equal(d["w"].data, [210, 310, 320, 321])
+    m = d.to_dense("f")
+    np.testing.assert_array_equal(m["B"].data, [10, 15, 20, 25, 35])
+    assert np.isnan(m["f"].data[0, 1]) and m["f"].data[2, 3] == 325
+
+
 root = Path(sys.argv[1])
 failed = False
-for name, test in (("fixture.lbd", check), ("live.lbd", check_live)):
+for name, test in (("fixture.lbd", check), ("live.lbd", check_live), ("groups.lbd", check_groups)):
     for p in sorted(root.glob(f"*/{name}")):
         try:
             test(p)

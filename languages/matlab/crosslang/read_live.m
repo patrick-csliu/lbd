@@ -51,7 +51,15 @@ n = numel(d.Axes.time.Data);
 if ~isequal(d.Values.T.Data(:), 10 * (0:n-1)')
     error('crosslang:live', 'T is wrong');
 end
+c = d.coords("gv");                       % the group: each point right, or not yet measured
+gv = d.Values.gv.Data(:);
+if ~all(isnan(gv) | gv == 10 * c.gi + c.gj)
+    error('crosslang:live', 'a point of the group is wrong');
+end
 if final && ~all(measured)
     error('crosslang:live', 'not every row in the finished file');
+end
+if final && (numel(gv) ~= sum(mod(0:size(s, 1) - 1, 3) + 1) || any(isnan(gv)))
+    error('crosslang:live', 'group points missing');
 end
 end

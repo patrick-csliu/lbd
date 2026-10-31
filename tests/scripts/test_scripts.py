@@ -457,6 +457,7 @@ def test_test_all_runs_what_a_change_affects(load_module):
 
     assert picked("languages/matlab/+lbd/Dataset.m") == ["crosslang", "examples", "matlab"]
     assert picked("languages/julia/crosslang/check.jl") == ["crosslang"]
+    assert picked("tests/crosslang/README.md") == ["crosslang", "docs"]           # included in the docs
     assert {"viewer", "e2e", "tools"} <= set(picked("languages/python/src/lbd/io.py"))   # the viewer is built on it
     assert picked("viewer/web/src/App.tsx") == ["e2e", "web"]
     assert picked("docs/matlab.md") == ["docs", "examples"]

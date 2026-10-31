@@ -22,9 +22,40 @@ for f = dir(fullfile(root, '*', 'live.lbd'))'
         fprintf('  matlab reads %-7s live.lbd FAILED: %s\n', lang, err.message);
     end
 end
+for f = dir(fullfile(root, '*', 'groups.lbd'))'
+    lang = string(regexp(f.folder, '[^\\/]+$', 'match', 'once'));
+    try
+        checkGroups(fullfile(f.folder, f.name));
+        fprintf('  matlab reads %-7s groups.lbd OK\n', lang);
+    catch err
+        failed = true;
+        fprintf('  matlab reads %-7s groups.lbd FAILED: %s\n', lang, err.message);
+    end
+end
 if failed
     error('crosslang:failed', 'MATLAB cross-language check failed');
 end
+end
+
+function checkGroups(p)
+d = lbd.load(p);
+expect(d.LbdVersion == "2.0", "version 2.0");
+expect(isequal(d.Groups.AB.Order, ["A" "B"]) && isequal(d.Groups.PQR.Order, ["P" "Q" "R"]), "group orders");
+expect(isequal(double(d.Axes.A.Data(:)'), [1 2 3]), "A");
+expect(isequal(double(d.Axes.B.Data(:)'), [10 10 20 15 25 35]), "B");
+expect(isequal(d.Axes.B.Parent(:)', int64([1 2 2 3 3 3])), "B parents (from 1)");
+expect(d.Axes.A.Unit == "V" && d.Axes.B.Group == "AB" && d.Axes.C.Group == "", "units and groups");
+expect(isequal(d.Values.f.Dims, {["A" "B"]}) && isequal(d.Values.h.Dims, {["A" "B"], "C"}), "dims");
+expect(isequal(d.Values.f.Data(:)', [110 210 220 315 325 335]), "f");
+expect(isequal(d.Values.q.Data(:)', [1.5 3 4.5]), "q");
+expect(isequal(size(d.Values.h.Data), [6 3]) && isequal(d.Values.h.Data(6, :), [3 35 38]), "h");
+expect(isequal(d.Values.cov.PointShape, [2 2]) && isequal(squeeze(d.Values.cov.Data(5, :, :)), [3 25; 25 -3]), "cov");
+expect(isa(d.Values.n.Data, 'int16') && isequal(d.Values.n.Data(:)', int16([1 0 0 0 2 0])), "n");
+expect(isequal(d.Values.n.Measured(:)', [true false false false true false]), "n measured");
+expect(isequal(double(d.Axes.Q.Data(:)'), [0 0 1 0 1 2]) && isequal(d.Axes.R.Parent(:)', int64([3 5 6 6])), "PQR");
+expect(isequal(d.Values.u.Data(:)', [10 20 21 30 31 32]) && isequal(d.Values.w.Data(:)', [210 310 320 321]), "u, w");
+m = d.toDense("f");
+expect(isequal(m.Axes.B.Data(:)', [10 15 20 25 35]) && isnan(m.Values.f.Data(1, 2)) && m.Values.f.Data(3, 4) == 325, "toDense");
 end
 
 function checkLive(p)

@@ -55,3 +55,33 @@ with lbd.Writer(out / "live.lbd", title="Live – ü") as w:
     w.write(state="excited", power=0, n=7)
     w.write(state="ground", power=1, n=3)
     w.close(stopped=True)
+
+# The groups fixture (format 2.0): variable sweeps, the same in every language.
+g = lbd.Dataset(title="Groups")
+g.add_group("AB")
+g.add_axis("A", group="AB", unit="V")
+g.add_axis("B", group="AB", unit="Hz")
+g.add_axis("C", [0.1, 0.2, 0.3])
+g.add_value("f", axes=["A", "B"])
+g.add_value("q", axes="A")
+g.add_value("h", axes=["A", "B", "C"])
+g.add_value("cov", axes=["A", "B"], shape=(2, 2))
+g.add_value("n", axes=["A", "B"], dtype="int16")
+g.add_group("PQR")
+for a in "PQR":
+    g.add_axis(a, group="PQR")
+g.add_value("u", axes=["P", "Q"])
+g.add_value("w", axes="PQR")
+for a, bs in ((1, [10]), (2, [10, 20]), (3, [15, 25, 35])):          # by coordinates
+    for b in bs:
+        g.write(A=a, B=b, f=100 * a + b, h=[a, b, a + b], cov=[[a, b], [b, -a]])
+    g.write(A=a, q=1.5 * a)
+g.write(A=1, B=10, n=1)
+g.write(A=3, B=25, n=2)
+for p in range(1, 4):                                                 # by parent=
+    i = g.write(P=p)
+    for q in range(p):
+        k = g.write(parent=i, Q=q, u=10 * p + q)
+        r = np.arange(q)
+        g.write(parent=k, R=r, w=100 * p + 10 * q + r)
+g.save(out / "groups.lbd")

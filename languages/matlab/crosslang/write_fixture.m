@@ -47,4 +47,38 @@ w.write(time=3, T=30);
 w.write(state="excited", power=1, n=7);
 w.write(state="ground", power=2, n=3);
 w.close(Stopped=true);
+
+% The groups fixture (format 2.0): variable sweeps, the same in every language.
+g = lbd.Dataset("Groups");
+g.addGroup("AB");
+g.addAxis("A", [], Group="AB", Unit="V");
+g.addAxis("B", [], Group="AB", Unit="Hz");
+g.addAxis("C", [0.1 0.2 0.3]);
+g.addValue("f", [], ["A" "B"]);
+g.addValue("q", [], "A");
+g.addValue("h", [], ["A" "B" "C"]);
+g.addValue("cov", [], ["A" "B"], Shape=[2 2]);
+g.addValue("n", [], ["A" "B"], Dtype="int16");
+g.addGroup("PQR");
+for a = ["P" "Q" "R"], g.addAxis(a, [], Group="PQR"); end
+g.addValue("u", [], ["P" "Q"]);
+g.addValue("w", [], "PQR");
+bs = {10, [10 20], [15 25 35]};
+for a = 1:3                                            % by coordinates
+    for b = bs{a}
+        g.write(A=a, B=b, f=100 * a + b, h=[a b a + b], cov=[a b; b -a]);
+    end
+    g.write(A=a, q=1.5 * a);
+end
+g.write(A=1, B=10, n=1);
+g.write(A=3, B=25, n=2);
+for p = 1:3                                            % by Parent=
+    i = g.write(P=p);
+    for q = 0:p - 1
+        k = g.write(Parent=i, Q=q, u=10 * p + q);
+        r = 0:q - 1;
+        g.write(Parent=k, R=r, w=100 * p + 10 * q + r);
+    end
+end
+g.save(fullfile(out, "groups.lbd"));
 end

@@ -26,8 +26,11 @@ def check(d, final):
     for i in np.flatnonzero(measured):
         assert np.all(s[i] == (i + 1) * (1 + 1j)), f"row {i} is wrong"
     np.testing.assert_array_equal(d["T"].data, 10.0 * np.arange(len(d["time"])))
+    c, gv = d.coords("gv"), d["gv"].data                  # the group: each point right, or not yet measured
+    assert np.all(np.isnan(gv) | (gv == 10 * c["gi"] + c["gj"])), "a point of the group is wrong"
     if final:
         assert all(measured), "not every row in the finished file"
+        assert len(gv) == sum(i % 3 + 1 for i in range(len(s))) and not np.isnan(gv).any(), "group points missing"
     return len(d["time"])
 
 

@@ -19,7 +19,10 @@ function check(d, final)
         all(==(ComplexF64(i, i)), s[i, :]) || error("row $i is wrong")
     end
     d["T"].data == 10.0 .* (0:length(d["time"].data)-1) || error("T is wrong")
+    c, gv = coords(d, "gv"), d["gv"].data              # the group: each point right, or not yet measured
+    all(@. isnan(gv) | (gv == 10 * c["gi"] + c["gj"])) || error("a point of the group is wrong")
     final && !all(measured) && error("not every row in the finished file")
+    final && (length(gv) != sum(i % 3 + 1 for i in 0:size(s, 1)-1) || any(isnan, gv)) && error("group points missing")
     return length(d["time"].data)
 end
 

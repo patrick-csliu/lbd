@@ -71,7 +71,7 @@ AFFECTS = [
     ("viewer/web/", {"web", "e2e"}),
     ("docs/", {"docs", "examples"}), ("mkdocs.yml", {"docs"}), ("spec/", {"docs"}),
     ("CHANGELOG.md", {"docs"}), ("README.md", {"docs"}),
-    ("tests/crosslang/", {"crosslang"}), ("scripts/languages.py", {"tools", "crosslang"}),
+    ("tests/crosslang/README.md", {"crosslang", "docs"}), ("tests/crosslang/", {"crosslang"}), ("scripts/languages.py", {"tools", "crosslang"}),
     ("scripts/check_doc_examples.py", {"tools", "examples"}), ("scripts/", {"tools"}),
     ("packaging/", {"tools"}), ("tests/", {"tools"}), ("examples/", {"tools", "viewer"}),
 ]

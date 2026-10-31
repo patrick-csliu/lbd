@@ -49,3 +49,38 @@ write!(w; time=3.0, T=30.0)
 write!(w; state="excited", power=1, n=7)
 write!(w; state="ground", power=2, n=3)
 close(w; stopped=true)
+
+# The groups fixture (format 2.0): variable sweeps, the same in every language.
+g = LBD.Dataset("Groups")
+add_group!(g, "AB")
+add_axis!(g, "A"; group="AB", unit="V")
+add_axis!(g, "B"; group="AB", unit="Hz")
+add_axis!(g, "C", [0.1, 0.2, 0.3])
+add_value!(g, "f"; axes=["A", "B"])
+add_value!(g, "q"; axes="A")
+add_value!(g, "h"; axes=["A", "B", "C"])
+add_value!(g, "cov"; axes=["A", "B"], shape=(2, 2))
+add_value!(g, "n"; axes=["A", "B"], dtype=Int16)
+add_group!(g, "PQR")
+for a in ("P", "Q", "R")
+    add_axis!(g, a; group="PQR")
+end
+add_value!(g, "u"; axes=["P", "Q"])
+add_value!(g, "w"; axes="PQR")
+for (a, bs) in (1 => [10], 2 => [10, 20], 3 => [15, 25, 35])          # by coordinates
+    for b in bs
+        write!(g; A=a, B=b, f=100a + b, h=Float64[a, b, a + b], cov=Float64[a b; b -a])
+    end
+    write!(g; A=a, q=1.5a)
+end
+write!(g; A=1, B=10, n=1)
+write!(g; A=3, B=25, n=2)
+for p in 1:3                                                           # by parent=
+    i = write!(g; P=p)
+    for q in 0:p-1
+        k = write!(g; parent=i, Q=q, u=10p + q)
+        r = collect(0:q-1)
+        write!(g; parent=k, R=r, w=100p .+ 10q .+ r)
+    end
+end
+LBD.save(joinpath(out, "groups.lbd"), g)

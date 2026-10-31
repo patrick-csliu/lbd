@@ -18,9 +18,10 @@ with a notice. See [languages/README.md](../../languages/README.md) for adding o
 <!-- --8<-- [start:fixture] -->
 ## What the scripts must do
 
-- **write** creates `<out>/fixture.lbd` with exactly the content below, and `<out>/live.lbd`
-  with the language's Writer (the live fixture). `<out>` is given as `{out}` / `LBD_OUT`.
-- **check** finds every `<root>/*/fixture.lbd` and `<root>/*/live.lbd` (`{root}` /
+- **write** creates `<out>/fixture.lbd` with exactly the content below, `<out>/live.lbd`
+  with the language's Writer (the live fixture), and `<out>/groups.lbd` (the groups fixture).
+  `<out>` is given as `{out}` / `LBD_OUT`.
+- **check** finds every `<root>/*/fixture.lbd`, `<root>/*/live.lbd` and `<root>/*/groups.lbd` (`{root}` /
   `LBD_ROOT`), compares each with its definition, prints one line per file (`<language> reads
   <writer> OK` or `FAILED: <reason>`), and exits non-zero if any check failed.
 - **read_live** (optional) reads a measurement while Python writes it: see "Reading while
@@ -62,16 +63,34 @@ with a notice. See [languages/README.md](../../languages/README.md) for adding o
 | value `n(state, power)` | int32, written at `state="excited", power 0` (7) and `state="ground", power 1` (3): data `[[0, 3, 0], [7, 0, 0]]`, mask `/measured/n` `[[0, 1, 0], [1, 0, 0]]` |
 | finish | closed as stopped on purpose (`close(stopped=True)` and its equivalents) |
 
+## Groups fixture definition (format 2.0; indices from 0 as in the file)
+
+| Item | Definition |
+|---|---|
+| file | `<out>/groups.lbd`, title `Groups`, `lbd_version` `"2.0"` |
+| group `AB` | order `A, B`; `A` unit V, `B` unit Hz; written by coordinates: A=1: B=10; A=2: B=10, 20; A=3: B=15, 25, 35. Levels: `A = [1, 2, 3]`, `B = [10, 10, 20, 15, 25, 35]`, `B._parent = [0, 1, 1, 2, 2, 2]` |
+| axis `C` | fixed, `[0.1, 0.2, 0.3]` |
+| value `f(A, B)` | float64, `100·A + B` per (A, B) point: `[110, 210, 220, 315, 325, 335]` |
+| value `q(A)` | float64, `1.5·A`: `[1.5, 3, 4.5]` |
+| value `h(A, B, C)` | float64, per (A, B) point the row `[A, B, A+B]`: shape (6, 3) |
+| value `cov(A, B)` | float64, a 2 × 2 matrix per point `[[A, B], [B, −A]]`: shape (6, 2, 2) |
+| value `n(A, B)` | int16, written only at (1, 10) = 1 and (3, 25) = 2: data `[1, 0, 0, 0, 2, 0]`, mask `[1, 0, 0, 0, 1, 0]` |
+| group `PQR` | order `P, Q, R`, written with `parent=`: for P in 1…3 a point, under it Q in 0…P−1, under each R in 0…Q−1. `Q = [0, 0, 1, 0, 1, 2]`, `R = [0, 0, 0, 1]`, `R._parent = [2, 4, 5, 5]` |
+| values `u(P, Q)`, `w(P, Q, R)` | `u = 10·P + Q`: `[10, 20, 21, 30, 31, 32]`; `w = 100·P + 10·Q + R`: `[210, 310, 320, 321]` |
+| check also | `to_dense(f)`: B ticks `[10, 15, 20, 25, 35]`, NaN where not measured |
+
 ## Reading while measuring
 
 `run_all.py` then starts every language's `read_live` command (`{file}` / `LBD_FILE`: a
 `measuring.lbd` path) and a Python Writer that writes `measuring.lbd.writing` slowly: 200 rows,
-row `i` (0-based) of `S21(power, freq)` (5 frequencies) all `(i+1)·(1+1j)`, and a growing `time`
-with `T = 10·time`. A reader:
+row `i` (0-based) of `S21(power, freq)` (5 frequencies) all `(i+1)·(1+1j)`, a growing `time`
+with `T = 10·time`, and a group `G` (`gi → gj`): at row `i` the points `gi = i`,
+`gj = 0 … i mod 3`, with `gv = 10·gi + gj`. A reader:
 
 1. creates `ready-<language id>` next to the file once it is running (the writer waits for all);
 2. reads the `.writing` file again and again until it is renamed: every read must show the
-   measured rows as a run from the first, each one right, and `T = 10·time`;
+   measured rows as a run from the first, each one right, `T = 10·time`, and every point of
+   `gv` right or not measured yet (`NaN`);
 3. reads the finished `measuring.lbd` (every row measured), and fails unless at least two reads
    saw the measurement part-way.
 

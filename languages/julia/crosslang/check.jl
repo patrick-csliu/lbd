@@ -65,6 +65,26 @@ function check_live(path)
     @test d["state"].elements == ["ground", "excited"]
 end
 
+function check_groups(path)
+    d = LBD.load(path)
+    @test d.lbd_version == "2.0"
+    @test d.groups["AB"].order == ["A", "B"] && d.groups["PQR"].order == ["P", "Q", "R"]
+    @test d["A"].data == [1, 2, 3] && d["B"].data == [10, 10, 20, 15, 25, 35]
+    @test d["B"].parent == [1, 2, 2, 3, 3, 3]                             # from 1 in Julia
+    @test d["A"].unit == "V" && d["B"].group == "AB" && d["C"].group === nothing
+    @test d["f"].dims == Tuple[("A", "B")] && d["h"].dims == Tuple[("A", "B"), ("C",)]
+    @test d["f"].data == [110, 210, 220, 315, 325, 335]
+    @test d["q"].data == [1.5, 3.0, 4.5]
+    @test size(d["h"].data) == (6, 3) && d["h"].data[6, :] == [3, 35, 38]
+    @test d["cov"].point_shape == (2, 2) && d["cov"].data[5, :, :] == [3 25; 25 -3]
+    @test eltype(d["n"].data) == Int16 && d["n"].data == [1, 0, 0, 0, 2, 0]
+    @test d["n"].measured == [true, false, false, false, true, false]
+    @test d["Q"].data == [0, 0, 1, 0, 1, 2] && d["R"].parent == [3, 5, 6, 6]
+    @test d["u"].data == [10, 20, 21, 30, 31, 32] && d["w"].data == [210, 310, 320, 321]
+    m = to_dense(d, "f")
+    @test m["B"].data == [10, 15, 20, 25, 35] && isnan(m["f"].data[1, 2]) && m["f"].data[3, 4] == 325
+end
+
 root = ARGS[1]
 failed = false
 for lang in sort(readdir(root))
@@ -77,5 +97,10 @@ for lang in sort(readdir(root))
     isfile(p) || continue
     @testset "julia reads $lang live.lbd" begin
         check_live(p)
+    end
+    p = joinpath(root, lang, "groups.lbd")
+    isfile(p) || continue
+    @testset "julia reads $lang groups.lbd" begin
+        check_groups(p)
     end
 end
