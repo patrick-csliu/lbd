@@ -25,12 +25,17 @@ are still written as 1.2).
   `d.coords("f")`, `d.rows("f", by=...)`, `d.to_dense("f")`. **MATLAB** the same:
   `d.addGroup`, `d.addAxis(name, [], Group=)`, `i = d.write(A=3)`, `d.write(Parent=i, B=25, f=x)`
   (indices from 1), `d.coords("f")`, `d.rows("f", By="A")` (a cell `{key, dataset}`),
-  `d.toDense("f", Round=, RTol=, ATol=, Limit=)`, and `lbd.Writer` with groups. Julia and the
-  viewer follow in this version.
+  `d.toDense("f", Round=, RTol=, ATol=, Limit=)`, and `lbd.Writer` with groups. **Julia** the
+  same: `add_group!`, `add_axis!(d, name; group=)`, `i = write!(d; A=3)`,
+  `write!(d; parent=i, B=25, f=x)` (indices from 1), `coords(d, "f")`, `rows(d, "f"; by="A")`
+  (`key => dataset` pairs), `to_dense(d, "f"; round=, rtol=, atol=, limit=)`, and `LBD.Writer`
+  with groups. The viewer follows in this version.
 
-- **A value's `axes` are what was swept** (Python and MATLAB; Julia follows in this version).
+- **A value's `axes` are what was swept** (every language).
   In MATLAB: `Values.<name>.Axes` lists the sweep axes, `PointShape` and `Elements` describe the
   data point, `Dims` is new; `PointAxes` and the `<value>_dim<k>` entries of `Axes` are gone.
+  In Julia: `v.axes`, `v.dims`, `v.point_shape` (a field now), `v.elements`; `v.point_axes` and
+  `d.axes["<value>_dim<k>"]` are gone.
   The dimensions of a data point (`shape=`) are no longer axes of the dataset: `d.axes` holds
   only sweep axes (`d.axes["bloch_dim1"]` is gone), `v.axes` lists only them, and the value
   describes its data point with `point_shape` and `elements`; `v.point_axes` is gone. New:

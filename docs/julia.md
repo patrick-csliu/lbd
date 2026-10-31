@@ -127,8 +127,10 @@ add_axis!(d, "state"; elements=["ground", "excited"])                      # pos
 add_value!(d, "bloch", zeros(length(v), 3), "t"; shape=(3,), elements=["x", "y", "z"])
 ```
 
-LBD makes one axis per dimension of a data point (`bloch_dim1`, `role == "point"`);
-`v.point_axes`, `v.elements` and `LBD.point_shape(v)` describe it.
+A value's `axes` are what was swept (`["t"]`); its data point is described by `v.point_shape`
+(`(3,)`) and `v.elements`, and `v.shape` is the data's size (the sweep, then the data point).
+In the file, each dimension of a data point is an axis of its own (`bloch_dim1`,
+`role="point"`), so every reader reads it.
 
 ## `write!`
 

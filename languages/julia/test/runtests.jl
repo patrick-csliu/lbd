@@ -317,14 +317,15 @@ end
         add_axis!(d, "amp", range(0, 0.5, length=4); unit="V")
         b = reshape(collect(1.0:12.0), 4, 3)
         v = add_value!(d, "bloch", b, "amp"; shape=(3,), elements=["x", "y", "z"])
-        @test v.axes == ["amp", "bloch_dim1"]
-        @test d.axes["bloch_dim1"].role == "point"
+        @test v.axes == ["amp"] && v.point_shape == (3,) && v.dims == Tuple[("amp",)]
+        @test !haskey(d.axes, "bloch_dim1")                 # a data point isn't a sweep axis
         add_value!(d, "cov", zeros(4, 2, 2), "amp"; shape=(2, 2), elements=[["I", "Q"], nothing])
         LBD.save(p, d)
         r = LBD.load(p)
         @test r["bloch"].data == b
-        @test r["bloch"].point_axes == ["bloch_dim1"]
+        @test r["bloch"].axes == ["amp"] && collect(keys(r.axes)) == ["amp"]
         @test LBD.point_shape(r["bloch"]) == (3,)
+        @test h5open(f -> read_attribute(f["values/bloch"], "axes"), p) == "amp,bloch_dim1"
         @test r["bloch"].elements == Any[["x", "y", "z"]]
         @test r["cov"].elements == Any[["I", "Q"], nothing]
         @test LBD.point_shape(LBD.info(p)["cov"]) == (2, 2)
@@ -496,5 +497,168 @@ end
         else
             @warn "examples/data not found; run examples/python/make_examples.py"
         end
+    end
+end
+
+# ---- axis groups (format 2.0): the data API's cases --------------------------------
+
+function group_case2()
+    # Case 2: group A -> B, B chosen per A (A=1: B=10; A=2: B=10, 20; A=3: B=15, 25, 35)
+    d = Dataset("case 2")
+    add_group!(d, "AB")
+    add_axis!(d, "A"; group="AB"); add_axis!(d, "B"; group="AB")
+    add_value!(d, "f"; axes=["A", "B"])
+    add_value!(d, "q"; axes="A")
+    for (a, bs) in [1 => [10], 2 => [10, 20], 3 => [15, 25, 35]]
+        for b in bs
+            write!(d; A=a, B=b, f=100a + b)
+        end
+        write!(d; A=a, q=1.5a)
+    end
+    return d
+end
+
+function group_case4(by_parent)
+    # Case 4: group A -> B -> C, B in 0:A-1, C in 0:B-1; f per (A, B), g per (A, B, C)
+    d = Dataset("case 4")
+    add_group!(d, "ABC")
+    for a in ("A", "B", "C")
+        add_axis!(d, a; group="ABC")
+    end
+    add_value!(d, "f"; axes=["A", "B"])
+    add_value!(d, "g"; axes="ABC")
+    for a in 1:3
+        i = by_parent ? write!(d; A=a) : nothing
+        for b in 0:a-1
+            c = collect(0:b-1)
+            if by_parent
+                k = write!(d; parent=i, B=b, f=10a + b)
+                write!(d; parent=k, C=c, g=100a .+ 10b .+ c)
+            else
+                write!(d; A=a, B=b, f=10a + b)
+                write!(d; A=a, B=b, C=c, g=100a .+ 10b .+ c)
+            end
+        end
+    end
+    return d
+end
+
+@testset "axis groups" begin
+    dir = mktempdir()
+    @testset "case 2, built and loaded" begin
+        for loaded in (false, true)
+            d = group_case2()
+            if loaded
+                p = joinpath(dir, "case2.lbd")
+                LBD.save(p, d)
+                d = LBD.load(p)
+                @test d.lbd_version == "2.0"
+            end
+            @test d.groups["AB"].order == ["A", "B"]
+            @test d.axes["A"].data == [1, 2, 3]
+            @test d.axes["B"].data == [10, 10, 20, 15, 25, 35]
+            @test d.axes["B"].parent == [1, 2, 2, 3, 3, 3]          # from 1 in Julia
+            @test d.axes["B"].group == "AB"
+            f = d["f"]
+            @test f.axes == ["A", "B"] && f.dims == Tuple[("A", "B")] && f.shape == (6,)
+            @test f.data == [110, 210, 220, 315, 325, 335]
+            @test d["q"].dims == Tuple[("A",)]
+            c = coords(d, "f")
+            @test c["A"] == [1, 2, 2, 3, 3, 3] && c["B"] == [10, 10, 20, 15, 25, 35]
+            m = to_dense(d, "f")
+            @test m.axes["B"].data == [10, 15, 20, 25, 35] && isempty(m.groups)
+            expected = fill(NaN, 3, 5)
+            expected[1, 1], expected[2, 1], expected[2, 3] = 110, 210, 220
+            expected[3, 2], expected[3, 4], expected[3, 5] = 315, 325, 335
+            @test isequal(m["f"].data, expected)
+            r = rows(d, "f"; by="A")
+            @test first.(r) == [1, 2, 3]
+            @test last(r[3]).axes["B"].data == [15, 25, 35] && last(r[3])["f"].data == [315, 325, 335]
+        end
+    end
+    @testset "case 4, by coordinates and by parent" begin
+        a, b = group_case4(false), group_case4(true)
+        for d in (a, b)
+            @test d.axes["B"].data == [0, 0, 1, 0, 1, 2]
+            @test d.axes["C"].data == [0, 0, 0, 1] && d.axes["C"].parent == [3, 5, 6, 6]
+            @test d["f"].data == [10, 20, 21, 30, 31, 32] && d["g"].data == [210, 310, 320, 321]
+        end
+        p = joinpath(dir, "case4.lbd")
+        LBD.save(p, a)
+        h5open(p) do f
+            @test read(f["axes/ABC/C._parent"]) == [2, 4, 5, 5]                  # from 0 in the file
+            @test read_attribute(f["values/g"], "axes") == "A,B,C"
+        end
+        r = LBD.load(p)
+        g = to_dense(r, "g")
+        @test size(g["g"].data) == (2, 2, 2) && g.axes["A"].data == [2, 3]
+        byA = rows(r, "g"; by="A")
+        row = last(byA[3])
+        @test row.groups["ABC"].order == ["B", "C"] && row.axes["C"].parent == [2, 3, 3]
+        @test row["g"].data == [310, 320, 321]
+        byB = rows(r, "g"; by="B")
+        @test first(byB[6]) == (3, 2) && last(byB[6]).axes["C"].data == [0, 1]
+        @test size(last(byB[1])["g"].data) == (0,)
+    end
+    @testset "a group, a fixed axis and a matrix per point" begin
+        d = Dataset("case 3 and 5b")
+        add_group!(d, "AB")
+        add_axis!(d, "A"; group="AB"); add_axis!(d, "B"; group="AB")
+        add_axis!(d, "C", [0.1, 0.2, 0.3])
+        add_value!(d, "h"; axes=["A", "B", "C"])
+        add_value!(d, "cov"; axes=["A", "B"], shape=(2, 2))
+        write!(d; A=1, B=[10, 20], h=[1.0 2 3; 4 5 6], cov=ones(2, 2, 2))
+        write!(d; A=2, B=10, C=2, h=7.0)
+        @test d["h"].dims == Tuple[("A", "B"), ("C",)]
+        @test isequal(d["h"].data[3, :], [NaN, 7.0, NaN])
+        p = joinpath(dir, "case3.lbd")
+        LBD.save(p, d)
+        r = LBD.load(p)
+        @test isequal(r["h"].data, d["h"].data) && r["cov"].point_shape == (2, 2)
+        m = to_dense(r, "h")
+        @test size(m["h"].data) == (2, 2, 3) && m["h"].data[1, 2, :] == [4, 5, 6]
+    end
+    @testset "refusals and near-equal coordinates" begin
+        d = group_case2()
+        @test_throws LBDError write!(d; B=10, f=1.0)
+        @test_throws LBDError write!(d; A=3, f=1.0)
+        @test_throws LBDError write!(d; A=NaN, B=1, f=1.0)
+        @test_throws LBDError add_value!(d, "x"; axes=["B"])
+        @test_throws LBDError to_dense(d, "f"; limit=10)
+        @test length(d.axes["B"].data) == 6
+        e = Dataset()
+        add_group!(e, "AB")
+        add_axis!(e, "A"; group="AB"); add_axis!(e, "B"; group="AB")
+        add_value!(e, "f"; axes=["A", "B"])
+        write!(e; A=0.3, B=1, f=1.0)
+        @test_logs (:warn, r"new point next to") write!(e; A=0.1 + 0.2, B=2, f=2.0)
+        @test_logs (:warn, r"differ only by rounding") to_dense(e, "f")
+        @test size(to_dense(e, "f"; round=9)["f"].data) == (1, 2)
+        @test to_dense(e, "f"; rtol=1e-9)["f"].data == [1.0 2.0]
+    end
+    @testset "LBD.Writer with a group" begin
+        p = joinpath(dir, "live_group.lbd")
+        lbd_writer(p; title="variable") do w
+            add_group!(w, "ABC")
+            for a in ("A", "B", "C")
+                add_axis!(w, a; group="ABC")
+            end
+            add_value!(w, "f"; axes=["A", "B"])
+            add_value!(w, "g"; axes="ABC")
+            add_value!(w, "n"; axes="A", dtype=Int16)
+            for a in 1:3
+                i = write!(w; A=a, n=a)
+                @test i == a
+                for b in 0:a-1
+                    k = write!(w; parent=i, B=b, f=10a + b)
+                    c = collect(0:b-1)
+                    write!(w; parent=k, C=c, g=100a .+ 10b .+ c)
+                end
+            end
+        end
+        r = LBD.load(p)
+        @test r.lbd_version == "2.0" && r.axes["C"].parent == [3, 5, 6, 6]
+        @test r["g"].data == [210, 310, 320, 321] && r["f"].data == [10, 20, 21, 30, 31, 32]
+        @test r["n"].data == Int16[1, 2, 3] && r["n"].measured === nothing
     end
 end

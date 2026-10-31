@@ -70,7 +70,7 @@ function Writer(path::AbstractString; title::AbstractString="", description::Abs
 end
 
 function Base.getproperty(w::Writer, s::Symbol)
-    s in (:title, :description, :meta, :plot, :style, :style_name, :axes, :values, :id) && return getfield(getfield(w, :d), s)
+    s in (:title, :description, :meta, :plot, :style, :style_name, :axes, :groups, :values, :id) && return getfield(getfield(w, :d), s)
     return getfield(w, s)
 end
 function Base.setproperty!(w::Writer, s::Symbol, x)
@@ -106,6 +106,13 @@ end
 function before_start(w::Writer, what)
     w.state == :new || throw(LBDError("$what: give every axis and value before the first write! " *
                                       "(a file being written can't get new ones)"))
+end
+
+"""As `add_group!` for a `Dataset`; before the first `write!`. Its points are written into the
+file as `write!` adds them."""
+function add_group!(w::Writer, name::AbstractString)
+    before_start(w, "add_group!")
+    return add_group!(w.d, name)
 end
 
 """As `add_axis!` for a `Dataset`; before the first `write!`."""
@@ -165,17 +172,27 @@ function create_live!(f, d::Dataset)
     write_str_attr(f, "writer", d.writer)
     write_str_attr(f, "id", d.id)
     ga = create_group(f, "axes")
-    for a in values(d.axes)
-        ds = a.grows ? live_dataset(ga, a.name, Float64, (0,), true) : write_array(ga, a.name, a.data, false)
+    for a in file_axes(d)
+        ds = a.grows ? live_dataset(ga, a.name, Float64, (0,), (1,)) : write_array(ga, a.name, a.data, false)
         write_str_attr(ds, "unit", a.unit)
         write_str_attr(ds, "label", a.label)
         a.elements === nothing || write_attribute(ds, "elements", String[e for e in a.elements])
         a.role === nothing || write_str_attr(ds, "role", a.role)
     end
+    for g in values(d.groups)                    # each level grows as write! adds points
+        gg = create_group(ga, g.name)
+        write_str_attr(gg, "order", join(g.order, ","))
+        for (k, name) in enumerate(g.order)
+            ds = live_dataset(gg, name, Float64, (0,), (1,))
+            write_str_attr(ds, "unit", d.axes[name].unit)
+            write_str_attr(ds, "label", d.axes[name].label)
+            k > 1 && live_dataset(gg, name * "._parent", Int64, (0,), (1,))
+        end
+    end
     gv = create_group(f, "values")
     masks = String[]
     for v in values(d.values)
-        grows = !isempty(v.axes) && d.axes[v.axes[1]].grows
+        grows = growing_dims(d, v)
         T = JULIA_TYPES[v.dtype]
         if v.name in d.placeholders
             ds = live_dataset(gv, v.name, T === Bool ? UInt8 : T, v.shape, grows)
@@ -186,27 +203,36 @@ function create_live!(f, d::Dataset)
         end
         write_str_attr(ds, "unit", v.unit)
         write_str_attr(ds, "label", v.label)
-        write_str_attr(ds, "axes", join(v.axes, ","))
+        write_str_attr(ds, "axes", join(vcat(v.axes, point_names(v)), ","))
         T === Bool && write_attribute(ds, "lbd_bool", Int64(1))
     end
     if !isempty(masks)
         gm = create_group(f, "measured")
         for name in masks
             v = d.values[name]
-            live_dataset(gm, name, UInt8, v.shape, !isempty(v.axes) && d.axes[v.axes[1]].grows)
+            live_dataset(gm, name, UInt8, v.shape, growing_dims(d, v))
         end
     end
     write_meta(create_group(f, "meta"), d.meta, "meta")
 end
 
-# A chunked dataset of logical `shape`, reading NaN (or 0) where nothing was written; `grows`:
-# unlimited along its first logical dimension. HDF5.jl counts dimensions in Julia order (reversed).
+# The dimensions of `v` that grow while it is written: a growing axis, a group's level.
+growing_dims(d::Dataset, v::Value) =
+    Tuple(i for (i, dm) in enumerate(v.dims) if d.axes[dm[end]].grows || d.axes[dm[end]].group !== nothing)
+
+# A chunked dataset of logical `shape`, reading NaN (or 0) where nothing was written; `grows`: the
+# logical dimensions that are unlimited. HDF5.jl counts dimensions in Julia order (reversed).
 function live_dataset(g, name, T, shape, grows)
     isempty(shape) && return create_dataset(g, name, datatype(T), dataspace(()); fill_value=not_measured(T))
+    nd = length(shape)
     dims = reverse(Tuple(shape))
-    maxd = grows ? (dims[1:end-1]..., -1) : dims
+    jgrows = [nd - i + 1 for i in grows]              # the same dimensions, in Julia order
+    maxd = Tuple(k in jgrows ? -1 : dims[k] for k in 1:nd)
     chunk = collect(max.(dims, 1))
-    grows && (chunk[end] = max(1, 8192 ÷ max(1, prod(chunk[1:end-1]))))
+    chunk[jgrows] .= 1
+    for k in jgrows
+        chunk[k] = max(1, 8192 ÷ max(1, prod(chunk)))
+    end
     while prod(chunk) > 2^17 && any(>(1), chunk)
         k = argmax(chunk)
         chunk[k] = cld(chunk[k], 2)
@@ -221,18 +247,23 @@ end
 Put measured data in its place: as `write!` for a `Dataset`. It returns at once; the data
 reaches the file within `flush_every` seconds (or at `flush`, `close`).
 """
-function write!(w::Writer, names::AbstractDict=Dict{String,Any}(); kw...)
+function write!(w::Writer, names::AbstractDict=Dict{String,Any}(); parent=nothing, kw...)
     raise_failure(w)
     w.state == :new && start!(w)
     w.state == :writing || throw(LBDError("$(basename(w.path)): the Writer is closed; nothing more can be written"))
-    plan = plan_write(w.d, names, kw)
+    plan = plan_write(w.d, names, kw, parent)
     lock(w.lock) do
         if plan.grow !== nothing
             ax = w.d.axes[plan.grow.axis]
             ax.data = vcat(Float64.(ax.data), plan.grow.coords)
             push!(w.pending, (:grow, plan.grow.axis, plan.grow.coords, length(ax.data)))
         end
+        grow_levels!(w.d, plan)                   # the points in memory (lookups), at once
+        for (a, c, p) in plan.levels
+            push!(w.pending, (:level, a, Float64.(c), p, length(w.d.axes[a].data)))
+        end
         for p in plan.puts
+            p.data isa AbstractArray && isempty(p.data) && continue    # no points (an (A, B) without C)
             push!(w.pending, (:put, p.name, p.idx, copy(p.data)))   # a copy: the caller may reuse its buffer
         end
     end
@@ -242,7 +273,7 @@ function write!(w::Writer, names::AbstractDict=Dict{String,Any}(); kw...)
     else
         flush_soon!(w)
     end
-    return nothing
+    return plan.result
 end
 
 """Write everything collected so far to the file now (readers see it)."""
@@ -281,20 +312,28 @@ end
 
 function apply_live!(w::Writer, item)
     f, d = w.file, w.d
-    if item[1] === :grow
-        _, g, c, n = item
+    if item[1] === :grow || item[1] === :level
+        g, c, n = item[2], item[3], item[end]
         for v in values(d.values)            # values first: readers cut to the shortest
-            (isempty(v.axes) || v.axes[1] != g) && continue
-            extend!(f["values"][v.name], n)
-            haskey(f, "measured") && haskey(f["measured"], v.name) && extend!(f["measured"][v.name], n)
+            for (pos, dm) in enumerate(v.dims)
+                dm[end] == g || continue
+                extend!(f["values"][v.name], n, pos, length(v.shape))
+                haskey(f, "measured") && haskey(f["measured"], v.name) && extend!(f["measured"][v.name], n, pos, length(v.shape))
+            end
         end
-        ds = f["axes"][g]
+        where = d.axes[g].group === nothing ? f["axes"] : f["axes"][d.axes[g].group]
+        if item[1] === :level && item[4] !== nothing
+            par = where[g * "._parent"]
+            extend!(par, n)
+            par[(n - length(c) + 1):n] = Int64.(item[4]) .- 1          # from 0 in the file
+        end
+        ds = where[g]
         extend!(ds, n)
         ds[(n - length(c) + 1):n] = c
     else
         _, name, idx, data = item
         v = d.values[name]
-        shape = Tuple(d.axes[a].grows ? length(d.axes[a].data) : s for (a, s) in zip(v.axes, v.shape))
+        shape = (Tuple(dim_length(d, dm) for dm in v.dims)..., v.point_shape...)
         put!(f["values"][name], idx, eltype(data) === Bool || data isa Bool ? UInt8.(data) : data, shape)
         if haskey(f, "measured") && haskey(f["measured"], name)
             put!(f["measured"][name], idx, data isa Number ? 0x01 : fill(0x01, size(data)), shape)
@@ -302,18 +341,37 @@ function apply_live!(w::Writer, item)
     end
 end
 
-function extend!(ds, n)
-    dims = size(ds)
-    HDF5.set_extent_dims(ds, (dims[1:end-1]..., n))   # the first logical dimension is Julia's last
+# Grow `ds` to `n` along its logical dimension `pos` (of `nd`); HDF5.jl counts in reversed order.
+function extend!(ds, n, pos=1, nd=ndims(ds))
+    dims = collect(size(ds))
+    dims[nd - pos + 1] = n
+    HDF5.set_extent_dims(ds, Tuple(dims))
 end
 
-# Write `data` at the logical place `idx` (an index, a range or `:` per dimension) of `ds`.
+# Write `data` at the logical place `idx` (an index, a range, a vector of indices or `:` per
+# dimension) of `ds`.
 function put!(ds, idx, data, shape)
     if isempty(idx)
         write_dataset(ds, datatype(typeof(data)), fill(data))
         return
     end
-    ranges = [i isa Colon ? (1:shape[k]) : i isa Integer ? (i:i) : i for (k, i) in enumerate(idx)]
+    for (k, i) in enumerate(idx)                # indices that aren't one run (points of a group): run by run
+        if i isa AbstractVector && length(i) > 1 && any(!=(1), diff(i))
+            ranges = [j isa Colon ? (1:shape[m]) : j isa Integer ? (j:j) : j for (m, j) in enumerate(idx)]
+            block = reshape(data isa Number ? [data] : data, Tuple(length.(ranges)))
+            stops = vcat(findall(!=(1), diff(i)), length(i))
+            start = 1
+            for stop in stops
+                sub = copy(idx)
+                sub[k] = i[start:stop]
+                sel = [m == k ? (start:stop) : Colon() for m in 1:length(idx)]
+                put!(ds, sub, block[sel...], shape)
+                start = stop + 1
+            end
+            return
+        end
+    end
+    ranges = [i isa Colon ? (1:shape[k]) : i isa Integer ? (i:i) : (first(i):last(i)) for (k, i) in enumerate(idx)]   # one run each
     block = reshape(data isa Number ? [data] : data, Tuple(length.(ranges)))
     ds[reverse(ranges)...] = to_file(block)
 end
