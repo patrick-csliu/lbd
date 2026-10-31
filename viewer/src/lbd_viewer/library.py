@@ -226,8 +226,9 @@ class LibraryIndex:
             return self._summarize(path)
         import lbd
 
-        from .server import file_summary          # the same summary as /api/file
-        return file_summary(lbd.info(path))
+        from .server import file_summary, quiet_writing   # the same summary as /api/file
+        with quiet_writing():                     # a file being written: its status is shown instead
+            return file_summary(lbd.info(path))
 
     def _read(self, path: Path, root: str, st: os.stat_result) -> Dict[str, Any]:
         try:
@@ -496,6 +497,7 @@ class LibraryIndex:
                              args + [max(1, min(limit, 1000)), max(0, offset)])
             rows = [dict(zip(ROW_FIELDS, r)) for r in cur]
         for r in rows:
+            r["writing"] = writing_status(r["path"])
             r["users"] = [u for u in (r["users"] or "").split("\n") if u]
             r["tags"] = [t for t in (r["tags"] or "").split("\n") if t]
             r["star"] = bool(r["star"])
@@ -594,13 +596,25 @@ class LibraryIndex:
         with self._lock:
             r = self._connect().execute("SELECT version, summary, root FROM files WHERE path = ?", (str(p),)).fetchone()
         if r and r[0] == _version(st) and r[1]:
-            return json.loads(r[1])
+            return {**json.loads(r[1]), "writing": writing_status(str(p))}   # the status now, not when read
         summary = self._summary(p)                 # raises: the page shows why
         root = r[2] if r else next((o for o in outermost(self.roots())
                                     if str(p).lower().startswith(o.lower().rstrip("\\/") + os.sep)), str(p.parent))
         self._write([row_from_summary(p, root, st, summary)])
         self.generation += 1
         return summary
+
+
+def writing_status(path: str) -> Optional[str]:
+    """"measuring" or "stopped" for a file being written (name.lbd.writing), else None."""
+    if not scan.is_writing(path):
+        return None
+    import lbd
+
+    try:
+        return lbd.writing_status(path)
+    except (OSError, lbd.LBDError):              # gone meanwhile (finished: renamed)
+        return None
 
 
 def _listdir(folder: str) -> List[str]:

@@ -300,6 +300,8 @@ class Previewer:
         """The automatic picture of a file if it is current ({picture} or {error}), else what is
         happening: {state: "drawing"} (asked for: `now` for the selected file, else as a row near
         it, e.g. a picture in view; not when previews are off) or {state: "off"}."""
+        if path.lower().endswith(".lbd.writing"):
+            return {"state": "writing"}
         version = file_version(path)
         if version is None:
             return {"error": "The file is gone (moved, renamed or deleted)."}
@@ -323,6 +325,8 @@ class Previewer:
         priority = NOW if now else NEAR
         with self._cond:
             for p in paths:
+                if p.lower().endswith(".lbd.writing"):   # no preview while it is written
+                    continue
                 version = file_version(p)
                 row = self.cache.get(p)
                 if version is None or (row and row["version"] == version) or p in self._drawing:
@@ -470,7 +474,7 @@ class Previewer:
         gone = [p for p in cached if p not in files]
         if gone:
             self.cache.drop(gone)
-        todo = [p for p, v in files.items() if cached.get(p) != v]
+        todo = [p for p, v in files.items() if cached.get(p) != v and not p.lower().endswith(".lbd.writing")]
         self.status.update({"total": len(files), "drawn": len(files) - len(todo)})
         with self._cond:
             if mode == "all":

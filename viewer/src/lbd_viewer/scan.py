@@ -1,4 +1,5 @@
-"""List folders and files for the folder panel: .lbd data, .lbd.json styles and images."""
+"""List folders and files for the folder panel: .lbd data (also .lbd.writing: being written),
+.lbd.json styles and images."""
 
 from __future__ import annotations
 
@@ -19,14 +20,19 @@ SKIP_DIRS = {
 }
 
 
+def is_writing(name: str) -> bool:
+    """A data file still being written by lbd.Writer (or stopped before finishing)."""
+    return name.lower().endswith(".lbd.writing")
+
+
 def is_lbd(name: str) -> bool:
-    return name.lower().endswith(".lbd")
+    return name.lower().endswith(".lbd") or is_writing(name)
 
 
 def file_type(name: str) -> Optional[str]:
     """'lbd', 'style', 'image', or None for files the panel doesn't show."""
     low = name.lower()
-    if low.endswith(".lbd"):
+    if is_lbd(low):
         return "lbd"
     if low.endswith(STYLE_SUFFIX):
         return "style"

@@ -811,6 +811,7 @@ export default function LibraryPage(props: Props) {
                       ) : null}
                       {c.id === "name" && r.star ? <span className="mark-star" aria-label="starred">★ </span> : null}
                       {cellText(r, c.id)}
+                      {c.id === "name" && r.writing ? <WritingMark writing={r.writing} /> : null}
                       {c.id === "name" && r.copies > 0 && !r.conflict ? (
                         <span className="mark-copies muted small" title="The same measurement is also elsewhere (labels are shared)">
                           {" "}
@@ -868,6 +869,15 @@ export default function LibraryPage(props: Props) {
           </div>
         ) : selected ? (
           <SelectedFile path={selected} row={selectedRow} generation={generation} onOpenIn={onOpenIn}>
+            {selectedRow?.writing && (
+              <WritingBox
+                row={selectedRow}
+                onRecovered={(path) => {
+                  setChosen([path]);
+                  onSelect(path);
+                }}
+              />
+            )}
             {selectedRow && !selectedRow.error && (
               <>
                 <LabelsEditor rows={[selectedRow]} facets={facets} login={state.login} onChange={(c) => label([selectedRow.path], c)} />
@@ -1126,6 +1136,60 @@ function DateTree({ dates, date, onDate }: { dates: LibraryFacets["dates"]; date
 }
 
 // ---- right: the selected file
+
+const WRITING_TIP = {
+  measuring: "Being written by a measurement right now: it grows as data comes in.",
+  stopped: "Its measurement stopped before finishing (a crash, an error, or a script that ended without closing it). " +
+    "Recover makes it an .lbd file with everything it holds.",
+};
+
+/** "measuring…" or "stopped before finishing", next to a file being written (name.lbd.writing). */
+function WritingMark({ writing }: { writing: "measuring" | "stopped" }) {
+  return (
+    <span className={`mark-writing ${writing} small`} title={WRITING_TIP[writing]}>
+      {" "}
+      {writing === "measuring" ? "measuring…" : "stopped before finishing"}
+    </span>
+  );
+}
+
+/** What a file being written is, and Recover once its measurement stopped. */
+function WritingBox({ row, onRecovered }: { row: LibraryRow; onRecovered: (path: string) => void }) {
+  const [busy, setBusy] = useState(false);
+  const toast = useToast();
+  const when = new Date(row.mtime * 1000).toLocaleString();
+  const recover = () => {
+    setBusy(true);
+    api
+      .recoverFile(row.path)
+      .then((r) => {
+        toast(`Recovered as ${baseName(r.path)}`, "info");
+        onRecovered(r.path);
+      })
+      .catch((e) => toast((e as Error).message, "error"))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <div className={`writing-box ${row.writing}`} role="status">
+      {row.writing === "measuring" ? (
+        <p>
+          <strong>Measuring…</strong> (last written {when}). This file is being written by a measurement; it is
+          shown as it is now, and becomes <code>{baseName(row.path).replace(/\.writing$/i, "")}</code> when the
+          measurement finishes. LBD doesn't change, rename or recycle it meanwhile.
+        </p>
+      ) : (
+        <p>
+          <strong>Stopped before finishing</strong> (last written {when}). Its measurement ended without finishing
+          the file (a crash, an error, or a script that ended without closing it).{" "}
+          <button className="primary" disabled={busy} onClick={recover}>
+            {busy ? "Recovering…" : "Recover"}
+          </button>{" "}
+          makes it an .lbd file with everything it holds.
+        </p>
+      )}
+    </div>
+  );
+}
 
 function SelectedFile({
   path,

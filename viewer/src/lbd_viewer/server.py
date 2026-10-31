@@ -45,7 +45,7 @@ from . import VERSION  # noqa: E402
 from . import files, images, scan, sdk  # noqa: E402
 from .catalog import Catalog, catalog_dir, fitting, structure  # noqa: E402
 from . import labels, library_labels  # noqa: E402
-from .library import LibraryIndex  # noqa: E402
+from .library import LibraryIndex, writing_status  # noqa: E402
 from .previews import PreviewCache, PreviewError, Previewer  # noqa: E402
 from . import reading  # noqa: E402
 from .explore import ExploreClosed, ExploreError, ExploreSession, Sessions  # noqa: E402
@@ -230,6 +230,21 @@ def _is_relative_to(p: Path, root: Path) -> bool:
 # ---- warnings ------------------------------------------------------------------------
 
 _WARN_LOCK = threading.RLock()
+
+
+@contextlib.contextmanager
+def quiet_writing() -> Iterator[None]:
+    """Leave out lbd's "still being written" warning (the viewer shows a file's status instead)."""
+    with _WARN_LOCK, warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=r".*is still being written", category=lbd.LBDWarning)
+        yield
+
+
+def refuse_writing(p: Path, what: str) -> None:
+    """A file being written belongs to its measurement: LBD doesn't change, move or recycle it."""
+    if p.name.lower().endswith(".lbd.writing"):
+        raise HTTPException(409, f"{p.name} is being written by a measurement, or it stopped before finishing: "
+                                 f"LBD doesn't {what} it. When it stopped, Recover makes it an .lbd file.")
 
 
 @contextlib.contextmanager
@@ -530,6 +545,7 @@ def file_summary(d: "lbd.Dataset") -> Dict[str, Any]:
         "axes": axes, "values": values, "meta": jsonable(d.meta),
         "plot": d.plot, "style": d.style, "style_name": d.style_name, "matplotlib": d.matplotlib,
         "version": file_version(d.path) if d.path else None,
+        "writing": writing_status(str(d.path)) if d.path else None,
     }
 
 
@@ -897,6 +913,7 @@ def create_app(state: AppState) -> FastAPI:
     def library_resolve(body: ResolveBody):
         """Two files share an id but differ: make this one a new measurement (writes a new id into
         it, after the user confirmed), say they are the same measurement, or recycle this one."""
+        refuse_writing(state.check_allowed(body.path), "change")
         p = str(state.check_allowed(body.path))
         if body.action == "new_id":
             notes = _labels_call(lambda: library_labels.new_measurement(state.library, p))
@@ -913,6 +930,7 @@ def create_app(state: AppState) -> FastAPI:
     @app.post("/api/library/duplicate")
     def library_duplicate(body: DuplicateBody):
         """Copy a file next to it as a new measurement (a new id; the original isn't touched)."""
+        refuse_writing(state.check_allowed(body.path), "copy")
         p = str(state.check_allowed(body.path))
         path, notes = _labels_call(lambda: library_labels.duplicate(state.library, p, body.labels))
         return {"path": path, "notes": notes}
@@ -920,6 +938,8 @@ def create_app(state: AppState) -> FastAPI:
     @app.post("/api/library/give-ids")
     def library_give_ids(body: PathsBody):
         """Write an id into these files, which have none (the user asked)."""
+        for p in body.paths:
+            refuse_writing(state.check_allowed(p), "write an id into")
         paths = [str(state.check_allowed(p)) for p in body.paths]
         return {"notes": _labels_call(lambda: library_labels.give_ids(state.library, paths))}
 
@@ -977,6 +997,9 @@ def create_app(state: AppState) -> FastAPI:
                             headers={"X-LBD-Preview": json.dumps(about), "Cache-Control": "no-store"})
         if answer.get("error"):
             return {"state": "error", "reason": answer["error"]}
+        if answer["state"] == "writing":
+            return {"state": "writing", "reason": "No preview while it is being written; it gets one once it is "
+                                                  "finished (or recovered)."}
         return {"state": answer["state"], "reason": None}
 
     @app.post("/api/library/preview/want")
@@ -1069,6 +1092,7 @@ def create_app(state: AppState) -> FastAPI:
     @app.put("/api/file/plot")
     def put_file_plot(body: FilePlotBody):
         p = state.check_allowed(body.path)
+        refuse_writing(p, "save a view into")
         changes = {k: getattr(body, k) for k in ("spec", "style", "style_name") if k in body.model_fields_set}
         if not changes:
             raise HTTPException(400, "nothing to change: send spec, style and/or style_name")
@@ -1433,6 +1457,7 @@ def create_app(state: AppState) -> FastAPI:
     @app.post("/api/file/rename")
     def rename_file(body: RenameBody):
         p = state.check_allowed(body.path)
+        refuse_writing(p, "rename")
         try:
             state.pages.check_unlocked(str(p))
         except PageError as e:
@@ -1454,9 +1479,32 @@ def create_app(state: AppState) -> FastAPI:
         state.pages.broadcast("renamed", old=str(p), new=str(new))
         return {"path": str(new)}
 
+    @app.post("/api/file/recover")
+    def recover_file(body: PathBody):
+        """Make a file whose measurement stopped before finishing (name.lbd.writing) an .lbd file
+        with everything it holds (lbd.recover): name.lbd, or "name (2).lbd" if that is taken."""
+        p = state.check_allowed(body.path)
+        if not p.name.lower().endswith(".lbd.writing"):
+            raise HTTPException(400, f"{p.name} is not a file being written (name.lbd.writing)")
+        if not p.is_file():
+            raise HTTPException(404, f"not a file: {p}")
+        try:
+            new = lbd.recover(p)
+        except lbd.LBDError as e:
+            raise HTTPException(409, str(e))
+        except OSError as e:
+            raise HTTPException(500, f"{p.name} couldn't be recovered: {e}")
+        if _key(p) in state.opened:
+            state.opened.add(_key(new))
+        state.catalog.renamed(str(p), str(new))       # its remembered Explore view follows it
+        _labels_follow(lambda lib: library_labels.renamed(lib, str(p), str(new)))
+        state.pages.broadcast("renamed", old=str(p), new=str(new))
+        return {"path": str(new)}
+
     @app.post("/api/file/trash")
     def trash_file(body: PathBody):
         p = state.check_allowed(body.path)
+        refuse_writing(p, "recycle")
         try:
             state.pages.check_unlocked(str(p))
         except PageError as e:

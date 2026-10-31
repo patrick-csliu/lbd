@@ -30,6 +30,12 @@ The file format has its own version (`lbd_version`, currently 1.2).
 
 **Viewer**
 
+- **Files being written** (`name.lbd.writing`, from `lbd.Writer` in any language) are listed in
+  folders and the Library, marked **measuring…** while their measurement writes them, or
+  **stopped before finishing** with a **Recover** button that makes them an `.lbd` file. Explore
+  opens them as they are now (with a notice). LBD doesn't save views into them, rename, recycle
+  or copy them, and draws no preview until they are finished.
+
 - **Elements and data points** (format 1.2): an axis's elements are shown instead of its numbers
   (tick labels, legends, cursor read-outs, sliders — type an element to choose it — and the
   axes table). A value whose data points are vectors or matrices is drawn as curves against its

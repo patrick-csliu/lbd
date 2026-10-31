@@ -59,7 +59,7 @@ export type PreviewMode = "all" | "nearby" | "off";
 export type Preview =
   | { picture: Blob; source: "automatic"; drawn_at: number }
   | { picture: Blob; source: "chosen"; chosen_at: number; changed_since: boolean }
-  | { picture: null; state: "drawing" | "off" | "error"; reason: string | null };
+  | { picture: null; state: "drawing" | "off" | "error" | "writing"; reason: string | null };
 
 /** An Explore panel as shown, for its "Library preview" button. */
 export interface PreviewPanel {
@@ -96,7 +96,12 @@ export interface LibraryRow {
   users: string[];
   tags: string[];
   comment: string;
+  /** a file being written (name.lbd.writing): "measuring", or "stopped" before finishing; else null */
+  writing: Writing;
 }
+
+/** The state of a file being written (name.lbd.writing); null for every other file. */
+export type Writing = "measuring" | "stopped" | null;
 
 /** A nested label (project, user or tag) with the number of files that have it or one inside it. */
 export interface LabelNode {
@@ -307,6 +312,8 @@ export interface FileInfo {
   matplotlib: string | null;
   /** changes when the file is written; sent back when saving, so a changed file isn't overwritten */
   version: string | null;
+  /** a file being written (name.lbd.writing): "measuring" or "stopped"; else null */
+  writing?: Writing;
   warnings: string[];
 }
 
@@ -327,7 +334,7 @@ export type FileKind = "lbd" | "style" | "image";
 /** What kind of file a path is, from its name (same rules as the server's scan.py). */
 export function fileKind(path: string): FileKind {
   const p = path.toLowerCase();
-  if (p.endsWith(".lbd")) return "lbd";
+  if (p.endsWith(".lbd") || p.endsWith(".lbd.writing")) return "lbd";
   if (p.endsWith(".lbd.json")) return "style";
   return "image";
 }
@@ -828,6 +835,8 @@ export const api = {
   renameFile: (path: string, name: string) => call<{ path: string }>("POST", "/api/file/rename", { path, name }),
   /** Move a data, style or image file to the Recycle Bin / Trash (never deleted permanently). */
   trashFile: (path: string) => call<{ ok: boolean }>("POST", "/api/file/trash", { path }),
+  /** a file whose measurement stopped before finishing (name.lbd.writing) becomes an .lbd file */
+  recoverFile: (path: string) => call<{ path: string }>("POST", "/api/file/recover", { path }),
 
   /** Export a figure with the system's "Save as" dialog (data file's folder, name filled in).
    *  `path` is null if the user cancelled. 501: no dialog on this system, use exportFigure. */

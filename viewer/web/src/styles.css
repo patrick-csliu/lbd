@@ -463,6 +463,11 @@ details.group fieldset > .group-fields { margin-top: -4px; }
 .library-row.starred .cell-name { font-weight: 600; }
 .library-row .mark-star { color: #c99a06; }
 .library-row .mark-conflict { color: var(--danger); }
+.mark-writing.measuring { color: var(--accent); }
+.mark-writing.stopped { color: var(--danger); }
+.writing-box { border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; margin: 8px 0; }
+.writing-box.stopped { border-color: var(--danger); }
+.writing-box p { margin: 0; }
 .library-row.conflict { box-shadow: inset 3px 0 0 var(--danger); }
 .library-conflicts, .library-pointing { font-size: 13px; padding: 4px 8px; border-radius: var(--radius); background: var(--accent-soft); margin: 4px 0; }
 .library-conflicts { background: var(--danger-soft); }
