@@ -1,4 +1,4 @@
-# LBD file format — version 1.2
+# LBD file format — version 2.0
 
 LBD ("Lab Data", extension `.lbd`) is a file format for measurement and simulation data that can be written and read identically from any programming language, and viewed with the LBD viewer. Any language with HDF5 support can implement it; this repository provides implementations for Python, MATLAB and Julia.
 
@@ -19,8 +19,11 @@ that implement this spec, see [Python](../docs/python/files.md), [MATLAB](../doc
 ```
 /                       (root group)
 ├── attrs               lbd_format, lbd_version, title, description, created, writer [, id, parent_id]
-├── axes/               (group)  one 1-D dataset per axis
-│   └── <axis name>     attrs: unit, label
+├── axes/               (group)  one 1-D dataset per fixed axis, one group per axis group
+│   ├── <axis name>     attrs: unit, label [, elements, role]
+│   └── <group name>/   (group, since 2.0)  attrs: order
+│       ├── <axis name>           attrs: unit, label
+│       └── <axis name>._parent   (for every axis of the group but the first)
 ├── values/             (group)  one N-D dataset per value
 │   └── <value name>    attrs: unit, label, axes [, lbd_bool]
 ├── meta/               (group)  free key/value metadata, stored as attributes; may contain sub-groups
@@ -34,7 +37,7 @@ that implement this spec, see [Python](../docs/python/files.md), [MATLAB](../doc
 | Attribute | Type | Required | Meaning |
 |---|---|---|---|
 | `lbd_format` | string, `"LBD"` | must | Identifies the file as LBD. |
-| `lbd_version` | string, `"<major>.<minor>"` | must | Format version, `"1.2"` for this spec (`"1.0"` and `"1.1"` files are valid 1.2 files without the content added since). |
+| `lbd_version` | string, `"<major>.<minor>"` | must | Format version: `"2.0"` for a file with an axis group (§1.8), `"1.2"` for every other file written by this spec (`"1.0"` and `"1.1"` files are valid 1.2 files without the content added since). See §6. |
 | `title` | string | must (may be `""`) | Short human-readable title. |
 | `description` | string | must (may be `""`) | Free text. |
 | `created` | string, ISO-8601 with UTC offset | must | When the data was created (measured), e.g. `2026-10-13T16:09:00+08:00`. Given by the user when known; otherwise writers fill in the time of the first save. A writer saving a dataset that already has a `created` (set by the user, or read from a file) writes it unchanged. |
@@ -60,6 +63,9 @@ with a warning.
 
 ### 1.2 Axes — `/axes/<name>`
 
+A dataset in `/axes` is a **fixed axis**: one dimension of a grid, the same points for every
+point of the other axes. (A group in `/axes` is an axis group, §1.8.)
+
 - 1-D numeric dataset (real; integer or floating point).
 - Attributes:
   - `unit`: string, must; `""` for dimensionless.
@@ -78,6 +84,16 @@ with a warning.
   - `axes`: string, must. The names of the axes along each dimension, **comma-separated, in logical order** (see §2), e.g. `"power,freq"`. It is `""` for a 0-D value.
   - `lbd_bool`: integer `1`, only for boolean data (see §3).
 - For every dimension *i*: the axis named in position *i* must exist in `/axes`, and its length must equal the size of dimension *i*.
+- **Dimensions on an axis group** (since 2.0). A dimension can be one level of an axis group
+  (§1.8): its points are the dimension's entries, so its size is the level's number of points.
+  In `axes` it is written as the group's first *k* axes, consecutive and in the group's order
+  (`"A,B"` = level 2 of a group whose `order` begins `A,B`), or as the group's name (its
+  innermost level: all its axes). Writers write the axis names. Only an outer part of a group's
+  order may be named (`"A"` or `"A,B"`, never `"B"` alone or `"A,C"`): an inner coordinate means
+  something only under its outer ones. A group appears at most once in a value's `axes`.
+  Consecutive names from one group form one dimension, so `axes="A,B,C"` with A, B in a group
+  and C a fixed axis has two dimensions: the (A, B) points, then C. Fixed axes and other groups
+  combine with it as a grid.
 - **Data points with a shape** (since 1.2). Each data point of a value is one number, unless its
   last dimensions lie on axes with `role="point"`: then one data point is the array over those
   dimensions (a vector, a matrix). Writers make one such axis per dimension of the data point,
@@ -127,6 +143,32 @@ piece and not completely (a measurement stopped early). Floating-point and compl
 - Readers that don't know masks read the value as usual; LBD readers should hide the points
   whose mask is `0`.
 
+### 1.8 Axis groups — `/axes/<group name>/` (since 2.0)
+
+A sweep whose inner points depend on the outer ones (B chosen per A, a different number of B per
+A, adaptive or re-centred sweeps, several such levels) is stored as an **axis group**: its axes'
+measured points listed together, level by level. Only measured points are stored.
+
+- A group in `/axes`, with attribute `order` (string, must): its axes, outer to inner,
+  comma-separated (one or more).
+- For each axis X in `order`, a dataset `X`: 1-D numeric, with `unit` and `label` as in §1.2
+  (`elements` and `role` are not used on a group's axes; readers ignore them with a warning).
+  It holds the coordinates of **level X**'s points:
+  - level 1 (the first axis): each distinct coordinate once;
+  - every further level: one entry per point of that level, and a dataset `X._parent` (1-D
+    integer, same length): for each point, the index (from 0) of the point it belongs to in the
+    level above.
+- At each level, no two points have the same coordinate and the same parent (readers warn and
+  keep both). Points are stored in the order they were first written: readers must not assume
+  sorted coordinates or the points of one parent next to each other. A point may have no points
+  below it (an (A, B) point with no C).
+- Coordinates must not be `NaN` or infinite. A `_parent` index outside the level above, or a
+  `_parent` whose length differs from its level's, is an error for readers.
+- A value on level *k* (§1.3) has one entry per point of level *k*, in the level's order.
+
+Reading a point: for point *j* of level C, its coordinate is `C[j]`; its (A, B) point is
+`p = C._parent[j]`, with B = `B[p]`; its A is `A[B._parent[p]]`.
+
 ---
 
 ## 2. Dimension order
@@ -140,7 +182,9 @@ HDF5 stores N-D arrays in row-major (C) order. Some languages are row-major (Pyt
 
 Result: a 2-D value with `axes = "power,freq"`, 11 powers and 401 frequencies, is `(11, 401)` in Python, `11×401` in MATLAB and `11×401` in Julia, with `A[i, j]` / `A(i, j)` meaning power *i*, frequency *j* everywhere.
 
-The same rule applies to numeric arrays stored in `/meta`.
+The same rule applies to numeric arrays stored in `/meta`. A level of an axis group (§1.3, §1.8)
+is one dimension, like an axis; its `_parent` indices count from 0 in every language's file, and
+implementations that count from 1 convert them when reading and writing.
 
 ---
 
@@ -167,7 +211,9 @@ Writers choose the type automatically from the input ("auto"): the input's numer
 - Axis and value names must match `^[A-Za-z][A-Za-z0-9_]{0,62}$`, so they are valid identifiers in common programming languages.
 - Names are case-sensitive.
 - The order of axes and values inside `/axes` and `/values` has no meaning. Most HDF5 libraries list them alphabetically. The dimension order of a value is defined only by its `axes` attribute.
-- An axis and a value must not share a name.
+- An axis and a value must not share a name. Since 2.0 the same holds for groups: fixed axes,
+  groups, the axes in groups and values all have different names, and a group's name follows
+  the same rule. The datasets `X._parent` contain a `.`, which no name may, so they can't clash.
 - Meta keys should follow the same rule. Readers must accept any HDF5 attribute name in `/meta`.
 
 ---
@@ -184,9 +230,14 @@ Writers may store datasets chunked and gzip-compressed. Readers must handle this
 - A **minor** bump only adds optional content. A reader for `1.x` must read any `1.y` file, ignoring what it does not understand, and should warn when `y > x`.
 - A **major** bump may break compatibility. A reader must refuse a file whose major version is newer than it supports, with an error telling the user to update.
 - Readers must ignore unknown attributes, groups and datasets anywhere in the file.
+- **Writers write the lowest version their content needs**: `"2.0"` only for a file with an axis
+  group, `"1.2"` otherwise, so readers of 1.x keep reading every file without a group.
+- A reader that supports 2.x reads every 1.x file. It warns for a minor version newer than it
+  knows within that major (1.3 or later, 2.1 or later).
 - Version history: **1.1** added the root `id` and `parent_id`; **1.2** added an axis's
   `elements` and `role`, data points with a shape (§1.2, §1.3), the `/measured` masks (§1.7)
-  and files being written (§7).
+  and files being written (§7); **2.0** added axis groups (§1.8, and dimensions on them in
+  §1.3). Readers of 1.x refuse 2.0 files with "please update".
 
 ---
 
@@ -204,6 +255,10 @@ when complete.
 - While written: values may hold `NaN` (or a `0` mask, §1.7) where nothing was measured yet, and
   an axis whose length isn't known in advance (a log, "until stopped") may be shorter than it
   will be, together with the values on it. Every value on such an axis has it as its first axis.
+- The levels of an axis group (§1.8) grow as points are measured, and every value on a level
+  grows with it, along that dimension (wherever it is in the value's `axes`). Readers take each
+  level as the points that are complete: up to the shortest of `X` and `X._parent`, and only up
+  to the first point whose parent isn't there yet; each value is cut to its levels' lengths.
 - **The guard.** For the whole time it writes, the writer holds an exclusive operating-system
   lock on one byte at offset 2^40 of the file (length 1; beyond any data, so no read is blocked).
   The lock disappears with the writing process, so it tells the two cases apart:
@@ -239,6 +294,39 @@ A file with named positions and a vector per data point (format 1.2):
 /axes/bloch_dim1    int64[3]     unit="" label="bloch" role="point" elements=["x","y","z"]
 /values/P1          float64[2,21]    unit="" label="P1" axes="state,amp"
 /values/bloch       float64[21,3]    unit="" label="bloch" axes="amp,bloch_dim1"
+```
+
+A variable sweep (format 2.0): A from [1, 2, 3]; for each A, B in `0 … A−1`; for each (A, B), C in
+`0 … B−1`; f measured once per (A, B) point, g once per (A, B, C) point:
+
+```
+/                   lbd_version="2.0" …
+/axes/ABC/          order="A,B,C"
+/axes/ABC/A         int64[3]   = [1, 2, 3]              ← level 1: each A once
+/axes/ABC/B         int64[6]   = [0, 0, 1, 0, 1, 2]     ← level 2: each (A, B) point
+/axes/ABC/B._parent int64[6]   = [0, 1, 1, 2, 2, 2]     ←   its A (index into level 1)
+/axes/ABC/C         int64[4]   = [0, 0, 0, 1]           ← level 3: each (A, B, C) point
+/axes/ABC/C._parent int64[4]   = [2, 4, 5, 5]           ←   its (A, B) point (index into level 2)
+/values/f           float64[6]   axes="A,B"             ← level 2 (also the points with no C)
+/values/g           float64[4]   axes="A,B,C"           ← level 3
+```
+
+`g[3]`: `C[3]` = 1, `C._parent[3]` = 5 → B = `B[5]` = 2, `B._parent[5]` = 2 → A = `A[2]` = 3: the
+point (3, 2, 1); its f is `f[5]`.
+
+A group together with a fixed axis and a data point of shape (2, 2) (format 2.0): B chosen per A,
+a spectrum over a fixed `freq` at each (A, B) point, and a 2 × 2 matrix per point:
+
+```
+/axes/AB/           order="A,B"
+/axes/AB/A          float64[3]   = [1, 2, 3]
+/axes/AB/B          float64[6]   = [10, 10, 20, 15, 25, 35]
+/axes/AB/B._parent  int64[6]     = [0, 1, 1, 2, 2, 2]
+/axes/freq          float64[401]                        ← a fixed axis
+/axes/cov_dim1      int64[2]     role="point" elements=["I","Q"]
+/axes/cov_dim2      int64[2]     role="point" elements=["I","Q"]
+/values/S           float64[6,401]   axes="A,B,freq"            ← (A, B) points × freq
+/values/cov         float64[6,2,2]   axes="A,B,cov_dim1,cov_dim2"
 ```
 
 <!-- --8<-- [end:body] -->

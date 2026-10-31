@@ -24,8 +24,10 @@ import h5py
 import numpy as np
 
 __version__ = "1.3.0.dev0"
-FORMAT_VERSION = "1.2"
-_FORMAT_MAJOR, _FORMAT_MINOR = (int(p) for p in FORMAT_VERSION.split("."))
+FORMAT_VERSION = "2.0"         # the newest format this module reads and writes
+_GRID_VERSION = "1.2"          # what a file without an axis group is written as (spec §6)
+_FORMAT_MAJOR = int(FORMAT_VERSION.split(".")[0])
+_LATEST_MINOR = {1: 2, 2: 0}   # the newest minor version known, per major version
 
 _NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,62}$")
 _STR_DTYPE = h5py.string_dtype("utf-8")
@@ -93,8 +95,9 @@ def version() -> Dict[str, str]:
     Returns
     -------
     dict
-        `{"package": "1.0.0", "lbd_version": "1.0"}`: the version of this module and of the
-        file format it writes and fully reads.
+        `{"package": "1.0.0", "lbd_version": "1.0"}`: the version of this module and the newest
+        file format it reads and writes (a file is written with the lowest version its content
+        needs).
 
     Examples
     --------
@@ -257,7 +260,8 @@ class Dataset:
     parent_id : str or None
         The id of the file this one was made from (saved to another file, or `new_id`).
     lbd_version : str
-        Format version of the file.
+        Format version of the file it was read from or last saved to (`"1.2"` for a new
+        dataset: files without an axis group are written as 1.2).
     path : pathlib.Path or None
         Where the dataset was last loaded from or saved to.
 
@@ -283,7 +287,7 @@ class Dataset:
         self.description = _check_text(description, "description")
         self.created: Optional[str] = None if created is None else _created_text(created)
         self.writer: Optional[str] = None
-        self.lbd_version: str = FORMAT_VERSION
+        self.lbd_version: str = _GRID_VERSION
         self.axes: Dict[str, Axis] = {}
         self.values: Dict[str, Value] = {}
         self.meta: Dict[str, Any] = {}
@@ -875,7 +879,8 @@ class Dataset:
                plot_json: Optional[str], style_json: Optional[str], style_name: Optional[str],
                mpl: Optional[str] = None) -> None:
         f.attrs["lbd_format"] = "LBD"
-        f.attrs["lbd_version"] = FORMAT_VERSION
+        self.lbd_version = _version_needed(self)
+        f.attrs["lbd_version"] = self.lbd_version
         f.attrs["title"] = self.title
         f.attrs["description"] = self.description
         f.attrs["created"] = created
@@ -1225,13 +1230,18 @@ def _check_version(ver: str, path: Path) -> None:
     if major > _FORMAT_MAJOR:
         raise LBDVersionError(
             f"{path.name} uses LBD format {ver}, but this lbd package ({__version__}) only supports "
-            f"{_FORMAT_MAJOR}.x. Please update lbd."
+            f"formats up to {_FORMAT_MAJOR}.x. Please update lbd."
         )
-    if major < _FORMAT_MAJOR:
+    if major not in _LATEST_MINOR:
         raise LBDError(f"{path.name}: LBD format {ver} doesn't exist (the first version is 1.0)")
-    if minor > _FORMAT_MINOR:
-        _warn(f"{path.name} uses LBD format {ver}, newer than {FORMAT_VERSION}; some content may be "
-              "ignored. Consider updating lbd.")
+    if minor > _LATEST_MINOR[major]:
+        _warn(f"{path.name} uses LBD format {ver}, newer than {major}.{_LATEST_MINOR[major]}; some "
+              "content may be ignored. Consider updating lbd.")
+
+
+def _version_needed(d: "Dataset") -> str:
+    """The lowest format version that holds `d`'s content (spec §6): 1.2 without an axis group."""
+    return _GRID_VERSION
 
 
 def _read_axis(name: str, ds: Any, path: Path) -> Axis:

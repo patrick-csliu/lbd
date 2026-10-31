@@ -287,9 +287,13 @@ makeSweep().save(p);
 setVersion(p, "1.7");
 tc.verifyWarning(@() lbd.load(p), 'lbd:newerVersion');
 setVersion(p, "2.0");
+lbd.load(p);                                        % 2.0 is known: no warning
+setVersion(p, "2.1");
+tc.verifyWarning(@() lbd.load(p), 'lbd:newerVersion');
+setVersion(p, "3.0");
 tc.verifyError(@() lbd.load(p), 'lbd:version');
 v = lbd.version();
-tc.verifyEqual(v.lbd_version, "1.2");
+tc.verifyEqual(v.lbd_version, "2.0");
 end
 
 function setVersion(p, ver)

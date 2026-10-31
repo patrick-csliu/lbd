@@ -149,7 +149,7 @@ classdef Writer < handle
             H5P.close(fapl);
             try
                 obj.takeGuard();                % at once: from now on it reads "measuring"
-                obj.create(fid, v.lbd_version);
+                obj.create(fid, lbd_version_needed(obj.D));
                 H5F.start_swmr_write(fid);
             catch err
                 H5F.close(fid);

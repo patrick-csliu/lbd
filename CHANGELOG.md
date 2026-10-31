@@ -1,11 +1,19 @@
 # Changelog
 
 All components (the viewer and every language module) share one version number.
-The file format has its own version (`lbd_version`, currently 1.2).
+The file format has its own version (`lbd_version`, currently 2.0; files without an axis group
+are still written as 1.2).
 
 ## 1.3.0 (in development)
 
 **Changes to how things behave** (read these when upgrading)
+
+- **File format 2.0: variable sweeps** (axis groups, spec §1.8): a sweep whose inner points
+  depend on the outer ones is stored as only its measured points, level by level. Writers
+  write 2.0 only for a file with an axis group; **every other file is still written as 1.2**, so
+  older LBD keeps reading it. LBD older than 1.3 refuses 2.0 files ("please update").
+  `lbd.version()` gives `"2.0"`, the newest format read and written. Writing and reading axis
+  groups comes in the next steps of this version.
 
 - **File format 1.1: every file gets an `id`** (every language). It is the measurement's
   identity, so LBD can recognise the same measurement in two places: a UUID version 7 (RFC 9562)

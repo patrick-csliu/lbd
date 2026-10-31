@@ -450,7 +450,7 @@ def test_version_rules(tmp_path):
         f.create_group("axes")
         f.create_group("values")
     p = _raw(tmp_path, body)
-    for ver, exc in (("0.9", LBDError), ("2.0", lbd.LBDVersionError), ("x", LBDError)):
+    for ver, exc in (("0.9", LBDError), ("3.0", lbd.LBDVersionError), ("x", LBDError)):
         with h5py.File(p, "r+") as f:
             f.attrs["lbd_version"] = ver
         with pytest.raises(exc):

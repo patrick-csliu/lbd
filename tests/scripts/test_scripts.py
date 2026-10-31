@@ -139,7 +139,7 @@ def test_check_versions_on_the_repository(load_module, capsys):
     assert cv.main() == 0
     version = capsys.readouterr().out.strip()
     assert re.fullmatch(r"\d+\.\d+\.\d+(-dev)?", version) and cv.release_version() == version
-    assert cv.spec_version() == "1.2"
+    assert cv.spec_version() == "2.0"
 
 
 def test_check_versions_reports_a_mismatch(load_module, monkeypatch, capsys):

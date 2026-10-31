@@ -157,7 +157,8 @@ end
 
 function create_live!(f, d::Dataset)
     write_str_attr(f, "lbd_format", "LBD")
-    write_str_attr(f, "lbd_version", FORMAT_VERSION)
+    d.lbd_version = version_needed(d)
+    write_str_attr(f, "lbd_version", d.lbd_version)
     write_str_attr(f, "title", d.title)
     write_str_attr(f, "description", d.description)
     write_str_attr(f, "created", d.created)

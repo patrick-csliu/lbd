@@ -29,8 +29,10 @@ export Dataset, Axis, Value, add_axis!, add_value!, write!, new_id!, LBDError, L
 export Writer, lbd_writer, writing_status, recover
 
 const PACKAGE_VERSION = "1.3.0-dev"
-const FORMAT_VERSION = "1.2"
-const FORMAT_MAJOR, FORMAT_MINOR = parse.(Int, split(FORMAT_VERSION, "."))
+const FORMAT_VERSION = "2.0"            # the newest format this module reads and writes
+const GRID_VERSION = "1.2"              # what a file without an axis group is written as (spec §6)
+const FORMAT_MAJOR = parse(Int, split(FORMAT_VERSION, ".")[1])
+const LATEST_MINOR = Dict(1 => 2, 2 => 0)   # the newest minor version known, per major version
 const NAME_RE = r"^[A-Za-z][A-Za-z0-9_]{0,62}$"
 const COMPRESS_MIN_SIZE = 1024
 const REPLACE_WAIT = 3.0   # seconds `save` waits for a file another program has open (Windows)
@@ -113,7 +115,7 @@ mutable struct Dataset
 end
 
 Dataset(title::AbstractString=""; description::AbstractString="", created=nothing) = Dataset(
-    String(title), String(description), created === nothing ? nothing : created_text(created), nothing, FORMAT_VERSION,
+    String(title), String(description), created === nothing ? nothing : created_text(created), nothing, GRID_VERSION,
     OrderedDict{String,Axis}(), OrderedDict{String,Value}(), OrderedDict{String,Any}(),
     nothing, nothing, nothing, nothing, nothing, nothing, nothing, false, String[],
 )
@@ -625,7 +627,8 @@ function write_file(f, d::Dataset, compression::Bool)
         created_text(d.created)
     d.writer = "julia LBD $PACKAGE_VERSION"
     write_str_attr(f, "lbd_format", "LBD")
-    write_str_attr(f, "lbd_version", FORMAT_VERSION)
+    d.lbd_version = version_needed(d)
+    write_str_attr(f, "lbd_version", d.lbd_version)
     write_str_attr(f, "title", d.title)
     write_str_attr(f, "description", d.description)
     write_str_attr(f, "created", d.created)
@@ -942,11 +945,16 @@ function check_version(ver, path)
     major, minor = parse(Int, m[1]), parse(Int, m[2])
     if major > FORMAT_MAJOR
         throw(LBDVersionError("$(basename(path)) uses LBD format $ver, but this LBD package ($PACKAGE_VERSION) " *
-                              "only supports $FORMAT_MAJOR.x. Please update LBD."))
-    elseif major == FORMAT_MAJOR && minor > FORMAT_MINOR
-        @warn "$(basename(path)) uses LBD format $ver, newer than $FORMAT_VERSION; some content may be ignored. Consider updating LBD."
+                              "only supports formats up to $FORMAT_MAJOR.x. Please update LBD."))
+    elseif !haskey(LATEST_MINOR, major)
+        throw(LBDError("$(basename(path)): LBD format $ver doesn't exist (the first version is 1.0)"))
+    elseif minor > LATEST_MINOR[major]
+        @warn "$(basename(path)) uses LBD format $ver, newer than $major.$(LATEST_MINOR[major]); some content may be ignored. Consider updating LBD."
     end
 end
+
+"The lowest format version that holds `d`'s content (spec §6): 1.2 without an axis group."
+version_needed(d::Dataset) = GRID_VERSION
 
 function describe_value(name, ds)
     isbool = attr_int(ds, "lbd_bool") == 1

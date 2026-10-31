@@ -393,7 +393,8 @@ classdef Dataset < handle
             fid = H5F.create(path, 'H5F_ACC_TRUNC', 'H5P_DEFAULT', 'H5P_DEFAULT');
             closer = onCleanup(@() H5F.close(fid));
             lbd_write_attr(fid, 'lbd_format', "LBD");
-            lbd_write_attr(fid, 'lbd_version', v.lbd_version);
+            ver = lbd_version_needed(obj);
+            lbd_write_attr(fid, 'lbd_version', ver);
             lbd_write_attr(fid, 'title', obj.Title);
             lbd_write_attr(fid, 'description', obj.Description);
             lbd_write_attr(fid, 'created', created);
@@ -468,7 +469,7 @@ classdef Dataset < handle
             end
             obj.Created = created;
             obj.Writer = writer;
-            obj.LbdVersion = v.lbd_version;
+            obj.LbdVersion = ver;
         end
     end
 

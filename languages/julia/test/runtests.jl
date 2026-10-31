@@ -252,8 +252,18 @@ end
             delete_attribute(f, "lbd_version")
             write_attribute(f, "lbd_version", "2.0")
         end
+        @test_logs LBD.load(p)                      # 2.0 is known: no warning
+        h5open(p, "r+") do f
+            delete_attribute(f, "lbd_version")
+            write_attribute(f, "lbd_version", "2.1")
+        end
+        @test_logs (:warn, r"newer than 2.0") LBD.load(p)
+        h5open(p, "r+") do f
+            delete_attribute(f, "lbd_version")
+            write_attribute(f, "lbd_version", "3.0")
+        end
         @test_throws LBDVersionError LBD.load(p)
-        @test LBD.version().lbd_version == "1.2"
+        @test LBD.version().lbd_version == "2.0"
     end
 
     @testset "robust reading" begin

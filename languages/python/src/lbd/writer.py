@@ -31,7 +31,6 @@ import h5py
 import numpy as np
 
 from .io import (
-    FORMAT_VERSION,
     WRITING_SUFFIX,
     Axis,
     Dataset,
@@ -45,6 +44,7 @@ from .io import (
     _check_style_name,
     _check_text,
     _matplotlib_version,
+    _version_needed,
     _warn,
     _write_meta,
     load,
@@ -483,7 +483,8 @@ class Writer:
     def _create(self, f: h5py.File) -> None:
         d = self._d
         f.attrs["lbd_format"] = "LBD"
-        f.attrs["lbd_version"] = FORMAT_VERSION
+        d.lbd_version = _version_needed(d)
+        f.attrs["lbd_version"] = d.lbd_version
         f.attrs["title"] = d.title
         f.attrs["description"] = d.description
         f.attrs["created"] = _created_text(d.created)
