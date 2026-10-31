@@ -98,6 +98,32 @@ def test_two_programs_at_the_same_time_lose_nothing(tmp_path):
     assert not (tmp_path / labels.LOCK).exists()
 
 
+def _deny_lock(monkeypatch, times):
+    """Making the lock file is denied `times` times (as on Windows, just after another writer
+    removed it), then works."""
+    real_open, denied = os.open, []
+
+    def fake_open(path, flags, *args):
+        if str(path).endswith(labels.LOCK) and len(denied) < times:
+            denied.append(path)
+            raise PermissionError(13, "Access is denied", str(path))
+        return real_open(path, flags, *args)
+    monkeypatch.setattr(labels.os, "open", fake_open)
+
+
+def test_a_lock_just_removed_by_another_writer_is_waited_for(tmp_path, monkeypatch):
+    _deny_lock(monkeypatch, times=3)
+    add(tmp_path, add_tags=["kept"])
+    assert entry(labels.read(tmp_path))["tags"] == ["kept"]
+
+
+def test_a_read_only_folder_says_so(tmp_path, monkeypatch):
+    _deny_lock(monkeypatch, times=10**9)
+    monkeypatch.setattr(labels, "LOCK_WAIT", 0.1)
+    with pytest.raises(labels.LabelsError, match="the folder is read-only"):
+        add(tmp_path, add_tags=["lost"])
+
+
 def test_sync_conflict_copies_are_merged_then_recycled(tmp_path):
     add(tmp_path, add_tags=["here"])
     other = labels.read(tmp_path)

@@ -242,13 +242,20 @@ def _lock(folder: Path) -> Path:
                     continue
             except FileNotFoundError:
                 continue
+            except PermissionError:                    # being removed by its writer (see below)
+                pass
             if time.monotonic() > deadline:
                 raise LabelsError(f"the labels of {folder} are being changed by another LBD program; "
                                   "try again in a moment") from None
             time.sleep(0.02)
         except PermissionError:
-            raise LabelsError(f"labels can't be saved in {folder}: the folder is read-only (or not "
-                              "yours to change); copy the files to a folder you can write to") from None
+            # On Windows a lock file another writer has just removed stays "delete pending" for a
+            # moment, and making it again is denied as if the folder were read-only. So only a
+            # denial that lasts means the folder can't be written to.
+            if time.monotonic() > deadline:
+                raise LabelsError(f"labels can't be saved in {folder}: the folder is read-only (or not "
+                                  "yours to change); copy the files to a folder you can write to") from None
+            time.sleep(0.02)
 
 
 def update(folder: Path, change: Callable[[Dict[str, Any]], None],
