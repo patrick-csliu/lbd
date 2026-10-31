@@ -127,6 +127,9 @@ class Axis:
     role : str or None
         `"point"` for an axis made by [`Dataset.add_value`][lbd.Dataset.add_value] for a
         dimension inside a value's data point (format 1.2); `None` for a sweep axis.
+    grows : bool
+        An axis of unknown length (`add_axis(..., grows=True)`): [`write`][lbd.Dataset.write]
+        adds its points. Not stored in the file (a saved file has the points written).
     """
 
     name: str
@@ -135,6 +138,7 @@ class Axis:
     label: str = ""
     elements: Optional[List[str]] = None
     role: Optional[str] = None
+    grows: bool = False
 
     def __len__(self) -> int:
         return len(self.data)
@@ -169,6 +173,10 @@ class Value:
     elements : list
         For each dimension of a data point, the text of each position, or `None` when it is
         known by number (format 1.2; a copy of its point axes' `elements`).
+    measured : numpy.ndarray or None
+        For an integer or boolean value filled piece by piece (`add_value` without data, then
+        `write`): `True` where something was written. `None` for every other value (float and
+        complex values use `NaN` for "not measured").
     """
 
     name: str
@@ -181,6 +189,7 @@ class Value:
     dtype: str = ""
     point_axes: List[str] = field(default_factory=list)
     elements: List[Optional[List[str]]] = field(default_factory=list)
+    measured: Optional[np.ndarray] = None
 
     @property
     def point_shape(self) -> tuple:
@@ -309,7 +318,7 @@ class Dataset:
     # ---- building -------------------------------------------------------
 
     def add_axis(self, name: str, data: Any = None, unit: str = "", label: Optional[str] = None,
-                 elements: Optional[Sequence[str]] = None) -> Axis:
+                 elements: Optional[Sequence[str]] = None, grows: bool = False) -> Axis:
         """Add a 1-D axis: the coordinates of one swept quantity.
 
         Add every axis before the values that use it.
@@ -331,6 +340,10 @@ class Dataset:
         elements : list of str, optional
             A text for each position of the axis, in order, e.g. `["ground", "excited"]`: plots,
             cursors and sliders show them instead of the numbers (format 1.2).
+        grows : bool, optional
+            An axis of unknown length (a log, "until I stop it"): give no `data`;
+            [`write`][lbd.Dataset.write] adds its points (`d.write(time=t, T=x)`). It must be the
+            first axis of the values on it.
 
         Returns
         -------
@@ -357,10 +370,17 @@ class Dataset:
         --------
         >>> d.add_axis("t", np.linspace(0, 1e-6, 201), unit="s", label="Time")
         >>> d.add_axis("state", elements=["ground", "excited"])        # numbered 0, 1
+        >>> d.add_axis("time", unit="s", grows=True)                   # points added by write
         """
         self._check_new_name(name)
         unit = _check_text(unit, "unit")
         label = name if label is None else _check_text(label, "label")
+        if grows:
+            if data is not None or elements is not None:
+                raise LBDError(f"axis '{name}' grows: give no data or elements; write adds its points")
+            axis = Axis(name, np.empty(0), unit=unit, label=label, grows=True)
+            self.axes[name] = axis
+            return axis
         if data is None:
             if elements is None:
                 raise LBDError(f"axis '{name}' needs its coordinates (data) or its elements")
@@ -389,7 +409,7 @@ class Dataset:
     def add_value(
         self,
         name: str,
-        data: Any,
+        data: Any = None,
         axes: Union[str, Sequence[str], None] = None,
         unit: str = "",
         label: Optional[str] = None,
@@ -406,8 +426,10 @@ class Dataset:
         ----------
         name : str
             Value name (same rules as axis names).
-        data : array_like
-            Numbers or booleans. A plain number makes a scalar value (no axes).
+        data : array_like, optional
+            Numbers or booleans. A plain number makes a scalar value (no axes). Left out: the
+            value is filled later by [`write`][lbd.Dataset.write] — every point starts as `NaN`
+            (not measured yet), or for integers and booleans as 0 with `measured` False.
         axes : str or sequence of str, optional
             One axis name per dimension of `data` (before the data point's dimensions), in
             order: a list (`["power", "freq"]`), one name (`"freq"`), a comma-separated string
@@ -468,9 +490,24 @@ class Dataset:
         label = name if label is None else _check_text(label, "label")
         if not isinstance(dtype, str):
             raise TypeError(f"dtype must be a string such as 'float32' or 'auto', not {type(dtype).__name__}")
-        arr = _coerce_value(data, dtype, name)
         axes_list = _axes_argument(axes)
         point = _check_shape(shape, name)
+        measured = None
+        if data is None:                      # filled later by write: "not measured yet"
+            for ax in axes_list:
+                if ax not in self.axes:
+                    raise LBDError(f"value '{name}': axis '{ax}' does not exist; add it with add_axis first")
+            kind = "float64" if dtype == "auto" else dtype
+            if kind not in _ALLOWED_DTYPES:
+                raise LBDError(f"value '{name}': unknown dtype {dtype!r}; use one of {', '.join(_ALLOWED_DTYPES)}")
+            full = tuple(len(self.axes[a]) for a in axes_list) + point
+            if kind.startswith(("float", "complex")):
+                data = np.full(full, np.nan, dtype=kind)
+            else:
+                data = np.zeros(full, dtype=bool if kind == "bool" else kind)
+                measured = np.zeros(full, dtype=bool)
+            dtype = "auto"
+        arr = _coerce_value(data, dtype, name)
         if len(axes_list) + len(point) != arr.ndim:
             if len(axes_list) < arr.ndim and not point:
                 raise LBDError(
@@ -482,6 +519,10 @@ class Dataset:
                 f"and shape={point} make {len(axes_list) + len(point)}")
         if len(set(axes_list)) != len(axes_list):
             raise LBDError(f"value '{name}': an axis appears more than once in {axes_list}")
+        growing = [a for a in axes_list if a in self.axes and self.axes[a].grows]
+        if growing and axes_list[0] != growing[0] or len(growing) > 1:
+            raise LBDError(f"value '{name}': a growing axis must be its first axis, and only one "
+                           f"(here {axes_list}, growing {growing})")
         for i, ax in enumerate(axes_list):
             if ax not in self.axes:
                 raise LBDError(f"value '{name}': axis '{ax}' does not exist; add it with add_axis first")
@@ -505,9 +546,152 @@ class Dataset:
             self.axes[p] = Axis(p, np.arange(n), label=f"{label} ({p.rsplit('_', 1)[1]})" if len(point) > 1 else label,
                                 elements=el, role="point")
         value = Value(name, arr, axes_list + point_names, unit=unit, label=label, shape=arr.shape,
-                      dtype=str(arr.dtype), point_axes=point_names, elements=named)
+                      dtype=str(arr.dtype), point_axes=point_names, elements=named, measured=measured)
         self.values[name] = value
         return value
+
+    def write(self, names: Optional[Mapping[str, Any]] = None, **more: Any) -> None:
+        """Put measured data into values made by `add_value`: a point, a trace, a whole map, or
+        several values at once, at the place the axes say.
+
+        Each name is an axis or a value (as keywords, or in the dict `names` for a name that
+        can't be a keyword, e.g. `d.write({"if": 3}, S21=z)`):
+
+        - a **fixed axis**: an index (`power=3`), or one of its elements (`state="excited"`);
+        - a **growing axis** (`add_axis(..., grows=True)`): its coordinate (`time=12.5`), or an
+          array of them, adding as many points;
+        - a **value**: its data, shaped as the value's axes that weren't given (and its data
+          point), in order: a point is one number, a trace at `power=3` of `S21[power, freq]`
+          is one number per frequency.
+
+        Writing again to the same place replaces the data there.
+
+        Raises
+        ------
+        LBDError
+            An unknown name; no value given; a position out of range or an unknown element; a
+            position for an axis a value doesn't lie on; a growing axis without its coordinate;
+            data of another shape than the place needs (the message says which); complex data for
+            a real value, or numbers an integer or boolean value can't hold exactly.
+
+        Examples
+        --------
+        >>> d.write(power=i, S21=trace)                    # a trace
+        >>> d.write(power=i, freq=j, S21=z, T=t)           # a point, and T at power i
+        >>> d.write(time=12.5, T=4.2)                      # a row of a growing axis
+        """
+        plan = self._plan_write(names, more)
+        self._apply_write(plan)
+
+    def _plan_write(self, names: Optional[Mapping[str, Any]], more: Mapping[str, Any]) -> Dict[str, Any]:
+        """Check a write against the dataset's shapes; returns what to put where (data not
+        needed: `lbd.Writer` uses the same plan)."""
+        given: Dict[str, Any] = {}
+        if names is not None:
+            if not isinstance(names, Mapping):
+                raise TypeError(f"write: the first argument must be a dict of names, not {type(names).__name__}")
+            given.update(names)
+        for k, v in more.items():
+            if k in given:
+                raise LBDError(f"write: '{k}' is given twice")
+            given[k] = v
+        unknown = [k for k in given if k not in self.axes and k not in self.values]
+        if unknown:
+            raise LBDError(f"write: no axis or value named {unknown}; axes: {list(self.axes)}, values: {list(self.values)}")
+        values = {k: v for k, v in given.items() if k in self.values}
+        if not values:
+            raise LBDError("write: give at least one value with its data, e.g. write(power=3, S21=trace)")
+        positions = {k: v for k, v in given.items() if k in self.axes}
+        growing = [a for a in positions if self.axes[a].grows]
+        if len(growing) > 1:
+            raise LBDError(f"write: one growing axis at a time, not {growing}")
+        grow = None
+        if growing:
+            g = growing[0]
+            coords = np.asarray(positions[g], dtype=float)
+            if coords.ndim > 1 or not np.all(np.isfinite(coords)):
+                raise LBDError(f"write: '{g}' takes a coordinate or a 1-D array of them, finite numbers")
+            grow = (g, coords)
+        index_of: Dict[str, int] = {}
+        for a, x in positions.items():
+            if self.axes[a].grows:
+                continue
+            index_of[a] = self._position(a, x)
+        puts = []
+        for name, data in values.items():
+            v = self.values[name]
+            for a in positions:
+                if a not in v.axes:
+                    raise LBDError(f"write: '{name}' doesn't lie on '{a}' (its axes: {v.axes})")
+            index, shape = [], []
+            for a in v.axes:
+                ax = self.axes[a]
+                if ax.grows:
+                    if grow is None or grow[0] != a:
+                        raise LBDError(f"write: '{name}' lies on the growing axis '{a}': give its coordinate "
+                                       f"({a}=…), which adds a point")
+                    start, n = len(ax.data), grow[1].size
+                    if grow[1].ndim == 0:
+                        index.append(start)
+                    else:
+                        index.append(slice(start, start + n))
+                        shape.append(n)
+                elif a in index_of:
+                    index.append(index_of[a])
+                else:
+                    index.append(slice(None))
+                    shape.append(len(ax.data))
+            arr = np.asarray(data)
+            if arr.shape != tuple(shape) and not (arr.size == 1 and shape == []):
+                given_axes = [a for a in v.axes if a in positions]
+                raise LBDError(f"write: '{name}' at {given_axes or 'every place'} needs data of shape {tuple(shape)} "
+                               f"({', '.join(a for a in v.axes if a not in index_of and not self.axes[a].grows) or 'one number'}), "
+                               f"not {arr.shape}")
+            puts.append((name, tuple(index), _check_fits(arr.reshape(shape) if arr.size == 1 and shape == [] else arr,
+                                                         v.dtype, name)))
+        return {"grow": grow, "puts": puts}
+
+    def _position(self, axis: str, x: Any) -> int:
+        """An index of a fixed axis, from an index or one of its elements."""
+        ax = self.axes[axis]
+        n = len(ax.data)
+        if isinstance(x, str):
+            if ax.elements is None or x not in ax.elements:
+                raise LBDError(f"write: '{axis}' has no element {x!r}"
+                               + (f"; its elements: {ax.elements}" if ax.elements else "; give an index"))
+            return ax.elements.index(x)
+        if isinstance(x, (bool, np.bool_)) or not isinstance(x, (int, np.integer)):
+            raise LBDError(f"write: '{axis}' takes one position: an index (0 … {n - 1})"
+                           + (" or one of its elements" if ax.elements else "") + f", not {x!r}")
+        if not -n <= int(x) < n:
+            raise LBDError(f"write: index {int(x)} is out of range for '{axis}' (it has {n} points: 0 … {n - 1})")
+        return int(x) % n
+
+    def _apply_write(self, plan: Dict[str, Any]) -> None:
+        if plan["grow"] is not None:
+            g, coords = plan["grow"]
+            n = max(coords.size, 1)
+            ax = self.axes[g]
+            ax.data = np.concatenate([ax.data, np.atleast_1d(coords)]) if ax.data.size else np.atleast_1d(coords).copy()
+            for v in self.values.values():
+                if v.axes and v.axes[0] == g:
+                    if v.data is None:
+                        raise LBDError(f"write: value '{v.name}' was not loaded")
+                    pad = np.full((n,) + v.data.shape[1:], np.nan, dtype=v.data.dtype) \
+                        if v.data.dtype.kind in "fc" else np.zeros((n,) + v.data.shape[1:], dtype=v.data.dtype)
+                    if v.data.dtype.kind not in "fc" and v.measured is None:
+                        v.measured = np.ones(v.data.shape, dtype=bool)
+                    v.data = np.concatenate([v.data, pad])
+                    if v.measured is not None:
+                        v.measured = np.concatenate([v.measured, np.zeros((n,) + v.measured.shape[1:], dtype=bool)])
+                    v.shape = v.data.shape
+        for name, index, arr in plan["puts"]:
+            v = self.values[name]
+            if v.data is None:
+                raise LBDError(f"write: value '{name}' was not loaded; load the file without `values=`")
+            v.data[index] = arr
+            if v.measured is not None:
+                v.measured[index] = True
 
     def _check_new_name(self, name: str) -> None:
         _check_name(name)
@@ -635,6 +819,8 @@ class Dataset:
             _check_text(a.unit, f"axis '{key}' unit")
             _check_text(a.label, f"axis '{key}' label")
             arr = np.asarray(a.data)
+            if a.grows and arr.size == 0:
+                raise LBDError(f"the growing axis '{key}' has no points yet; write some before saving")
             if arr.ndim != 1 or arr.size == 0 or arr.dtype.kind not in "iuf":
                 raise LBDError(f"axis '{key}' must hold 1-D, non-empty real numbers; got {arr.dtype} {arr.shape}")
             if arr.dtype.kind == "f" and not np.all(np.isfinite(arr)):
@@ -666,6 +852,8 @@ class Dataset:
                 if len(self.axes[ax]) != arr.shape[i]:
                     raise LBDError(f"value '{key}': dimension {i} has size {arr.shape[i]} "
                                    f"but axis '{ax}' has length {len(self.axes[ax])}")
+            if v.measured is not None and np.shape(v.measured) != arr.shape:
+                raise LBDError(f"value '{key}': its measured mask has shape {np.shape(v.measured)}, not {arr.shape}")
         if not isinstance(self.meta, Mapping):
             raise LBDError(f"meta must be a dict, not {type(self.meta).__name__}")
 
@@ -701,6 +889,13 @@ class Dataset:
             ds.attrs["axes"] = ",".join(v.axes)
             if is_bool:
                 ds.attrs["lbd_bool"] = np.int64(1)
+
+        masks = {v.name: v.measured for v in self.values.values()
+                 if v.measured is not None and not np.all(v.measured)}
+        if masks:                             # integer / boolean points never measured (stopped early)
+            g_measured = f.create_group("measured")
+            for name, m in masks.items():
+                _create_dataset(g_measured, name, np.asarray(m, dtype=np.uint8), compression)
 
         _write_meta(f.create_group("meta"), self.meta, "meta")
 
@@ -812,10 +1007,18 @@ def load(path: PathLike, values: Union[None, str, Iterable[str]] = None) -> Data
                 raise LBDError(f"{path.name} has no /{group} group; it breaks the LBD format")
         for name, ds in f["axes"].items():
             d.axes[name] = _read_axis(name, ds, path)
+        masks = f["measured"] if isinstance(f.get("measured"), h5py.Group) else None
         for name, ds in f["values"].items():
             v = _describe_value(name, ds, path)
             if wanted is None or name in wanted:
                 v.data = _read_value_data(ds, v, path)
+                if masks is not None and name in masks:
+                    m = np.asarray(masks[name][()]).astype(bool)
+                    if m.shape == tuple(v.shape):
+                        v.measured = m
+                    else:
+                        _warn(f"{path.name}: the measured mask of '{name}' has shape {m.shape}, not {tuple(v.shape)}; "
+                              "it is ignored")
             d.values[name] = v
         if wanted is not None:
             missing = wanted - set(d.values)
@@ -1102,6 +1305,23 @@ def _check_elements(elements: Any, n: Optional[int], where: str) -> List[str]:
     if n is not None and len(items) != n:
         raise LBDError(f"{where}: {len(items)} elements for {n} positions; give one text per position")
     return items
+
+
+def _check_fits(arr: np.ndarray, dtype: str, name: str) -> np.ndarray:
+    """Data for a value of type `dtype`: complex refused for real values, integers and booleans
+    only when exactly representable."""
+    if np.iscomplexobj(arr) and not dtype.startswith("complex"):
+        raise LBDError(f"write: '{name}' is real ({dtype}); refusing to drop an imaginary part")
+    if dtype == "bool":
+        if arr.dtype != np.bool_ and not np.all(np.isin(arr, (0, 1))):
+            raise LBDError(f"write: '{name}' is boolean; give True/False (or 0/1)")
+    elif dtype.startswith(("int", "uint")):
+        if arr.dtype.kind == "f" and not np.all(np.isfinite(arr) & (arr == np.round(arr))):
+            raise LBDError(f"write: '{name}' holds whole numbers ({dtype}); got {arr.ravel()[:3]}")
+        info = np.iinfo(dtype)
+        if arr.size and (np.min(arr) < info.min or np.max(arr) > info.max):
+            raise LBDError(f"write: '{name}' ({dtype}) can't hold {np.min(arr)} … {np.max(arr)}")
+    return arr
 
 
 def _check_shape(shape: Any, name: str) -> tuple:

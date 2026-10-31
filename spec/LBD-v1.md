@@ -24,6 +24,7 @@ that implement this spec, see [Python](../docs/python/files.md), [MATLAB](../doc
 ├── values/             (group)  one N-D dataset per value
 │   └── <value name>    attrs: unit, label, axes [, lbd_bool]
 ├── meta/               (group)  free key/value metadata, stored as attributes; may contain sub-groups
+├── measured/           (group, optional)  one uint8 mask per integer / boolean value not fully measured
 ├── plot/               (group, optional)  attrs: spec, style, style_name [, matplotlib]
 └── extra/              (group, optional)  anything; ignored by LBD readers
 ```
@@ -114,6 +115,18 @@ The meaning of the JSON keys is defined by the viewer, not by this spec. Readers
 
 Any additional HDF5 content. LBD readers ignore it. Use it for data that does not fit the axes/values model.
 
+### 1.7 Measured — `/measured/<value name>` (optional)
+
+Which points of an integer or boolean value were measured, for a value that was filled piece by
+piece and not completely (a measurement stopped early). Floating-point and complex values use
+`NaN` for "not measured" instead and have no mask.
+
+- A `uint8` dataset with the same shape as `/values/<value name>`: `1` where the point was
+  measured, `0` where it was not (the value holds `0` there, which means nothing).
+- Writers omit the mask when every point was measured.
+- Readers that don't know masks read the value as usual; LBD readers should hide the points
+  whose mask is `0`.
+
 ---
 
 ## 2. Dimension order
@@ -141,7 +154,8 @@ The same rule applies to numeric arrays stored in `/meta`.
 | bool | `uint8` with values 0/1, and attribute `lbd_bool = 1` on the dataset. Readers convert back to boolean. |
 | string | variable-length UTF-8. Readers must also accept fixed-length or ASCII strings. |
 
-- Missing numeric values are `NaN` (floating point only).
+- Missing numeric values are `NaN` (floating point and complex); for integers and booleans, the
+  `/measured` mask says which points are missing (§1.7).
 - Values and axes must not be string datasets.
 
 Writers choose the type automatically from the input ("auto"): the input's numeric type is kept, complex input becomes the complex compound type, and boolean input becomes `uint8` + `lbd_bool`. The user may force a specific type.
@@ -171,11 +185,37 @@ Writers may store datasets chunked and gzip-compressed. Readers must handle this
 - A **major** bump may break compatibility. A reader must refuse a file whose major version is newer than it supports, with an error telling the user to update.
 - Readers must ignore unknown attributes, groups and datasets anywhere in the file.
 - Version history: **1.1** added the root `id` and `parent_id`; **1.2** added an axis's
-  `elements` and `role`, and data points with a shape (§1.2, §1.3).
+  `elements` and `role`, data points with a shape (§1.2, §1.3), the `/measured` masks (§1.7)
+  and files being written (§7).
 
 ---
 
-## 7. Minimal example (as seen by `h5dump`-style listing)
+## 7. Files being written
+
+A program may write a file while it measures, so that the data so far can be read at any time
+and a crash loses at most the last moments. Such a file is not yet an LBD file; it becomes one
+when complete.
+
+- It is named `<name>.lbd.writing` and is written in HDF5's single-writer / multiple-reader
+  (SWMR) mode, which needs the HDF5 1.10 file layout. When complete, the writer closes it and
+  renames it to `<name>.lbd`; the content is not copied.
+- While written: values may hold `NaN` (or a `0` mask, §1.7) where nothing was measured yet, and
+  an axis whose length isn't known in advance (a log, "until stopped") may be shorter than it
+  will be, together with the values on it. Every value on such an axis has it as its first axis.
+- **The guard.** For the whole time it writes, the writer holds an exclusive operating-system
+  lock on one byte at offset 2^40 of the file (length 1; beyond any data, so no read is blocked).
+  The lock disappears with the writing process, so it tells the two cases apart:
+  held → **measuring**; not held → **stopped** (the writer crashed or was stopped before
+  finishing). A stopped file holds everything written before the last flush and is made into
+  an LBD file by copying its content into `<name>.lbd`.
+- Readers open a `.lbd.writing` file in SWMR read mode with HDF5 file locking turned off, read
+  what they need and close it again; they must not keep it open or write to it. Other programs
+  opening it in the ordinary way are refused by HDF5 while it is written; this does not
+  disturb the writer.
+
+---
+
+## 8. Minimal example (as seen by `h5dump`-style listing)
 
 ```
 /                         lbd_format="LBD" lbd_version="1.2" title="Resonator power sweep"

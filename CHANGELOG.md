@@ -136,6 +136,13 @@ The file format has its own version (`lbd_version`, currently 1.2).
   read these files. Data with more dimensions than axes needs `shape=` (a clear error says so).
   1.1 files stay valid; readers for 1.1 read 1.2 files with a warning.
 
+- **Filling a file piece by piece** (Python): `add_value("S21", axes=["power", "freq"],
+  dtype="complex128")` without data makes a value that is "not measured yet" (`NaN`; for
+  integers and booleans a `measured` mask, saved as `/measured/<value>` when something is
+  missing), and `d.write(power=i, S21=trace)` puts a point, a trace or a whole map in its place —
+  fixed axes by index or element, several values at once. `add_axis("time", grows=True)` makes
+  an axis of unknown length whose points `write` adds (`d.write(time=t, T=x)`).
+
 ## 1.2.0 (2026-10-28)
 
 **Changes to how things behave** (read these when upgrading)
