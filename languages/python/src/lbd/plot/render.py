@@ -160,6 +160,8 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
     first = d.values[values[0]]
     nd = len(first.shape)
     swept = _swept(first)                  # its axes with more than one point
+    # its sweep axes: not the axes of one data point (format 1.2), which become curves, not maps
+    sweep = [a for a in swept if not _is_point(d, a)]
 
     # kind
     def check_kind(k: Any) -> str:
@@ -168,7 +170,7 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
         if k not in KINDS:
             raise RenderError(f"unknown plot kind {k!r}; use one of {KINDS}")
         if k == "auto":
-            return "heatmap" if len(swept) >= 2 else "curve"
+            return "heatmap" if len(sweep) >= 2 else "curve"
         if k == "heatmap" and nd < 2:
             raise RenderError(f"'{first.name}' is {nd}-D; a heat map needs 2 dimensions")
         if k == "heatmap" and len(swept) < 2:
@@ -253,11 +255,11 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
             return v
         return _pick(v, axes, role="horizontal axis")
 
-    x = pick("x", check_x, (swept or axes)[-1])
+    x = pick("x", check_x, (sweep or swept or axes)[-1])
     out["x"] = x
     along = x
     if x in d.values:
-        along = (swept or axes)[-1]
+        along = (sweep or swept or axes)[-1]
         out["along"] = along
     keep = [along]
     if kind == "heatmap":
@@ -456,7 +458,7 @@ def _resolve_scatter(d, out, values, pick, spec, index_in, warn_unused) -> Dict[
                                   f"or a value with the same axes ({[n for n in same_shape if n not in values]})")
             return x
 
-        x = pick("x", check_x, (_swept(first) or axes)[-1])
+        x = pick("x", check_x, ([a for a in _swept(first) if not _is_point(d, a)] or _swept(first) or axes)[-1])
         out["x"] = x
         for name in values[1:]:
             v = d.values[name]
@@ -511,6 +513,40 @@ def _swept(value) -> List[str]:
     return [a for a, n in zip(value.axes, value.shape) if n > 1]
 
 
+def _is_point(d, axis: str) -> bool:
+    """An axis of one data point (format 1.2: role "point"), not a sweep."""
+    return getattr(d.axes[axis], "role", None) == "point"
+
+
+def position_text(axis, i: int) -> Optional[str]:
+    """The text of position i of an axis with elements (format 1.2), or None."""
+    elements = getattr(axis, "elements", None)
+    return elements[i] if elements is not None and 0 <= i < len(elements) else None
+
+
+def _element_axis(axis, ticks: Optional[Tuple[np.ndarray, List[str]]]) -> None:
+    """An axis with elements: its texts at their positions, no minor ticks between them."""
+    if ticks is None:
+        return
+    from matplotlib.ticker import NullLocator
+
+    axis.set_ticks(*ticks)
+    axis.set_minor_locator(NullLocator())
+
+
+MAX_ELEMENT_TICKS = 15     # an axis with elements shows at most this many of them (every k-th)
+
+
+def _element_ticks(axis, f: float) -> Optional[Tuple[np.ndarray, List[str]]]:
+    """Tick positions (in plot units) and texts for an axis with elements, or None."""
+    elements = getattr(axis, "elements", None)
+    if elements is None:
+        return None
+    step = max(1, math.ceil(len(elements) / MAX_ELEMENT_TICKS))
+    pos = np.asarray(axis.data, dtype=float)[::step] * f
+    return pos, [mathsafe(e) for e in elements[::step]]
+
+
 def _slices(d, axes: List[str], index_in: Dict[str, Any], spec: Dict[str, Any]):
     slices = []
     explicit = spec.get("index") or {}
@@ -525,8 +561,10 @@ def _slices(d, axes: List[str], index_in: Dict[str, Any], spec: Dict[str, Any]):
             _warn(f"{_where(d)}saved view: {e}; using the first point", RenderWarning)
             i = 0
         ax = d.axes[a]
-        slices.append({"axis": a, "index": i, "length": n, "label": ax.label, "unit": ax.unit,
-                       "value": _num(ax.data[i])})
+        item = {"axis": a, "index": i, "length": n, "label": ax.label, "unit": ax.unit, "value": _num(ax.data[i])}
+        if getattr(ax, "elements", None) is not None:          # an axis with elements (format 1.2)
+            item.update(text=position_text(ax, i), elements=ax.elements)
+        slices.append(item)
     return {s["axis"]: s["index"] for s in slices}, slices
 
 
@@ -557,8 +595,13 @@ def _num(x: Any) -> Any:
     return x if not isinstance(x, float) or math.isfinite(x) else None
 
 
-def _legend_label(axis, value: Any) -> str:
-    """'Power = −60 dBm': one point of an axis in a legend (with a real minus, like the tick labels)."""
+def _legend_label(axis, value: Any, i: Optional[int] = None) -> str:
+    """'Power = −60 dBm': one point of an axis in a legend (with a real minus, like the tick labels).
+    Position i of an axis with elements: 'Prepared state = excited'; of a data point's axis, the
+    element alone ('x')."""
+    text = None if i is None else position_text(axis, i)
+    if text is not None:
+        return mathsafe(text) if getattr(axis, "role", None) == "point" else f"{mathsafe(axis.label)} = {mathsafe(text)}"
     number = _fmt(value).replace("-", "−")
     return f"{mathsafe(axis.label)} = {number} {axis.unit}".strip()
 
@@ -771,6 +814,7 @@ class CurveModel:
     ylim: Optional[Tuple[Optional[float], Optional[float]]]
     series_bar: Optional[Tuple[ScalarMappable, str]]    # many series: a colour bar instead of a legend
     auto_axes: List[Tuple[str, str]]
+    x_ticks: Optional[Tuple[np.ndarray, List[str]]] = None   # an axis with elements: its texts as ticks
 
 
 @dataclass
@@ -791,6 +835,8 @@ class MapModel:
     x_scale: str
     y_scale: str
     auto_axes: List[Tuple[str, str]]
+    x_ticks: Optional[Tuple[np.ndarray, List[str]]] = None   # an axis with elements: its texts as ticks
+    y_ticks: Optional[Tuple[np.ndarray, List[str]]] = None
 
 
 def prepare_curves(d, spec, style: Style) -> CurveModel:
@@ -829,7 +875,7 @@ def prepare_curves(d, spec, style: Style) -> CurveModel:
                 norm = mcolors.Normalize(float(np.min(sa.data)), float(np.max(sa.data)))
                 series_mappable = (ScalarMappable(norm=norm, cmap=cmap), sa)
             for j in range(n):
-                lines.append((arr[:, j], _legend_label(sa, sa.data[j])))
+                lines.append((arr[:, j], _legend_label(sa, sa.data[j], j)))
                 line_x.append(x_shown[:, j] if x_is_value else x_shown)
         else:
             lines.append((arr, label))
@@ -862,7 +908,8 @@ def prepare_curves(d, spec, style: Style) -> CurveModel:
         xs=line_x, lines=[(np.asarray(y) * yf, lab) for y, lab in lines], colors=series_colors, xf=xf, yf=yf,
         x_label=axis_label(spec.get("x_label") or xa.label, xunit, xs.label.unit_format),
         y_label=axis_label(ylabel, yunit, ys.label.unit_format), x_scale=spec["x_scale"], y_scale=y_scale,
-        ylim=ylim, series_bar=series_bar, auto_axes=auto_axes)
+        ylim=ylim, series_bar=series_bar, auto_axes=auto_axes,
+        x_ticks=None if x_is_value else _element_ticks(xa, xf))
 
 
 def draw_curves(fig: Figure, ax, model: CurveModel, d, spec, style: Style,
@@ -879,6 +926,7 @@ def draw_curves(fig: Figure, ax, model: CurveModel, d, spec, style: Style,
     ax.set_yscale(model.y_scale)
     if model.ylim is not None:
         ax.set_ylim(*model.ylim)
+    _element_axis(ax.xaxis, model.x_ticks)
     ax.margins(x=0)
     _annotate(ax, d, spec, model.auto_axes)
     if model.series_bar is not None:
@@ -917,7 +965,8 @@ def prepare_map(d, spec, style: Style) -> MapModel:
         x_label=axis_label(spec.get("x_label") or xa.label, xunit, xs.label.unit_format),
         y_label=axis_label(spec.get("y_label") or ya.label, yunit, ys.label.unit_format),
         z_label=axis_label(spec.get("z_label") or label, zunit, ys.label.unit_format),
-        x_scale=spec["x_scale"], y_scale=spec["y_scale"], auto_axes=auto_axes)
+        x_scale=spec["x_scale"], y_scale=spec["y_scale"], auto_axes=auto_axes,
+        x_ticks=_element_ticks(xa, xf), y_ticks=_element_ticks(ya, yf))
 
 
 def draw_map(fig: Figure, ax, model: MapModel, d, spec, style: Style, image: Optional[np.ndarray] = None):
@@ -934,6 +983,8 @@ def draw_map(fig: Figure, ax, model: MapModel, d, spec, style: Style, image: Opt
     ax.set_ylabel(model.y_label)
     ax.set_xscale(model.x_scale)
     ax.set_yscale(model.y_scale)
+    _element_axis(ax.xaxis, model.x_ticks)
+    _element_axis(ax.yaxis, model.y_ticks)
     _annotate(ax, d, spec, model.auto_axes)
     _colorbar(fig, mappable, ax, style, model.z_label)
     return mappable
@@ -1015,7 +1066,7 @@ def _draw_scatter(fig: Figure, ax, d, spec, style: Style) -> None:
         if c in d.axes and len(d.axes[c].data) <= len(a.colors) and not fixed_scale:
             ca = d.axes[c]
             where = np.ravel(_coords(d, c, shape_axes, point_shape))
-            groups = [(where == val, _legend_label(ca, val)) for val in ca.data]
+            groups = [(where == val, _legend_label(ca, val, k)) for k, val in enumerate(ca.data)]
         else:
             if c in d.axes:
                 cvals = _coords(d, c, shape_axes, point_shape)

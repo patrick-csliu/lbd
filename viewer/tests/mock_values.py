@@ -18,7 +18,7 @@ import numpy as np
 import lbd
 
 NAMES = ["6 rabi.lbd", "7 spectroscopy 3d.lbd", "8 mixed axes.lbd", "9 many values.lbd",
-         "10 one value.lbd", "11 single shot iq.lbd"]
+         "10 one value.lbd", "11 single shot iq.lbd", "12 tomography.lbd"]
 
 
 def rabi(small: bool) -> lbd.Dataset:
@@ -137,7 +137,7 @@ def single_shot_iq(small: bool) -> lbd.Dataset:
         fidelity[k] = 1 - (excited_called[0].mean() + (1 - excited_called[1].mean())) / 2
     d = lbd.Dataset(title="Single-shot readout", description="Mock data: I/Q shots, ground (0) and excited (1)")
     d.add_axis("readout_power", power, unit="dBm", label="Readout power")
-    d.add_axis("state", [0.0, 1.0], label="Prepared state (0 ground, 1 excited)")
+    d.add_axis("state", [0.0, 1.0], label="Prepared state", elements=["ground", "excited"])
     d.add_axis("shot", np.arange(float(shots)), label="Shot")
     d.add_value("IQ", iq, axes=["readout_power", "state", "shot"], unit="V", label="I/Q")
     d.add_value("I", iq.real, axes=["readout_power", "state", "shot"], unit="V", label="I")
@@ -147,7 +147,27 @@ def single_shot_iq(small: bool) -> lbd.Dataset:
     return d
 
 
-MAKERS = dict(zip(NAMES, [rabi, spectroscopy_3d, mixed_axes, many_values, one_value, single_shot_iq]))
+def tomography(small: bool) -> lbd.Dataset:
+    """State tomography against drive amplitude (format 1.2): each data point is a Bloch vector
+    (x, y, z) and a 2×2 I/Q covariance matrix."""
+    rng = np.random.default_rng(12)
+    amp = np.linspace(0, 0.5, 6 if small else 41)
+    theta = np.pi * amp / 0.25                                          # a π pulse at 0.25 V
+    bloch = np.stack([np.sin(theta), 0.02 * rng.normal(size=amp.size), np.cos(theta)], axis=1)
+    bloch *= np.exp(-amp / 2)[:, None]                                  # a little decay
+    cov = np.empty((amp.size, 2, 2))
+    for k, a in enumerate(amp):
+        sii, sqq, siq = 1 + 0.2 * a, 1 - 0.1 * a, 0.3 * np.sin(theta[k])
+        cov[k] = np.array([[sii, siq], [siq, sqq]]) * 1e-8
+    d = lbd.Dataset(title="Tomography", description="Mock data: a Bloch vector and an I/Q covariance per amplitude")
+    d.add_axis("amp", amp, unit="V", label="Drive amplitude")
+    d.add_value("bloch", bloch, axes="amp", shape=(3,), elements=["x", "y", "z"], label="Bloch vector")
+    d.add_value("cov", cov, axes="amp", shape=(2, 2), elements=[["I", "Q"], ["I", "Q"]], unit="V^2",
+                label="Covariance")
+    return d
+
+
+MAKERS = dict(zip(NAMES, [rabi, spectroscopy_3d, mixed_axes, many_values, one_value, single_shot_iq, tomography]))
 
 
 def write_all(folder: Path, small: bool = False) -> List[Path]:

@@ -899,13 +899,25 @@ function axisValues(path: string, version: string | null, axis: string): Promise
 /** The position on an axis that isn't drawn: a slider, and a box to type the axis value. A typed
  *  value goes to the nearest measured point; the box then shows that point's exact value. */
 export function SliceControl({ path, version, slice: s, onIndex }: { path: string; version: string | null; slice: Slice; onIndex: (i: number) => void }) {
-  const shown = s.value === null ? "" : String(s.value);
+  const shown = s.text ?? (s.value === null ? "" : String(s.value));
   const [text, setText] = useState(shown);
   const [note, setNote] = useState<string | null>(null);
   useEffect(() => setText(shown), [shown]);
 
   const commit = async () => {
     if (text.trim() === shown) return;
+    if (s.elements) {
+      // an axis with elements (format 1.2): its positions are chosen by their text
+      const i = s.elements.findIndex((e) => e.toLowerCase() === text.trim().toLowerCase());
+      if (i < 0) {
+        setNote(`Type one of: ${s.elements.slice(0, 8).join(", ")}${s.elements.length > 8 ? ", …" : ""}`);
+        setText(shown);
+        return;
+      }
+      setNote(null);
+      if (i !== s.index) onIndex(i);
+      return;
+    }
     const wanted = Number(text.trim());
     if (text.trim() === "" || !Number.isFinite(wanted)) {
       setNote("Type a number");
@@ -1031,11 +1043,23 @@ export function FileDetails({ info, metaFilter = false }: { info: FileInfo; meta
           {info.axes.map((a) => (
             <tr key={a.name}>
               <td><code>{a.name}</code></td>
-              <td>{a.label}</td>
+              <td>
+                {a.label}
+                {a.role === "point" && <span className="muted small"> (inside each data point)</span>}
+              </td>
               <td>{a.unit}</td>
               <td className="num">{a.length}</td>
-              <td className="num">{fmt(a.min)}</td>
-              <td className="num">{fmt(a.max)}</td>
+              {a.elements ? (
+                <td colSpan={2} title={a.elements.join(", ")}>
+                  {a.elements.slice(0, 6).join(", ")}
+                  {a.elements.length > 6 ? ", …" : ""}
+                </td>
+              ) : (
+                <>
+                  <td className="num">{fmt(a.min)}</td>
+                  <td className="num">{fmt(a.max)}</td>
+                </>
+              )}
             </tr>
           ))}
         </tbody>

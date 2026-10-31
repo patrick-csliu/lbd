@@ -258,6 +258,10 @@ export interface AxisInfo {
   dtype: string;
   min: number | null;
   max: number | null;
+  /** a text for each position (format 1.2), or null: numbered */
+  elements?: string[] | null;
+  /** "point": an axis of a value's data point (format 1.2); null: a sweep axis */
+  role?: string | null;
 }
 
 export interface ValueInfo {
@@ -268,6 +272,8 @@ export interface ValueInfo {
   shape: number[];
   dtype: string;
   complex: boolean;
+  /** the axes of one data point (format 1.2): the last of `axes` */
+  point_axes?: string[];
   /** a single number (no axes), as text with a unit prefix: "21 µs" */
   text?: string;
 }
@@ -311,6 +317,9 @@ export interface Slice {
   label: string;
   unit: string;
   value: number | null;
+  /** the position's text, for an axis with elements (format 1.2) */
+  text?: string | null;
+  elements?: string[] | null;
 }
 
 export type FileKind = "lbd" | "style" | "image";
@@ -593,6 +602,8 @@ export interface ReadItem {
   unit: string;
   value: number | null; // null: empty (missing data)
   index?: number;
+  /** the position's text, for an axis with elements (format 1.2) */
+  text?: string | null;
 }
 
 export interface CursorRead {

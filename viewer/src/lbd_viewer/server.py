@@ -510,10 +510,12 @@ def file_summary(d: "lbd.Dataset") -> Dict[str, Any]:
         finite = data[np.isfinite(data)] if data.dtype.kind == "f" else data
         axes.append({
             "name": a.name, "unit": a.unit, "label": a.label, "length": int(data.size), "dtype": str(data.dtype),
+            "elements": a.elements, "role": a.role,
             "min": jsonable(finite.min()) if finite.size else None,
             "max": jsonable(finite.max()) if finite.size else None,
         })
     values = [{"name": v.name, "unit": v.unit, "label": v.label, "axes": v.axes, "shape": list(v.shape),
+               "point_axes": v.point_axes,
                "dtype": v.dtype, "complex": v.dtype.startswith("complex")} for v in d.values.values()]
     numbers = _single_numbers(d)
     for v in values:

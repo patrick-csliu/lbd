@@ -30,6 +30,11 @@ The file format has its own version (`lbd_version`, currently 1.2).
 
 **Viewer**
 
+- **Elements and data points** (format 1.2): an axis's elements are shown instead of its numbers
+  (tick labels, legends, cursor read-outs, sliders — type an element to choose it — and the
+  axes table). A value whose data points are vectors or matrices is drawn as curves against its
+  sweep (one per element: Bloch vector x, y, z), not as a map; the Library's sweep size counts
+  sweep axes only.
 - **Previews in the Library:** the selected file shows a picture of its data, as Explore first
   shows it, and the files near it are drawn ahead, so stepping with the arrow keys shows them at
   once. **Pictures** shows the list as a grid of pictures. Explore's **Library preview** button

@@ -45,7 +45,7 @@ export function si(v: number | null | undefined, unit: string, digits = 7): stri
 
 /** One read-out number: "Frequency = 5.12031 GHz". */
 export function readText(i: ReadItem): string {
-  return `${i.label} = ${si(i.value, i.unit)}`;
+  return `${i.label} = ${i.text ?? si(i.value, i.unit)}`;
 }
 
 export const item = (c: CursorRead | null | undefined, role: ReadItem["role"]) => c?.items.find((i) => i.role === role);

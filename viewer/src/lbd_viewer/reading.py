@@ -113,7 +113,7 @@ def _stored(s: "ExploreSession", name: str, base_value, factor: float) -> Option
 def _axis_item(s: "ExploreSession", role: str, axis: str, i: int) -> Dict[str, Any]:
     a = s.data.axes[axis]
     return {"role": role, "name": axis, "label": a.label or axis, "unit": a.unit, "index": int(i),
-            "value": _num(np.asarray(a.data, dtype=float)[i])}
+            "value": _num(np.asarray(a.data, dtype=float)[i]), "text": rnd.position_text(a, int(i))}
 
 
 def _per_value(s: "ExploreSession") -> int:

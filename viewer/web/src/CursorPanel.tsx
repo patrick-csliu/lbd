@@ -87,7 +87,7 @@ export function parseSi(text: string, unit: string): number | null {
 
 /** A position box: shows the stored value; Enter or leaving it moves the cursor there. */
 function PositionBox({ it, onSet }: { it: ReadItem; onSet: (v: number) => void }) {
-  const shown = si(it.value, it.unit);
+  const shown = it.text ?? si(it.value, it.unit);
   const [text, setText] = useState(shown);
   const [bad, setBad] = useState<string | null>(null);
   useEffect(() => {

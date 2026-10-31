@@ -97,7 +97,9 @@ def row_from_summary(path: Path, root: str, st: os.stat_result, summary: Dict[st
     created = parse_created(summary.get("created"))
     if created:
         row["sort_time"], row["day"], row["date_from_file"] = created[0], created[1], 0
-    swept = [a for a in summary["axes"] if a["length"] > 1 and any(a["name"] in v["axes"] for v in summary["values"])]
+    # the sweep: axes with more than one point that values lie on; not a data point's axes (format 1.2)
+    swept = [a for a in summary["axes"] if a["length"] > 1 and a.get("role") != "point"
+             and any(a["name"] in v["axes"] for v in summary["values"])]
     points = math.prod(a["length"] for a in swept) if swept else 0
     values = summary["values"]
     words = [summary.get("title") or "", path.name, summary.get("description") or ""]
