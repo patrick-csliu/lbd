@@ -323,6 +323,156 @@ end
         @test_throws LBDError add_value!(d, "r", zeros(4, 3), "amp"; shape=(3,), elements=["u", "v"])
     end
 
+    function make_planned()
+        d = LBD.Dataset("planned")
+        add_axis!(d, "power", collect(range(-60.0, 0, 4)); unit="dBm")
+        add_axis!(d, "freq", collect(range(6e9, 7e9, 5)); unit="Hz")
+        add_axis!(d, "state"; elements=["ground", "excited"])
+        add_value!(d, "S21"; axes=["power", "freq"], dtype=ComplexF64)
+        add_value!(d, "T"; axes="power")
+        add_value!(d, "n"; axes=["state", "power"], dtype=Int32)
+        return d
+    end
+
+    @testset "write!: filling values piece by piece" begin
+        d = make_planned()
+        @test all(isnan, d["S21"].data) && size(d["S21"].data) == (4, 5)
+        @test d["S21"].measured === nothing
+        @test d["n"].measured == falses(2, 4)
+        write!(d; power=2, S21=(1:5) .* im, T=4.2)           # a trace and a point
+        write!(d; power=3, freq=4, S21=1 + 2im)
+        write!(d; state="excited", power=4, n=7)
+        write!(d, Dict("state" => 1, "power" => 1); n=3)       # names as a Dict
+        @test d["S21"].data[2, :] == (1:5) .* im
+        @test d["S21"].data[3, 4] == 1 + 2im && isnan(d["S21"].data[3, 1])
+        @test d["T"].data[2] == 4.2
+        @test d["n"].data[2, 4] == 7 && count(d["n"].measured) == 2
+        p = joinpath(dir, "filled.lbd")
+        LBD.save(p, d)
+        r = LBD.load(p)
+        @test r["n"].measured == d["n"].measured
+        @test r["T"].measured === nothing
+        @test h5open(f -> collect(keys(f["measured"])), p) == ["n"]
+        write!(d; n=ones(Int, 2, 4))                         # now everything is measured
+        LBD.save(p, d)
+        @test LBD.load(p)["n"].measured === nothing
+        # errors, and nothing half written
+        @test_throws LBDError write!(d; power=2, S21=ones(4))
+        @test_throws LBDError write!(d; power=9, T=1)
+        @test_throws LBDError write!(d; power=0, T=1)          # 1-based
+        @test_throws LBDError write!(d; freq=1, T=1)
+        @test_throws LBDError write!(d; S21=1)
+        @test_throws LBDError write!(d; state="mid", power=1, n=1)
+        @test_throws LBDError write!(d; state=1, power=1, n=1.5)
+        @test_throws LBDError write!(d; power=1, T=1im)
+        @test_throws LBDError write!(d; power=1)
+        @test_throws LBDError write!(d; nope=1, T=1)
+        @test_throws LBDError write!(d, Dict("power" => 1); power=2, T=1)
+        @test isnan(d["T"].data[1])
+    end
+
+    @testset "write!: a growing axis" begin
+        d = LBD.Dataset("log")
+        add_axis!(d, "time"; unit="s", grows=true)
+        add_axis!(d, "ch", [1, 2])
+        add_value!(d, "T"; axes="time")
+        add_value!(d, "V"; axes=["time", "ch"])
+        add_value!(d, "ok"; axes="time", dtype=Bool)
+        @test_throws LBDError add_value!(d, "bad"; axes=["ch", "time"])
+        @test_throws LBDError LBD.save(joinpath(dir, "empty.lbd"), d)
+        write!(d; time=0.5, T=1, V=[1, 2], ok=true)
+        write!(d; time=[1, 1.5], T=[2, 3])
+        @test d["time"].data == [0.5, 1, 1.5]
+        @test d["T"].data == [1, 2, 3]
+        @test all(isnan, d["V"].data[2:3, :])
+        @test d["ok"].measured == [true, false, false]
+        @test_throws LBDError write!(d; T=1)
+        p = joinpath(dir, "log.lbd")
+        LBD.save(p, d)
+        r = LBD.load(p)
+        @test r["time"].data == [0.5, 1, 1.5]
+        @test r["ok"].measured == [true, false, false]
+    end
+
+    function live_writer(path; kw...)
+        w = LBD.Writer(path; title="live", flush_every=60, kw...)
+        add_axis!(w, "power", 1:3)
+        add_axis!(w, "freq", collect(range(0, 1, 4)))
+        add_value!(w, "S21"; axes=["power", "freq"], dtype=ComplexF64)
+        add_value!(w, "n"; axes="power", dtype=Int64)
+        add_axis!(w, "time"; grows=true)
+        add_value!(w, "T"; axes="time")
+        return w
+    end
+
+    @testset "Writer: writing while measuring" begin
+        p = joinpath(dir, "live.lbd")
+        w = live_writer(p)
+        w.meta["sample"] = "R7"
+        write!(w; power=1, S21=(1:4) .+ 1im, n=5)
+        write!(w; time=[0, 1], T=[10, 11])
+        write!(w; time=2, T=12)
+        @test isfile(p * ".writing") && !isfile(p)
+        @test writing_status(p * ".writing") == "measuring"
+        r = @test_logs (:warn, r"still being written") LBD.load(p * ".writing")
+        @test r["S21"].data[1, :] == (1:4) .+ 1im
+        @test r["time"].data == [0, 1, 2] && r["T"].data == [10, 11, 12]
+        @test_throws LBDError add_axis!(w, "late", [1])
+        @test_throws LBDError LBD.Writer(p)
+        @test_throws LBDError recover(p * ".writing")
+        write!(w; power=2, S21=ones(4), n=6)
+        w.description = "changed while measuring"
+        out = @test_logs (:warn, r"n not measured everywhere") close(w)
+        @test out == p && !isfile(p * ".writing")
+        r = LBD.load(p)
+        @test r.description == "changed while measuring"
+        @test r.meta["sample"] == "R7"
+        @test r["S21"].data[2, :] == ones(4)
+        @test all(isnan, r["S21"].data[3, :])
+        @test r["n"].measured == [true, true, false]
+        @test r.id == w.id
+        @test_throws LBDError write!(w; power=3, n=1)
+    end
+
+    @testset "Writer: an error in the block, recover" begin
+        p = joinpath(dir, "stopped.lbd")
+        wref = Ref{Any}(nothing)
+        @test_logs (:warn, r"stopped with an error") match_mode=:any @test_throws ErrorException lbd_writer(p; flush_every=60) do w
+            wref[] = w
+            add_axis!(w, "x", 1:4)
+            add_value!(w, "y"; axes="x")
+            write!(w; x=1, y=1.0)
+            write!(w; x=2, y=2.0)                            # not flushed yet: written on the way out
+            error("instrument did not answer")
+        end
+        @test !isfile(p) && writing_status(p) == "stopped"
+        @test recover(p * ".writing") == p
+        @test !isfile(p * ".writing")
+        r = LBD.load(p)
+        @test r.id == wref[].id
+        @test r["y"].data[1:2] == [1.0, 2.0] && isnan(r["y"].data[3])
+    end
+
+    @testset "Writer: stopped early, a name taken, bad metadata" begin
+        p = joinpath(dir, "taken.lbd")
+        w = live_writer(p)
+        write!(w; power=1, n=1)
+        w.meta["bad"] = nothing
+        @test_throws LBDError close(w)
+        @test writing_status(p) == "measuring"
+        delete!(w.meta, "bad")
+        write(p, "someone else's")
+        out = @test_logs (:warn, r"saved as taken \(2\)\.lbd") close(w; stopped=true)
+        @test out == joinpath(dir, "taken (2).lbd")
+        @test LBD.load(out)["n"].measured == [true, false, false]
+        @test read(p, String) == "someone else's"
+        @test_throws LBDError LBD.Writer(joinpath(dir, "a.h5"))
+        d = LBD.Dataset()
+        add_axis!(d, "x", [1])
+        add_value!(d, "y", [1.0], "x")
+        @test_throws LBDError LBD.save(joinpath(dir, "a.lbd.writing"), d)
+    end
+
     @testset "reads Python-written examples" begin
         ex = joinpath(@__DIR__, "..", "..", "..", "examples", "data")
         if isdir(ex)

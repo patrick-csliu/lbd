@@ -9,6 +9,8 @@ d = LBD.Dataset("Resonator power sweep")
 add_axis!(d, "power", -40.0:4:0; unit="dBm", label="Power")
 add_axis!(d, "freq", range(4e9, 8e9, 401); unit="Hz", label="Frequency")
 add_value!(d, "S21", s21, ["power", "freq"])      # size(s21) == (11, 401)
+add_value!(d, "S21b"; axes=["power", "freq"], dtype=ComplexF64)   # filled by write!
+write!(d; power=3, S21b=trace)                    # a trace: power 3, every frequency
 d.meta["T_mK"] = 12
 LBD.save("sweep.lbd", d)
 d = LBD.load("sweep.lbd")
@@ -23,7 +25,8 @@ using JSON3
 using OrderedCollections: OrderedDict
 using Random: RandomDevice
 
-export Dataset, Axis, Value, add_axis!, add_value!, new_id!, LBDError, LBDVersionError
+export Dataset, Axis, Value, add_axis!, add_value!, write!, new_id!, LBDError, LBDVersionError
+export Writer, lbd_writer, writing_status, recover
 
 const PACKAGE_VERSION = "1.3.0-dev"
 const FORMAT_VERSION = "1.2"
@@ -60,8 +63,10 @@ mutable struct Axis
     label::String
     elements::Union{Vector{String},Nothing}   # a text per position (format 1.2), or nothing: numbered
     role::Union{String,Nothing}               # "point": an axis of a value's data point (1.2); nothing: a sweep axis
+    grows::Bool                               # write! adds its points (add_axis!(...; grows=true)); not stored
 end
-Axis(name, data, unit, label) = Axis(name, data, unit, label, nothing, nothing)
+Axis(name, data, unit, label) = Axis(name, data, unit, label, nothing, nothing, false)
+Axis(name, data, unit, label, elements, role) = Axis(name, data, unit, label, elements, role, false)
 Base.length(a::Axis) = length(a.data)
 
 mutable struct Value
@@ -74,8 +79,13 @@ mutable struct Value
     dtype::String
     point_axes::Vector{String}   # the axes of one data point (the last of `axes`; format 1.2)
     elements::Vector{Any}        # per data-point dimension: its texts (Vector{String}) or nothing
+    # For an integer or Bool value filled by write!: true where something was written; nothing
+    # for every other value (NaN means "not measured")
+    measured::Any
 end
-Value(name, data, axes, unit, label, shape, dtype) = Value(name, data, axes, unit, label, shape, dtype, String[], Any[])
+Value(name, data, axes, unit, label, shape, dtype) = Value(name, data, axes, unit, label, shape, dtype, String[], Any[], nothing)
+Value(name, data, axes, unit, label, shape, dtype, point_axes, elements) =
+    Value(name, data, axes, unit, label, shape, dtype, point_axes, elements, nothing)
 
 """The shape of one data point of `v`: `()` for one number, `(3,)` for a vector of 3 …"""
 point_shape(v::Value) = isempty(v.point_axes) ? () : Tuple(v.shape[end-length(v.point_axes)+1:end])
@@ -98,12 +108,14 @@ mutable struct Dataset
     id::Union{String,Nothing}
     parent_id::Union{String,Nothing}
     path::Union{String,Nothing}
+    live::Bool                     # LBD.Writer: values without data take no memory
+    placeholders::Vector{String}   # ... and these are they (their data is in the file)
 end
 
 Dataset(title::AbstractString=""; description::AbstractString="", created=nothing) = Dataset(
     String(title), String(description), created === nothing ? nothing : created_text(created), nothing, FORMAT_VERSION,
     OrderedDict{String,Axis}(), OrderedDict{String,Value}(), OrderedDict{String,Any}(),
-    nothing, nothing, nothing, nothing, nothing, nothing, nothing,
+    nothing, nothing, nothing, nothing, nothing, nothing, nothing, false, String[],
 )
 
 # ---- the measurement's identity ----------------------------------------------
@@ -177,14 +189,23 @@ function check_new_name(d::Dataset, name::AbstractString)
 end
 
 """
-    add_axis!(d, name, data=nothing; unit="", label=name, elements=nothing)
+    add_axis!(d, name, data=nothing; unit="", label=name, elements=nothing, grows=false)
 
 Add a 1-D real axis. `elements`: a text for each position (e.g. `["ground", "excited"]`);
-`data` may then be left out (the positions are numbered 0, 1, 2 …).
+`data` may then be left out (the positions are numbered 0, 1, 2 …). `grows=true`: an axis of
+unknown length (a log, "until I stop it"), given no data; `write!` adds its points. It must be
+the first axis of the values on it.
 """
 function add_axis!(d::Dataset, name::AbstractString, data=nothing; unit::AbstractString="",
-                   label::AbstractString=name, elements=nothing)
+                   label::AbstractString=name, elements=nothing, grows::Bool=false)
     check_new_name(d, name)
+    if grows
+        (data === nothing && elements === nothing) ||
+            throw(LBDError("axis \"$name\" grows: give no data or elements; write! adds its points"))
+        a = Axis(String(name), Float64[], String(unit), String(label), nothing, nothing, true)
+        d.axes[a.name] = a
+        return a
+    end
     if data === nothing
         elements === nothing && throw(LBDError("axis \"$name\" needs its coordinates (data) or its elements"))
         data = collect(0:length(check_elements(elements, nothing, "axis \"$name\"")) - 1)
@@ -214,6 +235,7 @@ end
 
 """
     add_value!(d, name, data, axes=String[]; unit="", label=name, dtype=:auto, shape=(), elements=nothing)
+    add_value!(d, name; axes=String[], dtype=Float64, ...)
 
 Add an N-D value. `axes` lists one axis name per dimension (or a single name / comma-separated
 string). `size(data)` must match the axis lengths. `dtype=:auto` keeps the element type;
@@ -223,14 +245,39 @@ Each data point is one number unless `shape` says otherwise (format 1.2): `shape
 vector of 3, `(2, 2)` for a matrix; `data`'s dimensions are then the value's axes first, then
 the data point's. `elements` names a data point's positions: one list (`["u", "v", "w"]`), or one
 per dimension (`[["I", "Q"], nothing]`).
+
+Without data (`nothing`, or the second form) the value is filled later by `write!`: every point
+starts as `NaN` (not measured yet), or for integers and `Bool` as 0 with `measured` false.
 """
+add_value!(d::Dataset, name::AbstractString; axes=String[], kw...) = add_value!(d, name, nothing, axes; kw...)
+
 function add_value!(d::Dataset, name::AbstractString, data, axes=String[];
                     unit::AbstractString="", label::AbstractString=name, dtype=:auto,
                     shape=(), elements=nothing)
     check_new_name(d, name)
-    arr = coerce_value(data, dtype, name)
     axl = axes_list(axes)
     point = check_shape(shape, name)
+    measured = nothing
+    placeholder = false
+    if data === nothing                 # filled later by write!: "not measured yet"
+        for ax in axl
+            haskey(d.axes, ax) || throw(LBDError("value \"$name\": axis \"$ax\" does not exist; add it with add_axis! first"))
+        end
+        T = dtype === :auto ? Float64 : dtype
+        (T isa DataType && haskey(DTYPE_NAMES, T)) || throw(LBDError(
+            "value \"$name\": unsupported dtype $dtype; allowed: $(sort(collect(values(DTYPE_NAMES)))) or :auto"))
+        full = (Tuple(length(d.axes[a]) for a in axl)..., point...)
+        if d.live                        # LBD.Writer: the data lives in the file
+            arr = Array{T}(undef, ntuple(_ -> 0, length(full)))
+            placeholder = true
+        else
+            arr = isempty(full) ? not_measured(T) : fill(not_measured(T), full)
+            T <: AbstractFloat || T <: Complex || (measured = isempty(full) ? false : falses(full))
+        end
+        data = arr
+        dtype = :auto
+    end
+    arr = coerce_value(data, dtype, name)
     nd = arr isa Number ? 0 : ndims(arr)
     if length(axl) + length(point) != nd
         if length(axl) < nd && isempty(point)
@@ -240,16 +287,19 @@ function add_value!(d::Dataset, name::AbstractString, data, axes=String[];
         throw(LBDError("value \"$name\" has $nd dimension(s), but its axes $axl and shape=$point make " *
                        "$(length(axl) + length(point))"))
     end
+    growing = [ax for ax in axl if haskey(d.axes, ax) && d.axes[ax].grows]
+    (length(growing) > 1 || (!isempty(growing) && axl[1] != growing[1])) && throw(LBDError(
+        "value \"$name\": a growing axis must be its first axis, and only one (here $axl)"))
     for (i, ax) in enumerate(axl)
         haskey(d.axes, ax) || throw(LBDError("value \"$name\": axis \"$ax\" does not exist; add it with add_axis! first"))
-        if length(d.axes[ax]) != size(arr, i)
+        if !placeholder && length(d.axes[ax]) != size(arr, i)
             hint = !isempty(point) && size(arr)[end-length(point)+1:end] != point ?
                 "; the value's axes come first, then the data point (e.g. use permutedims)" : ""
             throw(LBDError("value \"$name\": dimension $i has size $(size(arr, i)) but axis \"$ax\" has " *
                            "length $(length(d.axes[ax]))$hint"))
         end
     end
-    if !isempty(point) && size(arr)[length(axl)+1:end] != point
+    if !placeholder && !isempty(point) && size(arr)[length(axl)+1:end] != point
         throw(LBDError("value \"$name\": its data points have shape $(size(arr)[length(axl)+1:end]), not shape=$point"))
     end
     named = value_elements(elements, point, name)
@@ -262,11 +312,182 @@ function add_value!(d::Dataset, name::AbstractString, data, axes=String[];
         plabel = length(point) > 1 ? "$label (dim$k)" : String(label)
         d.axes[pn] = Axis(pn, collect(0:n-1), "", plabel, named[k], "point")
     end
-    vshape = arr isa Number ? () : size(arr)
+    vshape = placeholder ? (Tuple(length(d.axes[a]) for a in axl)..., point...) : arr isa Number ? () : size(arr)
+    T = arr isa Number ? typeof(arr) : eltype(arr)
     v = Value(String(name), arr, vcat(axl, point_names), String(unit), String(label), vshape,
-              DTYPE_NAMES[eltype(arr)], point_names, named)
+              DTYPE_NAMES[T], point_names, named, measured)
     d.values[v.name] = v
+    placeholder && push!(d.placeholders, v.name)
     return v
+end
+
+# "Not measured" for an element type: NaN, or zero for integers and Bool (with a mask).
+not_measured(::Type{T}) where {T<:AbstractFloat} = T(NaN)
+not_measured(::Type{T}) where {T<:Complex} = T(NaN, NaN)
+not_measured(::Type{T}) where {T} = zero(T)
+
+# ---- filling values: write! -----------------------------------------------------
+
+"""
+    write!(d; names...)
+    write!(d, Dict("if" => 3); names...)
+
+Put measured data into values made by `add_value!` without data: a point, a trace, a whole map,
+or several values at once, at the place the axes say.
+
+- a fixed axis: an index (`power=3`, 1 = its first point), or one of its elements (`state="excited"`);
+- a growing axis (`add_axis!(...; grows=true)`): its coordinate, or a vector of them, adding as
+  many points;
+- a value: its data, sized as the value's axes that weren't given (and its data point), in order.
+
+Names that can't be keywords go in the `Dict`. Writing again to the same place replaces the data.
+
+```julia
+write!(d; power=3, S21=trace)               # a trace
+write!(d; power=3, freq=7, S21=z, T=t)      # a point, and T at power 3
+write!(d; time=12.5, T=4.2)                 # a growing axis: adds a point
+```
+"""
+function write!(d::Dataset, names::AbstractDict=Dict{String,Any}(); kw...)
+    apply_write!(d, plan_write(d, names, kw))
+    return nothing
+end
+
+function plan_write(d::Dataset, names::AbstractDict, kw)
+    given = OrderedDict{String,Any}(String(k) => v for (k, v) in names)
+    for (k, v) in kw
+        haskey(given, String(k)) && throw(LBDError("write!: \"$k\" is given twice"))
+        given[String(k)] = v
+    end
+    unknown = [k for k in keys(given) if !haskey(d, k)]
+    isempty(unknown) || throw(LBDError("write!: no axis or value named $unknown; axes: $(collect(keys(d.axes))), " *
+                                       "values: $(collect(keys(d.values)))"))
+    vals = [k for k in keys(given) if haskey(d.values, k)]
+    isempty(vals) && throw(LBDError("write!: give at least one value with its data, e.g. write!(d; power=3, S21=trace)"))
+    positions = [k for k in keys(given) if haskey(d.axes, k)]
+    grow = nothing
+    index = Dict{String,Int}()
+    for a in positions
+        if d.axes[a].grows
+            grow === nothing || throw(LBDError("write!: one growing axis at a time, not $(grow.axis) and $a"))
+            c = given[a]
+            ok = (c isa Real && !(c isa Bool) && isfinite(c)) ||
+                 (c isa AbstractVector && eltype(c) <: Real && !(eltype(c) <: Bool) && all(isfinite, c))
+            ok || throw(LBDError("write!: \"$a\" takes a coordinate or a vector of them, finite numbers"))
+            grow = (axis=a, coords=Float64.(c isa Real ? [c] : collect(c)), scalar=c isa Real)
+        else
+            index[a] = position(d, a, given[a])
+        end
+    end
+    puts = []
+    for name in vals
+        v = d.values[name]
+        for a in positions
+            a in v.axes || throw(LBDError("write!: \"$name\" doesn't lie on \"$a\" (its axes: $(v.axes))"))
+        end
+        idx = Any[]
+        need = Int[]
+        free = String[]
+        for a in v.axes
+            ax = d.axes[a]
+            if ax.grows
+                (grow !== nothing && grow.axis == a) || throw(LBDError(
+                    "write!: \"$name\" lies on the growing axis \"$a\": give its coordinate ($a=…), which adds a point"))
+                start = length(ax.data)
+                if grow.scalar
+                    push!(idx, start + 1)
+                else
+                    push!(idx, start .+ (1:length(grow.coords)))
+                    push!(need, length(grow.coords)); push!(free, a)
+                end
+            elseif haskey(index, a)
+                push!(idx, index[a])
+            else
+                push!(idx, Colon())
+                push!(need, length(ax.data)); push!(free, a)
+            end
+        end
+        x = fits_type(given[name], v.dtype, name)
+        x = shaped_for(x, need, name, free)
+        push!(puts, (name=name, idx=idx, data=x))
+    end
+    return (grow=grow, puts=puts)
+end
+
+# An index of a fixed axis (1 = its first point), from an index or one of its elements.
+function position(d::Dataset, a, x)
+    ax = d.axes[a]
+    n = length(ax.data)
+    if x isa AbstractString || x isa Symbol
+        i = ax.elements === nothing ? nothing : findfirst(==(String(x)), ax.elements)
+        i === nothing && throw(LBDError("write!: \"$a\" has no element \"$x\"; " *
+            (ax.elements === nothing ? "give an index (1 … $n)" : "its elements: $(ax.elements)")))
+        return i
+    end
+    (x isa Integer && !(x isa Bool)) ||
+        throw(LBDError("write!: \"$a\" takes one position: an index (1 … $n) or one of its elements, not $(repr(x))"))
+    1 <= x <= n || throw(LBDError("write!: index $x is out of range for \"$a\" (it has $n points: 1 … $n)"))
+    return Int(x)
+end
+
+const JULIA_TYPES = Dict(v => k for (k, v) in DTYPE_NAMES)
+
+# Data for a value of type `dtype`: complex refused for real values, integers and Bool only when
+# exactly representable.
+function fits_type(x, dtype, name)
+    T = JULIA_TYPES[dtype]
+    S = x isa Number ? typeof(x) : x isa AbstractArray ? eltype(x) : nothing
+    (S !== nothing && S <: Number) || throw(LBDError("write!: \"$name\" takes numbers, not $(typeof(x))"))
+    S <: Complex && !(T <: Complex) && throw(LBDError("write!: \"$name\" is real ($dtype); refusing to drop an imaginary part"))
+    if !(T <: AbstractFloat || T <: Complex)
+        exact(e) = try convert(T, e) == e catch; false end
+        all(exact, x isa Number ? (x,) : x) || throw(LBDError("write!: \"$name\" ($dtype) can't hold " *
+            "$(x isa Number ? x : extrema(x)) exactly" * (T === Bool ? "; give true/false (or 0/1)" : "; it holds whole numbers")))
+    end
+    return x isa Number ? convert(T, x) : convert(Array{T}, x)
+end
+
+# X arranged as the place it goes: `need`, the sizes of the axes not given.
+function shaped_for(x, need, name, free)
+    ok = if isempty(need)
+        x isa Number || length(x) == 1
+    elseif length(need) == 1
+        x isa AbstractVector && length(x) == need[1]
+    else
+        x isa AbstractArray && size(x) == Tuple(need)
+    end
+    ok || throw(LBDError("write!: \"$name\" needs data of size $(Tuple(need)) " *
+                         "($(isempty(free) ? "one number" : join(free, ", "))), not $(x isa Number ? "one number" : size(x))"))
+    return isempty(need) && !(x isa Number) ? x[1] : x
+end
+
+function apply_write!(d::Dataset, plan)
+    if plan.grow !== nothing
+        g, c = plan.grow.axis, plan.grow.coords
+        ax = d.axes[g]
+        ax.data = vcat(Float64.(ax.data), c)
+        for v in values(d.values)
+            (isempty(v.axes) || v.axes[1] != g) && continue
+            T = eltype(v.data)
+            rest = size(v.data)[2:end]
+            if !(T <: AbstractFloat || T <: Complex) && v.measured === nothing
+                v.measured = trues(size(v.data))
+            end
+            v.data = cat(v.data, fill(not_measured(T), (length(c), rest...)); dims=1)
+            v.measured === nothing || (v.measured = cat(v.measured, falses((length(c), rest...)); dims=1))
+            v.shape = size(v.data)
+        end
+    end
+    for p in plan.puts
+        v = d.values[p.name]
+        if isempty(p.idx)
+            v.data = p.data
+            v.measured === nothing || (v.measured = true)
+        else
+            v.data[p.idx...] = p.data
+            v.measured === nothing || (view(v.measured, p.idx...) .= true)
+        end
+    end
 end
 
 # A data point's shape: a tuple of positive Ints (() for one number).
@@ -348,7 +569,13 @@ On Windows a file another program keeps open (e.g. LBD Viewer reading it, a sync
 be replaced: `save` waits up to $(REPLACE_WAIT) s for it, then throws an `IOError` naming the file.
 """
 function save(path::AbstractString, d::Dataset; compression::Bool=false)
+    endswith(lowercase(path), ".writing") &&
+        throw(LBDError("$(basename(path)): a \".writing\" file is written only by LBD.Writer; save to the .lbd name"))
     lowercase(splitext(path)[2]) == ".lbd" || @warn "$(basename(path)): LBD files should use the .lbd extension"
+    for a in values(d.axes)
+        a.grows && isempty(a.data) &&
+            throw(LBDError("the growing axis \"$(a.name)\" has no points yet; write some before saving"))
+    end
     for v in values(d.values)
         v.data === nothing && throw(LBDError("value \"$(v.name)\" was not loaded; load the file without `values=` to re-save it"))
     end
@@ -430,6 +657,16 @@ function write_file(f, d::Dataset, compression::Bool)
         write_str_attr(ds, "label", v.label)
         write_str_attr(ds, "axes", join(v.axes, ","))
         isbool && write_attribute(ds, "lbd_bool", Int64(1))
+    end
+
+    # integer / Bool points never measured (stopped early)
+    masks = [v for v in values(d.values) if v.measured !== nothing && !all(v.measured)]
+    if !isempty(masks)
+        gm = create_group(f, "measured")
+        for v in masks
+            m = v.measured isa Bool ? UInt8(v.measured) : UInt8.(collect(v.measured))
+            write_array(gm, v.name, to_file(m), compression)
+        end
     end
 
     write_meta(create_group(f, "meta"), d.meta, "meta")
@@ -549,7 +786,7 @@ end
 Read an `.lbd` file. `values`: a name or names of the values whose data to load (default: all).
 Values not listed are still described (shape, dtype, axes, unit) but their `.data` is `nothing`.
 """
-function load(path::AbstractString; values=nothing)
+function load(path::AbstractString; values=nothing, quiet::Bool=false)
     wanted = if values === nothing
         nothing
     elseif values isa AbstractString
@@ -559,7 +796,10 @@ function load(path::AbstractString; values=nothing)
             throw(ArgumentError("values must be a name or a collection of names, got $(repr(values))"))
         Set{String}(String.(collect(values)))
     end
-    d = h5open(path, "r") do f
+    writing = endswith(lowercase(path), ".writing")
+    writing && !quiet && @warn "$(basename(path)) is still being written, or its writer stopped before finishing " *
+        "(LBD.writing_status tells which); reading what was written so far"
+    d = open_for_reading(path, writing) do f
         d = read_header(f, path)
         if haskey(f, "axes")
             for name in keys(f["axes"])
@@ -577,6 +817,21 @@ function load(path::AbstractString; values=nothing)
                 d.values[name] = v
             end
         end
+        if haskey(f, "measured")
+            for name in keys(f["measured"])
+                v = get(d.values, name, nothing)
+                (v === nothing || v.data === nothing) && continue
+                m = from_file(read(f["measured"][name])) .!= 0
+                m isa AbstractArray || (m = fill(m))
+                writing && (m = cut_to(m, size(v.data)))
+                if size(m) == size(v.data) || (v.data isa Number && length(m) == 1)
+                    v.measured = v.data isa Number ? m[] : m
+                else
+                    @warn "$(basename(path)): the measured mask of \"$name\" has size $(size(m)), not $(size(v.data)); it is ignored"
+                end
+            end
+        end
+        writing && same_lengths!(d)       # a growing axis and its values may be caught mid-write
         if wanted !== nothing
             missing_names = setdiff(wanted, keys(d.values))
             isempty(missing_names) || throw(KeyError("$(basename(path)): no value(s) named $(sort(collect(missing_names)))"))
@@ -606,6 +861,44 @@ function read_axis(name, ds, path)
         @warn "$(basename(path)): axis \"$name\" has an unknown role \"$role\"; it is read as a sweep axis"
     end
     return a
+end
+
+# A file being written is opened in SWMR mode with HDF5's file locking off (spec §7); one written
+# by this process is read through its Writer (HDF5 shares one handle per file within a process).
+function open_for_reading(f::Function, path, writing)
+    if writing
+        w = own_writer(path)
+        if w !== nothing && w.file !== nothing
+            flush_pending!(w)
+            return f(w.file)
+        end
+        fapl = HDF5.FileAccessProperties()
+        fapl.file_locking = (false, true)
+        return h5open(f, path, "r"; swmr=true, fapl=fapl)
+    end
+    return h5open(f, path, "r")
+end
+
+cut_to(x::AbstractArray, sz) = x[(1:min(size(x, k), sz[k]) for k in 1:length(sz))...]
+
+# In a file being written, cut each axis and the values on it to the length all of them have
+# reached (the writer extends them one after the other).
+function same_lengths!(d::Dataset)
+    for (a, ax) in d.axes
+        n = length(ax.data)
+        for v in values(d.values)
+            k = findfirst(==(a), v.axes)
+            k === nothing || k > length(v.shape) || (n = min(n, v.shape[k]))
+        end
+        n < length(ax.data) && (ax.data = ax.data[1:n])
+        for v in values(d.values)
+            k = findfirst(==(a), v.axes)
+            (k === nothing || v.shape[k] <= n) && continue
+            v.shape = Tuple(i == k ? n : s for (i, s) in enumerate(v.shape))
+            v.data === nothing || (v.data = cut_to(v.data, v.shape))
+            v.measured isa AbstractArray && (v.measured = cut_to(v.measured, v.shape))
+        end
+    end
 end
 
 """Read everything except value data. Cheap, even for large files."""
@@ -740,5 +1033,7 @@ end
 to_plain(x::JSON3.Object) = Dict{String,Any}(String(k) => to_plain(v) for (k, v) in x)
 to_plain(x::JSON3.Array) = Any[to_plain(v) for v in x]
 to_plain(x) = x
+
+include("writer.jl")
 
 end # module
