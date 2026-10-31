@@ -143,6 +143,72 @@ point's coordinate with its data. A value on a growing axis has it as its first 
 
 A vector of coordinates adds as many points at once (`write(time=[1, 2], T=[10, 20])`).
 
+## A variable sweep
+
+When the inner points depend on the outer ones (here: frequencies chosen around a resonance that
+moves with power), use an [axis group](concepts.md#variable-sweeps-axis-groups): `write` adds
+each point by its coordinates, and the file holds only measured points, growing as they come.
+
+=== "Python"
+
+    ```python
+    import numpy as np
+    import lbd
+
+    with lbd.Writer("adaptive.lbd", title="Resonance tracking") as w:
+        w.add_group("scan")
+        w.add_axis("power", group="scan", unit="dBm")
+        w.add_axis("freq", group="scan", unit="Hz")
+        w.add_value("S21", axes=["power", "freq"], dtype="complex128")
+        for p in np.linspace(-60, 0, 7):
+            f0 = 7e9 - 2e6 * 10 ** (p / 20)              # where the resonance is now
+            freqs = np.linspace(f0 - 3e6, f0 + 3e6, 21)
+            i = w.write(power=p)                         # the power point …
+            w.write(parent=i, freq=freqs, S21=1 - 0.8 / (1 + 2j * (freqs - f0) / 6e5))
+    print(lbd.load("adaptive.lbd").values["S21"].shape)   # (147,): 7 powers × 21 points each
+    ```
+
+=== "MATLAB"
+
+    ```matlab
+    w = lbd.Writer("adaptive.lbd", Title="Resonance tracking");
+    w.addGroup("scan");
+    w.addAxis("power", [], Group="scan", Unit="dBm");
+    w.addAxis("freq", [], Group="scan", Unit="Hz");
+    w.addValue("S21", [], ["power" "freq"], Dtype="complex128");
+    for p = linspace(-60, 0, 7)
+        f0 = 7e9 - 2e6 * 10^(p / 20);                     % where the resonance is now
+        freqs = linspace(f0 - 3e6, f0 + 3e6, 21);
+        i = w.write(power=p);                             % the power point ...
+        w.write(Parent=i, freq=freqs, S21=1 - 0.8 ./ (1 + 2i * (freqs - f0) / 6e5));
+    end
+    w.close();
+    disp(size(lbd.load("adaptive.lbd").Values.S21.Data))   % 147 1
+    ```
+
+=== "Julia"
+
+    ```julia
+    using LBD
+
+    lbd_writer("adaptive.lbd"; title="Resonance tracking") do w
+        add_group!(w, "scan")
+        add_axis!(w, "power"; group="scan", unit="dBm")
+        add_axis!(w, "freq"; group="scan", unit="Hz")
+        add_value!(w, "S21"; axes=["power", "freq"], dtype=ComplexF64)
+        for p in range(-60.0, 0, 7)
+            f0 = 7e9 - 2e6 * 10^(p / 20)                 # where the resonance is now
+            freqs = collect(range(f0 - 3e6, f0 + 3e6, 21))
+            i = write!(w; power=p)                       # the power point …
+            write!(w; parent=i, freq=freqs, S21=1 .- 0.8 ./ (1 .+ 2im .* (freqs .- f0) ./ 6e5))
+        end
+    end
+    println(size(LBD.load("adaptive.lbd")["S21"].data))   # (147,)
+    ```
+
+Readers see complete points only: a point whose outer point isn't in the file yet waits for the
+next read.
+
 ## Points not measured
 
 Before a point is written it holds `NaN`, LBD's "missing". If the measurement stops early, the

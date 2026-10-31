@@ -8,39 +8,22 @@ are still written as 1.2).
 
 **Changes to how things behave** (read these when upgrading)
 
-- **File format 2.0: variable sweeps** (axis groups, spec §1.8): a sweep whose inner points
-  depend on the outer ones is stored as only its measured points, level by level. Writers
-  write 2.0 only for a file with an axis group; **every other file is still written as 1.2**, so
-  older LBD keeps reading it. LBD older than 1.3 refuses 2.0 files ("please update").
-  `lbd.version()` gives `"2.0"`, the newest format read and written.
+- **File format 2.0: variable sweeps** (axis groups, spec §1.8; every language). A sweep whose
+  inner points depend on the outer ones (frequencies chosen per power, a different number of
+  points per row, adaptive points) is stored as an axis group: only the measured points, level
+  by level. Writers write 2.0 only for a file with an axis group; **every other file is still
+  written as 1.2**, so older LBD keeps reading it. **LBD older than 1.3 can't open 2.0 files**
+  ("please update"). `lbd.version()` gives `"2.0"`, the newest format read and written. See
+  *Concepts → Variable sweeps* and *Grid or group?*.
 
-- **Variable sweeps in Python** (`lbd`, format 2.0): `d.add_group("scan")`, then its axes outer
-  to inner with `add_axis(name, group="scan")`; values lie on a group's points
-  (`add_value("f", axes=["A", "B"])`). `write` takes a group axis's coordinate (the same
-  coordinates are the same point; a new point that differs from one already there only by
-  rounding is warned about) or `parent=` (the index an earlier `write` returned), and adds the
-  points. Reading: `v.coords()` (each point's coordinates), `v.rows(by="A")` (row by row, each
-  an `lbd.Dataset`) and `v.to_dense()` (the full rectangle, gaps `NaN`; `round=` or
-  `rtol=` / `atol=` merge coordinates that differ only by rounding; `limit=`), also as
-  `d.coords("f")`, `d.rows("f", by=...)`, `d.to_dense("f")`. **MATLAB** the same:
-  `d.addGroup`, `d.addAxis(name, [], Group=)`, `i = d.write(A=3)`, `d.write(Parent=i, B=25, f=x)`
-  (indices from 1), `d.coords("f")`, `d.rows("f", By="A")` (a cell `{key, dataset}`),
-  `d.toDense("f", Round=, RTol=, ATol=, Limit=)`, and `lbd.Writer` with groups. **Julia** the
-  same: `add_group!`, `add_axis!(d, name; group=)`, `i = write!(d; A=3)`,
-  `write!(d; parent=i, B=25, f=x)` (indices from 1), `coords(d, "f")`, `rows(d, "f"; by="A")`
-  (`key => dataset` pairs), `to_dense(d, "f"; round=, rtol=, atol=, limit=)`, and `LBD.Writer`
-  with groups. The viewer follows in this version.
-
-- **A value's `axes` are what was swept** (every language).
-  In MATLAB: `Values.<name>.Axes` lists the sweep axes, `PointShape` and `Elements` describe the
-  data point, `Dims` is new; `PointAxes` and the `<value>_dim<k>` entries of `Axes` are gone.
-  In Julia: `v.axes`, `v.dims`, `v.point_shape` (a field now), `v.elements`; `v.point_axes` and
-  `d.axes["<value>_dim<k>"]` are gone.
-  The dimensions of a data point (`shape=`) are no longer axes of the dataset: `d.axes` holds
-  only sweep axes (`d.axes["bloch_dim1"]` is gone), `v.axes` lists only them, and the value
-  describes its data point with `point_shape` and `elements`; `v.point_axes` is gone. New:
-  `v.dims`, how the sweep part is stored (`[("amp",)]`). `data` and the file are unchanged
-  (the file still stores a data point's dimensions as axes with `role="point"`).
+- **A value's `axes` are what was swept** (every language). The dimensions of a data point
+  (`shape=`, format 1.2) are no longer axes of the dataset: `d.axes` holds only sweep axes, and
+  the value describes its data point with `point_shape` and `elements`; new is `dims`, how the
+  sweep part is stored (`[("amp",)]`, or `[("A", "B")]` for a group's points). Gone: Python
+  `v.point_axes` and `d.axes["bloch_dim1"]`; MATLAB `PointAxes` and `Axes.bloch_dim1` (new
+  `PointShape`, `Dims`); Julia `v.point_axes` and `d.axes["bloch_dim1"]` (`v.point_shape` is a
+  field now, `v.dims` new). `data` and the file are unchanged (the file still stores a data
+  point's dimensions as axes with `role="point"`).
 
 - **File format 1.1: every file gets an `id`** (every language). It is the measurement's
   identity, so LBD can recognise the same measurement in two places: a UUID version 7 (RFC 9562)
@@ -64,6 +47,10 @@ are still written as 1.2).
   the right of the header. Each browser tab keeps the workspace it shows across a reload.
 
 **Viewer**
+
+- **Files with variable sweeps open** (format 2.0): a value on a group's points is drawn against
+  its point number for now, with a notice (drawing against the coordinates comes later); the
+  file page names the group, and the Library counts the points ("44 points (variable)").
 
 - **Files being written** (`name.lbd.writing`, from `lbd.Writer` in any language) are listed in
   folders and the Library, marked **measuring…** while their measurement writes them, or
@@ -168,12 +155,25 @@ are still written as 1.2).
 
 **File format and languages**
 
-- **`lbd.Writer` writes variable sweeps** (Python): `w.add_group`, `w.add_axis(..., group=)`,
-  and `w.write` with coordinates or `parent=`, as for a dataset; each group's levels grow in the
-  file as points are measured, and readers see complete points only.
+- **Variable sweeps** (every language, format 2.0): make a group and its axes, outer to inner,
+  and values on its points; `write` takes a group axis's coordinate (the same coordinates are
+  the same point, found or added; a new point that differs from one there only by rounding is
+  warned about) or the outer point's index, which `write` returns. Reading: each point's
+  coordinates, the value row by row (each row a dataset), and the full rectangle (gaps `NaN`;
+  merging coordinates that differ only by rounding on request; a size limit). The Writer does
+  the same while measuring, each level growing in the file.
+  - Python: `d.add_group("scan")`, `add_axis(name, group="scan")`, `i = d.write(A=3)`,
+    `d.write(parent=i, B=25, f=x)`; `v.coords()`, `v.rows(by="A")`,
+    `v.to_dense(round=, rtol=, atol=, limit=)` (also `d.coords("f")` …).
+  - MATLAB: `d.addGroup`, `d.addAxis(name, [], Group=)`, `i = d.write(A=3)`,
+    `d.write(Parent=i, B=25, f=x)` (indices from 1); `d.coords("f")`, `d.rows("f", By="A")` (a cell
+    `{key, dataset}`), `d.toDense("f", Round=, RTol=, ATol=, Limit=)`.
+  - Julia: `add_group!`, `add_axis!(d, name; group=)`, `i = write!(d; A=3)`,
+    `write!(d; parent=i, B=25, f=x)` (indices from 1); `coords(d, "f")`, `rows(d, "f"; by="A")`
+    (`key => dataset`), `to_dense(d, "f"; round=, rtol=, atol=, limit=)`.
 
 - Reading a file being written no longer fails now and then at the moment its writer finishes it
-  (Python): the writer rewrites the description and metadata then, and the reader reads again
+  (every language): the writer rewrites the description and metadata then, and the reader reads again
   a moment later, or says the file was finished.
 
 - **File format 1.2: elements and the shape of a data point** (every language). An axis's
@@ -208,6 +208,12 @@ are still written as 1.2).
   `lbd_writer("rabi.lbd") do w … end`; `writing_status`, `recover`.
 
 **Documentation**
+
+- **Variable sweeps**: *Concepts* explains axis groups (sweep axes, dimensions, data points) and
+  **Grid or group?**, the pros and cons of each; the Python, MATLAB and Julia pages show building,
+  writing (by coordinates and by the outer point), `to_dense`, `rows` and `coords`; *Writing
+  while measuring* shows a variable sweep written live. `viewer/tests/mock_values.py` writes a
+  variable sweep, a triangle and an adaptive map.
 
 - A new page, **Writing while measuring** (Getting started): the Writer in every language, what
   `write` takes, growing axes, points not measured, what other programs see, and Recover.

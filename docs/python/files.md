@@ -132,6 +132,122 @@ given; `add_axis("time", grows=True)` makes an axis whose points `write` adds. T
 **while** measuring, so it can be looked at and survives a crash, use `lbd.Writer` with the same
 calls: see [Writing while measuring](../getting-started/writing-while-measuring.md).
 
+### Variable sweeps (axis groups)
+
+A grid (fixed axes) has the same inner points for every outer point. When the inner points
+depend on the outer one (frequencies chosen around a resonance that moves with power, a
+different number of points per row, adaptive sampling), put the axes in an **axis group**: only
+the measured points are stored, level by level. Read [Grid or group?](../getting-started/concepts.md#grid-or-group)
+first: a grid is simpler whenever it fits.
+
+```python
+import numpy as np
+import lbd
+
+d = lbd.Dataset(title="Variable sweep")
+d.add_group("AB")                          # a group; its axes follow, outer to inner
+d.add_axis("A", group="AB", unit="V")
+d.add_axis("B", group="AB", unit="Hz")
+d.add_axis("C", [0.1, 0.2, 0.3])           # a fixed axis, as always
+d.add_value("f", axes=["A", "B"])          # one entry per (A, B) point
+d.add_value("q", axes="A")                 # one per A
+d.add_value("h", axes=["A", "B", "C"])     # per (A, B) point × C
+d.add_value("cov", axes=["A", "B"], shape=(2, 2))   # a 2 × 2 matrix per (A, B) point
+
+for a, bs in [(1, [10]), (2, [10, 20]), (3, [15, 25, 35])]:   # B chosen per A
+    for b in bs:
+        d.write(A=a, B=b, f=100 * a + b, h=[a, b, a + b], cov=[[a, b], [b, -a]])
+    d.write(A=a, q=1.5 * a)
+
+print(d.axes["B"].data)          # [10 10 20 15 25 35]: each (A, B) point's B
+print(d.axes["B"].parent)        # [0 1 1 2 2 2]: the A it belongs to (an index into A)
+print(d.values["f"].axes)        # ['A', 'B']: what was swept
+print(d.values["f"].dims)        # [('A', 'B')]: stored as the (A, B) points
+print(d.values["h"].dims)        # [('A', 'B'), ('C',)]: the points × C
+print(d.values["cov"].shape)     # (6, 2, 2): the points, then one data point
+d.save("variable.lbd")           # format 2.0
+```
+
+- **Writing:** a group's axis takes a **coordinate** (not an index), outer axes first; the same
+  coordinates are the same point, found or added. An array writes several points:
+  `d.write(A=3, B=[15, 25, 35], f=[x1, x2, x3])`. A fixed axis still takes an index.
+- **`parent=`:** `write` returns the index of the point it wrote; give it as `parent=` to write
+  under that point without a lookup (exact, even when coordinates are computed):
+
+    ```python
+    import numpy as np
+    import lbd
+
+    d = lbd.Dataset()
+    d.add_group("ABC")
+    for name in "ABC":
+        d.add_axis(name, group="ABC")
+    d.add_value("f", axes=["A", "B"])        # per (A, B) point
+    d.add_value("g", axes=["ABC"])           # per (A, B, C) point (the group's name: all its axes)
+    for a in [1, 2, 3]:
+        i = d.write(A=a)                     # an A point
+        for b in range(a):
+            k = d.write(parent=i, B=b, f=10 * a + b)
+            c = np.arange(b)                 # maybe no C at all
+            d.write(parent=k, C=c, g=100 * a + 10 * b + c)
+    print(d.axes["C"].data, d.axes["C"].parent)    # [0 0 0 1] [2 4 5 5]
+    ```
+
+- A value lies on an outer part of a group: `["A"]`, `["A", "B"]` or the whole group, never
+  `["B"]` alone (a B means something only under its A).
+
+**Reading.** Three ways, on the value or on the dataset (`d.to_dense("f")`, `d.rows("f",
+by="A")`, `d.coords("f")`):
+
+```python
+import numpy as np
+import lbd
+
+d = lbd.Dataset()
+d.add_group("AB")
+d.add_axis("A", group="AB")
+d.add_axis("B", group="AB")
+d.add_value("f", axes=["A", "B"])
+for a, bs in [(1, [10]), (2, [10, 20]), (3, [15, 25, 35])]:
+    d.write(A=a, B=bs, f=[100 * a + b for b in bs])
+f = d.values["f"]
+
+m = f.to_dense()                       # the full rectangle: an lbd.Dataset with fixed axes
+print(m.axes["B"].data)                # [10 15 20 25 35]: the distinct B
+print(m.values["f"].data)              # 3 × 5, NaN where nothing was measured
+
+for a, row in f.rows(by="A"):          # row by row: each row an lbd.Dataset
+    print(a, row.axes["B"].data, row.values["f"].data)
+
+c = f.coords()                         # each point's coordinates
+print(c["A"], c["B"])                  # [1 2 2 3 3 3] [10 10 20 15 25 35]
+```
+
+- **`to_dense()`** places the measured points in a rectangle ("dense", as scipy's `toarray()`
+  or pandas' `unstack`): each axis's ticks are the sorted distinct coordinates, gaps are `NaN`
+  (0 / `False` with `measured` for integers and booleans). It doesn't interpolate, and it is a
+  copy, refused above `limit=10**8` cells (`limit=None`: no limit). `m.save(...)` writes an
+  ordinary 1.2 file.
+- **`rows(by=...)`** gives one row per point of `by`'s level, the key being the coordinate (or
+  the coordinates down to `by`). Rows of a group of three keep the rest as a group.
+- **`coords()`** gives one array per axis, along its dimension: what `scatter`, a table or a fit
+  needs. Underneath it follows `parent`: `A.data[B.parent]` is each (A, B) point's A.
+
+<!-- no-check -->
+```python
+c = f.coords()
+plt.tripcolor(c["A"], c["B"], f.data)            # a map filled between the measured points
+plt.scatter(c["A"], c["B"], c=f.data)            # or the points themselves
+f.data[(c["A"] >= 2) & (c["B"] < 30)]            # the points where …
+pd.DataFrame({**c, "f": f.data})                 # a table: groupby, sort, CSV
+```
+
+**Near-equal coordinates.** Coordinates are compared exactly, so `A=0.1 + 0.2` and `A=0.3` are
+two points. `write` warns when a new point differs from one already there only by rounding;
+round the coordinate (`np.round(a, 9)`) or write with `parent=`. For a file that has such
+points, `to_dense(round=9)` or `to_dense(rtol=1e-9)` (as `np.isclose`) merges them; merging two
+measured points into one cell is refused, so no result is ever dropped.
+
 ### Metadata
 
 `d.meta` is a plain dict for everything else about the measurement: temperatures, instrument

@@ -161,6 +161,46 @@ d.save("sweep.lbd");
 (`d.write(time=t, T=x)`). A name that isn't a valid MATLAB name goes as text:
 `d.write("if", 3, "S21", z)`.
 
+### Variable sweeps: `addGroup`
+
+When the inner points depend on the outer one (B chosen per A), put the axes in an axis group
+(format 2.0): only measured points are stored. See [Grid or group?](getting-started/concepts.md#grid-or-group).
+
+```matlab
+d = lbd.Dataset("Variable sweep");
+d.addGroup("AB");                                  % its axes follow, outer to inner
+d.addAxis("A", [], Group="AB", Unit="V");
+d.addAxis("B", [], Group="AB", Unit="Hz");
+d.addValue("f", [], ["A" "B"]);                    % one entry per (A, B) point
+d.addValue("q", [], "A");                          % one per A
+bs = {10, [10 20], [15 25 35]};
+for a = 1:3
+    d.write(A=a, B=bs{a}, f=100 * a + bs{a});      % coordinates, not indices
+    d.write(A=a, q=1.5 * a);
+end
+disp(d.Axes.B.Data')       % 10 10 20 15 25 35: each (A, B) point's B
+disp(d.Axes.B.Parent')     % 1 2 2 3 3 3: the A it belongs to (from 1)
+disp(d.Values.f.Dims)      % {["A" "B"]}: stored as the (A, B) points
+i = d.write(A=4);                                  % write returns the point's index ...
+d.write(Parent=i, B=[5 6], f=[45 46]);             % ... to write under it without a lookup
+m = d.toDense("f");                                % the full rectangle: gaps NaN
+disp(size(m.Values.f.Data))                        % 4 7
+r = d.rows("f", By="A");                           % {key, dataset; ...}
+disp(r{3, 2}.Axes.B.Data')                         % 15 25 35
+c = d.coords("f");                                 % each point's coordinates
+disp([c.A c.B]')
+d.save("variable.lbd");                            % format 2.0
+```
+
+- A group's axis takes a **coordinate**, outer axes first; the same coordinates are the same
+  point. `Parent=` takes the index an earlier `write` returned (indices from 1; the file stores
+  them from 0).
+- A value lies on an outer part of a group (`"A"`, `["A" "B"]`, or the group's name), never on
+  `"B"` alone.
+- `d.toDense(name, Round=9)` or `RTol=1e-9` merges coordinates that differ only by rounding
+  (`write` warns about them); `Limit=Inf` lifts the size limit (1e8 cells).
+- `lbd.Writer` takes the same calls (`w.addGroup`, `w.addAxis(..., Group=)`, `w.write`).
+
 ### `save`
 
 <!-- no-check -->

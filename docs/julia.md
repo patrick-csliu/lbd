@@ -157,6 +157,48 @@ LBD.save("sweep.lbd", d)
 (`write!(d; time=t, T=x)`). Names that can't be keywords go in a `Dict`:
 `write!(d, Dict("if" => 3); S21=z)`.
 
+## Variable sweeps: `add_group!`
+
+When the inner points depend on the outer one (B chosen per A), put the axes in an axis group
+(format 2.0): only measured points are stored. See [Grid or group?](getting-started/concepts.md#grid-or-group).
+
+```julia
+using LBD
+
+d = LBD.Dataset("Variable sweep")
+add_group!(d, "AB")                                 # its axes follow, outer to inner
+add_axis!(d, "A"; group="AB", unit="V")
+add_axis!(d, "B"; group="AB", unit="Hz")
+add_value!(d, "f"; axes=["A", "B"])                 # one entry per (A, B) point
+add_value!(d, "q"; axes="A")                        # one per A
+for (a, bs) in (1 => [10], 2 => [10, 20], 3 => [15, 25, 35])
+    write!(d; A=a, B=bs, f=100a .+ bs)              # coordinates, not indices
+    write!(d; A=a, q=1.5a)
+end
+println(d.axes["B"].data)      # [10, 10, 20, 15, 25, 35]: each (A, B) point's B
+println(d.axes["B"].parent)    # [1, 2, 2, 3, 3, 3]: the A it belongs to (from 1)
+println(d["f"].dims)           # [("A", "B")]: stored as the (A, B) points
+i = write!(d; A=4)                                  # write! returns the point's index ...
+write!(d; parent=i, B=[5, 6], f=[45.0, 46.0])       # ... to write under it without a lookup
+m = to_dense(d, "f")                                # the full rectangle: gaps NaN
+println(size(m["f"].data))                          # (4, 7)
+for (a, row) in rows(d, "f"; by="A")                # key => dataset
+    println(a, " ", row.axes["B"].data)
+end
+c = coords(d, "f")                                  # each point's coordinates
+println(c["A"], c["B"])
+LBD.save("variable.lbd", d)                         # format 2.0
+```
+
+- A group's axis takes a **coordinate**, outer axes first; the same coordinates are the same
+  point. `parent=` takes the index an earlier `write!` returned (from 1; the file stores them
+  from 0).
+- A value lies on an outer part of a group (`"A"`, `["A", "B"]`, or the group's name), never on
+  `"B"` alone.
+- `to_dense(d, name; round=9)` or `rtol=1e-9` merges coordinates that differ only by rounding
+  (`write!` warns about them); `limit=nothing` lifts the size limit (10^8 cells).
+- `LBD.Writer` takes the same calls (`add_group!(w, ...)`, `add_axis!(w, ...; group=)`, `write!`).
+
 ## `LBD.save`
 
 ```julia
