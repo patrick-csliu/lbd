@@ -164,6 +164,12 @@ The file format has its own version (`lbd_version`, currently 1.2).
   … `w.close()`, with `w.abort()` on an error; `lbd.writingStatus`, `lbd.recover`. In Julia:
   `lbd_writer("rabi.lbd") do w … end`; `writing_status`, `recover`.
 
+**Documentation**
+
+- A new page, **Writing while measuring** (Getting started): the Writer in every language, what
+  `write` takes, growing axes, points not measured, what other programs see, and Recover.
+  `viewer/tests/mock_live.py` writes a file slowly (and leaves a stopped one) to try the viewer.
+
 ## 1.2.0 (2026-10-28)
 
 **Changes to how things behave** (read these when upgrading)

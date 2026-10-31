@@ -1,7 +1,8 @@
 # MATLAB API reference — `lbd`
 
 All functions live in the `lbd` package: `lbd.Dataset`, `lbd.load`, `lbd.info` and
-`lbd.version`. Requires MATLAB R2021b or newer; no extra toolboxes are needed. To install, see
+`lbd.version`; to write a file while measuring, `lbd.Writer`, `lbd.writingStatus` and
+`lbd.recover` (see [Writing while measuring](getting-started/writing-while-measuring.md)). Requires MATLAB R2021b or newer; no extra toolboxes are needed. To install, see
 [Install → MATLAB](getting-started/install.md#matlab).
 
 ## Quick example
@@ -134,6 +135,29 @@ d.addValue("bloch", zeros(numel(v), 3), "t", Shape=3, Elements=["x" "y" "z"]);  
 
 LBD makes one axis per dimension of a data point (`bloch_dim1`, with `Role="point"`); the value's
 `PointAxes` and `Elements` fields list them.
+
+### `write`
+
+Fills a value made with `addValue(name, [], axes, Dtype=...)` (every point `NaN`, or 0 with a
+false `Measured` mask for integers and logicals): a point, a trace, a map, or several values at
+once. Indices count from 1; a position can also be one of an axis's elements.
+
+```matlab
+d = lbd.Dataset("Power sweep");
+d.addAxis("power", linspace(-60, 0, 7), Unit="dBm");
+d.addAxis("freq", linspace(6.99e9, 7.01e9, 201), Unit="Hz");
+d.addValue("S21", [], ["power" "freq"], Dtype="complex128");
+d.addValue("n", [], "power", Dtype="int32");
+for i = 1:3
+    d.write(power=i, S21=ones(1, 201), n=10 * i);    % a trace, and n at power i
+end
+disp(d.Values.n.Measured')                            % 1 1 1 0 0 0 0
+d.save("sweep.lbd");
+```
+
+`d.addAxis("time", [], Grows=true)` makes an axis whose points `write` adds
+(`d.write(time=t, T=x)`). A name that isn't a valid MATLAB name goes as text:
+`d.write("if", 3, "S21", z)`.
 
 ### `save`
 

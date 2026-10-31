@@ -60,6 +60,7 @@ where the details are (`viewer.log`, next to LBD's database); the session stays 
 | `GET /api/search` | `?root=&q=` | `{root, query, results: [{path, rel, type, size, mtime}], truncated, errors: [{path, error}]}`: recursive, case-insensitive substring of the relative path, up to 500 results; folders or files that couldn't be read are in `errors`. 404 if `root` isn't a folder. |
 | `POST /api/reveal` | `{path}` | `{ok}`. Opens the system file manager with the file selected (a folder: opens it). |
 | `POST /api/file/rename` | `{path, name}` | `{path}`: the new path, in the same folder. Only data, style and image files. 400 for a folder, another kind of file, a name with `/` or `\`, or a changed extension; 409 if the name exists or the file is being moved between pages; 404 if the file is missing. Every page gets a `renamed` event. |
+| `POST /api/file/recover` | `{path}` | `{path}`: the `.lbd` file made (`lbd.recover`) from a file whose measurement stopped before finishing (`name.lbd.writing`). 400 for another file; 409 while it is still being written. Every page gets a `renamed` event. |
 | `POST /api/file/trash` | `{path}` | `{ok}`. Moves the file to the Recycle Bin / Trash (`send2trash`); never deletes permanently. 400, 404 and 409 as rename; 500 if the system has no trash for it (the file stays). Every page gets a `trashed` event. |
 
 ## Library

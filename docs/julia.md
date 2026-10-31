@@ -4,8 +4,10 @@
 using LBD
 ```
 
-Exported names are `Dataset`, `Axis`, `Value`, `add_axis!`, `add_value!`, `LBDError` and
-`LBDVersionError`. The file functions are called with the module prefix (`LBD.save`,
+Exported names are `Dataset`, `Axis`, `Value`, `add_axis!`, `add_value!`, `write!`,
+`LBDError` and `LBDVersionError`, and for writing while measuring `Writer`, `lbd_writer`,
+`writing_status` and `recover` (see
+[Writing while measuring](getting-started/writing-while-measuring.md)). The file functions are called with the module prefix (`LBD.save`,
 `LBD.load`, `LBD.info`, `LBD.version`), so they don't clash with other packages.
 
 Requires Julia 1.9 or newer; it installs HDF5.jl, JSON3.jl and OrderedCollections.jl. To
@@ -127,6 +129,31 @@ add_value!(d, "bloch", zeros(length(v), 3), "t"; shape=(3,), elements=["x", "y",
 
 LBD makes one axis per dimension of a data point (`bloch_dim1`, `role == "point"`);
 `v.point_axes`, `v.elements` and `LBD.point_shape(v)` describe it.
+
+## `write!`
+
+Fills a value made with `add_value!(d, name; axes=..., dtype=...)` (every point `NaN`, or 0 with
+`measured` false for integers and `Bool`): a point, a trace, a map, or several values at once.
+Indices count from 1; a position can also be one of an axis's elements.
+
+```julia
+using LBD
+
+d = LBD.Dataset("Power sweep")
+add_axis!(d, "power", collect(range(-60.0, 0, 7)); unit="dBm")
+add_axis!(d, "freq", collect(range(6.99e9, 7.01e9, 201)); unit="Hz")
+add_value!(d, "S21"; axes=["power", "freq"], dtype=ComplexF64)
+add_value!(d, "n"; axes="power", dtype=Int32)
+for i in 1:3
+    write!(d; power=i, S21=ones(201), n=10i)          # a trace, and n at power i
+end
+println(d["n"].measured)                              # Bool[1, 1, 1, 0, 0, 0, 0]
+LBD.save("sweep.lbd", d)
+```
+
+`add_axis!(d, "time"; grows=true)` makes an axis whose points `write!` adds
+(`write!(d; time=t, T=x)`). Names that can't be keywords go in a `Dict`:
+`write!(d, Dict("if" => 3); S21=z)`.
 
 ## `LBD.save`
 

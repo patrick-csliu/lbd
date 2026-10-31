@@ -59,6 +59,22 @@ one is read again within a few seconds, while your selection stays. A file that 
 (damaged, not an LBD file, or from a newer LBD) stays in the list, greyed; point at it, or select
 it, to see why.
 
+## Files being written
+
+A measurement written with the Writer (see
+[Writing while measuring](../getting-started/writing-while-measuring.md)) is called
+`name.lbd.writing` until it is finished. The Library lists it with its state:
+
+- **measuring…**: its measurement is writing it right now. Explore opens it as it is at that
+  moment (open it again to see newer data). It gets no preview until it is finished, and LBD
+  doesn't rename, recycle or save views into it.
+- **stopped before finishing**: its measurement ended without finishing it (a crash, an error,
+  a script that ended without closing it). Select it and click **Recover**: it becomes
+  `name.lbd` (or `name (2).lbd`) with everything it holds.
+
+A file measured on another computer and synced here always shows as stopped: the state is only
+known on the computer that writes it.
+
 ## Previews
 
 The selected file shows a picture of its data on the right, as Explore first shows it: one panel

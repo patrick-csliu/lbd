@@ -102,6 +102,30 @@ print(d.values["bloch"].axes)            # ['amp', 'bloch_dim1']
   `role="point"`): readers of every version read the file, and the viewer draws the vector as one
   curve per element against `amp`.
 
+### Filling values piece by piece
+
+A value can be made before its data is measured, and filled point by point, trace by trace:
+
+```python
+import numpy as np
+import lbd
+
+d = lbd.Dataset(title="Power sweep")
+d.add_axis("power", np.linspace(-60, 0, 7), unit="dBm")
+d.add_axis("freq", np.linspace(6.99e9, 7.01e9, 201), unit="Hz")
+d.add_value("S21", axes=["power", "freq"], dtype="complex128")   # every point NaN: not measured yet
+d.add_value("n", axes="power", dtype="int32")                    # integers: a `measured` mask
+for i in range(3):
+    d.write(power=i, S21=np.ones(201), n=10 * i)                 # a trace, and n at power i
+print(d.values["n"].measured)            # [ True  True  True False False False False]
+d.save("sweep.lbd")                      # /measured/n records the points never measured
+```
+
+`write` takes a fixed axis's index (or one of its elements), and the data for the axes not
+given; `add_axis("time", grows=True)` makes an axis whose points `write` adds. To write the file
+**while** measuring, so it can be looked at and survives a crash, use `lbd.Writer` with the same
+calls: see [Writing while measuring](../getting-started/writing-while-measuring.md).
+
 ### Metadata
 
 `d.meta` is a plain dict for everything else about the measurement: temperatures, instrument
