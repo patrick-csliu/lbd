@@ -22,6 +22,7 @@ import lbd
 from lbd.plot import render as rnd
 from lbd.plot.reduce import cell_edges, curve_minmax
 
+from . import summaries
 from .explore import ExploreError
 
 if TYPE_CHECKING:
@@ -477,8 +478,12 @@ def histogram(s: "ExploreSession", bins: int = HIST_BINS) -> Dict[str, Any]:
     cache = getattr(s, "_hist", None)
     if cache and cache[0] == key and cache[2] is s.model:
         return cache[1]
-    z = _map_z(s)
-    v = z[np.isfinite(z)]
+    if s.summarised:                                  # too big for memory: from its summary
+        v = s._finite_z()
+        v = v[np.isfinite(v)]
+    else:
+        z = _map_z(s)
+        v = z[np.isfinite(z)]
     if log:
         v = v[v > 0]
     if not v.size:
@@ -498,6 +503,9 @@ def histogram(s: "ExploreSession", bins: int = HIST_BINS) -> Dict[str, Any]:
            "counts": [int(c) for c in counts.reshape(bins, 64).sum(axis=1)],
            "lowest": float(back(lo)), "highest": float(back(hi)),
            "auto": [float(a) for a in back(auto)], "log": log, "cells": int(v.size)}
+    if s.summarised:      # counts of the summary's blocks: the shape is right, the numbers are not cells
+        out["cells"] = summaries.histogram_cells(s.model.z)[1]
+        out["approximate"] = True
     s._hist = (key, out, s.model)
     return out
 

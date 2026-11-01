@@ -138,6 +138,12 @@ export default function Contrast({ load, loadKey, clim, onClim }: Props) {
         onPointerUp={() => (drag.current = null)}
         aria-label="Histogram of the map's values with the colour range: drag the lines or the band between them"
       />
+      {hist.approximate && (
+        <div className="muted small">
+          Approximate: this map is too large for memory, so the histogram counts its summary (averages of blocks of
+          cells). The lowest and highest values are exact.
+        </div>
+      )}
       <div className="row-controls">
         <button onClick={() => onClim(hist.auto)} title="Leave out the outliers: 0.5 % of the cells at each end">
           Auto

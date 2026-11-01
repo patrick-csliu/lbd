@@ -14,12 +14,16 @@ single hot cell). Here the choice is made on purpose and reported:
 Zoomed in, when cells are bigger than pixels, nothing is reduced: each pixel shows the cell under
 its centre. Values read off the screen (clicks, cursors) must come from the full data, not from
 these pictures.
+
+A map bigger than memory (plan 6d) gets its pyramid built part by part (`map_levels`: strips of
+rows read one at a time) and kept on disk; `MapPyramid.from_levels` reads from it, and from the
+file itself when zoomed in, only the part in view.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional, Sequence, Tuple
+from typing import Any, Callable, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -123,6 +127,35 @@ class MapPyramid:
                                       xe[np.minimum(np.arange(nx + 1) * step, len(xe) - 1)],
                                       ye[np.minimum(np.arange(ny + 1) * step, len(ye) - 1)]))
 
+    @classmethod
+    def from_levels(cls, z: Any, x_edges: np.ndarray, y_edges: np.ndarray, levels: Sequence[Sequence[Any]]) -> "MapPyramid":
+        """A pyramid read when needed: `z` (the map) and every level's arrays give `[rows, cols]`
+        (two slices) as numpy arrays, e.g. HDF5 datasets; `levels[k]` = (max, min, sum, count) of
+        level k + 1 in the map's own order, as made by `map_levels`. A view reads only what it
+        shows: about two blocks per pixel each way."""
+        xe, ye = np.asarray(x_edges, dtype=float), np.asarray(y_edges, dtype=float)
+        if tuple(z.shape) != (len(ye) - 1, len(xe) - 1):
+            raise ReduceError(f"a map of {z.shape[0]}×{z.shape[1]} cells needs {z.shape[1] + 1} x edges and "
+                              f"{z.shape[0] + 1} y edges, not {len(xe)} and {len(ye)}")
+        fx, fy = not _monotonic(xe, "horizontal"), not _monotonic(ye, "vertical")
+
+        def seen(a: Any) -> Any:                         # stored in increasing order from here on
+            return _Flipped(a, fx, fy) if fx or fy else a
+
+        def order(e: np.ndarray, flip: bool) -> np.ndarray:
+            return e[::-1] if flip else e
+
+        self = cls.__new__(cls)
+        self.shape = tuple(z.shape)
+        self.levels = [_Level(seen(z), seen(z), None, None, order(xe, fx), order(ye, fy))]
+        for k, (vmax, vmin, vsum, count) in enumerate(levels, start=1):
+            ny, nx = vmax.shape
+            step = 2 ** k
+            lxe = xe[np.minimum(np.arange(nx + 1) * step, len(xe) - 1)]
+            lye = ye[np.minimum(np.arange(ny + 1) * step, len(ye) - 1)]
+            self.levels.append(_Level(seen(vmax), seen(vmin), seen(vsum), seen(count), order(lxe, fx), order(lye, fy)))
+        return self
+
     def raster(self, px_x_edges: Sequence[float], px_y_edges: Sequence[float], stat: str = "max") -> Raster:
         """The map as seen through a plot area whose pixel boundaries are at these data values
         (W+1 x edges left to right, H+1 y edges bottom to top, both increasing).
@@ -163,6 +196,79 @@ class MapPyramid:
         empty = (xa < 0)[None, :] | (ya < 0)[:, None]
         image[empty] = np.nan
         return Raster(image, level, (cx, cy), stat)
+
+
+class _Flipped:
+    """A 2-D array-like seen with its columns (fx) and/or rows (fy) reversed; takes [rows, cols]
+    as two slices (what MapPyramid.raster asks)."""
+
+    def __init__(self, a: Any, fx: bool, fy: bool):
+        self.a, self.fx, self.fy = a, fx, fy
+        self.shape = tuple(a.shape)
+
+    def __getitem__(self, key: Tuple[slice, slice]) -> np.ndarray:
+        rows, cols = key
+        r = _flip_slice(rows, self.shape[0]) if self.fy else rows
+        c = _flip_slice(cols, self.shape[1]) if self.fx else cols
+        part = np.asarray(self.a[r, c])
+        return part[::-1 if self.fy else 1, ::-1 if self.fx else 1]
+
+
+def _flip_slice(s: slice, n: int) -> slice:
+    start, stop, step = s.indices(n)
+    if step != 1:
+        raise ReduceError("a flipped map takes ranges of rows and columns")
+    stop = max(start, stop)
+    return slice(n - stop, n - start)
+
+
+def map_levels(read_rows: Callable[[int, int], np.ndarray], shape: Tuple[int, int],
+               store: Callable[[int, int, np.ndarray, np.ndarray, np.ndarray, np.ndarray], None],
+               load: Callable[[int, int, int], Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]],
+               budget: int, smallest: int = 64, progress: Optional[Callable[[float], None]] = None) -> int:
+    """Make levels 1, 2, … of a map's pyramid (as MapPyramid does) without holding the map:
+    strips of rows are read one at a time, each made into its part of as many levels as fit.
+
+    `read_rows(r0, r1)`: rows r0 … r1-1 of the map (as drawn: NaN for missing cells).
+    `store(level, r0, max, min, sum, count)`: keep these rows of a level, from row r0.
+    `load(level, r0, r1)`: rows of a level stored before, as (max, min, sum, count): the next
+    levels are made from it when the first strips couldn't hold them all.
+    `budget`: bytes a strip and its work may take. `progress(fraction)` is called after each
+    strip of the map (it may raise to stop). Returns the number of levels made."""
+    ny, nx = shape
+    sizes = [(ny, nx)]
+    while max(sizes[-1]) > smallest:
+        h, w = sizes[-1]
+        sizes.append(((h + 1) // 2, (w + 1) // 2))
+    top = len(sizes) - 1
+    done = 0
+    while done < top:
+        h, w = sizes[done]
+        per_row = w * 40                               # the strip as float, its four sums, temporaries
+        most = max(int(np.log2(max(budget // per_row, 1))), 0)
+        if most < 1:
+            raise ReduceError(f"two rows of {w} cells don't fit in the memory available; "
+                              "free some memory or set a larger maximum in Settings")
+        last = min(done + most, top)
+        rows = 2 ** (last - done)
+        for r0 in range(0, h, rows):
+            r1 = min(r0 + rows, h)
+            if done == 0:
+                z = np.asarray(read_rows(r0, r1), dtype=float)
+                vmax = vmin = z
+                vsum, count = np.nan_to_num(z), np.isfinite(z).astype(np.int32)
+            else:
+                vmax, vmin, vsum, count = load(done, r0, r1)
+            for k in range(done + 1, last + 1):
+                vmax = _halve(vmax, np.nan, np.fmax).astype(np.float32)
+                vmin = _halve(vmin, np.nan, np.fmin).astype(np.float32)
+                vsum = _halve(vsum, 0.0, np.add)
+                count = _halve(count, 0, np.add)
+                store(k, r0 >> (k - done), vmax, vmin, vsum, count)
+            if done == 0 and progress is not None:
+                progress(r1 / h)
+        done = last
+    return top
 
 
 def _cells_in(edges: np.ndarray, lo: float, hi: float) -> float:

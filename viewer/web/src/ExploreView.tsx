@@ -29,6 +29,7 @@ import {
 } from "./api";
 import { between, CursorsState, HELP, item, readText, si } from "./cursors";
 import { ConfirmDialog, ConfirmRequest, ContextMenu, MenuAt, MenuEntry } from "./menu";
+import { SummaryProgress } from "./SummaryProgress";
 
 /**
  * The Explore view (preview): a file's plot drawn by the server's matplotlib (explore.py), made
@@ -1112,6 +1113,7 @@ export default function ExploreView({
         {showCuts && <div className="explore-cut-corner" />}
       <div className="explore-host" ref={host}>
         {status && <div className="explore-status muted">{status}</div>}
+        {status && <SummaryProgress path={info.path} />}
         {meta?.empty && !status && (
           <div className="explore-empty" role="status">
             {meta.empty}

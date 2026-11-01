@@ -945,15 +945,23 @@ def draw_curves(fig: Figure, ax, model: CurveModel, d, spec, style: Style,
     return drawn
 
 
-def prepare_map(d, spec, style: Style) -> MapModel:
+def prepare_map(d, spec, style: Style, big: Optional[Any] = None) -> MapModel:
+    """`big`: stands for the map when it is too big to read whole (LBD Viewer's
+    summaries.BigMap): `big.range()` gives its lowest and highest drawn number, `big * factor`
+    the same map scaled; the model's `z` is then `big` scaled, read part by part."""
     d = flat(d)
     a = style.figure.axes
     xs, ys = style.axis_style("x"), style.axis_style("y")
     name = spec["values"][0]
     v = d.values[name]
     xa, ya = d.axes[spec["x"]], d.axes[spec["y"]]
-    z = _take(v, [spec["y"], spec["x"]], spec["index"])     # rows = y, columns = x
-    z, label, unit = apply_complex(z, v.label, v.unit, spec["complex"], axis=1)      # x runs along rows
+    if big is None:
+        z = _take(v, [spec["y"], spec["x"]], spec["index"])     # rows = y, columns = x
+        z, label, unit = apply_complex(z, v.label, v.unit, spec["complex"], axis=1)      # x runs along rows
+        span = z
+    else:
+        _, label, unit = apply_complex(np.ones(1, dtype=v.dtype), v.label, v.unit, spec["complex"])
+        z, span = big, np.asarray(big.range(), dtype=float)
     q = find_quantity(style, name, v.label, spec["complex"] if np.iscomplexobj(v.data) else None)
     x_raw = np.asarray(xa.data, dtype=float)
     y_raw = np.asarray(ya.data, dtype=float)
@@ -964,9 +972,9 @@ def prepare_map(d, spec, style: Style) -> MapModel:
                                                    (spec["y"], yq, ya.unit, ys.label.auto_prefix, yunit))
                  if _auto_prefix(q, unit, auto)]
     # With fixed limits, the colour bar keeps the value's own unit so the limits read as entered.
-    zf, zunit = _unit_scale(z, unit, q, ys.label.auto_prefix and q.vmin is None and q.vmax is None)
+    zf, zunit = _unit_scale(span, unit, q, ys.label.auto_prefix and q.vmin is None and q.vmax is None)
     if q.scale == "log":
-        _check_log(np.asarray(z, dtype=float), f"the colour scale of '{name}'")
+        _check_log(np.asarray(span, dtype=float), f"the colour scale of '{name}'")
     for scale, raw, axis in ((spec["x_scale"], x_raw, xa), (spec["y_scale"], y_raw, ya)):
         if scale == "log":
             _check_log(raw, f"axis '{axis.name}'")

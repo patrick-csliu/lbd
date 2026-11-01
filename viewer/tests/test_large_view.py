@@ -27,8 +27,8 @@ class FakeMemory:
 
 @pytest.fixture()
 def fake(monkeypatch):
-    """The viewer's memory with little room: a few kB."""
-    system = FakeMemory(room=20_000)
+    """The viewer's memory with little room: 100 kB (a map of the cube, 19 kB, fits; the cube doesn't)."""
+    system = FakeMemory(room=100_000)
     cache = PartCache(Memory(system=system))
     monkeypatch.setitem(memory._shared, "cache", cache)
     return system, cache
@@ -167,3 +167,193 @@ def test_memory_settings(client):
     r = client.put("/api/settings", json={"memory": {"maximum_gb": None, "reserve_gb": None}})
     r.raise_for_status()
     assert memory.shared().memory.maximum is None
+
+
+# ---- a map bigger than memory: shown from its summary (summaries.py, plan 6d B) ------------------
+
+from lbd_viewer import summaries  # noqa: E402
+
+MAP = {"kind": "heatmap", "x": "x", "y": "y", "index": {"t": 1}, "complex": "db"}
+
+
+@pytest.fixture()
+def big(data_dir):
+    """4 maps of 1001 × 1201 complex cells (77 MB), one hot cell in map 1."""
+    rng = np.random.default_rng(2)
+    z = rng.normal(size=(4, 1001, 1201)) + 1j * rng.normal(size=(4, 1001, 1201))
+    z[1, 700, 300] = 1000
+    d = lbd.Dataset(title="big")
+    d.add_axis("t", np.arange(4.0))
+    d.add_axis("y", np.linspace(-1, 1, 1001))
+    d.add_axis("x", np.linspace(1e9, 2e9, 1201), unit="Hz")
+    d.add_value("z", z, axes=["t", "y", "x"])
+    path = data_dir / "big.lbd"
+    d.save(path)
+    return path, 20 * np.log10(np.abs(z[1]))
+
+
+def little_room(monkeypatch, room=10 << 20):
+    """10 MB of room: a map of 1.2 million cells (29 MB drawn) is too big, its strips are not."""
+    cache = PartCache(Memory(system=FakeMemory(room=room)))
+    monkeypatch.setitem(memory._shared, "cache", cache)
+    return cache
+
+
+def test_a_map_bigger_than_memory_is_drawn_from_its_summary(client, big, monkeypatch):
+    path, z = big
+    little_room(monkeypatch)
+    sid, meta, by_summary = picture(client, path, MAP)
+    s = client.app.state.lbd.explore.get(sid)
+    assert s.summarised and len(summaries.shared().entries()) == 1
+    assert "max of" in meta["note"]                                   # reduced, as any big map
+    monkeypatch.setitem(memory._shared, "cache", PartCache(Memory(system=FakeMemory(room=10 * GB))))
+    sid2, meta2, whole = picture(client, path, MAP)
+    assert not client.app.state.lbd.explore.get(sid2).summarised
+    assert meta2["xlim"] == meta["xlim"] and meta2["note"] == meta["note"]
+    assert by_summary == whole                                        # the same picture
+
+
+def test_a_summary_is_found_again_and_made_again_when_the_file_changes(client, big, monkeypatch):
+    path, _ = big
+    little_room(monkeypatch)
+    picture(client, path, MAP)
+    seen = reads(monkeypatch)
+    picture(client, path, MAP)
+    assert not any(n > 1_000_000 for _, n in seen)                    # no strips read: found on disk
+    assert len(summaries.shared().entries()) == 1
+    picture(client, path, {**MAP, "complex": "phase"})                # another drawing: another summary
+    assert len(summaries.shared().entries()) == 2
+    d = lbd.load(path)
+    d.meta["changed"] = 1
+    time.sleep(0.02)
+    d.save(path)                                                       # a new version of the file
+    picture(client, path, MAP)
+    assert len(summaries.shared().entries()) == 3
+
+
+def test_reading_a_summarised_map_reads_the_exact_stored_numbers(client, big, monkeypatch):
+    path, z = big
+    little_room(monkeypatch)
+    sid, meta, _ = picture(client, path, MAP)
+    s = client.app.state.lbd.explore.get(sid)
+    m = s.model.z
+    assert m[700, 300] == pytest.approx(z[700, 300])
+    np.testing.assert_allclose(m[700, :], z[700])
+    np.testing.assert_allclose(m[:, 300], z[:, 300])
+    np.testing.assert_allclose(m[np.ix_([3, 9, 5], [10, 2])], z[np.ix_([3, 9, 5], [10, 2])])
+    np.testing.assert_allclose(m[10:2:-3, 7], z[10:2:-3, 7])
+    r = client.post(f"/api/explore/{sid}/cursors",
+                    json={"cursors": [{"x": float(s.model.x[300]), "y": float(s.model.y[700])}], "type": "cross",
+                          "xlim": meta["xlim"], "ylim": meta["ylim"], "width": 400, "height": 300})
+    r.raise_for_status()
+    c = r.json()
+    assert c["cursors"][0]["index"] == {"x": 300, "y": 700}
+    shown = next(i for i in c["cursors"][0]["items"] if i["role"] == "z")
+    assert shown["value"] == pytest.approx(z[700, 300])
+    assert len(c["cuts"]["row"]["z"]) > 0 and len(c["cuts"]["column"]["z"]) > 0
+    f = client.post(f"/api/explore/{sid}/find", json={"what": "max", "xlim": [1.2, 1.3], "ylim": [0.3, 0.5]})
+    f.raise_for_status()
+    assert f.json()["y"] == pytest.approx(float(s.model.y[700]))      # the hot cell, read from the file
+    h = client.post(f"/api/explore/{sid}/histogram", json={}).json()
+    assert h["approximate"] and h["cells"] == z.size
+    assert h["highest"] == pytest.approx(z.max(), rel=1e-6) and h["lowest"] == pytest.approx(z.min(), rel=1e-6)
+
+
+def test_whole_map_work_is_refused_with_a_message(client, big, monkeypatch):
+    path, _ = big
+    little_room(monkeypatch)
+    sid, _, _ = picture(client, path, MAP)
+    r = client.post(f"/api/explore/{sid}/render", json={"format": "raw", "settings": {"select": {"y": [0, 1]}}})
+    assert r.status_code == 400 and "choosing rows" in r.json()["detail"]
+    r = client.post(f"/api/explore/{sid}/render", json={"format": "raw", "settings": {"ops": [{"op": "derivative"}]}})
+    detail = r.json()["detail"] if r.status_code == 400 else json.loads(r.headers["X-LBD-Frame"])["ops"]["notes"][0]
+    assert "more than the memory available" in detail
+
+
+def test_making_a_summary_shows_progress_and_can_be_cancelled(client, big, monkeypatch):
+    import threading
+
+    path, _ = big
+    little_room(monkeypatch)
+    real = summaries.Job.step
+
+    def slow(self, fraction):
+        time.sleep(0.2)
+        real(self, fraction)
+
+    monkeypatch.setattr(summaries.Job, "step", slow)
+    answer = {}
+    t = threading.Thread(target=lambda: answer.update(r=client.post(
+        "/api/explore", json={"path": str(path), "spec": MAP, "width": 400, "height": 300, "dpr": 1})))
+    t.start()
+    deadline = time.monotonic() + 10
+    while not client.get("/api/summaries").json()["making"] and time.monotonic() < deadline:
+        time.sleep(0.02)
+    making = client.get("/api/summaries").json()["making"]
+    assert making and making[0]["path"] == str(path.resolve()) and "1,001 × 1,201 cells" in making[0]["what"]
+    client.post("/api/summaries/cancel", json={"path": str(path)}).raise_for_status()
+    t.join(10)
+    assert answer["r"].status_code == 400 and "cancelled" in answer["r"].json()["detail"]
+    assert client.get("/api/summaries").json()["making"] == []
+    assert not list(summaries.shared().folder.glob("*.part")) and summaries.shared().entries() == []
+    assert client.post("/api/summaries/cancel", json={"path": str(path)}).status_code == 404
+
+
+def test_the_summary_cache_is_trimmed_and_emptied(client, big, monkeypatch):
+    path, _ = big
+    little_room(monkeypatch)
+    for mode in ("db", "phase", "real"):
+        sid, _, _ = picture(client, path, {**MAP, "complex": mode})
+        client.delete(f"/api/explore/{sid}")
+    c = summaries.shared()
+    sizes = [p.stat().st_size for p in c.entries()]
+    assert len(sizes) == 3
+    gb = (sizes[0] + sizes[1]) * 1.01 / GB                            # room for two
+    client.put("/api/settings", json={"memory": {"summary_cache_gb": gb}}).raise_for_status()
+    assert len(c.entries()) == 2
+    assert client.get("/api/summaries").json()["count"] == 2
+    out = client.post("/api/summaries/empty").json()
+    assert out["removed"] == 2 and out["count"] == out["bytes"] == 0 and c.entries() == []
+
+
+def test_a_summary_made_in_several_passes_gives_the_same_means(client, big, monkeypatch):
+    """Strips of 4 rows (as when memory is very short): two levels per strip, the rest made from
+    the stored levels (kept as float32 sums and 16-bit counts)."""
+    from lbd.plot.reduce import MapPyramid, cell_edges
+
+    path, z = big
+    little_room(monkeypatch, room=1 << 20)
+    monkeypatch.setattr(summaries, "MIN_BUDGET", 1201 * 40 * 4)
+    sid, _, _ = picture(client, path, MAP)
+    s = client.app.state.lbd.explore.get(sid)
+    whole = MapPyramid(z, cell_edges(s.model.x), cell_edges(s.model.y))
+    for n in (7, 40, 300):                                        # coarse to fine
+        px = np.linspace(s.model.x[0], s.model.x[-1], n + 1)
+        py = np.linspace(s.model.y[0], s.model.y[-1], n + 1)
+        for stat in ("max", "mean"):
+            a, b = whole.raster(px, py, stat), s.pyramid.raster(px, py, stat)
+            assert a.level == b.level
+            np.testing.assert_allclose(b.image, a.image, rtol=1e-5, atol=1e-5, equal_nan=True)
+
+
+def test_a_preview_never_summarises_a_map_bigger_than_memory(client, big, monkeypatch):
+    from lbd.plot.style import Style
+    from lbd_viewer import previews
+
+    path, _ = big
+    little_room(monkeypatch)
+    with pytest.raises(previews.PreviewError, match="too many for a preview; open it in Explore"):
+        previews.draw(path, [{"spec": MAP}], (1, 1), Style(), saved_view=False)
+    assert summaries.shared().entries() == []
+
+
+def test_closing_one_view_of_a_summarised_map_keeps_the_others(client, big, monkeypatch):
+    path, _ = big
+    little_room(monkeypatch)
+    a, _, first = picture(client, path, MAP)
+    b, _, _ = picture(client, path, MAP)                                # the same summary, opened again
+    client.delete(f"/api/explore/{b}").raise_for_status()
+    r = client.post(f"/api/explore/{a}/render", json={"format": "raw", "xlim": [1.2, 1.4], "ylim": [0, 0.5]})
+    r.raise_for_status()
+    r = client.post(f"/api/explore/{a}/render", json={"format": "raw"})
+    assert r.content == first

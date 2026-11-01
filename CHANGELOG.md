@@ -54,6 +54,15 @@ are still written as 1.2).
   rest of the computer. ⚙ Settings → *Memory for data*: how much to leave free (automatic: 2 GB
   or 10% of the memory, whichever is more) and an optional most to use.
 
+- **Maps bigger than the memory available open too**: such a map is summarised once (its blocks'
+  max, min and mean, made by reading the file strip by strip, with progress and Cancel) and the
+  summary is kept on disk, so it opens at once next time. Zooming, panning and the reductions work
+  as on any map; clicks, cursors, cuts and max/min/peak read the exact stored numbers from the
+  file; the contrast histogram is counted from the summary and says so. Operations and choosing
+  rows are refused on such a map, with a message. ⚙ Settings → *Memory for data*: how much disk
+  the summaries may take (20 GB; the least recently used go first) and *Empty*. Library previews
+  of such maps say to open them in Explore.
+
 - **Files with variable sweeps open** (format 2.0): a value on a group's points is drawn against
   its point number for now, with a notice (drawing against the coordinates comes later); the
   file page names the group, and the Library counts the points ("44 points (variable)").

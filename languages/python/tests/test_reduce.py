@@ -7,7 +7,7 @@ cells, a one-point spike, a gap. A slow brute-force reduction checks the fast on
 import numpy as np
 import pytest
 
-from lbd.plot.reduce import MapPyramid, ReduceError, cell_edges, curve_minmax, nearest_point
+from lbd.plot.reduce import MapPyramid, ReduceError, cell_edges, curve_minmax, map_levels, nearest_point
 
 
 def pixels(lo, hi, n):
@@ -244,3 +244,84 @@ def test_the_curve_pyramid_keeps_spikes_and_matches_the_direct_reduction():
             assert abs(col(*fast[7]) - col(*slow[7])) <= 1
     zoomed, reduced = pyr.minmax(pixels(0.61233, 0.61236, 500))   # few points: stored points
     assert not reduced and np.nanmax(zoomed[7][1]) == 50
+
+
+def strip_built(z, xe, ye, budget, smallest=64):
+    """A pyramid made by map_levels from strips of rows (as for a map bigger than memory), its
+    levels kept in a dict instead of on disk; and the strips read."""
+    kept, reads = {}, []
+
+    def read_rows(r0, r1):
+        reads.append((r0, r1))
+        return z[r0:r1]
+
+    def store(k, r0, *arrays):
+        if k not in kept:
+            n = int(np.ceil(z.shape[0] / 2 ** k)), int(np.ceil(z.shape[1] / 2 ** k))
+            kept[k] = [np.zeros(n, a.dtype) for a in arrays]
+        for whole, part in zip(kept[k], arrays):
+            whole[r0:r0 + part.shape[0]] = part
+
+    def load(k, r0, r1):
+        return tuple(a[r0:r1] for a in kept[k])
+
+    top = map_levels(read_rows, z.shape, store, load, budget, smallest=smallest)
+    return MapPyramid.from_levels(z, xe, ye, [kept[k] for k in range(1, top + 1)]), reads
+
+
+@pytest.mark.parametrize("seed", range(4))
+@pytest.mark.parametrize("stat", ["max", "min", "mean"])
+def test_a_pyramid_built_strip_by_strip_equals_one_built_whole(seed, stat):
+    """Strips of 4 rows (two levels each, then more passes from the stored level) make the same
+    pyramid, at every level, as the whole map does."""
+    rng = np.random.default_rng(seed)
+    ny, nx = rng.integers(70, 160, 2)
+    z = rng.normal(size=(ny, nx))
+    z[rng.random(z.shape) < 0.1] = np.nan
+    xe = np.cumsum(rng.uniform(0.2, 3, nx + 1))
+    ye = np.cumsum(rng.uniform(0.2, 3, ny + 1))
+    whole = MapPyramid(z, xe, ye, smallest=8)
+    parts, reads = strip_built(z, xe, ye, budget=int(nx) * 40 * 4, smallest=8)
+    assert len(parts.levels) == len(whole.levels) and max(r1 - r0 for r0, r1 in reads) == 4
+    assert sorted(reads) == [(r, min(r + 4, ny)) for r in range(0, ny, 4)]      # each row read once
+    levels = set()
+    views = [(pixels(xe[0], xe[-1], 5), pixels(ye[0], ye[-1], 4))]          # all of it, few pixels
+    for _ in range(6):
+        x0, x1 = np.sort(rng.uniform(xe[0] - 5, xe[-1] + 5, 2))
+        y0, y1 = np.sort(rng.uniform(ye[0] - 5, ye[-1] + 5, 2))
+        views.append((pixels(x0, x1, int(rng.integers(3, 40))), pixels(y0, y1, int(rng.integers(3, 40)))))
+    for px, py in views:
+        a, b = whole.raster(px, py, stat), parts.raster(px, py, stat)
+        levels.add(a.level)
+        assert a.level == b.level
+        np.testing.assert_allclose(b.image, a.image, rtol=1e-6, atol=1e-9, equal_nan=True)
+    assert max(levels) >= 2                                   # coarse views were compared too
+
+
+@pytest.mark.parametrize("stat", ["max", "mean"])
+def test_a_strip_built_pyramid_of_a_decreasing_map_follows_the_rule(stat):
+    """Decreasing axes: blocks are made in the file's order, so they start at the other end than
+    MapPyramid's; still each pixel shows the blocks under it (brute force, on the map padded at
+    its start so its blocks line up)."""
+    rng = np.random.default_rng(7)
+    ny, nx = 101, 133
+    z = rng.normal(size=(ny, nx))
+    xe, ye = np.cumsum(rng.uniform(0.2, 3, nx + 1))[::-1], np.cumsum(rng.uniform(0.2, 3, ny + 1))[::-1]
+    parts, _ = strip_built(z, xe, ye, budget=nx * 40 * 4, smallest=8)
+    views = [(pixels(xe[-1], xe[0], 5), pixels(ye[-1], ye[0], 4))]
+    for _ in range(6):
+        x0, x1 = np.sort(rng.uniform(xe[-1], xe[0], 2))
+        y0, y1 = np.sort(rng.uniform(ye[-1], ye[0], 2))
+        views.append((pixels(x0, x1, int(rng.integers(3, 30))), pixels(y0, y1, int(rng.integers(3, 30)))))
+    levels = set()
+    for px, py in views:
+        r = parts.raster(px, py, stat)
+        levels.add(r.level)
+        s_ = 2 ** r.level
+        padx, pady = -nx % s_, -ny % s_                 # in increasing order the last block is the short one
+        zi = np.pad(z[::-1, ::-1], ((pady, 0), (padx, 0)), constant_values=np.nan)
+        xi = np.r_[np.full(padx, xe[-1]), xe[::-1]]
+        yi = np.r_[np.full(pady, ye[-1]), ye[::-1]]
+        expected = _brute(zi, xi, yi, px, py, stat, r.level)
+        np.testing.assert_allclose(r.image, expected, rtol=1e-6, atol=1e-6, equal_nan=True)
+    assert max(levels) >= 2

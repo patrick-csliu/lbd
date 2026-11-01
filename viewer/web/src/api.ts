@@ -35,6 +35,14 @@ export interface MemorySettings {
   room_gb: number | null;
 }
 
+/** A summary of a map bigger than memory being made (server: summaries.Job). */
+export interface SummaryJob {
+  path: string;
+  what: string;
+  fraction: number;
+  seconds: number;
+}
+
 // ---- Library (server: library.py; keep in sync with /api/library in server.py) ----
 
 /** A column of the Library's list. */
@@ -669,6 +677,8 @@ export interface Histogram {
   auto: [number, number];
   log: boolean;
   cells: number;
+  /** a map too big for memory: counted from its summary's blocks, so the shape is approximate */
+  approximate?: boolean;
 }
 
 async function exploreRender(
@@ -776,6 +786,10 @@ export const api = {
   setLibrary: (changes: Partial<LibrarySettings>) => call<AppState>("PUT", "/api/settings", { library: changes }),
   setMemory: (changes: Partial<Pick<MemorySettings, "reserve_gb" | "maximum_gb" | "summary_cache_gb">>) =>
     call<AppState>("PUT", "/api/settings", { memory: changes }),
+  // summaries of maps bigger than memory (summaries.py)
+  summaries: () => call<{ making: SummaryJob[]; count: number; bytes: number }>("GET", "/api/summaries"),
+  cancelSummary: (path: string) => call<{ ok: boolean }>("POST", "/api/summaries/cancel", { path }),
+  emptySummaries: () => call<{ removed: number; kept: number; count: number; bytes: number }>("POST", "/api/summaries/empty"),
 
   // ---- Library: the index of the data files under the open folders (library.py)
   libraryList: (query: LibraryQuery, offset: number, limit: number) => {

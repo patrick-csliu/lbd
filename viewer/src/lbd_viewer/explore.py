@@ -43,7 +43,7 @@ from lbd.plot.reduce import STATS, CurvePyramid, MapPyramid, cell_edges, curve_m
 from lbd.plot.style import Style
 from lbd.plot.units import prefix_scale
 
-from . import equations, memory
+from . import equations, memory, summaries
 from . import operations as ops_mod
 
 KINDS = ("curve", "heatmap")
@@ -119,14 +119,17 @@ class ExploreSession:
     `render`, under the render lock."""
 
     def __init__(self, path: Path, version: str, spec: Dict[str, Any], style: Style,
-                 width: int, height: int, dpr: float, saved_view: bool = True):
+                 width: int, height: int, dpr: float, saved_view: bool = True, summarise: bool = True):
         """`saved_view` False: the file's saved figure view (/plot) is not used at all (the
-        Library's automatic previews, plan 8c, depend on the data only)."""
+        Library's automatic previews, plan 8c, depend on the data only). `summarise` False: a
+        map bigger than memory is refused instead of summarised (previews, drawn in the
+        background, never start reading a whole large file)."""
         if width < 50 or height < 50:
             raise ExploreError(f"the plot area is too small ({width}×{height} px); make the window larger")
         self.id = secrets.token_urlsafe(9)
         self.path, self.version, self.style = path, version, style
         self.saved_view = saved_view
+        self.summarise = summarise
         self.last_used = time.monotonic()
         self.header = self._read(lbd.info(path))
         self.data = self._read(lbd.load(path, values=[]))
@@ -152,12 +155,26 @@ class ExploreSession:
             raise ExploreError(f"the Explore view shows curves and heat maps, not {new['kind']} plots; "
                                "use the Figure view for this plot")
         self.spec, self.base_kind = new, new["kind"]
+        # A map with more cells than the memory available holds is shown from its summary, made
+        # once (and kept on disk) by reading the file strip by strip (summaries.py, plan 6d).
+        big = None
+        if self.base_kind == "heatmap":
+            v = self.data.values[new["values"][0]]
+            shape = (len(self.data.axes[new["y"]].data), len(self.data.axes[new["x"]].data))
+            if new["y"] in v.axes and new["x"] in v.axes and summaries.too_big(shape):
+                if not self.summarise:
+                    raise ExploreError(f"this map has {shape[0]:,} × {shape[1]:,} cells, too many for a preview; "
+                                       "open it in Explore (it is summarised once, then kept)")
+                big = summaries.shared().summarise(
+                    self.path, self.version, summaries.BigMap(v, new["x"], new["y"], new["index"], new["complex"]))
         # The plot as prepared from the data; operations (view setting "ops") draw a model made
         # from it (operations.py), the base model stays for the stored values.
-        prepare = rnd.prepare_curves if self.base_kind == "curve" else rnd.prepare_map
         with rnd.RENDER_LOCK, matplotlib.rc_context(self.style.to_rcparams()):
             self._check_open()
-            self.base_model = prepare(self.data, self.spec, self.style)
+            if self.base_kind == "curve":
+                self.base_model = rnd.prepare_curves(self.data, self.spec, self.style)
+            else:
+                self.base_model = rnd.prepare_map(self.data, self.spec, self.style, big=big)
         for v in self.data.values.values():           # a value read by part: the next slider positions
             if isinstance(v.data, memory.Cached):
                 v.data.read_ahead()
@@ -328,15 +345,33 @@ class ExploreSession:
         self.full = (_finite_range([x for x, _, _ in self.x_groups]), m.ylim if m.ylim and None not in m.ylim
                      else self._padded(_finite_range([y for y, _ in m.lines])))
 
+    @property
+    def summarised(self) -> bool:
+        """The map is shown from its summary (too big for memory, summaries.py)."""
+        return self.kind == "heatmap" and isinstance(self.model.z, summaries.BigMap)
+
+    def _finite_z(self) -> np.ndarray:
+        """The map's numbers (finite ones); of a summarised map, its blocks' means (approximate)
+        with its lowest and highest number."""
+        if self.summarised:                              # the lowest and highest are exact
+            return np.concatenate([summaries.histogram_cells(self.model.z)[0], self.model.z.range()])
+        z = self.model.z
+        return z[np.isfinite(z)]
+
     def _setup_map(self):
         m = self.model
         xe, ye = cell_edges(m.x), cell_edges(m.y)
         try:
-            self.pyramid = MapPyramid(m.z, xe, ye)
+            if isinstance(m.z, summaries.BigMap):
+                self.pyramid = summaries.pyramid(m.z, xe, ye)
+            else:
+                self.pyramid = MapPyramid(m.z, xe, ye)
         except ValueError as e:
             raise ExploreError(str(e)) from e
         self.x_edges, self.y_edges = np.sort(xe), np.sort(ye)
-        m.norm.autoscale_None(np.ma.masked_invalid(m.z))   # colour limits from all the data, not the view
+        # colour limits from all the data, not the view (a summarised map: its lowest and highest)
+        whole = np.asarray(m.z.range()) if isinstance(m.z, summaries.BigMap) else m.z
+        m.norm.autoscale_None(np.ma.masked_invalid(whole))
         self.image = rnd.draw_map(self.fig, self.ax, m, self.data, self.spec, self.style,
                                   image=np.full((2, 2), np.nan))
         self.full = ((float(self.x_edges[0]), float(self.x_edges[-1])), (float(self.y_edges[0]), float(self.y_edges[-1])))
@@ -460,6 +495,11 @@ class ExploreSession:
                         notes.append(f"{n} point{'s' * (n != 1)} at x ≤ 0 aren't shown on the log horizontal axis.")
                     if ylog and (n := sum(int(((y <= 0) & o).sum()) for (_, y), o in zip(pairs, ok))):
                         notes.append(f"{n} point{'s' * (n != 1)} ≤ 0 aren't shown on the log vertical axis.")
+            elif self.summarised:                        # its lowest and highest number say enough
+                if not np.isfinite(m.z.range()).any():
+                    empty = self._why_empty("cell")
+                if self.settings.get("cscale") == "log" and m.z.range()[0] <= 0:
+                    notes.append("Cells ≤ 0 aren't shown on the log colour scale.")
             else:
                 z = np.asarray(m.z, dtype=float)
                 finite = np.isfinite(z)
@@ -566,7 +606,7 @@ class ExploreSession:
         """For the page: each operation's state (None: applied, "off", or why not), each equation
         field's (error or note), what is shown, and the names equations can use (the legend)."""
         r = self.ops_result
-        if getattr(self, "eq_legend", None) is None:      # nothing applied: the legend of the plain plot
+        if getattr(self, "eq_legend", None) is None and not self.summarised:   # the legend of the plain plot
             self.eq_legend = equations.names_of(self, ops_mod.grid_of(self, None), arrays=False)[1]
         info: Dict[str, Any] = {"notes": r.notes if r else ["off"] * len(self.ops_list), "applied": r.applied if r else 0,
                                 "equations": getattr(self, "eq_state", {}), "names": self.eq_legend}
@@ -578,7 +618,10 @@ class ExploreSession:
 
     def _apply_map(self, settings: Dict[str, Any], chosen: Optional[set], clim) -> None:
         old = (self.settings.get("select") or {}).get(self.spec.get("y"))
-        if (None if old is None else set(old)) != chosen or not hasattr(self, "pyramid"):
+        if chosen is not None and self.summarised:
+            raise ExploreError("choosing rows isn't possible on a map this large (it is shown from its summary); "
+                               "show all rows, or save a cut and open that")
+        if not self.summarised and ((None if old is None else set(old)) != chosen or not hasattr(self, "pyramid")):
             z = self.model.z
             if chosen is not None:                       # left-out rows are empty, in their place
                 z = z.copy()
@@ -590,7 +633,7 @@ class ExploreSession:
         self.image.set_cmap(name)
         if "cscale" in settings or any(v is not None for v in clim):
             log = settings.get("cscale") == "log"
-            z = self.model.z[np.isfinite(self.model.z)]
+            z = self._finite_z()
             if log:
                 z = z[z > 0]
             lo = clim[0] if clim[0] is not None else (float(z.min()) if z.size else 1.0)
@@ -598,7 +641,7 @@ class ExploreSession:
             if log and not z.size:
                 log = False                              # nothing above 0: a log scale would show nothing
                 self.log_refused.append("The map has no value above 0, so the colour scale stays linear.")
-                z = self.model.z[np.isfinite(self.model.z)]
+                z = self._finite_z()
                 lo = clim[0] if clim[0] is not None else (float(z.min()) if z.size else 0.0)
                 hi = clim[1] if clim[1] is not None else (float(z.max()) if z.size else 1.0)
             if log and lo <= 0:
@@ -999,9 +1042,13 @@ class ExploreSession:
                                 "viewer restarted); it reopens by itself")
 
     def close(self):
-        """Free the figure; a request still using the session then gets ExploreClosed."""
+        """Free the figure (and a summarised map's summary file); a request still using the
+        session then gets ExploreClosed."""
         with rnd.RENDER_LOCK:
             self.fig = None
+            for model in {id(m): m for m in (getattr(self, "base_model", None), getattr(self, "model", None))}.values():
+                if isinstance(getattr(model, "z", None), summaries.BigMap):
+                    model.z.close()
 
 
 class Sessions:

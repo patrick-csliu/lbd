@@ -4,7 +4,7 @@
 // whole; a bigger one is read by part.
 
 import { useEffect, useState } from "react";
-import { api, AppState, MemorySettings as Settings } from "./api";
+import { api, AppState, formatBytes, MemorySettings as Settings } from "./api";
 import { useToast } from "./toast";
 
 /** A number of GB typed in a box: "" means automatic / no maximum. */
@@ -23,6 +23,11 @@ export function MemorySettings({ settings, onSettings }: { settings: Settings; o
   useEffect(() => setReserve(settings.reserve_gb === null ? "" : String(settings.reserve_gb)), [settings.reserve_gb]);
   useEffect(() => setMaximum(settings.maximum_gb === null ? "" : String(settings.maximum_gb)), [settings.maximum_gb]);
   useEffect(() => setCache(String(settings.summary_cache_gb)), [settings.summary_cache_gb]);
+  // the summaries kept now: read when the settings open (and after emptying or a new limit)
+  const [kept, setKept] = useState<{ count: number; bytes: number } | null>(null);
+  useEffect(() => {
+    api.summaries().then(setKept, () => setKept(null));
+  }, [settings.summary_cache_gb]);
 
   const save = async (key: keyof Settings, text: string, empty: number | null) => {
     const parsed = parseGb(text);
@@ -34,6 +39,16 @@ export function MemorySettings({ settings, onSettings }: { settings: Settings; o
     if (settings[key] === value) return;
     try {
       onSettings(await api.setMemory({ [key]: value }));
+    } catch (e) {
+      toast((e as Error).message, "error");
+    }
+  };
+
+  const empty = async () => {
+    try {
+      const out = await api.emptySummaries();
+      setKept(out);
+      if (out.kept) toast(`${out.kept} summar${out.kept === 1 ? "y is" : "ies are"} in use now and stay; close those maps, then empty again.`, "warning");
     } catch (e) {
       toast((e as Error).message, "error");
     }
@@ -83,6 +98,14 @@ export function MemorySettings({ settings, onSettings }: { settings: Settings; o
           onKeyDown={(e) => e.key === "Enter" && save("summary_cache_gb", cache, 20)}
         />
       </label>
+      <p className="settings-note small muted">
+        A map larger than the memory is summarised once (this takes a while); the summary is kept on disk so the map
+        opens quickly next time, the least recently used going first. Summaries:{" "}
+        {kept ? `${kept.count.toLocaleString()}, ${formatBytes(kept.bytes)}` : "…"}{" "}
+        <button className="link" onClick={empty} disabled={!kept || kept.count === 0}>
+          Empty
+        </button>
+      </p>
     </>
   );
 }

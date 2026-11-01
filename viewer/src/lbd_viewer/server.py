@@ -47,10 +47,10 @@ from .catalog import Catalog, catalog_dir, fitting, structure  # noqa: E402
 from . import labels, library_labels  # noqa: E402
 from .library import LibraryIndex, writing_status  # noqa: E402
 from .previews import PreviewCache, PreviewError, Previewer  # noqa: E402
-from . import memory, reading  # noqa: E402
+from . import memory, reading, summaries  # noqa: E402
 from .explore import ExploreClosed, ExploreError, ExploreSession, Sessions  # noqa: E402
 from .pages import PageError, Pages, UnknownPage  # noqa: E402
-from .config import Config, ConfigError, Style, StyleError, from_dict, previews_mode  # noqa: E402
+from .config import MEMORY_DEFAULTS, Config, ConfigError, Style, StyleError, from_dict, previews_mode  # noqa: E402
 
 CREATOR = f"LBD viewer {VERSION} (matplotlib {matplotlib.__version__})"
 
@@ -734,6 +734,15 @@ def create_app(state: AppState) -> FastAPI:
     with contextlib.suppress(ConfigError):
         apply_memory(cfg.settings()["memory"])
 
+    def summary_limit() -> float:
+        try:
+            return float(cfg.settings()["memory"]["summary_cache_gb"])
+        except ConfigError:
+            return MEMORY_DEFAULTS["summary_cache_gb"]
+
+    # summaries of maps bigger than memory (summaries.py): on disk, next to the database
+    summaries.configure(catalog_dir(cfg.dir) / "summaries", summary_limit)
+
     @app.middleware("http")
     async def guard(request: Request, call_next):
         if state.check_host:
@@ -799,6 +808,29 @@ def create_app(state: AppState) -> FastAPI:
     def heartbeat():
         state.last_heartbeat = time.monotonic()
         return {"ok": True}
+
+    # -- summaries of maps bigger than memory (summaries.py)
+
+    @app.get("/api/summaries")
+    def summaries_now():
+        """The summaries being made now (file, what, fraction done, seconds); how many are kept
+        and their size."""
+        c = summaries.shared()
+        return {"making": c.progress(), "count": len(c.entries()), "bytes": c.size()}
+
+    @app.post("/api/summaries/cancel")
+    def summaries_cancel(body: PathBody):
+        """Stop making the summary of this file; the request that asked for it answers "cancelled"."""
+        p = str(state.check_allowed(body.path))
+        if not summaries.shared().cancel(p):
+            raise HTTPException(404, f"no summary of {Path(p).name} is being made")
+        return {"ok": True}
+
+    @app.post("/api/summaries/empty")
+    def summaries_empty():
+        """Remove every summary not in use; they are made again when needed."""
+        c = summaries.shared()
+        return {**c.empty(), "count": len(c.entries()), "bytes": c.size()}
 
     @app.get("/api/state")
     def get_state():
@@ -1445,6 +1477,7 @@ def create_app(state: AppState) -> FastAPI:
                                      "library and/or memory")
         if body.memory is not None:
             apply_memory(cfg.set_memory(body.memory))
+            summaries.shared().trim()                     # a smaller limit: the oldest summaries go
         if body.default_style is not None:
             cfg.set_default_style(body.default_style)
             state.pages.broadcast("styles_changed")

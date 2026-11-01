@@ -108,7 +108,7 @@ def draw(path: Path, panels: Sequence[Panel], grid: Tuple[int, int], style: Styl
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", RenderWarning)
                 s = ExploreSession(Path(path), version, dict(panel.get("spec") or {}), style,
-                                   x1 - x0, y1 - y0, PREVIEW_DPR, saved_view=saved_view)
+                                   x1 - x0, y1 - y0, PREVIEW_DPR, saved_view=saved_view, summarise=False)
                 try:
                     s.apply(panel.get("settings") or {})
                     view = panel.get("view") or {}
