@@ -277,6 +277,31 @@ d = lbd.load("sweep.lbd");
 d = lbd.load("big.lbd", Values="S21");
 ```
 
+## `lbd.open`
+
+<!-- no-check -->
+```matlab
+d = lbd.open(path)
+d = lbd.open(path, Mode="r+")
+```
+
+Reads the file's structure and leaves the value data in the file: each value's `Data` is an
+`lbd.OnDisk`. `size` and `class` need no reading; `Data(4, :)` reads row 4 only, `Data.read()`
+everything. `d.close()` closes the file; what was read stays usable.
+
+| Argument | Meaning |
+|---|---|
+| `path` | File to read. A file being written (`.lbd.writing`) opens as it was at that moment. |
+| `Mode` | `"r"` (default): read only; `write` and `save` are refused. `"r+"`: `write` puts data into the file at points that exist, `d.save()` writes the title, description, metadata and saved view into it, `d.save(other)` copies it piece by piece. |
+
+```matlab
+d = lbd.open("big.lbd");
+row = d.Values.S21.Data(4, :);
+d.close();
+```
+
+See [Large files](getting-started/large-files.md).
+
 ## `lbd.info`
 
 <!-- no-check -->

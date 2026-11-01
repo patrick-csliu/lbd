@@ -31,6 +31,14 @@ and recipes, see [Reading and writing files](../../python/files.md).
     options:
       heading_level: 3
 
+::: lbd.open
+    options:
+      heading_level: 3
+
+::: lbd.OnDisk
+    options:
+      heading_level: 3
+
 ## Writing while measuring
 
 ::: lbd.Writer

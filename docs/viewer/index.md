@@ -58,13 +58,16 @@ Only one copy of the viewer runs at a time. Opening more files adds them to the 
 
 ![The ⚙ settings](img/settings.png){ width="380" }
 
-**⚙** at the top right holds three settings. They are saved, and apply to every viewer tab and
+**⚙** at the top right holds these settings (and the [Library](library.md)'s own). They are saved, and apply to every viewer tab and
 to the next start:
 
 1. **Files opened from Explorer / Finder:** *in the open viewer (as a tab)*, which is the
    default, or *in a new browser tab* every time.
 2. **Data files opened from Explorer / Finder open in** *Explore* (the default) or *Figure*.
-3. **Theme:**
+3. **Memory for data:** how much memory to leave free for the rest of the computer, an
+   optional most to use, and how much disk the summaries of large data may take
+   ([Large files](../getting-started/large-files.md#large-files-in-lbd-viewer)).
+4. **Theme:**
     - **System** follows the light or dark mode of Windows, macOS or Linux, also when it changes
       while the viewer is open.
     - **Light** and **Dark** stay as chosen.

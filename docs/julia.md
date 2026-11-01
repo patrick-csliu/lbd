@@ -245,6 +245,28 @@ Reads a file.
 It logs a warning (`@warn`) if the minor format version is newer or the stored plot JSON is
 invalid.
 
+## `LBD.open`
+
+```julia
+LBD.open(path; mode="r") -> Dataset
+LBD.open(f, path; mode="r")          # do-block: closed at its end
+```
+
+Reads the file's structure and leaves the value data in the file: each value's `data` is an
+`LBD.OnDisk{T,N} <: AbstractArray{T,N}`. `size` reads nothing; `x[4, :]` reads row 4 only,
+`collect(x)` everything. `close(d)` (or the end of the do-block) closes the file; what was read
+stays usable. `mode="r+"`: `write!` puts data into the file at points that exist,
+`LBD.save(d)` writes the title, description, metadata and saved view into it,
+`LBD.save(other, d)` copies it piece by piece.
+
+```julia
+LBD.open("big.lbd") do d
+    row = d["S21"].data[4, :]
+end
+```
+
+See [Large files](getting-started/large-files.md).
+
 ## `LBD.info`
 
 ```julia

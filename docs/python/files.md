@@ -320,6 +320,14 @@ i = lbd.info("sweep.lbd")                    # everything except value data: fas
   the others are still described (`shape`, `dtype`, `axes`, `unit`), with `data` set to `None`.
   Such a dataset can't be saved again until it is loaded fully.
 - [`lbd.info`][lbd.info] reads no value data at all. Use it to list or check many files.
+- [`lbd.open`][lbd.open] reads the structure and leaves the data in the file: `v.data` is an
+  on-disk array, and indexing it reads only that part. For files larger than memory; with
+  `mode="r+"` it also changes the file in place. See [Large files](../getting-started/large-files.md).
+
+```python
+with lbd.open("big.lbd") as d:
+    row = d.values["S21"].data[3]            # one row read from the file
+```
 
 ```python
 from pathlib import Path
