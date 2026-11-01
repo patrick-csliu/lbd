@@ -146,6 +146,7 @@ class OnDisk:
     def _copy_to(self, group: h5py.Group, name: str) -> h5py.Dataset:
         """This dataset copied into another file, inside HDF5 (no value is read whole)."""
         def copy(f: h5py.File) -> h5py.Dataset:
+            f.flush()                               # what write changed, on disk before it is copied
             f.copy(f[self._where], group, name=name)
             return group[name]
 

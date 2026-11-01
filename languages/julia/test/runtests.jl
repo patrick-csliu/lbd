@@ -662,3 +662,66 @@ end
         @test r["n"].data == Int16[1, 2, 3] && r["n"].measured === nothing
     end
 end
+
+@testset "LBD.open: read only what is needed" begin
+    dir = mktempdir()
+    function big()
+        p = joinpath(dir, "big$(rand(UInt32)).lbd")
+        d = Dataset("big")
+        add_axis!(d, "power", collect(1.0:6))
+        add_axis!(d, "freq", collect(1.0:50))
+        add_value!(d, "S", [ComplexF64(50i + j, 1) for i in 0:5, j in 0:49], ["power", "freq"])
+        add_value!(d, "ok", [iseven(i) for i in 0:5], "power")
+        add_value!(d, "n"; axes="power", dtype=Int16)
+        write!(d; power=2, n=7)
+        add_value!(d, "q", 2.5)
+        d.meta["T_mK"] = 12
+        LBD.save(p, d; compression=true)
+        return p
+    end
+    p = big()
+    whole = LBD.load(p)
+    LBD.open(p) do d
+        x = d["S"].data
+        @test x isa LBD.OnDisk && size(x) == (6, 50) && eltype(x) == ComplexF64
+        @test x[4, :] == whole["S"].data[4, :]
+        @test x[2:3, [10, 3, 3]] == whole["S"].data[2:3, [10, 3, 3]]
+        @test x[end, end] == whole["S"].data[end, end]
+        @test collect(x) == whole["S"].data
+        @test d["ok"].data[:] == whole["ok"].data
+        @test d["n"].measured[:] == whole["n"].measured
+        @test d["q"].data[] == 2.5 && d.meta["T_mK"] == 12
+        @test_throws BoundsError x[7, 1]
+    end
+    d = LBD.open(p)
+    x = d["S"].data
+    close(d)
+    @test_throws LBDError x[1, 1]
+
+    d = LBD.open(p)
+    @test_throws LBDError write!(d; power=1, n=1)
+    @test_throws LBDError LBD.save(joinpath(dir, "nope.lbd"), d)
+    close(d)
+    copy = joinpath(dir, "copy.lbd")
+    LBD.open(p; mode="r+") do d
+        write!(d; power=3, S=zeros(ComplexF64, 50))
+        write!(d; power=5, n=9)
+        d.meta["checked"] = 1
+        LBD.save(d)
+        LBD.save(copy, d)
+        @test d.path == p
+    end
+    r = LBD.load(p)
+    @test all(iszero, r["S"].data[3, :]) && r["n"].data[5] == 9 && r.meta["checked"] == 1
+    @test r["n"].measured == [false, true, false, false, true, false]
+    c = LBD.load(copy)
+    @test c["S"].data == r["S"].data && c.parent_id == r.id && c["ok"].data isa AbstractVector{Bool}
+
+    g = joinpath(dir, "groups.lbd")
+    LBD.save(g, group_case4(true))
+    LBD.open(g) do d
+        @test last(rows(d, "g"; by="A")[3])["g"].data == [310, 320, 321]
+        @test to_dense(d, "f")["f"].data[3, :] == [30, 31, 32]
+        @test coords(d, "g")["C"] == [0, 0, 0, 1]
+    end
+end

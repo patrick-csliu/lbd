@@ -567,7 +567,7 @@ function try_guard(io::IOStream)
 end
 
 function take_guard(path)
-    io = open(path, "r+")
+    io = Base.open(path, "r+")
     try_guard(io) || (close(io); throw(LBDError("$path is being written by another program")))
     return io
 end
@@ -601,9 +601,9 @@ function writing_status(path::AbstractString)
     isfile(p) || throw(LBDError("no file being written: $p"))
     own_writer(p) === nothing || return "measuring"
     io = try
-        open(p, "r+")
+        Base.open(p, "r+")
     catch
-        open(p, "r")
+        Base.open(p, "r")
     end
     try
         if Sys.iswindows()

@@ -698,7 +698,7 @@ classdef Dataset < handle
                 data = val.Data;
                 if isa(data, 'lbd.OnDisk')           % opened with lbd.open: copied inside HDF5, never read whole
                     where = data.Where;
-                    obj.Source.run(@(src) H5O.copy(src, char(where), gid, char(val.Name), 'H5P_DEFAULT', 'H5P_DEFAULT'));
+                    obj.Source.run(@(src) copyValue(src, where, gid, val.Name));
                     did = H5D.open(gid, char(val.Name));
                     for a = ["unit" "label" "axes"]
                         try, H5A.delete(did, char(a)); catch, end
@@ -1994,6 +1994,12 @@ classdef Dataset < handle
             end
         end
     end
+end
+
+function copyValue(src, where, gid, name)
+% A value of an opened file copied into another file inside HDF5 (what write changed flushed first).
+H5F.flush(src, 'H5F_SCOPE_GLOBAL');
+H5O.copy(src, char(where), gid, char(name), 'H5P_DEFAULT', 'H5P_DEFAULT');
 end
 
 function rewriteDescription(fid, d)

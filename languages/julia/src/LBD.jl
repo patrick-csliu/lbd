@@ -135,12 +135,13 @@ mutable struct Dataset
     live::Bool                     # LBD.Writer: values without data take no memory
     placeholders::Vector{String}   # ... and these are they (their data is in the file)
     lookups::Dict{String,Any}      # each group level's points by (parent, coordinate)
+    source::Any                    # LBD.open: the file its values are read from (a LazySource), or nothing
 end
 
 Dataset(title::AbstractString=""; description::AbstractString="", created=nothing) = Dataset(
     String(title), String(description), created === nothing ? nothing : created_text(created), nothing, GRID_VERSION,
     OrderedDict{String,Axis}(), OrderedDict{String,Group}(), OrderedDict{String,Value}(), OrderedDict{String,Any}(),
-    nothing, nothing, nothing, nothing, nothing, nothing, nothing, false, String[], Dict{String,Any}(),
+    nothing, nothing, nothing, nothing, nothing, nothing, nothing, false, String[], Dict{String,Any}(), nothing,
 )
 
 # ---- the measurement's identity ----------------------------------------------
@@ -416,7 +417,11 @@ write!(d; parent=i, B=[15, 25], f=[1.0, 2.0])
 ```
 """
 function write!(d::Dataset, names::AbstractDict=Dict{String,Any}(); parent=nothing, kw...)
+    d.source === nothing || check_change(d.source, "write!")
     plan = plan_write(d, names, kw, parent)
+    d.source !== nothing && (plan.grow !== nothing || !isempty(plan.levels)) && throw(LBDError(
+        "write!: the file is opened with LBD.open, where write! puts data at points that exist; to add points " *
+        "(a growing axis, a group's new points) use LBD.load, or LBD.Writer"))
     apply_write!(d, plan)
     return plan.result
 end
@@ -889,6 +894,8 @@ function to_dense(d::Dataset, name::AbstractString; round=nothing, rtol=nothing,
                        "with rows(d, name; by=...), or give limit=nothing"))
     end
     E = JULIA_TYPES[v.dtype]
+    data = v.data isa OnDisk ? collect(v.data) : v.data             # opened with LBD.open: read now
+    vmeasured = v.measured isa OnDisk ? collect(v.measured) : v.measured
     out = fill(not_measured(E), shape)
     isint = !(E <: AbstractFloat || E <: Complex)
     mask = isint ? falses(shape) : nothing
@@ -905,12 +912,12 @@ function to_dense(d::Dataset, name::AbstractString; round=nothing, rtol=nothing,
                                     "result. Use a smaller round= / rtol= / atol="))
         push!(seen, t)
         if isempty(v.point_shape)
-            out[t...] = v.data isa AbstractArray ? v.data[Tuple(I)...] : v.data
+            out[t...] = data isa AbstractArray ? data[Tuple(I)...] : data
         else
-            out[t..., point...] = v.data[Tuple(I)..., point...]
+            out[t..., point...] = data[Tuple(I)..., point...]
         end
         if isint
-            src = v.measured === nothing ? true : v.measured isa AbstractArray ? v.measured[Tuple(I)..., point...] : v.measured
+            src = vmeasured === nothing ? true : vmeasured isa AbstractArray ? vmeasured[Tuple(I)..., point...] : vmeasured
             isempty(v.point_shape) ? (mask[t...] = src) : (mask[t..., point...] .= src)
         end
     end
@@ -990,7 +997,11 @@ function apply_write!(d::Dataset, plan)
             v.measured === nothing || (v.measured = true)
         else
             v.data[p.idx...] = p.data
-            v.measured === nothing || (view(v.measured, p.idx...) .= true)
+            if v.measured isa OnDisk                       # opened with LBD.open: written into the file
+                v.measured[p.idx...] = p.data isa Number ? true : trues(size(p.data))
+            elseif v.measured !== nothing
+                view(v.measured, p.idx...) .= true
+            end
         end
     end
 end
@@ -1073,7 +1084,22 @@ the file system keeps its id, so LBD Viewer recognises the same measurement in t
 On Windows a file another program keeps open (e.g. LBD Viewer reading it, a sync client) can't
 be replaced: `save` waits up to $(REPLACE_WAIT) s for it, then throws an `IOError` naming the file.
 """
+# `LBD.save(d)`: a dataset opened with `LBD.open(path; mode="r+")`: its description, metadata
+# and saved view rewritten in the file (the data is already there).
+function save(d::Dataset)
+    d.source === nothing && throw(LBDError("save needs a path: LBD.save(path, d)"))
+    check_change(d.source, "save")
+    return save_in_place(d)
+end
+
 function save(path::AbstractString, d::Dataset; compression::Bool=false)
+    if d.source !== nothing                      # opened with LBD.open
+        check_change(d.source, "save")
+        same_file(path, d.source.path) && return save_in_place(d)
+        copy = Dataset((getfield(d, f) for f in fieldnames(Dataset))...)     # the copy changes, not d
+        copy.source = nothing
+        return save(path, copy; compression=compression)
+    end
     endswith(lowercase(path), ".writing") &&
         throw(LBDError("$(basename(path)): a \".writing\" file is written only by LBD.Writer; save to the .lbd name"))
     lowercase(splitext(path)[2]) == ".lbd" || @warn "$(basename(path)): LBD files should use the .lbd extension"
@@ -1165,6 +1191,20 @@ function write_file(f, d::Dataset, compression::Bool)
     gv = create_group(f, "values")
     for v in values(d.values)
         data = v.data
+        if data isa OnDisk                       # opened with LBD.open: copied inside HDF5, never read whole
+            run_on(data.source) do src
+                flush(src)                       # what write! changed, on disk before it is copied
+                HDF5.copy_object(src[data.where_], gv, v.name)
+            end
+            ds = gv[v.name]
+            for a in ("unit", "label", "axes")
+                haskey(attributes(ds), a) && delete_attribute(ds, a)
+            end
+            write_str_attr(ds, "unit", v.unit)
+            write_str_attr(ds, "label", v.label)
+            write_str_attr(ds, "axes", join(vcat(v.axes, point_names(v)), ","))
+            continue
+        end
         isbool = (data isa Bool) || (data isa AbstractArray && eltype(data) === Bool)
         if isbool
             data = data isa Bool ? UInt8(data) : UInt8.(data)
@@ -1177,11 +1217,12 @@ function write_file(f, d::Dataset, compression::Bool)
     end
 
     # integer / Bool points never measured (stopped early)
-    masks = [v for v in values(d.values) if v.measured !== nothing && !all(v.measured)]
+    whole(m) = m isa OnDisk ? collect(m) : m
+    masks = [v for v in values(d.values) if v.measured !== nothing && !all(whole(v.measured))]
     if !isempty(masks)
         gm = create_group(f, "measured")
         for v in masks
-            m = v.measured isa Bool ? UInt8(v.measured) : UInt8.(collect(v.measured))
+            m = v.measured isa Bool ? UInt8(v.measured) : UInt8.(collect(whole(v.measured)))
             write_array(gm, v.name, to_file(m), compression)
         end
     end
@@ -1692,5 +1733,6 @@ to_plain(x::JSON3.Array) = Any[to_plain(v) for v in x]
 to_plain(x) = x
 
 include("writer.jl")
+include("lazy.jl")
 
 end # module

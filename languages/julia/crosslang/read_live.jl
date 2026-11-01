@@ -4,6 +4,14 @@ using Logging
 
 path = ARGS[1]
 writing = path * ".writing"
+# Julia compiles a function at its first call: read a small file once before saying "ready", so
+# the first read of the measurement isn't seconds late (on a busy computer it could miss it).
+let warm = joinpath(mktempdir(), "warm.lbd"), d = LBD.Dataset("warm")
+    add_axis!(d, "x", [1.0, 2.0])
+    add_value!(d, "y"; axes="x", dtype=ComplexF64)
+    LBD.save(warm, d)
+    LBD.load(warm)
+end
 touch(joinpath(dirname(path), "ready-julia"))
 deadline = time() + 120
 while !isfile(writing) && !isfile(path)

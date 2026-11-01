@@ -157,8 +157,9 @@ are still written as 1.2).
 
 **File format and languages**
 
-- **`lbd.open`: read only what is needed** (Python and MATLAB; Julia and the viewer follow in
-  this version). In MATLAB: `d = lbd.open("big.lbd", Mode="r")`, `d.Values.S21.Data(4, :)` reads
+- **`lbd.open`: read only what is needed** (every language; the viewer follows in this
+  version). In Julia: `LBD.open("big.lbd"; mode="r") do d … end`, `d["S21"].data[4, :]` reads row
+  4 only (`data` is an `LBD.OnDisk`, an `AbstractArray`), `LBD.save(d)` / `LBD.save(copy, d)`. In MATLAB: `d = lbd.open("big.lbd", Mode="r")`, `d.Values.S21.Data(4, :)` reads
   row 4 only (`Data` is an `lbd.OnDisk`), `d.close()`. `with lbd.open("big.lbd") as d:` reads the structure; each value's `data` is an
   on-disk array: `d.values["S21"].data[3]` reads row 3 only, `np.asarray(...)` all of it, and
   `rows`, `coords`, `to_dense` read only what they need. `mode="r"` (default) only reads;
