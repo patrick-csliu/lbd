@@ -109,13 +109,37 @@ def check_groups(path: Path) -> None:
     assert np.isnan(m["f"].data[0, 1]) and m["f"].data[2, 3] == 325
 
 
+def check_open(path: Path) -> None:
+    """lbd.open reads the same parts as lbd.load (plan 6d)."""
+    whole = lbd.load(path)
+    with lbd.open(path) as d:
+        for name, v in whole.values.items():
+            o = d.values[name]
+            assert o.shape == v.shape, name
+            if v.data.ndim:
+                np.testing.assert_array_equal(o.data[-1], v.data[-1], err_msg=name)
+                np.testing.assert_array_equal(o.data[0], v.data[0], err_msg=name)
+            np.testing.assert_array_equal(np.asarray(o.data), v.data, err_msg=name)
+        if d.groups:
+            np.testing.assert_array_equal(d.to_dense("f")["f"].data, whole.to_dense("f")["f"].data)
+            assert [r["w"].data.tolist() for _, r in d.rows("w", by="P")] == \
+                [r["w"].data.tolist() for _, r in whole.rows("w", by="P")]
+
+
+def check_rplus(path: Path) -> None:
+    d = lbd.load(path)
+    np.testing.assert_array_equal(d["y"].data, [0, 0, 7, 0, 0])
+    assert d.meta["edited"] == 1 and d.title == "R plus"
+
+
 root = Path(sys.argv[1])
 failed = False
-for name, test in (("fixture.lbd", check), ("live.lbd", check_live), ("groups.lbd", check_groups)):
+for name, test in (("fixture.lbd", check), ("live.lbd", check_live), ("groups.lbd", check_groups),
+                   ("fixture.lbd", check_open), ("groups.lbd", check_open), ("rplus.lbd", check_rplus)):
     for p in sorted(root.glob(f"*/{name}")):
         try:
             test(p)
-            print(f"  python reads {p.parent.name:7s} {name:11s} OK")
+            print(f"  python reads {p.parent.name:7s} {name:11s} {'(opened) ' if test is check_open else ''}OK")
         except Exception as e:  # noqa: BLE001 - report every failure, then exit non-zero
             failed = True
             print(f"  python reads {p.parent.name:7s} {name:11s} FAILED: {type(e).__name__}: {e}")

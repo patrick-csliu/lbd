@@ -84,3 +84,14 @@ for p in 1:3                                                           # by pare
     end
 end
 LBD.save(joinpath(out, "groups.lbd"), g)
+
+# The r+ fixture (plan 6d): saved, then opened with mode="r+" and changed in place.
+r = LBD.Dataset("R plus")
+add_axis!(r, "x", collect(0.0:4))
+add_value!(r, "y", zeros(5), "x")
+LBD.save(joinpath(out, "rplus.lbd"), r)
+LBD.open(joinpath(out, "rplus.lbd"); mode="r+") do o
+    write!(o; x=3, y=7.0)
+    o.meta["edited"] = 1
+    LBD.save(o)
+end

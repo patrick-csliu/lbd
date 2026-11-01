@@ -19,9 +19,12 @@ with a notice. See [languages/README.md](../../languages/README.md) for adding o
 ## What the scripts must do
 
 - **write** creates `<out>/fixture.lbd` with exactly the content below, `<out>/live.lbd`
-  with the language's Writer (the live fixture), and `<out>/groups.lbd` (the groups fixture).
+  with the language's Writer (the live fixture), `<out>/groups.lbd` (the groups fixture) and
+  `<out>/rplus.lbd` (changed in place with the language's `open` in mode r+).
   `<out>` is given as `{out}` / `LBD_OUT`.
-- **check** finds every `<root>/*/fixture.lbd`, `<root>/*/live.lbd` and `<root>/*/groups.lbd` (`{root}` /
+- **check** finds every `<root>/*/fixture.lbd`, `<root>/*/live.lbd`, `<root>/*/groups.lbd` and
+  `<root>/*/rplus.lbd`, also opens every fixture and groups file with the language's `open` (read
+  lazily: the same values as a full load, read whole and by part) (`{root}` /
   `LBD_ROOT`), compares each with its definition, prints one line per file (`<language> reads
   <writer> OK` or `FAILED: <reason>`), and exits non-zero if any check failed.
 - **read_live** (optional) reads a measurement while Python writes it: see "Reading while
@@ -78,6 +81,14 @@ with a notice. See [languages/README.md](../../languages/README.md) for adding o
 | group `PQR` | order `P, Q, R`, written with `parent=`: for P in 1…3 a point, under it Q in 0…P−1, under each R in 0…Q−1. `Q = [0, 0, 1, 0, 1, 2]`, `R = [0, 0, 0, 1]`, `R._parent = [2, 4, 5, 5]` |
 | values `u(P, Q)`, `w(P, Q, R)` | `u = 10·P + Q`: `[10, 20, 21, 30, 31, 32]`; `w = 100·P + 10·Q + R`: `[210, 310, 320, 321]` |
 | check also | `to_dense(f)`: B ticks `[10, 15, 20, 25, 35]`, NaN where not measured |
+
+## R+ fixture definition (plan 6d)
+
+| Item | Definition |
+|---|---|
+| file | `<out>/rplus.lbd`, title `R plus` |
+| written | axis `x` `[0, 1, 2, 3, 4]`, value `y(x)` float64 zeros, saved; then opened with mode r+: `y` at x index 2 (from 0) set to 7, meta `edited = 1`, saved in place |
+| check | `y = [0, 0, 7, 0, 0]`, `meta.edited = 1`, title `R plus` |
 
 ## Reading while measuring
 

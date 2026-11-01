@@ -81,4 +81,15 @@ for p = 1:3                                            % by Parent=
     end
 end
 g.save(fullfile(out, "groups.lbd"));
+
+% The r+ fixture (plan 6d): saved, then opened with Mode="r+" and changed in place.
+r = lbd.Dataset("R plus");
+r.addAxis("x", 0:4);
+r.addValue("y", zeros(1, 5), "x");
+r.save(fullfile(out, "rplus.lbd"));
+o = lbd.open(fullfile(out, "rplus.lbd"), Mode="r+");
+o.write(x=3, y=7);
+o.Meta.edited = 1;
+o.save();
+o.close();
 end

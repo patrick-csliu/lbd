@@ -85,3 +85,13 @@ for p in range(1, 4):                                                 # by paren
         r = np.arange(q)
         g.write(parent=k, R=r, w=100 * p + 10 * q + r)
 g.save(out / "groups.lbd")
+
+# The r+ fixture (plan 6d): saved, then opened with mode="r+" and changed in place.
+r = lbd.Dataset(title="R plus")
+r.add_axis("x", np.arange(5.0))
+r.add_value("y", np.zeros(5), axes="x")
+r.save(out / "rplus.lbd")
+with lbd.open(out / "rplus.lbd", mode="r+") as o:
+    o.write(x=2, y=7.0)
+    o.meta["edited"] = 1
+    o.save()

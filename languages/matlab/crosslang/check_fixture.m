@@ -32,9 +32,58 @@ for f = dir(fullfile(root, '*', 'groups.lbd'))'
         fprintf('  matlab reads %-7s groups.lbd FAILED: %s\n', lang, err.message);
     end
 end
+for name = ["fixture.lbd" "groups.lbd" "rplus.lbd"]
+    for f = dir(fullfile(root, '*', name))'
+        lang = string(regexp(f.folder, '[^\\/]+$', 'match', 'once'));
+        try
+            if name == "rplus.lbd", checkRplus(fullfile(f.folder, f.name)); else, checkOpen(fullfile(f.folder, f.name)); end
+            fprintf('  matlab reads %-7s %s %s OK\n', lang, name, string(ifelse(name == "rplus.lbd", "", "(opened)")));
+        catch err
+            failed = true;
+            fprintf('  matlab reads %-7s %s FAILED: %s\n', lang, name, err.message);
+        end
+    end
+end
 if failed
     error('crosslang:failed', 'MATLAB cross-language check failed');
 end
+end
+
+function x = ifelse(c, a, b)
+if c, x = a; else, x = b; end
+end
+
+function checkOpen(p)
+% lbd.open reads the same parts as lbd.load (plan 6d).
+whole = lbd.load(p);
+d = lbd.open(p);
+closer = onCleanup(@() d.close());
+for name = string(fieldnames(whole.Values))'
+    v = whole.Values.(name);
+    o = d.Values.(name).Data;
+    expect(isequal(size(o), size(v.Data)), name + " size");
+    full = o.read();
+    if startsWith(v.Dtype, "complex")
+        expect(isequaln(real(full), real(v.Data)) && isequaln(imag(full), imag(v.Data)), name + " all");
+    else
+        expect(isequaln(full, v.Data), name + " all");
+    end
+    if numel(v.Shape) >= 2
+        idx = repmat({':'}, 1, numel(v.Shape));
+        idx{1} = v.Shape(1);
+        part = o(idx{:});
+        expect(isequaln(real(part), real(v.Data(idx{:}))), name + " last row");
+    end
+end
+if ~isempty(fieldnames(d.Groups))
+    expect(isequaln(d.toDense("f").Values.f.Data, whole.toDense("f").Values.f.Data), "toDense");
+end
+end
+
+function checkRplus(p)
+d = lbd.load(p);
+expect(isequal(d.Values.y.Data(:)', [0 0 7 0 0]), "y written in place");
+expect(d.Meta.edited == 1 && d.Title == "R plus", "meta saved in place");
 end
 
 function checkGroups(p)

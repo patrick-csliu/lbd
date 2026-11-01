@@ -85,6 +85,28 @@ function check_groups(path)
     @test m["B"].data == [10, 15, 20, 25, 35] && isnan(m["f"].data[1, 2]) && m["f"].data[3, 4] == 325
 end
 
+# lbd.open reads the same parts as LBD.load (plan 6d).
+function check_open(path)
+    whole = LBD.load(path)
+    LBD.open(path) do d
+        for (name, v) in whole.values
+            o = d[name].data
+            @test size(o) == size(v.data)
+            @test isequal(collect(o), v.data isa AbstractArray ? v.data : fill(v.data))
+            if ndims(o) >= 2
+                @test isequal(o[end, ntuple(_ -> Colon(), ndims(o) - 1)...], selectdim(v.data, 1, size(v.data, 1)))
+            end
+        end
+        isempty(d.groups) || @test isequal(to_dense(d, "f")["f"].data, to_dense(whole, "f")["f"].data)
+    end
+end
+
+function check_rplus(path)
+    d = LBD.load(path)
+    @test d["y"].data == [0, 0, 7, 0, 0]
+    @test d.meta["edited"] == 1 && d.title == "R plus"
+end
+
 root = ARGS[1]
 failed = false
 for lang in sort(readdir(root))
@@ -102,5 +124,14 @@ for lang in sort(readdir(root))
     isfile(p) || continue
     @testset "julia reads $lang groups.lbd" begin
         check_groups(p)
+    end
+    @testset "julia opens $lang fixture.lbd, groups.lbd" begin
+        check_open(joinpath(root, lang, "fixture.lbd"))
+        check_open(p)
+    end
+    p = joinpath(root, lang, "rplus.lbd")
+    isfile(p) || continue
+    @testset "julia reads $lang rplus.lbd" begin
+        check_rplus(p)
     end
 end
