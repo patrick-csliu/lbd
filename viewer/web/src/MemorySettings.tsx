@@ -88,10 +88,10 @@ export function MemorySettings({ settings, onSettings }: { settings: Settings; o
         />
       </label>
       <label className="settings-choice">
-        Summaries of large maps on disk, up to (GB)
+        Summaries of large data on disk, up to (GB)
         <input
           className="settings-number"
-          aria-label="Disk cache for summaries of large maps, in GB"
+          aria-label="Disk cache for summaries of large data, in GB"
           value={cache}
           onChange={(e) => setCache(e.target.value)}
           onBlur={() => save("summary_cache_gb", cache, 20)}
@@ -99,8 +99,8 @@ export function MemorySettings({ settings, onSettings }: { settings: Settings; o
         />
       </label>
       <p className="settings-note small muted">
-        A map larger than the memory is summarised once (this takes a while); the summary is kept on disk so the map
-        opens quickly next time, the least recently used going first. Summaries:{" "}
+        A map or curves larger than the memory are summarised once (this takes a while); the summary is kept on disk so
+        they open quickly next time, the least recently used going first. Summaries:{" "}
         {kept ? `${kept.count.toLocaleString()}, ${formatBytes(kept.bytes)}` : "…"}{" "}
         <button className="link" onClick={empty} disabled={!kept || kept.count === 0}>
           Empty

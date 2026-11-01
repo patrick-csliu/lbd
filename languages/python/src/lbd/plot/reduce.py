@@ -15,9 +15,9 @@ Zoomed in, when cells are bigger than pixels, nothing is reduced: each pixel sho
 its centre. Values read off the screen (clicks, cursors) must come from the full data, not from
 these pictures.
 
-A map bigger than memory (plan 6d) gets its pyramid built part by part (`map_levels`: strips of
-rows read one at a time) and kept on disk; `MapPyramid.from_levels` reads from it, and from the
-file itself when zoomed in, only the part in view.
+A map or curves bigger than memory (plan 6d) get their pyramid built part by part (`map_levels`:
+strips of rows; `curve_levels`: stretches of points) and kept on disk; `from_levels` reads from
+it, and from the file itself when zoomed in, only the part in view.
 """
 
 from __future__ import annotations
@@ -443,21 +443,65 @@ class CurvePyramid:
 
     `x` increasing (n,), `ys` (curves, n). Blocks never mix points of different columns by more
     than a block, and a block is at most half a pixel column wide, so peaks stay in their column
-    or the next (as with MapPyramid); zoomed in, the stored points are used as they are."""
+    or the next (as with MapPyramid); zoomed in, the stored points are used as they are.
+
+    Level i holds blocks of 2^(i+1) points: block b is points b·2^(i+1) … (b+1)·2^(i+1) − 1 (the
+    last one may be shorter). Only the blocks' min and max are kept; their x range comes from `x`
+    when a view needs it, for the blocks near the view only."""
 
     def __init__(self, x: np.ndarray, ys: np.ndarray, smallest: int = 256):
         x = np.asarray(x, dtype=float)
         y = np.atleast_2d(np.asarray(ys, dtype=float))
         self.x, self.y = x, y
-        self.levels: List[Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]] = []   # x0, x1, lo, hi
-        x0, x1, lo, hi = x, x, y, y
-        while x0.size > smallest:
-            n = x0.size // 2 * 2                          # an odd last point stays a block of its own
-            x0 = np.concatenate([x0[:n:2], x0[n:]])
-            x1 = np.concatenate([x1[1:n:2], x1[n:]])
-            lo = np.concatenate([np.fmin(lo[:, :n:2], lo[:, 1:n:2]), lo[:, n:]], axis=1)
-            hi = np.concatenate([np.fmax(hi[:, :n:2], hi[:, 1:n:2]), hi[:, n:]], axis=1)
-            self.levels.append((x0, x1, lo, hi))
+        self.levels: List[Tuple[Any, Any]] = []                      # (lo, hi): (curves, blocks) each
+        lo, hi = y, y
+        while lo.shape[1] > smallest:
+            lo, hi = _pair(lo, np.fmin), _pair(hi, np.fmax)
+            self.levels.append((lo, hi))
+
+    @classmethod
+    def from_levels(cls, x: np.ndarray, ys: Any, levels: Sequence[Tuple[Any, Any]]) -> "CurvePyramid":
+        """A pyramid read when needed: `ys` (curves × points) and every level's lo and hi give
+        `[:, i0:i1]` as numpy arrays (e.g. HDF5 datasets), as made by `curve_levels`. A view reads
+        about four blocks per pixel column, or the points in view when zoomed in."""
+        self = cls.__new__(cls)
+        self.x, self.y, self.levels = np.asarray(x, dtype=float), ys, list(levels)
+        return self
+
+    def _level(self, pxe: np.ndarray) -> Optional[int]:
+        """The coarsest level with at least two blocks per pixel column in view (None: zoomed in so
+        far that the stored points are drawn)."""
+        w = len(pxe) - 1
+        visible = int(np.searchsorted(self.x, pxe[-1], side="right") - np.searchsorted(self.x, pxe[0], side="left"))
+        level = None
+        for i in range(len(self.levels)):
+            if visible / 2 ** (i + 1) >= 2 * w:
+                level = i
+        return level
+
+    def _blocks(self, pxe: np.ndarray, level: int, rows: Optional[Sequence[int]] = None):
+        """The blocks of a level in view, grouped by pixel column: (column of each group, its
+        middle x, min, max) — min and max (curves, groups)."""
+        w = len(pxe) - 1
+        n, step = self.x.size, 2 ** (level + 1)
+        lo, hi = self.levels[level]
+        nb = lo.shape[1]
+        # Only blocks near the view: those before p0 // step end before the view, those after
+        # p1 // step start after it (two blocks' margin, as the middle of a block decides).
+        p0 = int(np.searchsorted(self.x, pxe[0], side="left"))
+        p1 = int(np.searchsorted(self.x, pxe[-1], side="right"))
+        b0, b1 = max(p0 // step - 2, 0), min(p1 // step + 3, nb)
+        b = np.arange(b0, b1)
+        mid = (self.x[b * step] + self.x[np.minimum((b + 1) * step, n) - 1]) / 2   # a block belongs to its middle's column
+        i0 = max(int(np.searchsorted(mid, pxe[0], side="left")) - 1, 0)
+        i1 = min(int(np.searchsorted(mid, pxe[-1], side="right")) + 1, mid.size)
+        mid = mid[i0:i1]
+        lo_v, hi_v = np.asarray(lo[:, b0 + i0:b0 + i1], dtype=float), np.asarray(hi[:, b0 + i0:b0 + i1], dtype=float)
+        if rows is not None:
+            lo_v, hi_v = lo_v[list(rows)], hi_v[list(rows)]
+        col = np.clip(np.searchsorted(pxe, mid, side="right") - 1, -1, w)
+        starts = np.flatnonzero(np.r_[True, col[1:] != col[:-1]])
+        return col[starts], mid[starts], np.fmin.reduceat(lo_v, starts, axis=1), np.fmax.reduceat(hi_v, starts, axis=1)
 
     def spans(self, px_x_edges: Sequence[float]) -> Optional[Tuple[np.ndarray, np.ndarray]]:
         """For each curve and pixel column: its lowest and highest value there, (curves, columns)
@@ -465,58 +509,81 @@ class CurvePyramid:
         drawn instead (see minmax)."""
         pxe = np.asarray(px_x_edges, dtype=float)
         w = len(pxe) - 1
-        found = self._blocks(pxe)
-        if found is None:
+        level = self._level(pxe)
+        if level is None:
             return None
-        cols, lo_c, hi_c = found
+        cols, _, lo_c, hi_c = self._blocks(pxe, level)
         lo = np.full((lo_c.shape[0], w), np.nan)
         hi = np.full((lo_c.shape[0], w), np.nan)
         inside = (cols >= 0) & (cols < w)
         lo[:, cols[inside]], hi[:, cols[inside]] = lo_c[:, inside], hi_c[:, inside]
         return lo, hi
 
-    def _blocks(self, pxe: np.ndarray):
-        """The pyramid level for these pixel columns: (column of each group, min, max), or None."""
-        w = len(pxe) - 1
-        visible = int(np.searchsorted(self.x, pxe[-1], side="right") - np.searchsorted(self.x, pxe[0], side="left"))
-        level = None
-        for i in range(len(self.levels)):
-            if visible / 2 ** (i + 1) >= 2 * w:
-                level = i
-        if level is None:
-            return None
-        x0, x1, lo, hi = self.levels[level]
-        mid = (x0 + x1) / 2
-        i0 = max(int(np.searchsorted(mid, pxe[0], side="left")) - 1, 0)
-        i1 = min(int(np.searchsorted(mid, pxe[-1], side="right")) + 1, mid.size)
-        col = np.clip(np.searchsorted(pxe, mid[i0:i1], side="right") - 1, -1, w)
-        starts = np.flatnonzero(np.r_[True, col[1:] != col[:-1]])
-        return col[starts], np.fmin.reduceat(lo[:, i0:i1], starts, axis=1), np.fmax.reduceat(hi[:, i0:i1], starts, axis=1)
-
-    def minmax(self, px_x_edges: Sequence[float]) -> Tuple[List[Tuple[np.ndarray, np.ndarray]], bool]:
-        """As curve_minmax(x, ys, px_x_edges), from the coarsest level with at least two blocks per
-        pixel column in view."""
+    def minmax(self, px_x_edges: Sequence[float], rows: Optional[Sequence[int]] = None
+               ) -> Tuple[List[Tuple[np.ndarray, np.ndarray]], bool]:
+        """As curve_minmax(x, ys, px_x_edges) (of the curves `rows`, default all), from the
+        coarsest level with at least two blocks per pixel column in view."""
         pxe = np.asarray(px_x_edges, dtype=float)
         w = len(pxe) - 1
-        visible = int(np.searchsorted(self.x, pxe[-1], side="right") - np.searchsorted(self.x, pxe[0], side="left"))
-        level = None
-        for i, (x0, x1, lo, hi) in enumerate(self.levels):
-            if visible / 2 ** (i + 1) >= 2 * w:
-                level = i
-        if level is None:
-            return curve_minmax(self.x, list(self.y), pxe)
-        x0, x1, lo, hi = self.levels[level]
-        mid = (x0 + x1) / 2                               # a block belongs to the column of its middle
-        i0 = max(int(np.searchsorted(mid, pxe[0], side="left")) - 1, 0)
-        i1 = min(int(np.searchsorted(mid, pxe[-1], side="right")) + 1, mid.size)
-        col = np.clip(np.searchsorted(pxe, mid[i0:i1], side="right") - 1, -1, w)
-        starts = np.flatnonzero(np.r_[True, col[1:] != col[:-1]])
-        ids = col[starts]
-        centres = np.where((ids >= 0) & (ids < w), (pxe[np.clip(ids, 0, w - 1)] + pxe[np.clip(ids + 1, 0, w)]) / 2,
-                           mid[i0:i1][starts])
+        level = self._level(pxe)
+        if level is None:                                # the points in view (and one beyond each side)
+            i0 = max(int(np.searchsorted(self.x, pxe[0], side="left")) - 1, 0)
+            i1 = min(int(np.searchsorted(self.x, pxe[-1], side="right")) + 1, self.x.size)
+            part = np.asarray(self.y[:, i0:i1], dtype=float)
+            part = part if rows is None else part[list(rows)]
+            return curve_minmax(self.x[i0:i1], list(part), pxe)
+        ids, mid, lo_c, hi_c = self._blocks(pxe, level, rows)
+        centres = np.where((ids >= 0) & (ids < w), (pxe[np.clip(ids, 0, w - 1)] + pxe[np.clip(ids + 1, 0, w)]) / 2, mid)
         xx = np.repeat(centres, 2)
-        lo_c = np.fmin.reduceat(lo[:, i0:i1], starts, axis=1)
-        hi_c = np.fmax.reduceat(hi[:, i0:i1], starts, axis=1)
-        yy = np.empty((lo.shape[0], 2 * len(starts)))
+        yy = np.empty((lo_c.shape[0], 2 * len(ids)))
         yy[:, 0::2], yy[:, 1::2] = lo_c, hi_c
         return [(xx, row) for row in yy], True
+
+
+def _pair(a: np.ndarray, ufunc) -> np.ndarray:
+    """Neighbouring points (columns) combined two by two with `ufunc`; an odd last one stays alone."""
+    n = a.shape[1] // 2 * 2
+    return np.concatenate([ufunc(a[:, :n:2], a[:, 1:n:2]), a[:, n:]], axis=1)
+
+
+def curve_levels(read_points: Callable[[int, int], np.ndarray], n: int,
+                 store: Callable[[int, int, np.ndarray, np.ndarray], None],
+                 load: Callable[[int, int, int], Tuple[np.ndarray, np.ndarray]],
+                 curves: int, budget: int, smallest: int = 256,
+                 progress: Optional[Callable[[float], None]] = None) -> int:
+    """Make the levels of a CurvePyramid without holding the curves: stretches of points are
+    read one at a time, each made into its part of as many levels as fit.
+
+    `read_points(i0, i1)`: points i0 … i1-1 of every curve, (curves, i1 − i0), as drawn.
+    `store(level, b0, lo, hi)`: keep these blocks of a level, from block b0.
+    `load(level, b0, b1)`: blocks of a level stored before, (lo, hi): the next levels are made
+    from it when the first stretches couldn't hold them all.
+    `budget`: bytes a stretch and its work may take; `progress(fraction)` after each stretch of
+    the curves (it may raise to stop). Returns the number of levels made."""
+    sizes = [n]
+    while sizes[-1] > smallest:
+        sizes.append((sizes[-1] + 1) // 2)
+    top = len(sizes) - 1                                 # levels 0 … top-1
+    done = 0                                             # levels made: the next is made from level done-1
+    while done < top:
+        size = sizes[done]
+        per_point = max(curves, 1) * 40
+        most = max(int(np.log2(max(budget // per_point, 1))), 0)
+        if most < 1:
+            raise ReduceError(f"two points of {curves} curves don't fit in the memory available; "
+                              "free some memory or set a larger maximum in Settings")
+        last = min(done + most, top)
+        span = 2 ** (last - done)
+        for p0 in range(0, size, span):
+            p1 = min(p0 + span, size)
+            if done == 0:
+                lo = hi = np.atleast_2d(np.asarray(read_points(p0, p1), dtype=float))
+            else:
+                lo, hi = load(done - 1, p0, p1)
+            for k in range(done, last):
+                lo, hi = _pair(lo, np.fmin), _pair(hi, np.fmax)
+                store(k, p0 >> (k - done + 1), lo, hi)
+            if done == 0 and progress is not None:
+                progress(p1 / size)
+        done = last
+    return top

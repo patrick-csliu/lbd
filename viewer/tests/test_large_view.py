@@ -357,3 +357,105 @@ def test_closing_one_view_of_a_summarised_map_keeps_the_others(client, big, monk
     r.raise_for_status()
     r = client.post(f"/api/explore/{a}/render", json={"format": "raw"})
     assert r.content == first
+
+
+# ---- curves bigger than memory: shown from their summary ------------------------------------------
+
+CURVES = {"kind": "curve", "values": ["S21"], "x": "freq", "series": "power", "complex": "db"}
+
+
+@pytest.fixture()
+def long_traces(data_dir):
+    """40 complex traces of 30 001 points (19 MB; 29 MB drawn), a spike on trace 7."""
+    rng = np.random.default_rng(4)
+    z = rng.normal(size=(40, 30001)) + 1j * rng.normal(size=(40, 30001))
+    z[7, 12345] = 500
+    d = lbd.Dataset(title="long traces")
+    d.add_axis("power", np.linspace(-40, 0, 40), unit="dBm")
+    d.add_axis("freq", np.linspace(4e9, 8e9, 30001), unit="Hz")
+    d.add_value("S21", z, axes=["power", "freq"])
+    d.add_value("S11", z * 0.5, axes=["power", "freq"])
+    path = data_dir / "long.lbd"
+    d.save(path)
+    return path, 20 * np.log10(np.abs(z))
+
+
+def test_curves_bigger_than_memory_are_drawn_from_their_summary(client, long_traces, monkeypatch):
+    path, y = long_traces
+    little_room(monkeypatch)
+    sid, meta, by_summary = picture(client, path, CURVES)
+    s = client.app.state.lbd.explore.get(sid)
+    assert s.summarised and meta["note"] == "min and max per pixel column"
+    assert s.full[1][0] < y.min() and s.full[1][1] > y.max()           # the range from the summary
+    monkeypatch.setitem(memory._shared, "cache", PartCache(Memory(system=FakeMemory(room=10 * GB))))
+    sid2, meta2, whole = picture(client, path, CURVES)
+    assert not client.app.state.lbd.explore.get(sid2).summarised
+    assert meta2["xlim"] == meta["xlim"] and meta2["ylim"] == pytest.approx(meta["ylim"], rel=1e-6)
+    differ = np.count_nonzero(np.frombuffer(by_summary, np.uint8) != np.frombuffer(whole, np.uint8))
+    assert differ <= len(whole) // 1000                                # the same picture (float32 rounding)
+
+
+def test_reading_summarised_curves_reads_the_stored_points(client, long_traces, monkeypatch):
+    path, y = long_traces
+    little_room(monkeypatch)
+    sid, meta, _ = picture(client, path, CURVES)
+    s = client.app.state.lbd.explore.get(sid)
+    f = s.model.xs[0]
+    seen = reads(monkeypatch)
+    c = client.post(f"/api/explore/{sid}/cursors",
+                    json={"cursors": [{"x": float(f[12345]), "y": 0.0, "trace": 7}], "type": "cross",
+                          "xlim": meta["xlim"], "ylim": meta["ylim"], "width": 400, "height": 300}).json()
+    cur = c["cursors"][0]
+    assert cur["index"] == {"freq": 12345, "power": 7}
+    assert next(i for i in cur["items"] if i["role"] == "y")["value"] == pytest.approx(y[7, 12345])
+    assert max(n for _, n in seen) < 30001 * 16                        # never a whole trace
+    c = client.post(f"/api/explore/{sid}/cursors",
+                    json={"cursors": [{"x": float(f[12345]), "y": 0.0, "trace": 7, "step": [3, 0]}],
+                          "xlim": meta["xlim"], "ylim": meta["ylim"], "width": 400, "height": 300}).json()
+    assert c["cursors"][0]["index"]["freq"] == 12348
+    r = client.post(f"/api/explore/{sid}/find", json={"what": "max", "xlim": [float(f[12000]), float(f[13000])],
+                                                       "ylim": [-100, 100]})
+    r.raise_for_status()
+    assert r.json()["trace"] == 7 and r.json()["x"] == pytest.approx(float(f[12345]))
+    r = client.post(f"/api/explore/{sid}/render", json={"format": "raw", "xlim": [float(f[12340]), float(f[12350])]})
+    r.raise_for_status()                                               # zoomed in: the stored points
+    assert json.loads(r.headers["X-LBD-Frame"])["note"] == "every point shown"
+    r = client.post(f"/api/explore/{sid}/render", json={"format": "raw", "settings": {"select": {"power": [7, 30]}}})
+    r.raise_for_status()                                               # two traces, from the summary
+
+
+def test_what_summarised_curves_cant_show_is_refused_with_a_reason(client, long_traces, monkeypatch):
+    path, _ = long_traces
+    little_room(monkeypatch, room=1 << 20)                # 1 MB: two values of one trace each (60 000 points) too
+    for spec, says in (({**CURVES, "complex": "phase_unwrap"}, "unwrapped phase"),
+                       ({**CURVES, "values": ["S21", "S11"]}, "one value at a time")):
+        r = client.post("/api/explore", json={"path": str(path), "spec": spec, "width": 400, "height": 300, "dpr": 1})
+        assert r.status_code == 400 and says in r.json()["detail"]
+    little_room(monkeypatch)
+    sid, _, _ = picture(client, path, CURVES)
+    r = client.post(f"/api/explore/{sid}/render", json={"format": "raw", "settings": {"ops": [{"op": "derivative"}]}})
+    detail = r.json()["detail"] if r.status_code == 400 else json.loads(r.headers["X-LBD-Frame"])["ops"]["notes"][0]
+    assert "more than the memory available" in detail
+
+
+def test_a_curve_summary_made_in_several_passes_is_found_again(client, long_traces, monkeypatch):
+    from lbd.plot.reduce import CurvePyramid
+
+    path, y = long_traces
+    little_room(monkeypatch, room=1 << 20)
+    monkeypatch.setattr(summaries, "MIN_BUDGET", 40 * 40 * 8)       # stretches of 8 points
+    sid, _, _ = picture(client, path, CURVES)
+    s = client.app.state.lbd.explore.get(sid)
+    x = s.model.xs[0]
+    whole = CurvePyramid(x, y * s.model.yf)
+    for lo, hi in ((x[0], x[-1]), (x[1000], x[9000])):
+        pxe = np.linspace(lo, hi, 301)
+        (a, _), (b, _) = whole.minmax(pxe), s.pyramids[id(x)].minmax(pxe)
+        for (xa, ya), (xb, yb) in zip(a, b):
+            np.testing.assert_array_equal(xa, xb)
+            np.testing.assert_allclose(yb, ya, rtol=1e-6)
+    client.delete(f"/api/explore/{sid}")
+    seen = reads(monkeypatch)
+    picture(client, path, CURVES)
+    assert max((n for _, n in seen), default=0) < 30001 * 16        # found on disk: nothing made again
+    assert len(summaries.shared().entries()) == 1

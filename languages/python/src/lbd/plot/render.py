@@ -847,7 +847,10 @@ class MapModel:
     y_ticks: Optional[Tuple[np.ndarray, List[str]]] = None
 
 
-def prepare_curves(d, spec, style: Style) -> CurveModel:
+def prepare_curves(d, spec, style: Style, big: Optional[Any] = None) -> CurveModel:
+    """`big`: stands for the curves when they are too big to read whole (LBD Viewer's
+    summaries.BigCurves, one value): `big.trace(j)` for each line, `big.range()` their lowest and
+    highest number, `trace * factor` scaled; the model's lines are then read part by part."""
     d = flat(d)
     a = style.figure.axes
     xs, ys = style.axis_style("x"), style.axis_style("y")
@@ -869,29 +872,36 @@ def prepare_curves(d, spec, style: Style) -> CurveModel:
     series_mappable = None
     for name in spec["values"]:
         v = d.values[name]
-        arr = _take(v, keep, spec["index"])
-        arr, label, unit = apply_complex(arr, v.label, v.unit, spec["complex"])
+        if big is None:
+            arr = _take(v, keep, spec["index"])
+            arr, label, unit = apply_complex(arr, v.label, v.unit, spec["complex"])
+        else:
+            _, label, unit = apply_complex(np.ones(1, dtype=v.dtype), v.label, v.unit, spec["complex"])
+            arr = None
         labels.append(label)
         units.append(unit)
         if quantity is None:  # the first value's fixed scale sets the vertical axis
             quantity = find_quantity(style, name, v.label, spec["complex"] if np.iscomplexobj(v.data) else None)
         if spec.get("series"):
             sa = d.axes[spec["series"]]
-            n = arr.shape[1]
+            n = arr.shape[1] if big is None else big.traces
             if n > len(a.colors):
                 cmap = matplotlib.colormaps[a.image.cmap]
                 series_colors = cmap(np.linspace(0, 1, n))
                 norm = mcolors.Normalize(float(np.min(sa.data)), float(np.max(sa.data)))
                 series_mappable = (ScalarMappable(norm=norm, cmap=cmap), sa)
             for j in range(n):
-                lines.append((arr[:, j], _legend_label(sa, sa.data[j], j)))
+                lines.append((arr[:, j] if big is None else big.trace(j), _legend_label(sa, sa.data[j], j)))
                 line_x.append(x_shown[:, j] if x_is_value else x_shown)
         else:
-            lines.append((arr, label))
+            lines.append((arr if big is None else big.trace(0), label))
             line_x.append(x_shown)
     quantity = quantity or QuantityStyle()
 
-    yall = np.concatenate([np.ravel(y) for y, _ in lines]) if lines else np.array([])
+    if big is not None:
+        yall = np.asarray(big.range(), dtype=float)
+    else:
+        yall = np.concatenate([np.ravel(y) for y, _ in lines]) if lines else np.array([])
     if len(set(units)) > 1:
         _warn(f"the curves have different units {sorted(set(units))}; the vertical axis shows no unit", RenderWarning)
     common_unit = units[0] if len(set(units)) == 1 else ""
@@ -914,7 +924,8 @@ def prepare_curves(d, spec, style: Style) -> CurveModel:
         sm, sa = series_mappable
         series_bar = (sm, axis_label(sa.label, sa.unit, ys.label.unit_format))
     return CurveModel(
-        xs=line_x, lines=[(np.asarray(y) * yf, lab) for y, lab in lines], colors=series_colors, xf=xf, yf=yf,
+        xs=line_x, lines=[((np.asarray(y) if big is None else y) * yf, lab) for y, lab in lines], colors=series_colors,
+        xf=xf, yf=yf,
         x_label=axis_label(spec.get("x_label") or xa.label, xunit, xs.label.unit_format),
         y_label=axis_label(ylabel, yunit, ys.label.unit_format), x_scale=spec["x_scale"], y_scale=y_scale,
         ylim=ylim, series_bar=series_bar, auto_axes=auto_axes,

@@ -31,6 +31,7 @@ if TYPE_CHECKING:
 CURSOR_TYPES = ("cross", "vertical", "horizontal")
 FIND = ("max", "min", "peak")
 TABLE_LIMIT = 2000      # a vertical cursor lists at most this many traces' values
+NEAR_POINTS = 4096      # curves too big for memory: a cursor looks this many points each side for its point
 HIST_BINS = 128
 AUTO_RANGE = (0.5, 99.5)  # "Auto" colour range: leave out 0.5 % of the cells at each end
 
@@ -270,14 +271,13 @@ def _curve_cursor(s: "ExploreSession", c: Dict[str, Any], kind: str, geo) -> Opt
         if k is None:
             return None
     else:
-        xs = np.asarray(m.xs[k], dtype=float)
-        ys = np.asarray(m.lines[k][0], dtype=float)
+        xs, ys, at = _near_trace(m, k, x)
         ok = np.isfinite(ys) & np.isfinite(xs)
         if not ok.any():
             return None
         d = np.abs(xs - x)
         d[~ok] = np.inf
-        i = int(np.argmin(d))
+        i = at + int(np.argmin(d))
     if step[0]:
         i = _step_point(m, k, i, int(step[0]))
     free = bool(c.get("free")) and not any(step)
@@ -305,6 +305,18 @@ def _curve_cursor(s: "ExploreSession", c: Dict[str, Any], kind: str, geo) -> Opt
     if kind == "vertical":
         out["table"] = _table(s, k, i, shown)
     return out
+
+
+def _near_trace(m, k: int, x: float, n: int = NEAR_POINTS) -> Tuple[np.ndarray, np.ndarray, int]:
+    """Trace k's x and y to search for a point near x: all of them, or for curves shown from their
+    summary (too big for memory; x sorted) the `n` points each side of x. And the index of the
+    first one."""
+    xs, y = m.xs[k], m.lines[k][0]
+    if not isinstance(y, summaries.BigTrace):
+        return np.asarray(xs, dtype=float), np.asarray(y, dtype=float), 0
+    c = int(np.searchsorted(xs, x))
+    a, b = max(c - n, 0), min(c + n, len(xs))
+    return np.asarray(xs[a:b], dtype=float), np.asarray(y[a:b], dtype=float), a
 
 
 def _curve_x_item(s: "ExploreSession", k: int, i: int) -> Dict[str, Any]:
@@ -342,7 +354,7 @@ def _nearest_point(s: "ExploreSession", x: float, y: float, shown: List[int], ge
             idx = np.arange(xg.size)
         if not idx.size:
             continue
-        ys = np.stack([np.asarray(m.lines[k][0], dtype=float)[idx] for k in ks])
+        ys = np.stack([np.asarray(m.lines[k][0][idx], dtype=float) for k in ks])
         dx = _pixels(xg[idx], xlim, xscale, w) - cx
         dy = _pixels(ys, ylim, yscale, h) - cy
         d = dx[None, :] ** 2 + dy ** 2
@@ -357,15 +369,14 @@ def _nearest_point(s: "ExploreSession", x: float, y: float, shown: List[int], ge
 
 def _step_point(m, k: int, i: int, n: int) -> int:
     """Move n stored points along curve k (in the direction of increasing x), over missing ones."""
-    xs = np.asarray(m.xs[k], dtype=float)
-    ys = np.asarray(m.lines[k][0], dtype=float)
+    xs, ys, at = _near_trace(m, k, float(m.xs[k][i]), abs(n) + NEAR_POINTS)
     ok = np.flatnonzero(np.isfinite(ys) & np.isfinite(xs))
     if not ok.size:
         return i
     order = ok[np.argsort(xs[ok], kind="stable")]
-    pos = int(np.searchsorted(xs[order], xs[i]))
+    pos = int(np.searchsorted(xs[order], m.xs[k][i]))
     pos = int(np.clip(pos + n, 0, order.size - 1))
-    return int(order[pos])
+    return at + int(order[pos])
 
 
 def _table(s: "ExploreSession", k: int, i: int, shown: List[int]) -> Dict[str, Any]:
@@ -438,8 +449,12 @@ def find(s: "ExploreSession", what: str, xlim: Sequence[float], ylim: Sequence[f
     shown = _visible(s)
     traces = [trace] if isinstance(trace, int) and trace in shown else shown
     for k in traces:
-        xs = np.asarray(m.xs[k], dtype=float)
-        ys = np.asarray(m.lines[k][0], dtype=float)
+        xs, ys = m.xs[k], m.lines[k][0]
+        if isinstance(ys, summaries.BigTrace):           # x sorted: read only the range
+            a, b = int(np.searchsorted(xs, x0, side="left")), int(np.searchsorted(xs, x1, side="right"))
+            xs, ys = np.asarray(xs[a:b], dtype=float), np.asarray(ys[a:b], dtype=float)
+        else:
+            xs, ys = np.asarray(xs, dtype=float), np.asarray(ys, dtype=float)
         sel = np.flatnonzero((xs >= x0) & (xs <= x1) & np.isfinite(ys))
         if not sel.size:
             continue

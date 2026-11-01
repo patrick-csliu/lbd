@@ -214,3 +214,34 @@ def test_a_value_bigger_than_memory_steps_through_its_slider(viewer, new_page, m
         page.mouse.click(*at(page, meta, 8, 30))
         expect(explore(page).locator(".explore-pick")).to_contain_text(f"{100 * t + 13:g} at x = 8, y = 30")
     assert memory.shared().hits + memory.shared().misses > 0           # it went through the part cache
+
+
+def test_a_map_and_curves_bigger_than_memory_are_shown_from_their_summary(viewer, new_page, monkeypatch):
+    """Plan 6d B: with little memory (a fake), a 300 × 400 map and 30 traces of 5000 points are
+    summarised once (kept on disk); a click still reads the exact stored number."""
+    from lbd_viewer import memory, summaries
+
+    system = lambda: (4 * memory.GB, 2 * memory.GB + 100_000)      # 100 kB of room
+    monkeypatch.setitem(memory._shared, "cache", memory.PartCache(memory.Memory(system=system)))
+    d = lbd.Dataset(title="Big map")
+    d.add_axis("y", np.linspace(10, 40, 300))
+    d.add_axis("x", np.linspace(1, 16, 400))
+    z = np.zeros((300, 400))
+    z[200:, 200:] = 7.0                                             # one corner stands out
+    d.add_value("value", z, axes=["y", "x"])
+    d.plot = {"kind": "heatmap", "x": "x", "y": "y"}
+    d.save(viewer.data / "big_map.lbd")
+    d = lbd.Dataset(title="Long traces")
+    d.add_axis("power", np.arange(30.0))
+    d.add_axis("t", np.linspace(0, 1, 5000))
+    d.add_value("v", np.arange(30.0)[:, None] + np.zeros((30, 5000)), axes=["power", "t"])
+    d.plot = {"kind": "curve", "x": "t", "series": "power"}
+    d.save(viewer.data / "long.lbd")
+
+    page = new_page("Explore")
+    meta = frames(page, lambda: row(page, "big_map.lbd").dblclick())
+    page.mouse.click(*at(page, meta, 12, 35))
+    expect(explore(page).locator(".explore-pick")).to_contain_text("7 at x = ")
+    meta = frames(page, lambda: row(page, "long.lbd").dblclick())
+    assert meta["ylim"][0] < 0 and meta["ylim"][1] > 29                   # every trace's range, from the summary
+    assert len(summaries.shared().entries()) == 2

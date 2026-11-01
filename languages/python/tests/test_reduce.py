@@ -7,7 +7,7 @@ cells, a one-point spike, a gap. A slow brute-force reduction checks the fast on
 import numpy as np
 import pytest
 
-from lbd.plot.reduce import MapPyramid, ReduceError, cell_edges, curve_minmax, map_levels, nearest_point
+from lbd.plot.reduce import CurvePyramid, MapPyramid, ReduceError, cell_edges, curve_levels, curve_minmax, map_levels, nearest_point
 
 
 def pixels(lo, hi, n):
@@ -325,3 +325,41 @@ def test_a_strip_built_pyramid_of_a_decreasing_map_follows_the_rule(stat):
         expected = _brute(zi, xi, yi, px, py, stat, r.level)
         np.testing.assert_allclose(r.image, expected, rtol=1e-6, atol=1e-6, equal_nan=True)
     assert max(levels) >= 2
+
+
+@pytest.mark.parametrize("n", [5000, 4097, 777])
+def test_a_curve_pyramid_built_stretch_by_stretch_equals_one_built_whole(n):
+    """Stretches of 8 points (three levels each, then more passes from the stored level) make the
+    same levels as the whole curves do, and the same pictures, zoomed out and in."""
+    rng = np.random.default_rng(n)
+    x = np.cumsum(rng.uniform(0.5, 2, n))
+    ys = rng.normal(size=(3, n))
+    ys[1, n // 3] = 40
+    ys[2, 100:130] = np.nan
+    whole = CurvePyramid(x, ys, smallest=16)
+    kept, reads = {}, []
+
+    def read_points(i0, i1):
+        reads.append((i0, i1))
+        return ys[:, i0:i1]
+
+    def store(k, b0, lo, hi):
+        if k not in kept:
+            kept[k] = [np.zeros((3, whole.levels[k][0].shape[1])) for _ in range(2)]
+        kept[k][0][:, b0:b0 + lo.shape[1]], kept[k][1][:, b0:b0 + hi.shape[1]] = lo, hi
+
+    top = curve_levels(read_points, n, store, lambda k, b0, b1: (kept[k][0][:, b0:b1], kept[k][1][:, b0:b1]),
+                       curves=3, budget=3 * 40 * 8, smallest=16)
+    assert top == len(whole.levels) and max(i1 - i0 for i0, i1 in reads) == 8
+    for k in range(top):
+        np.testing.assert_array_equal(kept[k][0], whole.levels[k][0])
+        np.testing.assert_array_equal(kept[k][1], whole.levels[k][1])
+    parts = CurvePyramid.from_levels(x, ys, [tuple(kept[k]) for k in range(top)])
+    for lo, hi, w in ((x[0], x[-1], 20), (x[n // 4], x[n // 2], 50), (x[200], x[230], 40)):
+        pxe = np.linspace(lo, hi, w + 1)
+        (a, ra), (b, rb) = whole.minmax(pxe), parts.minmax(pxe)
+        assert ra == rb
+        for (xa, ya), (xb, yb) in zip(a, b):
+            np.testing.assert_array_equal(xa, xb)
+            np.testing.assert_array_equal(ya, yb)
+        assert parts.minmax(pxe, rows=[2])[0][0][1].tolist() == pytest.approx(b[2][1].tolist(), nan_ok=True)

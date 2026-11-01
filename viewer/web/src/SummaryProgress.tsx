@@ -1,4 +1,4 @@
-// A map bigger than the memory available is summarised once, reading the file strip by strip
+// A map or curves bigger than the memory available are summarised once, reading the file part by part
 // (server: summaries.py, plan 6d). While Explore waits for that, this shows how far it is and
 // a Cancel button; the open (or new plot settings) request then answers "cancelled".
 
@@ -33,7 +33,7 @@ export function SummaryProgress({ path }: { path: string }) {
   return (
     <div className="summary-progress" role="status">
       <div>
-        This map is larger than the memory available: {job.what}, once; it is kept for next time.
+        This data is larger than the memory available: {job.what}, once; the summary is kept for next time.
       </div>
       <progress max={1} value={job.fraction} aria-label="Summary made so far" />
       <span className="muted small">

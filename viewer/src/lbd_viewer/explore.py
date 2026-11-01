@@ -155,10 +155,13 @@ class ExploreSession:
             raise ExploreError(f"the Explore view shows curves and heat maps, not {new['kind']} plots; "
                                "use the Figure view for this plot")
         self.spec, self.base_kind = new, new["kind"]
-        # A map with more cells than the memory available holds is shown from its summary, made
-        # once (and kept on disk) by reading the file strip by strip (summaries.py, plan 6d).
+        # A map with more cells (curves with more points) than the memory available holds is shown
+        # from its summary, made once (and kept on disk) by reading the file part by part
+        # (summaries.py, plan 6d).
         big = None
-        if self.base_kind == "heatmap":
+        if self.base_kind == "curve":
+            big = self._big_curves(new)
+        elif self.base_kind == "heatmap":
             v = self.data.values[new["values"][0]]
             shape = (len(self.data.axes[new["y"]].data), len(self.data.axes[new["x"]].data))
             if new["y"] in v.axes and new["x"] in v.axes and summaries.too_big(shape):
@@ -172,7 +175,7 @@ class ExploreSession:
         with rnd.RENDER_LOCK, matplotlib.rc_context(self.style.to_rcparams()):
             self._check_open()
             if self.base_kind == "curve":
-                self.base_model = rnd.prepare_curves(self.data, self.spec, self.style)
+                self.base_model = rnd.prepare_curves(self.data, self.spec, self.style, big=big)
             else:
                 self.base_model = rnd.prepare_map(self.data, self.spec, self.style, big=big)
         for v in self.data.values.values():           # a value read by part: the next slider positions
@@ -189,6 +192,33 @@ class ExploreSession:
         self.eq_state: Dict[str, Dict[str, str]] = {}
         self.settings: Dict[str, Any] = {}               # view settings (apply), reset with the plot
         self._build()
+
+    def _big_curves(self, spec: Dict[str, Any]) -> Optional[summaries.BigCurves]:
+        """The curves of `spec` from their summary when their points don't fit in the memory
+        available (None when they do); what such curves can't be shown as is refused, saying why."""
+        along, series = spec.get("along", spec["x"]), spec.get("series")
+        points = len(self.data.axes[along].data)
+        traces = (len(self.data.axes[series].data) if series else 1) * len(spec["values"])
+        if not summaries.too_big((traces, points)):
+            return None
+        what = f"these curves have {traces:,} × {points:,} points, more than the memory available"
+        if not self.summarise:
+            raise ExploreError(f"{what}: too many for a preview; open the file in Explore (they are summarised "
+                               "once, then kept)")
+        if len(spec["values"]) > 1:
+            raise ExploreError(f"{what}; show one value at a time")
+        if spec["x"] in self.data.values:
+            raise ExploreError(f"{what}; show them against an axis, not against a value")
+        if spec["complex"] in ("phase_unwrap", "phase_deg_unwrap"):
+            raise ExploreError(f"{what}; an unwrapped phase needs each whole trace: choose the phase (not "
+                               "unwrapped), or read the file in a script with lbd.open")
+        x = np.asarray(self.data.axes[along].data, dtype=float)
+        if not (np.all(np.isfinite(x)) and np.all(np.diff(x) > 0)):
+            raise ExploreError(f"{what}; they can be shown only along an increasing axis without gaps, and "
+                               f"'{along}' isn't one")
+        v = self.data.values[spec["values"][0]]
+        return summaries.shared().summarise(
+            self.path, self.version, summaries.BigCurves(v, along, series, spec["index"], spec["complex"]))
 
     def _read(self, d: "lbd.Dataset") -> "lbd.Dataset":
         d = rnd.flat(d)                     # one axis per dimension, a data point's too
@@ -315,9 +345,13 @@ class ExploreSession:
             groups.setdefault(id(x), (np.asarray(x, dtype=float), []))[1].append(k)
         self.x_groups = [(x, ks, _is_sorted(x)) for x, ks in groups.values()]
         # Many curves on one sorted x without gaps in x: min/max blocks made once (CurvePyramid)
-        self.pyramids = {id(x): CurvePyramid(x, np.stack([m.lines[k][0] for k in ks]))
-                         for x, ks, ok in self.x_groups if ok and len(ks) > 1 and x.size > 4096
-                         and np.all(np.isfinite(x)) and x[0] < x[-1]}
+        if self.summarised:                              # one x, every trace: from the summary
+            x = self.x_groups[0][0]
+            self.pyramids = {id(x): summaries.curve_pyramid(m.lines[0][0].curves, x)}
+        else:
+            self.pyramids = {id(x): CurvePyramid(x, np.stack([m.lines[k][0] for k in ks]))
+                             for x, ks, ok in self.x_groups if ok and len(ks) > 1 and x.size > 4096
+                             and np.all(np.isfinite(x)) and x[0] < x[-1]}
         # One vertical axis: the traces are named in the list and when clicked, so the figure's
         # colour bar for many series (a second axis) is left out here.
         m.series_bar = None
@@ -342,13 +376,20 @@ class ExploreSession:
             for handle, text in zip(legend.legend_handles if legend else [], legend.get_texts() if legend else []):
                 if text.get_text() in right_labels:
                     handle.set_linestyle("--")
+        ys = [np.asarray(self._y_range(range(len(m.lines))))] if self.summarised else [y for y, _ in m.lines]
         self.full = (_finite_range([x for x, _, _ in self.x_groups]), m.ylim if m.ylim and None not in m.ylim
-                     else self._padded(_finite_range([y for y, _ in m.lines])))
+                     else self._padded(_finite_range(ys)))
 
     @property
     def summarised(self) -> bool:
-        """The map is shown from its summary (too big for memory, summaries.py)."""
-        return self.kind == "heatmap" and isinstance(self.model.z, summaries.BigMap)
+        """The map or the curves are shown from their summary (too big for memory, summaries.py)."""
+        if self.kind == "heatmap":
+            return isinstance(self.model.z, summaries.BigMap)
+        return bool(self.model.lines) and isinstance(self.model.lines[0][0], summaries.BigTrace)
+
+    def _y_range(self, traces: Sequence[int]) -> Tuple[float, float]:
+        """Summarised curves: the lowest and highest value of these traces (plot units, exact)."""
+        return self.model.lines[0][0].curves.range(traces)
 
     def _finite_z(self) -> np.ndarray:
         """The map's numbers (finite ones); of a summarised map, its blocks' means (approximate)
@@ -466,7 +507,10 @@ class ExploreSession:
         m = self.model
         if self.kind == "curve":
             shown = [k for k, v in enumerate(self.visible) if v]
-            arrays = [m.xs[k] if which == "horizontal" else m.lines[k][0] for k in shown]
+            if self.summarised and which != "horizontal":
+                arrays = [np.asarray(self._y_range(shown))]
+            else:
+                arrays = [m.xs[k] if which == "horizontal" else m.lines[k][0] for k in shown]
         else:
             arrays = [m.x if which == "horizontal" else m.y]
         with np.errstate(invalid="ignore"):
@@ -485,10 +529,19 @@ class ExploreSession:
         with np.errstate(invalid="ignore"):
             if self.kind == "curve":
                 shown = [k for k, v in enumerate(self.visible) if v]
+                if self.summarised:                      # their lowest and highest value say enough
+                    lo, hi = self._y_range(shown) if shown else (np.nan, np.nan)
+                    if not np.isfinite([lo, hi]).any():
+                        empty = self._why_empty("point")
+                    if ylog and lo <= 0:
+                        notes.append("Points ≤ 0 aren't shown on the log vertical axis.")
+                    if xlog and (n := int((m.xs[0] <= 0).sum())):        # the axis is in memory
+                        notes.append(f"{n} point{'s' * (n != 1)} of each trace at x ≤ 0 aren't shown on the log "
+                                     "horizontal axis.")
                 # stops at the first trace with a value: cheap however many points there are
-                if not any(np.isfinite(np.asarray(m.lines[k][0], dtype=float)).any() for k in shown):
+                elif not any(np.isfinite(np.asarray(m.lines[k][0], dtype=float)).any() for k in shown):
                     empty = self._why_empty("point")
-                if xlog or ylog:                         # counting what a log scale hides: only then
+                if (xlog or ylog) and not self.summarised:   # counting what a log scale hides: only then
                     pairs = [(np.asarray(m.xs[k], dtype=float), np.asarray(m.lines[k][0], dtype=float)) for k in shown]
                     ok = [np.isfinite(x) & np.isfinite(y) for x, y in pairs]
                     if xlog and (n := sum(int(((x <= 0) & o).sum()) for (x, _), o in zip(pairs, ok))):
@@ -675,6 +728,8 @@ class ExploreSession:
         m = self.model
         if m.ylim and None not in m.ylim and not ylog:
             return x, m.ylim
+        if self.summarised:
+            return x, self._padded(rng([np.asarray(self._y_range(shown))], ylog), ylog)
         return x, self._padded(rng([m.lines[k][0] for k in shown], ylog), ylog)
 
     # -- drawing
@@ -853,6 +908,9 @@ class ExploreSession:
                     if is_sorted and id(x) in self.pyramids and len(ks) == len(self._group(x)):
                         out, red = self.pyramids[id(x)].minmax(pxe)
                         reduced |= red
+                    elif self.summarised:                # some traces of summarised curves
+                        out, red = self.pyramids[id(x)].minmax(pxe, rows=ks)
+                        reduced |= red
                     elif is_sorted:
                         out, red = curve_minmax(x, [ys[k] for k in ks], pxe)
                         reduced |= red
@@ -999,7 +1057,7 @@ class ExploreSession:
                 continue
             if not idx.size:
                 continue
-            ys = np.stack([np.asarray(m.lines[k][0], dtype=float)[idx] for k in ks])   # lines × points
+            ys = np.stack([np.asarray(m.lines[k][0][idx], dtype=float) for k in ks])   # lines × points
             xpx, ypx = self._to_px(np.broadcast_to(x[idx], ys.shape), ys)
             xpx, ypx = xpx.reshape(ys.shape), ypx.reshape(ys.shape)
             d = np.where(np.isfinite(ys), (xpx - px) ** 2 + (ypx - py) ** 2, np.inf)
@@ -1049,6 +1107,9 @@ class ExploreSession:
             for model in {id(m): m for m in (getattr(self, "base_model", None), getattr(self, "model", None))}.values():
                 if isinstance(getattr(model, "z", None), summaries.BigMap):
                     model.z.close()
+                lines = getattr(model, "lines", None)
+                if lines and isinstance(lines[0][0], summaries.BigTrace):
+                    lines[0][0].curves.close()
 
 
 class Sessions:
