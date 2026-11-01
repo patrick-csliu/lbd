@@ -48,6 +48,12 @@ are still written as 1.2).
 
 **Viewer**
 
+- **Values bigger than the memory available open**: a value that fits is read whole as before;
+  a bigger one is read by part, only the map or curves shown. Parts read are kept while memory
+  is free, the next slider positions are read ahead, and LBD always leaves some memory for the
+  rest of the computer. ⚙ Settings → *Memory for data*: how much to leave free (automatic: 2 GB
+  or 10% of the memory, whichever is more) and an optional most to use.
+
 - **Files with variable sweeps open** (format 2.0): a value on a group's points is drawn against
   its point number for now, with a notice (drawing against the coordinates comes later); the
   file page names the group, and the Library counts the points ("44 points (variable)").
@@ -157,14 +163,15 @@ are still written as 1.2).
 
 **File format and languages**
 
-- **`lbd.open`: read only what is needed** (every language; the viewer follows in this
-  version). In Julia: `LBD.open("big.lbd"; mode="r") do d … end`, `d["S21"].data[4, :]` reads row
-  4 only (`data` is an `LBD.OnDisk`, an `AbstractArray`), `LBD.save(d)` / `LBD.save(copy, d)`. In MATLAB: `d = lbd.open("big.lbd", Mode="r")`, `d.Values.S21.Data(4, :)` reads
-  row 4 only (`Data` is an `lbd.OnDisk`), `d.close()`. `with lbd.open("big.lbd") as d:` reads the structure; each value's `data` is an
-  on-disk array: `d.values["S21"].data[3]` reads row 3 only, `np.asarray(...)` all of it, and
-  `rows`, `coords`, `to_dense` read only what they need. `mode="r"` (default) only reads;
-  `mode="r+"` writes into the file at points that exist and saves (in place, or a copy piece by
-  piece). A file being written opens too, as it was at that moment.
+- **`lbd.open`: read only what is needed** (every language). `with lbd.open("big.lbd") as d:`
+  reads the structure; each value's `data` is an on-disk array: `d.values["S21"].data[3]` reads
+  row 3 only, `np.asarray(...)` all of it, and `rows`, `coords`, `to_dense` read only what they
+  need. In MATLAB: `d = lbd.open("big.lbd", Mode="r")`, `d.Values.S21.Data(4, :)` reads row 4
+  only (`Data` is an `lbd.OnDisk`), `d.close()`. In Julia: `LBD.open("big.lbd"; mode="r") do d …
+  end`, `d["S21"].data[4, :]` reads row 4 only (`data` is an `LBD.OnDisk`, an `AbstractArray`).
+  `mode="r"` (default) only reads; `mode="r+"` writes into the file at points that exist and
+  saves (in place, or a copy piece by piece). A file being written opens too, as it was at that
+  moment.
 
 - **Variable sweeps** (every language, format 2.0): make a group and its axes, outer to inner,
   and values on its points; `write` takes a group axis's coordinate (the same coordinates are
