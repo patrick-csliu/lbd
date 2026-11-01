@@ -73,6 +73,8 @@ classdef Dataset < handle
         Placeholders string = strings(1, 0)
         % each group level's points by (parent, coordinate): struct(n, map) per axis
         Lookups (1,1) struct = struct()
+        % lbd.open: the file its values are read from (lbd.LazySource), or [] after lbd.load
+        Source = []
     end
 
     methods
@@ -322,7 +324,12 @@ classdef Dataset < handle
             %   replaces. Returns the index (from 1) of the group's point at the deepest level
             %   given (a column for several points), for Parent=; a struct by group name for
             %   several groups; [] without a group.
+            if ~isempty(obj.Source), obj.Source.check("write"); end
             plan = obj.planWrite(varargin);
+            if ~isempty(obj.Source) && (~isempty(plan.grow) || ~isempty(plan.levels))
+                error('lbd:invalid', ['write: the file is opened with lbd.open, where write puts data at points ' ...
+                    'that exist; to add points (a growing axis, a group''s new points) use lbd.load, or lbd.Writer']);
+            end
             obj.applyWrite(plan);
             index = plan.result;
         end
@@ -468,14 +475,15 @@ classdef Dataset < handle
                 error('lbd:invalid', ['toDense: two points of "%s" fall into one cell: merging must not drop a ' ...
                     'result. Use a smaller Round / RTol / ATol'], name);
             end
-            out = lbd.Dataset.fillLike(v.Data, [max(prod(T), 1) P]);
-            out(lin, :) = reshape(v.Data, D, P);
+            data = lbd.Dataset.whole(v.Data);              % opened with lbd.open: read now
+            out = lbd.Dataset.fillLike(data, [max(prod(T), 1) P]);
+            out(lin, :) = reshape(data, D, P);
             out = reshape(out, [shape ones(1, max(0, 2 - numel(shape)))]);
             if startsWith(v.Dtype, "complex"), out = complex(out); end
             measured = [];
-            if ~isfloat(v.Data)
+            if ~isfloat(data)
                 mask = false(max(prod(T), 1), P);
-                if isempty(v.Measured), src = true(D, P); else, src = reshape(v.Measured, D, P); end
+                if isempty(v.Measured), src = true(D, P); else, src = reshape(lbd.Dataset.whole(v.Measured), D, P); end
                 mask(lin, :) = src;
                 if ~all(mask(:)), measured = reshape(mask, size(out)); end
             end
@@ -492,6 +500,12 @@ classdef Dataset < handle
                 'Measured', measured);
         end
 
+        function close(obj)
+            %CLOSE  Close the file of a dataset opened with lbd.open: what was read stays usable;
+            %   reading more is refused. Nothing to do for a loaded dataset.
+            if ~isempty(obj.Source), obj.Source.close(); end
+        end
+
         function newId(obj)
             %NEWID  Make this dataset a measurement of its own: a new Id; the old one becomes
             %   ParentId. Takes effect when it is saved.
@@ -504,11 +518,24 @@ classdef Dataset < handle
         function path = save(obj, path, opts)
             %SAVE  Write the dataset to PATH (.lbd). Compression=true gzips large arrays.
             %   The file is written under a temporary name and then renamed, so a viewer
-            %   never sees a half-written file.
+            %   never sees a half-written file. A dataset opened with lbd.open(..., Mode="r+"):
+            %   d.save() rewrites its description, metadata and saved view in the file;
+            %   d.save("copy.lbd") copies it piece by piece.
             arguments
                 obj
-                path (1,1) string
+                path (1,1) string = ""
                 opts.Compression (1,1) logical = false
+            end
+            if ~isempty(obj.Source)
+                obj.Source.check("save");
+                if strlength(path) == 0 || lbd.Dataset.samePath(path, obj.Source.Path)
+                    obj.saveInPlace();
+                    path = obj.Source.Path;
+                    return
+                end
+            end
+            if strlength(path) == 0
+                error('lbd:invalid', 'save needs a path, e.g. d.save("sweep.lbd")');
             end
             [~, ~, ext] = fileparts(path);
             if lower(ext) == ".writing"
@@ -565,6 +592,7 @@ classdef Dataset < handle
                 if isfile(tmp), delete(tmp); end
                 rethrow(err);
             end
+            if ~isempty(obj.Source), return; end     % a copy of an opened file: this one stays as it is
             obj.Path = path;
             obj.Id = id;
             obj.ParentId = parent;
@@ -668,12 +696,22 @@ classdef Dataset < handle
             for i = 1:numel(vn)
                 val = obj.Values.(vn{i});
                 data = val.Data;
-                if startsWith(val.Dtype, "complex") && isreal(data)
-                    data = complex(data);           % MATLAB drops an all-zero imaginary part
+                if isa(data, 'lbd.OnDisk')           % opened with lbd.open: copied inside HDF5, never read whole
+                    where = data.Where;
+                    obj.Source.run(@(src) H5O.copy(src, char(where), gid, char(val.Name), 'H5P_DEFAULT', 'H5P_DEFAULT'));
+                    did = H5D.open(gid, char(val.Name));
+                    for a = ["unit" "label" "axes"]
+                        try, H5A.delete(did, char(a)); catch, end
+                    end
+                    isBool = false;                  % lbd_bool is copied with it
+                else
+                    if startsWith(val.Dtype, "complex") && isreal(data)
+                        data = complex(data);           % MATLAB drops an all-zero imaginary part
+                    end
+                    isBool = islogical(data);
+                    if isBool, data = uint8(data); end
+                    did = lbd_write_dataset(gid, val.Name, data, numel(val.Dims) + numel(val.PointShape), compression);
                 end
-                isBool = islogical(data);
-                if isBool, data = uint8(data); end
-                did = lbd_write_dataset(gid, val.Name, data, numel(val.Dims) + numel(val.PointShape), compression);
                 lbd_write_attr(did, 'unit', val.Unit);
                 lbd_write_attr(did, 'label', val.Label);
                 lbd_write_attr(did, 'axes', strjoin([val.Axes lbd.Dataset.pointNames(val)], ","));
@@ -688,7 +726,8 @@ classdef Dataset < handle
                 gid = H5G.create(fid, 'measured', 'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
                 for i = 1:numel(masks)
                     val = obj.Values.(masks{i});
-                    did = lbd_write_dataset(gid, val.Name, uint8(val.Measured), numel(val.Dims) + numel(val.PointShape), compression);
+                    did = lbd_write_dataset(gid, val.Name, uint8(lbd.Dataset.whole(val.Measured)), ...
+                        numel(val.Dims) + numel(val.PointShape), compression);
                     H5D.close(did);
                 end
                 H5G.close(gid);
@@ -1351,7 +1390,7 @@ classdef Dataset < handle
                     v.Data(p.idx{:}) = p.data;
                     if ~isempty(v.Measured), v.Measured(p.idx{:}) = true; end
                 end
-                if startsWith(v.Dtype, "complex") && isreal(v.Data)
+                if ~isa(v.Data, 'lbd.OnDisk') && startsWith(v.Dtype, "complex") && isreal(v.Data)
                     v.Data = complex(v.Data);       % MATLAB drops an all-zero imaginary part
                 end
                 obj.Values.(p.name) = v;
@@ -1745,6 +1784,41 @@ classdef Dataset < handle
             obj.Axes.(axis).Data = [double(obj.Axes.(axis).Data); coords(:)];
         end
 
+        function attachSource(obj, source)
+            %ATTACHSOURCE  lbd.open: each value's data (and mask) becomes an lbd.OnDisk.
+            obj.Source = source;
+            for name = string(fieldnames(obj.Values))'
+                v = obj.Values.(name);
+                v.Data = lbd.OnDisk(source, "/values/" + name, v.Shape, v.Dtype);
+                hasMask = source.run(@(fid) H5L.exists(fid, '/measured', 'H5P_DEFAULT') && ...
+                    H5L.exists(fid, char("/measured/" + name), 'H5P_DEFAULT'));
+                if hasMask
+                    v.Measured = lbd.OnDisk(source, "/measured/" + name, v.Shape, "bool");
+                end
+                obj.Values.(name) = v;
+            end
+        end
+
+        function saveInPlace(obj)
+            %SAVEINPLACE  The description, metadata and saved view rewritten in the opened file.
+            if ~isempty(obj.Plot), lbd_to_json(obj.Plot, "Plot"); end
+            if ~isempty(obj.Style), lbd_to_json(obj.Style, "Style"); end
+            check = tempname + ".h5";                % metadata that can't be stored: refused before any change
+            cfid = H5F.create(check, 'H5F_ACC_TRUNC', 'H5P_DEFAULT', 'H5P_DEFAULT');
+            try
+                gid = H5G.create(cfid, 'meta', 'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
+                lbd_write_meta(gid, obj.Meta, "meta");
+                H5G.close(gid);
+                H5F.close(cfid);
+                delete(check);
+            catch err
+                H5F.close(cfid);
+                delete(check);
+                rethrow(err);
+            end
+            obj.Source.run(@(fid) rewriteDescription(fid, obj));
+        end
+
         function keepIdentityAt(obj, path)
             %KEEPIDENTITYAT  Saving to PATH keeps the Id (lbd.recover: the same measurement).
             obj.Path = string(path);
@@ -1822,12 +1896,14 @@ classdef Dataset < handle
         end
 
         function x = pick(data, idx)
-            %PICK  DATA at IDX (one entry per dimension; a 1-D value is a column).
-            if isvector(data) && numel(idx) == 1
-                x = data(idx{1});
-            else
-                x = data(idx{:});
-            end
+            %PICK  DATA at IDX (one entry per dimension; a 1-D value is a column). An lbd.OnDisk
+            %   reads only that part.
+            x = data(idx{:});
+        end
+
+        function x = whole(x)
+            %WHOLE  The array itself: an lbd.OnDisk is read whole.
+            if isa(x, 'lbd.OnDisk'), x = x.read(); end
         end
 
         function [t, inv] = ticksOf(c, name, opts)
@@ -1918,4 +1994,26 @@ classdef Dataset < handle
             end
         end
     end
+end
+
+function rewriteDescription(fid, d)
+% The description, metadata and saved view of an opened file, written in place.
+for a = ["title" "description"]
+    try, H5A.delete(fid, char(a)); catch, end
+end
+lbd_write_attr(fid, 'title', d.Title);
+lbd_write_attr(fid, 'description', d.Description);
+if H5L.exists(fid, 'meta', 'H5P_DEFAULT'), H5L.delete(fid, 'meta', 'H5P_DEFAULT'); end
+gid = H5G.create(fid, 'meta', 'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
+lbd_write_meta(gid, d.Meta, "meta");
+H5G.close(gid);
+if H5L.exists(fid, 'plot', 'H5P_DEFAULT'), H5L.delete(fid, 'plot', 'H5P_DEFAULT'); end
+if ~isempty(d.Plot) || ~isempty(d.Style) || ~isempty(d.StyleName)
+    gid = H5G.create(fid, 'plot', 'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
+    if ~isempty(d.Plot), lbd_write_attr(gid, 'spec', lbd_to_json(d.Plot, "Plot")); end
+    if ~isempty(d.Style), lbd_write_attr(gid, 'style', lbd_to_json(d.Style, "Style")); end
+    if ~isempty(d.StyleName), lbd_write_attr(gid, 'style_name', d.StyleName); end
+    if ~isempty(d.Matplotlib) && strlength(d.Matplotlib) > 0, lbd_write_attr(gid, 'matplotlib', d.Matplotlib); end
+    H5G.close(gid);
+end
 end

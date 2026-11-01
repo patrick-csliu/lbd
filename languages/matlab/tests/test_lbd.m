@@ -776,3 +776,74 @@ tc.verifyEqual(r.Values.f.Data', [10 20 21 30 31 32]);
 tc.verifyEqual(r.Values.n.Data', int16([1 2 3]));
 tc.verifyEmpty(r.Values.n.Measured);
 end
+
+% ---- lbd.open: read only what is needed (plan 6d) ---------------------------------------
+
+function p = bigFile(tc)
+p = fullfile(tc.TestData.dir, "big_" + string(randi(1e9)) + ".lbd");
+d = lbd.Dataset("big");
+d.addAxis("power", 1:6);
+d.addAxis("freq", 1:50);
+d.addValue("S", reshape(0:299, 50, 6)' + 1i, ["power" "freq"]);
+d.addValue("ok", mod(0:5, 2) == 0, "power");
+d.addValue("n", [], "power", Dtype="int16");
+d.write(power=2, n=7);
+d.addValue("q", 2.5);
+d.Meta.T_mK = 12;
+d.save(p, Compression=true);
+end
+
+function testOpenReadsParts(tc)
+p = bigFile(tc);
+whole = lbd.load(p);
+d = lbd.open(p);
+closer = onCleanup(@() d.close());
+x = d.Values.S.Data;
+tc.verifyClass(x, 'lbd.OnDisk');
+tc.verifyEqual(size(x), [6 50]);
+tc.verifyEqual(x(4, :), whole.Values.S.Data(4, :));
+tc.verifyEqual(x(2:3, [10 3 3]), whole.Values.S.Data(2:3, [10 3 3]));
+tc.verifyEqual(x(end, end), whole.Values.S.Data(end, end));
+tc.verifyEqual(x(:, :), whole.Values.S.Data);
+tc.verifyEqual(d.Values.ok.Data(:), whole.Values.ok.Data(:));
+tc.verifyEqual(d.Values.n.Measured(:), whole.Values.n.Measured(:));
+tc.verifyEqual(d.Values.q.Data(), 2.5);
+tc.verifyEqual(d.Meta.T_mK, whole.Meta.T_mK);
+tc.verifyError(@() x(7, 1), 'lbd:invalid');
+d.close();
+tc.verifyError(@() x(1, 1), 'lbd:closed');
+end
+
+function testOpenModes(tc)
+p = bigFile(tc);
+d = lbd.open(p);
+tc.verifyError(@() d.write(power=1, n=1), 'lbd:readOnly');
+tc.verifyError(@() d.save(fullfile(tc.TestData.dir, "nope.lbd")), 'lbd:readOnly');
+d.close();
+d = lbd.open(p, Mode="r+");
+d.write(power=3, S=zeros(1, 50));
+d.write(power=5, n=9);
+d.Meta.checked = 1;
+d.save();
+copy = d.save(fullfile(tc.TestData.dir, "copy_" + string(randi(1e9)) + ".lbd"));
+tc.verifyEqual(d.Path, p);
+d.close();
+r = lbd.load(p);
+tc.verifyEqual(real(r.Values.S.Data(3, :)), zeros(1, 50));          % MATLAB drops an all-zero imaginary part
+tc.verifyEqual(r.Values.n.Data(5), int16(9));
+tc.verifyEqual(r.Meta.checked, 1);
+c = lbd.load(copy);
+tc.verifyEqual(c.Values.S.Data, r.Values.S.Data);
+tc.verifyEqual(c.ParentId, r.Id);
+end
+
+function testOpenGroupsAndRows(tc)
+p = fullfile(tc.TestData.dir, "open_groups.lbd");
+groupCase4(true).save(p);
+d = lbd.open(p);
+closer = onCleanup(@() d.close());
+r = d.rows("g", By="A");
+tc.verifyEqual(r{3, 2}.Values.g.Data', [310 320 321]);
+tc.verifyEqual(d.toDense("f").Values.f.Data(3, :), [30 31 32]);
+tc.verifyEqual(d.coords("g").C', [0 0 0 1]);
+end
