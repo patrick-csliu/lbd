@@ -364,7 +364,7 @@ def part(d: "Dataset", v: Value, pos: int, sel: Tuple) -> "Dataset":
             index.append(keep_above)
         dims.append(rest)
     data = np.array(v._read(tuple(index)))
-    measured = None if v.measured is None else np.array(np.asarray(v.measured)[tuple(index)])
+    measured = None if v.measured is None else np.array(v.measured[tuple(index)])
     _add(nd, v, data, dims, measured)
     return nd
 

@@ -315,10 +315,14 @@ class Value:
         return d
 
     def _read(self, selection: Any = ()) -> np.ndarray:
-        """Part of the data, the one way LBD reads a value's data (a file read lazily reads
-        only this part)."""
+        """Part of the data, the one way LBD reads a value's data (a file opened with lbd.open
+        reads only this part)."""
         if self.data is None:
             raise LBDError(f"value '{self.name}' was not loaded; load the file without `values=`")
+        if isinstance(self.data, np.ndarray):
+            return self.data[selection]
+        if hasattr(self.data, "_source"):                # lazy.OnDisk
+            return self.data[selection]
         return np.asarray(self.data)[selection]
 
 
@@ -426,6 +430,7 @@ class Dataset:
         self._placeholders: Optional[set] = None   # lbd.Writer: names of values whose data is in the file
         self._room: Dict[Any, np.ndarray] = {}     # buffers with room for arrays that grow (groups.grown)
         self._lookups: Dict[str, Any] = {}         # each group level's points by coordinate (groups.lookup)
+        self._source: Any = None                    # lbd.open: the file its values are read from (lazy._Source)
 
     @property
     def id(self) -> Optional[str]:
@@ -792,7 +797,14 @@ class Dataset:
         >>> i = d.write(A=3)                               # an outer point, then under it:
         >>> d.write(parent=i, B=25, f=x)
         """
+        if self._source is not None:
+            from . import lazy
+
+            lazy.check_change(self, "write")
         plan = self._plan_write(names, more, parent)
+        if self._source is not None and (plan["grow"] is not None or plan["levels"]):
+            raise LBDError(f"{self._source.path.name} is opened with lbd.open: write puts data at points that exist; "
+                           "to add points (a growing axis, a group's new points) use lbd.load, or lbd.Writer")
         self._apply_write(plan)
         return plan["result"]
 
@@ -1008,6 +1020,18 @@ class Dataset:
 
     # ---- access ---------------------------------------------------------
 
+    def close(self) -> None:
+        """Close the file of a dataset opened with [`lbd.open`][lbd.open]: what was read stays
+        usable; reading more is refused. Nothing to do for a loaded dataset."""
+        if self._source is not None:
+            self._source.close()
+
+    def __enter__(self) -> "Dataset":
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.close()
+
     def __getitem__(self, name: str) -> Union[Axis, Value]:
         if name in self.values:
             return self.values[name]
@@ -1033,7 +1057,7 @@ class Dataset:
 
     # ---- saving ---------------------------------------------------------
 
-    def save(self, path: PathLike, compression: Optional[str] = None) -> Path:
+    def save(self, path: Optional[PathLike] = None, compression: Optional[str] = None) -> Path:
         """Write the dataset to an `.lbd` file.
 
         Everything is checked again first, also axes, values and attributes changed by hand
@@ -1082,6 +1106,13 @@ class Dataset:
         >>> d.save("sweep.lbd")
         >>> d.save("big.lbd", compression="gzip")
         """
+        if self._source is not None:               # opened with lbd.open
+            from . import lazy
+
+            if lazy.check_change(self, "save", path):
+                return lazy.save_in_place(self)
+        if path is None:
+            raise LBDError("save needs a path, e.g. d.save('sweep.lbd')")
         path = Path(path)
         if path.name.lower().endswith(WRITING_SUFFIX):
             raise LBDError(f"{path.name}: a '{WRITING_SUFFIX}' file is written only by lbd.Writer; "
@@ -1117,6 +1148,8 @@ class Dataset:
         finally:
             if tmp.exists():
                 tmp.unlink()
+        if self._source is not None:               # a copy of an opened file: this one stays as it is
+            return path
         self.created, self.writer, self.path = created, writer, path
         self._id, self._parent_id = ident, parent
         return path
@@ -1175,7 +1208,7 @@ class Dataset:
             _check_text(v.label, f"value '{key}' label")
             if v.data is None:
                 raise LBDError(f"value '{key}' was not loaded; load the file without `values=` to re-save it")
-            arr = np.asarray(v.data)
+            arr = v.data if hasattr(v.data, "_source") else np.asarray(v.data)    # lazy.OnDisk: not read
             if arr.dtype.kind not in "biufc" or                     str(_normalize_dtype(np.empty(0, arr.dtype), key, quiet=True).dtype) not in _ALLOWED_DTYPES:
                 raise LBDError(f"value '{key}' has unsupported dtype {arr.dtype}")
             point = tuple(v.point_shape)
@@ -1271,11 +1304,15 @@ class Dataset:
 
         g_values = f.create_group("values")
         for v in self.values.values():
-            data = _normalize_dtype(np.asarray(v.data), v.name)
-            is_bool = data.dtype == np.bool_
-            if is_bool:
-                data = data.astype(np.uint8)
-            ds = _create_dataset(g_values, v.name, data, compression, whole=len(v.point_shape))
+            if hasattr(v.data, "_source"):          # opened with lbd.open: copied inside HDF5, never read whole
+                ds = v.data._copy_to(g_values, v.name)
+                is_bool = v.dtype == "bool"
+            else:
+                data = _normalize_dtype(np.asarray(v.data), v.name)
+                is_bool = data.dtype == np.bool_
+                if is_bool:
+                    data = data.astype(np.uint8)
+                ds = _create_dataset(g_values, v.name, data, compression, whole=len(v.point_shape))
             ds.attrs["unit"] = v.unit
             ds.attrs["label"] = v.label
             ds.attrs["axes"] = ",".join(_dim_names(v))
@@ -1287,6 +1324,9 @@ class Dataset:
         if masks:                             # integer / boolean points never measured (stopped early)
             g_measured = f.create_group("measured")
             for name, m in masks.items():
+                if hasattr(m, "_source"):
+                    m._copy_to(g_measured, name)
+                    continue
                 _create_dataset(g_measured, name, np.asarray(m, dtype=np.uint8), compression,
                                 whole=len(self.values[name].point_shape))
 

@@ -86,14 +86,21 @@ def case5b():
     return d
 
 
-@pytest.fixture(params=["built", "loaded"])
+@pytest.fixture(params=["built", "loaded", "opened"])
 def source(request, tmp_path):
     def get(make):
         d = make()
         if request.param == "built":
             return d
-        return lbd.load(d.save(tmp_path / f"{make.__name__}.lbd"))
-    return get
+        p = d.save(tmp_path / f"{make.__name__}.lbd")
+        if request.param == "loaded":
+            return lbd.load(p)
+        opened.append(lbd.open(p))                  # read lazily (plan 6d): the same answers
+        return opened[-1]
+    opened = []
+    yield get
+    for o in opened:
+        o.close()
 
 
 # ---- properties ------------------------------------------------------------------
