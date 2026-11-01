@@ -598,6 +598,37 @@ w.write(x=2, y=2);
 tc.verifyEqual(lbd.load(w.close()).Values.y.Data, [1; 2]);
 end
 
+function testProgramHoldingAFileIsNamed(tc)
+% The messages about a file another program keeps open name that program; a folder on a network
+% share is noticed. The helpers are private: called from their folder.
+p = fullfile(tc.TestData.dir, "held.txt");
+fid = fopen(p, 'w'); fprintf(fid, 'x'); fclose(fid);
+private = fullfile(fileparts(which('lbd.load')), 'private');
+back = cd(private);
+restore = onCleanup(@() cd(back));
+tc.verifyEqual(lbd_who_has_open(fullfile(tc.TestData.dir, "nobody.txt")), "");
+tc.verifyFalse(lbd_on_network_share(tc.TestData.dir));
+if ispc
+    tc.verifyTrue(lbd_on_network_share("\\server\share\data"));
+end
+if ispc || ~system('command -v lsof >/dev/null')
+    holder = java.lang.ProcessBuilder({'powershell', '-NoProfile', '-Command', ...
+        sprintf('$f = [IO.File]::Open(''%s'', ''Open''); Start-Sleep 30', p)});
+    if ~ispc
+        holder = java.lang.ProcessBuilder({'sh', '-c', sprintf('exec 3<"%s"; sleep 30', p)});
+    end
+    proc = holder.start();
+    stop = onCleanup(@() proc.destroy());
+    named = "";
+    for k = 1:100
+        named = lbd_who_has_open(p);
+        if named ~= "", break; end
+        pause(0.2);
+    end
+    tc.verifyNotEmpty(char(named));
+end
+end
+
 % ---- axis groups (format 2.0): the data API's cases --------------------------------
 
 function d = groupCase2()

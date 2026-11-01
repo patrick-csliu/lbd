@@ -54,6 +54,68 @@ const OWN_WRITERS = Dict{String,Writer}()      # files written by this process
 own_key(path) = (p = abspath(path); Sys.iswindows() ? lowercase(p) : p)
 own_writer(path) = get(OWN_WRITERS, own_key(path), nothing)
 
+# ---- who has a file open; network shares (for messages only) ------------------------------
+
+"""The programs that have `path` open, as text ("" if unknown): on Windows from the Restart
+Manager (what Explorer uses for "the file is open in …"), elsewhere from `lsof`. Only for a
+better message: never fails."""
+function who_has_open(path::AbstractString)::String
+    try
+        Sys.iswindows() && return restart_manager(path)
+        out = read(pipeline(ignorestatus(`lsof -Fc $path`); stderr=devnull), String)
+        return join(sort(unique(l[2:end] for l in split(out, '\n') if startswith(l, "c"))), ", ")
+    catch
+        return ""
+    end
+end
+
+# RM_PROCESS_INFO: RM_UNIQUE_PROCESS (pid, start time: 12 bytes), strAppName (256 UTF-16),
+# strServiceShortName (64), ApplicationType, AppStatus, TSSessionId, bRestartable: 668 bytes.
+const RM_INFO_BYTES = 668
+
+function restart_manager(path::AbstractString)::String
+    session, key = Ref{UInt32}(0), zeros(UInt16, 64)
+    ccall((:RmStartSession, "rstrtmgr"), stdcall, UInt32, (Ref{UInt32}, UInt32, Ptr{UInt16}), session, 0, key) == 0 ||
+        return ""
+    try
+        name = vcat(transcode(UInt16, String(abspath(path))), UInt16(0))
+        GC.@preserve name begin
+            files = [pointer(name)]
+            ccall((:RmRegisterResources, "rstrtmgr"), stdcall, UInt32,
+                  (UInt32, UInt32, Ptr{Ptr{UInt16}}, UInt32, Ptr{Cvoid}, UInt32, Ptr{Cvoid}),
+                  session[], 1, files, 0, C_NULL, 0, C_NULL)
+        end
+        needed, count, reason = Ref{UInt32}(0), Ref{UInt32}(0), Ref{UInt32}(0)
+        ccall((:RmGetList, "rstrtmgr"), stdcall, UInt32, (UInt32, Ref{UInt32}, Ref{UInt32}, Ptr{UInt8}, Ref{UInt32}),
+              session[], needed, count, C_NULL, reason)
+        needed[] == 0 && return ""
+        infos = zeros(UInt8, RM_INFO_BYTES * needed[])
+        count[] = needed[]
+        ccall((:RmGetList, "rstrtmgr"), stdcall, UInt32, (UInt32, Ref{UInt32}, Ref{UInt32}, Ptr{UInt8}, Ref{UInt32}),
+              session[], needed, count, infos, reason) == 0 || return ""
+        names = String[]
+        for i in 0:count[]-1
+            at = i * RM_INFO_BYTES
+            pid = reinterpret(UInt32, infos[at+1:at+4])[1]
+            pid == getpid() && continue
+            app = reinterpret(UInt16, infos[at+13:at+12+512])
+            push!(names, "$(transcode(String, app[1:something(findfirst(==(0), app), length(app) + 1) - 1])) (process $pid)")
+        end
+        return join(names, ", ")
+    finally
+        ccall((:RmEndSession, "rstrtmgr"), stdcall, UInt32, (UInt32,), session[])
+    end
+end
+
+"""Whether `folder` is on a network share (Windows: a UNC path or a remote drive)."""
+function on_network_share(folder::AbstractString)::Bool
+    Sys.iswindows() || return false
+    p = abspath(folder)
+    startswith(p, "\\\\") && return true
+    root = vcat(transcode(UInt16, p[1:3]), UInt16(0))
+    return ccall((:GetDriveTypeW, "kernel32"), stdcall, UInt32, (Ptr{UInt16},), root) == 4    # DRIVE_REMOTE
+end
+
 function Writer(path::AbstractString; title::AbstractString="", description::AbstractString="",
                 created=nothing, flush_every::Real=0.5, force_every::Real=2.0)
     lowercase(splitext(path)[2]) == ".lbd" ||
@@ -63,6 +125,9 @@ function Writer(path::AbstractString; title::AbstractString="", description::Abs
         ispath(p) && throw(LBDError("$p exists; LBD.Writer never replaces a file - choose another name"))
     end
     (flush_every > 0 && force_every > 0) || throw(LBDError("flush_every and force_every must be positive numbers of seconds"))
+    folder = dirname(abspath(path))
+    on_network_share(isdir(folder) ? folder : pwd()) &&
+        @warn "$folder is on a network share; writing while measuring is not tested there yet. Measure into a local folder if you see problems."
     d = Dataset(title; description=description, created=created)
     d.live = true
     return Writer(String(path), writing, d, flush_every, force_every, nothing, nothing, Any[], 0.0, 0.0,
@@ -424,7 +489,8 @@ function Base.close(w::Writer; stopped::Bool=false)
             e isa Base.IOError || rethrow()
             if time() > deadline
                 w.state = :stopped
-                throw(LBDError("the measurement is complete, but another program kept $(w.writing_path) open for " *
+                who = who_has_open(w.writing_path)
+                throw(LBDError("the measurement is complete, but $(isempty(who) ? "another program" : who) kept $(w.writing_path) open for " *
                                "$(FINISH_WAIT) s, so it couldn't be renamed to $(basename(target)). Close it there, then " *
                                "rename it yourself or use LBD.recover"))
             end
@@ -653,7 +719,12 @@ function recover(path::AbstractString)
             rm(src)
             break
         catch e
-            (e isa Base.IOError && time() < deadline) || rethrow()
+            e isa Base.IOError || rethrow()
+            if time() > deadline
+                who = who_has_open(src)
+                throw(LBDError("recovered $(basename(target)), but can't remove $(basename(src)): " *
+                               "$(isempty(who) ? "another program" : who) keeps it open"))
+            end
             sleep(0.1)
         end
     end

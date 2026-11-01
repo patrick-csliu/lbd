@@ -484,6 +484,29 @@ end
         @test_throws LBDError LBD.save(joinpath(dir, "a.lbd.writing"), d)
     end
 
+    @testset "the program holding a file is named; network shares are noticed" begin
+        path = joinpath(dir, "held.txt")
+        write(path, "x")
+        holder = run(`$(Base.julia_cmd()) --startup-file=no -e "f = open(ARGS[1]); println(); sleep(60)" $path`;
+                     wait=false)
+        try
+            named = ""
+            for _ in 1:150                               # the other Julia starts in a few seconds
+                named = LBD.who_has_open(path)
+                isempty(named) || break
+                sleep(0.1)
+            end
+            if Sys.iswindows() || Sys.which("lsof") !== nothing
+                @test occursin("ulia", named)            # "Julia Programming Language (process …)" / "julia"
+            end
+        finally
+            kill(holder)
+        end
+        @test LBD.who_has_open(joinpath(dir, "nobody.txt")) == ""
+        @test !LBD.on_network_share(dir)
+        Sys.iswindows() && @test LBD.on_network_share("\\\\server\\share\\data")
+    end
+
     @testset "reads Python-written examples" begin
         ex = joinpath(@__DIR__, "..", "..", "..", "examples", "data")
         if isdir(ex)

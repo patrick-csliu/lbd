@@ -280,7 +280,7 @@ running.
   10 seconds, then says which program holds it; the complete file stays as `.writing`
   (Recover, or rename it).
 - **Measure into a folder on this computer.** Writing while measuring onto a network share
-  (NAS) isn't tested yet; Python warns when the folder is on one.
+  (NAS) isn't tested yet; every language warns when the folder is on one (Windows).
 - Tested on Windows; macOS and Linux are checked by the automatic tests.
 - Files being written use the HDF5 1.10 format, readable by every HDF5 since 1.10 (MATLAB needs
   HDF5 1.10 or newer to write them).

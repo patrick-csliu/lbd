@@ -32,7 +32,9 @@ while isfile(src)
     end
     if isfile(src)
         if toc(started) > 10
-            error('lbd:held', 'recovered %s, but can''t remove %s: another program keeps it open', target, src);
+            who = lbd_who_has_open(src);
+            if who == "", who = "another program"; end
+            error('lbd:held', 'recovered %s, but can''t remove %s: %s keeps it open', target, src, who);
         end
         pause(0.1);
     end

@@ -173,6 +173,10 @@ are still written as 1.2).
 
 **File format and languages**
 
+- **MATLAB and Julia name the program that keeps a file open** when a measurement can't be
+  finished or recovered because of it ("… LBD Viewer (process 1234) kept it open …"), as Python
+  does, and **warn when a Writer writes onto a network share** (Windows).
+
 - **`lbd.open`: read only what is needed** (every language). `with lbd.open("big.lbd") as d:`
   reads the structure; each value's `data` is an on-disk array: `d.values["S21"].data[3]` reads
   row 3 only, `np.asarray(...)` all of it, and `rows`, `coords`, `to_dense` read only what they

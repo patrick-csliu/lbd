@@ -83,6 +83,10 @@ classdef Writer < handle
                     error('lbd:exists', '%s exists; lbd.Writer never replaces a file - choose another name', p);
                 end
             end
+            if lbd_on_network_share(path)
+                warning('lbd:networkShare', ['the folder of %s is on a network share; writing while measuring is ' ...
+                    'not tested there yet. Measure into a local folder if you see problems.'], path);
+            end
             obj.D = lbd.Dataset(opts.Title, opts.Description, Created=opts.Created);
             obj.D.LiveWriting = true;
             obj.FlushEvery = opts.FlushEvery;
@@ -266,9 +270,11 @@ classdef Writer < handle
             while ~java.io.File(char(obj.WritingPath)).renameTo(java.io.File(char(target)))
                 if toc(started) > obj.FinishWait
                     obj.State = "stopped";
-                    error('lbd:held', ['the measurement is complete, but another program kept %s open for %g s, so ' ...
+                    who = lbd_who_has_open(obj.WritingPath);
+                    if who == "", who = "another program"; end
+                    error('lbd:held', ['the measurement is complete, but %s kept %s open for %g s, so ' ...
                         'it couldn''t be renamed to %s. Close it there, then rename it yourself or use lbd.recover'], ...
-                        obj.WritingPath, obj.FinishWait, target);
+                        who, obj.WritingPath, obj.FinishWait, target);
                 end
                 pause(0.1);
             end
