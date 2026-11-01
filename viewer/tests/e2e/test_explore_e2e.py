@@ -188,3 +188,29 @@ def test_a_file_that_grows_keeps_the_zoom(sweep, viewer, new_page):
     again = frames(page, lambda: None)
     assert again["xlim"] == pytest.approx(zoomed["xlim"])           # the zoom stayed
     expect(explore(page).locator(".axis-select legend")).to_contain_text("all 7")
+
+
+def test_a_value_bigger_than_memory_steps_through_its_slider(viewer, new_page, monkeypatch):
+    """Plan 6d: with little memory (a fake), a 3-D value is read by part; each slider position
+    shows its own map, and the stored value read back is that position's."""
+    from lbd_viewer import memory
+
+    system = lambda: (4 * memory.GB, 2 * memory.GB + 500)          # 500 bytes of room: one map fits
+    monkeypatch.setitem(memory._shared, "cache", memory.PartCache(memory.Memory(system=system)))
+    d = lbd.Dataset(title="Cube")
+    d.add_axis("t", np.arange(6.0))
+    d.add_axis("y", [10.0, 20, 30, 40])
+    d.add_axis("x", [1.0, 2, 4, 8, 16])
+    cells = np.arange(5.0)[None, :] + 5 * np.arange(4.0)[:, None]
+    d.add_value("value", 100 * np.arange(6.0)[:, None, None] + cells, axes=["t", "y", "x"])
+    d.plot = {"kind": "heatmap", "x": "x", "y": "y"}
+    d.save(viewer.data / "cube.lbd")
+
+    page = new_page("Explore")
+    meta = frames(page, lambda: row(page, "cube.lbd").dblclick())
+    slider = explore(page).get_by_role("slider")
+    for t in range(1, 4):
+        meta = frames(page, lambda: slider.press("ArrowRight"))
+        page.mouse.click(*at(page, meta, 8, 30))
+        expect(explore(page).locator(".explore-pick")).to_contain_text(f"{100 * t + 13:g} at x = 8, y = 30")
+    assert memory.shared().hits + memory.shared().misses > 0           # it went through the part cache

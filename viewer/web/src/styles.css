@@ -520,3 +520,9 @@ details.group fieldset > .group-fields { margin-top: -4px; }
 .library-card .card-date { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .library-card .mark-star { color: #c99a06; }
 .library-card .mark-conflict { color: var(--danger); }
+
+/* Memory for data (MemorySettings.tsx): a small number box after its label */
+.settings-number {
+  width: 7em;
+  margin-left: 0.5em;
+}

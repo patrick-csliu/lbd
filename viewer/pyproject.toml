@@ -10,6 +10,7 @@ dependencies = [
     "uvicorn>=0.29",
     "pillow>=10.0",       # image metadata (also a matplotlib dependency)
     "send2trash>=1.8",    # "Move to Recycle Bin" in the folder panel
+    "psutil>=5.9",        # the memory available now: large values are read by part (memory.py)
 ]
 
 [project.scripts]

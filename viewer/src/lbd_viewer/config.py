@@ -39,6 +39,10 @@ PREVIEW_MODES = ("all", "nearby", "off")
 LIST_VIEWS = ("list", "pictures")
 LIBRARY_DEFAULTS: Dict[str, Any] = {"read_headers": True, "notice_seen": False, "columns": ["name", "date", "sweep"],
                                     "previews": "all", "list_view": "list"}
+# Memory for data (plan 6d, memory.py): what to leave free for the rest of the computer (None:
+# automatic, max(2 GB, 10% of RAM)), the most LBD may use (None: no maximum), and the disk cache
+# of large maps' and curves' summaries. In GB.
+MEMORY_DEFAULTS: Dict[str, Any] = {"reserve_gb": None, "maximum_gb": None, "summary_cache_gb": 20.0}
 EVERY_FILE_NEEDS_HEADERS = ("Previews of every file can't be drawn while \"Read each data file's details\" is "
                             "off: drawing them would read every file. Turn that on first, or choose \"The "
                             "selected file and nearby rows\".")
@@ -78,7 +82,7 @@ class Config:
             data = _read_json(self.settings_path)
         if data is None:
             return {"roots": [], "default_style": None, "open_files_in": "viewer", "open_data_in": "explore",
-                    "theme": "system", "library": dict(LIBRARY_DEFAULTS)}
+                    "theme": "system", "library": dict(LIBRARY_DEFAULTS), "memory": dict(MEMORY_DEFAULTS)}
         if not isinstance(data, dict):
             raise ConfigError(f"{self.settings_path} must contain a JSON object; fix or delete the file")
         roots = data.get("roots", [])
@@ -104,8 +108,12 @@ class Config:
             library = _check_library(library)
         except ConfigError as e:
             raise ConfigError(f"{self.settings_path}: {e}; fix or delete the file") from None
+        try:
+            memory = _check_memory({**MEMORY_DEFAULTS, **(data.get("memory") or {})})
+        except ConfigError as e:
+            raise ConfigError(f"{self.settings_path}: {e}; fix or delete the file") from None
         return {"roots": list(roots), "default_style": default or None, "open_files_in": open_in,
-                "open_data_in": open_data, "theme": theme, "library": library}
+                "open_data_in": open_data, "theme": theme, "library": library, "memory": memory}
 
     def settings(self) -> Dict[str, Any]:
         """{"roots": [...], "default_style": name, "open_files_in": ..., "open_data_in": ...,
@@ -115,7 +123,8 @@ class Config:
         if default not in self.style_names():
             default = "default"
         return {"roots": stored["roots"], "default_style": default, "open_files_in": stored["open_files_in"],
-                "open_data_in": stored["open_data_in"], "theme": stored["theme"], "library": stored["library"]}
+                "open_data_in": stored["open_data_in"], "theme": stored["theme"], "library": stored["library"],
+                "memory": stored["memory"]}
 
     def problems(self) -> List[str]:
         """Things the user should know about the settings (shown as warnings in the viewer)."""
@@ -194,6 +203,18 @@ class Config:
             s["library"] = new
             self._save_settings(s)
             return s["library"]
+
+    def set_memory(self, changes: Dict[str, Any]) -> Dict[str, Any]:
+        """Change the memory settings (reserve_gb, maximum_gb: a number or None; summary_cache_gb);
+        returns them all."""
+        unknown = sorted(set(changes) - set(MEMORY_DEFAULTS))
+        if unknown:
+            raise ConfigError(f"unknown memory setting(s) {unknown}; known: {sorted(MEMORY_DEFAULTS)}")
+        with self._lock:
+            s = self.settings()
+            s["memory"] = _check_memory({**s["memory"], **changes})
+            self._save_settings(s)
+            return s["memory"]
 
     def set_theme(self, theme: str) -> None:
         """The viewer's colours: "system" (follow the operating system), "light" or "dark"."""
@@ -279,6 +300,17 @@ def _check_library(library: Dict[str, Any]) -> Dict[str, Any]:
         if library.get(key) not in allowed:
             raise ConfigError(f"Library setting '{key}' must be one of {', '.join(allowed)}, not {library.get(key)!r}")
     return {k: library[k] for k in LIBRARY_DEFAULTS}
+
+
+def _check_memory(memory: Dict[str, Any]) -> Dict[str, Any]:
+    for key in ("reserve_gb", "maximum_gb"):
+        x = memory.get(key)
+        if x is not None and (isinstance(x, bool) or not isinstance(x, (int, float)) or x < 0):
+            raise ConfigError(f"memory setting '{key}' must be a number of GB (≥ 0) or empty (automatic), not {x!r}")
+    x = memory.get("summary_cache_gb")
+    if isinstance(x, bool) or not isinstance(x, (int, float)) or x < 0:
+        raise ConfigError(f"memory setting 'summary_cache_gb' must be a number of GB (≥ 0), not {x!r}")
+    return {k: (None if memory[k] is None else float(memory[k])) for k in MEMORY_DEFAULTS}
 
 
 def _same_path(a: str, b: str) -> bool:

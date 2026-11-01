@@ -586,7 +586,7 @@ def save_cut(s: "ExploreSession", which: str, index: Dict[str, int], path: Path,
         missing = [ax for ax in v.axes if ax != keep and ax not in fixed]
         if missing:
             raise ExploreError(f"'{name}' has axes {missing} that the cut doesn't fix")
-        data = np.asarray(v.data)[tuple(slice(None) if ax == keep else fixed[ax] for ax in v.axes)]
+        data = np.asarray(v._read(tuple(slice(None) if ax == keep else fixed[ax] for ax in v.axes)))
         d.add_value(name, data, axes=keep, unit=v.unit, label=v.label)
     d.meta = {"cut_from": s.path.name,
               "cut_index": {ax: int(i) for ax, i in fixed.items()},

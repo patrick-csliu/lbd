@@ -47,7 +47,7 @@ from .catalog import Catalog, catalog_dir, fitting, structure  # noqa: E402
 from . import labels, library_labels  # noqa: E402
 from .library import LibraryIndex, writing_status  # noqa: E402
 from .previews import PreviewCache, PreviewError, Previewer  # noqa: E402
-from . import reading  # noqa: E402
+from . import memory, reading  # noqa: E402
 from .explore import ExploreClosed, ExploreError, ExploreSession, Sessions  # noqa: E402
 from .pages import PageError, Pages, UnknownPage  # noqa: E402
 from .config import Config, ConfigError, Style, StyleError, from_dict, previews_mode  # noqa: E402
@@ -348,6 +348,7 @@ class SettingsBody(_Body):
     open_data_in: Optional[str] = None    # "explore" or "figure" (config.OPEN_DATA_IN)
     theme: Optional[str] = None           # "system", "light" or "dark" (config.THEMES)
     library: Optional[Dict[str, Any]] = None  # {read_headers?, notice_seen?, columns?} (config.LIBRARY_DEFAULTS)
+    memory: Optional[Dict[str, Any]] = None   # {reserve_gb?, maximum_gb?, summary_cache_gb?} (config.MEMORY_DEFAULTS)
 
 
 class FilePlotBody(_Body):
@@ -551,6 +552,11 @@ def file_summary(d: "lbd.Dataset") -> Dict[str, Any]:
     }
 
 
+def _load_for_view(path: str, names: List[str]) -> "lbd.Dataset":
+    """The values a figure needs: whole if they fit in memory, else read by part (memory.py)."""
+    return memory.load_values(path, names, file_version(Path(path)))
+
+
 def _single_numbers(d: "lbd.Dataset") -> Dict[str, str]:
     """The single-number (0-D) values as text with a unit prefix, as a plot shows them: "21 µs".
     `d` may be header-only (lbd.info); then these small values are read from its file."""
@@ -704,10 +710,29 @@ class _UiFiles(StaticFiles):
 # ---- app ---------------------------------------------------------------------------------
 
 
+def apply_memory(settings: Dict[str, Any]) -> None:
+    """The memory settings (GB, None: automatic / no maximum) in effect for every Explore tab."""
+    gb = lambda x: None if x is None else int(float(x) * memory.GB)   # noqa: E731
+    memory.configure(gb(settings.get("reserve_gb")), gb(settings.get("maximum_gb")))
+
+
+def memory_now() -> Dict[str, Any]:
+    """This computer's memory and the room the viewer has now, for the settings page (GB)."""
+    m = memory.shared().memory
+    try:
+        total, available = m._system()
+    except Exception:                                   # psutil missing or failing: say so
+        return {"total_gb": None, "reserve_now_gb": None, "room_gb": None}
+    return {"total_gb": round(total / memory.GB, 1), "reserve_now_gb": round(m.reserve() / memory.GB, 1),
+            "room_gb": round(m.room() / memory.GB, 1)}
+
+
 def create_app(state: AppState) -> FastAPI:
     app = FastAPI(title="LBD viewer", version=VERSION, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.lbd = state
     cfg = state.config
+    with contextlib.suppress(ConfigError):
+        apply_memory(cfg.settings()["memory"])
 
     @app.middleware("http")
     async def guard(request: Request, call_next):
@@ -788,7 +813,7 @@ def create_app(state: AppState) -> FastAPI:
             "version": VERSION, "lbd_version": lbd.FORMAT_VERSION,
             "roots": s["roots"], "default_style": s["default_style"], "styles": names,
             "open_files_in": s["open_files_in"], "open_data_in": s["open_data_in"], "theme": s["theme"],
-            "library": s["library"], "login": getpass.getuser(), "platform": sys.platform, "config_dir": str(cfg.dir), "warnings": problems + warns,
+            "library": s["library"], "memory": {**s["memory"], **memory_now()}, "login": getpass.getuser(), "platform": sys.platform, "config_dir": str(cfg.dir), "warnings": problems + warns,
         }
 
     @app.post("/api/open")
@@ -1132,7 +1157,7 @@ def create_app(state: AppState) -> FastAPI:
             # The UI only shows the controls that apply, so settings left over from another plot
             # type are expected here and not reported.
             svg, spec = rnd.render_file(str(p), body.spec, style, fmt="svg", display=True, creator=CREATOR,
-                                        warn_unused=False)
+                                        warn_unused=False, load=_load_for_view)
         return {"svg": svg.decode("utf-8"), "spec": spec, "preset": preset,
                 "size_mm": [style.figure.width_mm, style.figure.height_mm], "warnings": notes + warns}
 
@@ -1273,7 +1298,7 @@ def create_app(state: AppState) -> FastAPI:
         with collect_warnings() as warns:
             style, _ = _style_for(body, p, notes)
             data, spec = rnd.render_file(str(p), body.spec, style, fmt=fmt, display=False, creator=CREATOR,
-                                         warn_unused=False)
+                                         warn_unused=False, load=_load_for_view)
         name = rnd.safe_filename(f"{p.stem}_{'_'.join(spec['values'])}") + f".{fmt}"
         return p, fmt, data, name, notes + warns
 
@@ -1415,9 +1440,11 @@ def create_app(state: AppState) -> FastAPI:
     @app.put("/api/settings")
     def put_settings(body: SettingsBody):
         if (body.default_style is None and body.open_files_in is None and body.open_data_in is None
-                and body.theme is None and body.library is None):
-            raise HTTPException(400, "nothing to change: send default_style, open_files_in, open_data_in, theme "
-                                     "and/or library")
+                and body.theme is None and body.library is None and body.memory is None):
+            raise HTTPException(400, "nothing to change: send default_style, open_files_in, open_data_in, theme, "
+                                     "library and/or memory")
+        if body.memory is not None:
+            apply_memory(cfg.set_memory(body.memory))
         if body.default_style is not None:
             cfg.set_default_style(body.default_style)
             state.pages.broadcast("styles_changed")
@@ -1432,7 +1459,7 @@ def create_app(state: AppState) -> FastAPI:
             if cfg.set_library(body.library)["read_headers"] != before:
                 state.wake_library()                      # read what is missing (or stop reading)
         if (body.open_files_in is not None or body.open_data_in is not None or body.theme is not None
-                or body.library is not None):
+                or body.library is not None or body.memory is not None):
             state.pages.broadcast("settings_changed")      # every page shows the new setting
         return get_state()
 

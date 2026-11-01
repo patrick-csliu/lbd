@@ -43,7 +43,7 @@ from lbd.plot.reduce import STATS, CurvePyramid, MapPyramid, cell_edges, curve_m
 from lbd.plot.style import Style
 from lbd.plot.units import prefix_scale
 
-from . import equations
+from . import equations, memory
 from . import operations as ops_mod
 
 KINDS = ("curve", "heatmap")
@@ -145,7 +145,8 @@ class ExploreSession:
         needed = rnd.needed_values(self.header, resolved)
         loaded = [n for n, v in self.data.values.items() if v.data is not None]
         if not set(needed) <= set(loaded):
-            self.data = self._read(lbd.load(self.path, values=sorted(set(needed) | set(loaded))))
+            # whole if they fit in the memory available, else read by part (plan 6d, memory.py)
+            self.data = self._read(memory.load_values(self.path, sorted(set(needed) | set(loaded)), self.version))
         new = rnd.resolve_spec(self.data, spec, warn_unused=False)
         if new["kind"] not in KINDS:
             raise ExploreError(f"the Explore view shows curves and heat maps, not {new['kind']} plots; "
@@ -157,6 +158,9 @@ class ExploreSession:
         with rnd.RENDER_LOCK, matplotlib.rc_context(self.style.to_rcparams()):
             self._check_open()
             self.base_model = prepare(self.data, self.spec, self.style)
+        for v in self.data.values.values():           # a value read by part: the next slider positions
+            if isinstance(v.data, memory.Cached):
+                v.data.read_ahead()
         self.raw_model = self.base_model                 # the file's data: read-outs' stored values
         self.complex_key: Optional[str] = None
         self.model = self.base_model

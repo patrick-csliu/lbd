@@ -18,8 +18,21 @@ export interface AppState {
   theme: Theme;
   /** the Library's settings (config.LIBRARY_DEFAULTS) */
   library: LibrarySettings;
+  /** memory for data (config.MEMORY_DEFAULTS, server memory_now) */
+  memory: MemorySettings;
   /** this computer's user name (suggested first when labelling users) */
   login: string;
+}
+
+/** Memory for data (plan 6d): GB; null = automatic (reserve) / no maximum. */
+export interface MemorySettings {
+  reserve_gb: number | null;
+  maximum_gb: number | null;
+  summary_cache_gb: number;
+  /** this computer, now (read-only) */
+  total_gb: number | null;
+  reserve_now_gb: number | null;
+  room_gb: number | null;
 }
 
 // ---- Library (server: library.py; keep in sync with /api/library in server.py) ----
@@ -761,6 +774,8 @@ export const api = {
   setOpenDataIn: (where: OpenDataIn) => call<AppState>("PUT", "/api/settings", { open_data_in: where }),
   setTheme: (theme: Theme) => call<AppState>("PUT", "/api/settings", { theme }),
   setLibrary: (changes: Partial<LibrarySettings>) => call<AppState>("PUT", "/api/settings", { library: changes }),
+  setMemory: (changes: Partial<Pick<MemorySettings, "reserve_gb" | "maximum_gb" | "summary_cache_gb">>) =>
+    call<AppState>("PUT", "/api/settings", { memory: changes }),
 
   // ---- Library: the index of the data files under the open folders (library.py)
   libraryList: (query: LibraryQuery, offset: number, limit: number) => {

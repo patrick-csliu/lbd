@@ -625,7 +625,7 @@ def _fmt(x: Any) -> str:
 def _take(v: "lbd.Value", keep: List[str], index: Dict[str, int]) -> np.ndarray:
     """Slice a value down to the axes in `keep`, in that order."""
     idx = tuple(slice(None) if a in keep else index.get(a, 0) for a in v.axes)
-    arr = np.asarray(v.data)[idx] if v.axes else np.asarray(v.data)
+    arr = np.asarray(v._read(idx if v.axes else ()))       # a value opened with lbd.open: only this part
     remaining = [a for a in v.axes if a in keep]
     order = [remaining.index(a) for a in keep if a in remaining]
     return np.transpose(arr, order) if len(order) > 1 else arr
@@ -634,7 +634,7 @@ def _take(v: "lbd.Value", keep: List[str], index: Dict[str, int]) -> np.ndarray:
 def _points(d, v: "lbd.Value", index: Dict[str, int]) -> Tuple[np.ndarray, List[str]]:
     """All points of a value (only axes in `index` are fixed), and the axes left."""
     idx = tuple(index[a] if a in index else slice(None) for a in v.axes)
-    arr = np.asarray(v.data)[idx] if v.axes else np.asarray(v.data)
+    arr = np.asarray(v._read(idx if v.axes else ()))
     return arr, [a for a in v.axes if a not in index]
 
 
@@ -1183,8 +1183,9 @@ def render_dataset(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], style: Styl
 
 def render_file(path, spec: Optional[Dict[str, Any]], style: Style, fmt: str = "svg",
                 display: bool = True, creator: Optional[str] = None,
-                warn_unused: bool = True) -> Tuple[bytes, Dict[str, Any]]:
-    """Render a file, reading only the values the plot needs."""
+                warn_unused: bool = True, load: Optional[Any] = None) -> Tuple[bytes, Dict[str, Any]]:
+    """Render a file, reading only the values the plot needs (with `load(path, names)`, by
+    default `lbd.load(path, values=names)`)."""
     fmt = check_format(fmt)
     header = lbd.info(path)
     import warnings as _w
@@ -1192,7 +1193,8 @@ def render_file(path, spec: Optional[Dict[str, Any]], style: Style, fmt: str = "
     with _w.catch_warnings():  # the same checks run again below on the loaded data
         _w.simplefilter("ignore", RenderWarning)
         resolved = resolve_spec(header, spec, warn_unused=warn_unused)
-    d = lbd.load(path, values=needed_values(header, resolved))
+    names = needed_values(header, resolved)
+    d = load(path, names) if load else lbd.load(path, values=names)
     return render_dataset(d, spec, style, fmt, display, creator, warn_unused=warn_unused)
 
 

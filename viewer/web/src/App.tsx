@@ -1,4 +1,5 @@
 import { CSSProperties, KeyboardEvent, MouseEvent, PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { MemorySettings } from "./MemorySettings";
 import { api, ApiError, AppState, baseName, fileKind, OpenDataIn, OpenFilesIn, PageCommand, PageEntry, TabState, Theme, viewerUrl, Workspace } from "./api";
 import FolderPanel from "./FolderPanel";
 import FileView from "./FileView";
@@ -878,6 +879,7 @@ function Shell() {
                   online: opening a file there downloads all of it.
                 </p>
                 <PreviewSettings settings={state.library} onSettings={setState} />
+                <MemorySettings settings={state.memory} onSettings={setState} />
                 <div className="settings-title">Theme</div>
                 {(
                   [

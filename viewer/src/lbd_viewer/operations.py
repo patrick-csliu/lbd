@@ -535,25 +535,61 @@ def complex_data(d, spec: Dict[str, Any], ops: Sequence[Dict[str, Any]], upto: O
         v = d.values[name]
         if v.data is None or not np.iscomplexobj(v.data):
             continue
-        z = np.asarray(v.data, dtype=complex)
         if along not in v.axes:
             raise BadOps(f"'{name}' doesn't run along '{along}', the horizontal axis")
         ax = v.axes.index(along)
-        shape = [1] * z.ndim
-        shape[ax] = -1
-        f = np.asarray(d.axes[along].data, dtype=float).reshape(shape)
-        for op in todo:
-            if op["op"] == "delay":
-                z = z * np.exp(2j * np.pi * f * op["tau"])
-            elif op["op"] == "rotation":
-                z = z * np.exp(1j * np.radians(op["phi"]))
-            else:                                          # each line along the horizontal axis
-                moved = np.moveaxis(z, ax, -1)
-                flat = moved.reshape(-1, moved.shape[-1])
-                turned = np.array([row * np.exp(-1j * _principal_angle(row)) for row in flat])
-                z = np.moveaxis(turned.reshape(moved.shape), -1, ax)
-        out.values[name] = dc_replace(v, data=z)
+        f = np.asarray(d.axes[along].data, dtype=float)
+        if hasattr(v.data, "_source"):                     # read by part (plan 6d): turned part by part
+            out.values[name] = dc_replace(v, data=_Turned(v.data, ax, f, todo))
+        else:
+            out.values[name] = dc_replace(v, data=_turn(np.asarray(v.data, dtype=complex), ax, f, todo))
     return out
+
+
+def _turn(z: np.ndarray, ax: int, f: np.ndarray, todo: Sequence[Dict[str, Any]]) -> np.ndarray:
+    """The complex operations `todo` applied to `z`, whose dimension `ax` is the horizontal axis f."""
+    shape = [1] * z.ndim
+    shape[ax] = -1
+    f = f.reshape(shape)
+    for op in todo:
+        if op["op"] == "delay":
+            z = z * np.exp(2j * np.pi * f * op["tau"])
+        elif op["op"] == "rotation":
+            z = z * np.exp(1j * np.radians(op["phi"]))
+        else:                                              # each line along the horizontal axis
+            moved = np.moveaxis(z, ax, -1)
+            flat = moved.reshape(-1, moved.shape[-1])
+            turned = np.array([row * np.exp(-1j * _principal_angle(row)) for row in flat])
+            z = np.moveaxis(turned.reshape(moved.shape), -1, ax)
+    return z
+
+
+class _Turned:
+    """A value read by part with the complex operations applied to each part read: the part is
+    read with its whole horizontal axis (auto-rotate needs each whole line), turned, then the
+    asked points of that axis are picked."""
+
+    def __init__(self, data: Any, ax: int, f: np.ndarray, todo: Sequence[Dict[str, Any]]):
+        self._data, self._ax, self._f, self._todo = data, ax, f, list(todo)
+        self.shape, self.dtype = data.shape, np.dtype(complex)
+        self._source = data._source                        # still "on disk" for lbd (Value._read)
+
+    ndim = property(lambda self: len(self.shape))
+
+    def __array__(self, dtype: Any = None, copy: Any = None) -> np.ndarray:
+        arr = self[(slice(None),) * self.ndim]
+        return arr if dtype is None else arr.astype(dtype, copy=False)
+
+    def __getitem__(self, key: Any) -> np.ndarray:
+        key = key if isinstance(key, tuple) else (key,)
+        if any(k is Ellipsis for k in key) or len(key) > self.ndim:
+            raise IndexError("a value read by part takes one index per dimension")
+        key = key + (slice(None),) * (self.ndim - len(key))
+        along = key[self._ax]
+        z = np.asarray(self._data[key[:self._ax] + (slice(None),) + key[self._ax + 1:]], dtype=complex)
+        pos = sum(1 for k in key[:self._ax] if not isinstance(k, (int, np.integer)))   # f's dimension in z
+        z = _turn(z, pos, self._f, self._todo)
+        return z[(slice(None),) * pos + (along,)]
 
 
 def traces_of(d, spec: Dict[str, Any], kind: str) -> Tuple[np.ndarray, np.ndarray]:

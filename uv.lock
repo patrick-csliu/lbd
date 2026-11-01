@@ -1654,6 +1654,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "lbd", extra = ["plot"] },
     { name = "pillow" },
+    { name = "psutil" },
     { name = "send2trash" },
     { name = "uvicorn" },
 ]
@@ -1663,6 +1664,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.110" },
     { name = "lbd", extras = ["plot"], editable = "languages/python" },
     { name = "pillow", specifier = ">=10.0" },
+    { name = "psutil", specifier = ">=5.9" },
     { name = "send2trash", specifier = ">=1.8" },
     { name = "uvicorn", specifier = ">=0.29" },
 ]
