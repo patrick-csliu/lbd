@@ -9,7 +9,9 @@ is closed and renamed to `name.lbd`.
 
 Measurements are put in with the same calls as `lbd.Dataset` (`add_axis`, `add_value`, `write`);
 `write` only checks and collects, and a background thread writes what was collected every
-`flush_every` seconds, forcing it to disk every `force_every` seconds.
+`flush_every` seconds, forcing it to disk every `force_every` seconds. The same thread keeps the
+heartbeat file `name.lbd.live` up to date (live.py): how far the measurement is, for this and
+other computers.
 """
 
 from __future__ import annotations
@@ -54,6 +56,7 @@ from .io import (
     load,
     new_uuid7,
 )
+from .live import Heartbeat, live_path
 
 PathLike = Union[str, os.PathLike]
 
@@ -252,18 +255,23 @@ def writing_status(path: PathLike) -> str:
     return "measuring" if _guard_held(p) else "stopped"
 
 
-def recover(path: PathLike) -> Path:
+def recover(path: PathLike, keep: bool = False) -> Path:
     """Make a stopped `.writing` file into an `.lbd` file with everything it holds.
 
     A Writer that stopped before finishing (a crash, a script ended without `close`) leaves
     `name.lbd.writing`; this copies what was written into `name.lbd` (or `name (2).lbd` … if
-    that is taken), checks the copy, and removes the `.writing` file. Points never measured stay
-    `NaN` (or masked, for integers and booleans). The file keeps its id.
+    that is taken), checks the copy, and removes the `.writing` file and its heartbeat
+    `name.lbd.live`. Points never measured stay `NaN` (or masked, for integers and booleans).
+    The file keeps its id.
 
     Parameters
     ----------
     path : str or path-like
         The `name.lbd.writing` file.
+    keep : bool, optional
+        Make a copy, `name (recovered).lbd`, and leave the `.writing` and `.live` files as they
+        are. For a file measured on another computer and synced here: whether it still
+        measures there can't be known here, and removing it would travel back through the sync.
 
     Returns
     -------
@@ -293,13 +301,18 @@ def recover(path: PathLike) -> Path:
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", message=".*still being written", category=LBDWarning)
         d = load(src)
-    target = _free_name(src.with_name(src.name[: -len(WRITING_SUFFIX)]))
+    name = src.with_name(src.name[: -len(WRITING_SUFFIX)])
+    target = _free_name(name.with_name(f"{name.stem} (recovered){name.suffix}") if keep else name)
     d.path = target                          # the same measurement: keep its id
     d.save(target)
     check = load(target)
     if check.id != d.id or {k: v.shape for k, v in check.values.items()} != {k: v.shape for k, v in d.values.items()}:
         raise LBDError(f"recovering {src.name}: the copy {target.name} doesn't match; {src.name} is kept")
-    _remove(src)
+    if not keep:
+        _remove(src)
+        beat = live_path(src)
+        if beat.exists():
+            _remove(beat)
     return target
 
 
@@ -401,6 +414,7 @@ class Writer:
         self._thread: Optional[threading.Thread] = None
         self._error: Optional[BaseException] = None
         self._last_force = 0.0
+        self._beat: Optional[Heartbeat] = None   # name.lbd.live, from the start
         self._state = "new"                  # new → writing → finished | stopped
 
     # ---- description, as Dataset ---------------------------------------
@@ -488,6 +502,7 @@ class Writer:
             self.writing_path.unlink()
             raise
         self._file = f
+        self._beat = Heartbeat(self.writing_path, d, d.writer)
         self._state = "writing"
         _OWN[str(self.writing_path.resolve())] = self
         _open_writers.add(self)
@@ -598,6 +613,7 @@ class Writer:
             items.append(("put", name, index, np.array(arr, dtype=store)))   # a copy: the caller may reuse its buffer
         with self._lock:
             self._pending.extend(items)
+            self._beat.record(plan["puts"])
         return plan["result"]
 
     def flush(self) -> None:
@@ -619,6 +635,16 @@ class Writer:
             self._write_pending()
             if self._error is not None:
                 return
+            self._beat_now()
+
+    def _beat_now(self, force: bool = False) -> None:
+        """Rewrite the heartbeat file when it is due (live.py)."""
+        beat = self._beat
+        if beat is None or not (force or beat.due()):
+            return
+        with self._lock:
+            content = beat.content()
+        beat.write(content)
 
     def _write_pending(self) -> None:
         with self._io:
@@ -737,6 +763,8 @@ class Writer:
                 time.sleep(0.1)
         self._state = "finished"
         self.path = target
+        if self._beat is not None:
+            self._beat.remove()
         return target
 
     def _finished_description(self) -> tuple:

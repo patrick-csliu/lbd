@@ -272,6 +272,28 @@ when complete.
   finished, renamed to `<name>.lbd`). Other programs
   opening it in the ordinary way are refused by HDF5 while it is written; this does not
   disturb the writer.
+- **The heartbeat** (optional; LBD's writers write it). The guard is seen only on the writer's
+  computer. So that other computers (e.g. through a sync tool) can tell a running measurement
+  from a stopped one, the writer keeps a small UTF-8 JSON file `<name>.lbd.live` beside the
+  file being written, rewritten whole (a new file replacing the old one) at least every
+  `beat_every` seconds even when nothing new was measured, and removed when the file is
+  finished:
+
+  ```json
+  {"lbd_live": 1, "computer": "LAB-PC", "process": 4120, "program": "python lbd 1.3.0",
+   "started": "2026-11-03T10:00:05+08:00", "updated": "2026-11-03T10:12:35+08:00",
+   "beat_every": 30, "longest_gap": 31.2,
+   "values": {"S21": {"points": 47069, "total": 180090, "per_write": 2001, "rate": 64.1,
+                      "axes": [{"name": "power", "index": 23, "length": 90, "step_seconds": 31.2}]}}}
+  ```
+
+  Per value: `points` measured so far (each counted once), `total` (`null` when it isn't known in
+  advance: a growing axis, an axis group), `per_write` (points given at once), `rate` (points
+  per second lately, or `null`), and for each axis written one position at a time its last
+  `index`, `length` and `step_seconds` (the average time between its steps, or `null`). A
+  reader judges whether the writer is alive by when **it** saw the file change, never by
+  comparing `updated` with its own clock (two computers' clocks differ). The file is not part
+  of the LBD file; readers that don't know it ignore it.
 
 ---
 
