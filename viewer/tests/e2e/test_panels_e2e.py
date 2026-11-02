@@ -77,7 +77,9 @@ def test_panels_are_added_removed_duplicated_moved_and_remembered(values_files, 
     first = titles(page)[0]
     assert titles(page)[1] == first
     order = titles(page)
-    shown(page).locator(".panel-title").nth(2).drag_to(shown(page).locator(".panel").nth(4))   # moved
+    # Dropped on panel 5's title: the panel's middle can be below the window (six panels with
+    # toolbars on three lines), and Playwright's drag to a point it must scroll to never starts.
+    shown(page).locator(".panel-title").nth(2).drag_to(shown(page).locator(".panel-title").nth(4))   # moved
     assert titles(page) == order[:2] + order[3:5] + [order[2]] + order[5:]
 
     shown(page).get_by_label("stacked").check()
