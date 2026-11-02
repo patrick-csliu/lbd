@@ -10,7 +10,16 @@ import pytest
 import lbd
 from lbd_viewer import export, memory, summaries
 from lbd_viewer.memory import Memory, PartCache
-from test_large_view import MAP, FakeMemory, big, little_room  # noqa: F401  (fixture)
+from test_large_view import GB, MAP, FakeMemory, big, little_room  # noqa: F401  (fixture)
+
+
+
+@pytest.fixture(autouse=True)
+def plenty_of_memory(monkeypatch):
+    """Room for the small files whatever else runs on the computer (tests side by side): only
+    the test that asks for little room sees a file as bigger than memory."""
+    monkeypatch.setitem(memory._shared, "cache", PartCache(Memory(system=FakeMemory(room=10 * GB))))
+
 
 F = np.linspace(4e9, 6e9, 201)
 P = np.array([-30.0, -20.0, -10.0])

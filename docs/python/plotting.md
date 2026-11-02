@@ -208,6 +208,35 @@ fig = lp.quick(t, {"data": np.sin(2e7 * t), "fit": 0.9 * np.sin(2e7 * t)},
                x_label="Time", x_unit="s", y_label="Signal", y_unit="V")
 ```
 
+### As numbers: a CSV table
+
+[`lp.table`][lbd.plot.table] gives the numbers a curve plot or heat map shows (the complex mode
+applied, the series and slices chosen), with the same arguments as `lp.plot`. This is what LBD
+Viewer's **Save as CSV** writes ([Explore](../viewer/explore.md#getting-data-out)).
+`to_csv` writes one data point per row, or for 2-D data a table (matrix):
+
+```python
+t = lp.table("sweep.lbd", "curve", "S21", complex="db", series="power")
+t.to_csv("sweep_S21_dB.csv")                       # columns power, freq, S21
+t.to_csv("sweep_matrix.csv", layout="matrix")      # rows = power, columns = freq
+
+a = np.loadtxt("sweep_S21_dB.csv", delimiter=",", encoding="utf-8")
+cols = np.genfromtxt("sweep_S21_dB.csv", delimiter=",", names=True, encoding="utf-8")
+print(cols["freq"][:3], cols["S21"][:3])
+```
+
+| Argument | Choices |
+|---|---|
+| `numbers=` | `"shown"` (as plotted), `"stored"` (the file's numbers; complex as `S21_re`, `S21_im`), `"both"` |
+| `xlim=`, `ylim=` | keep only this range (stored units: Hz, not GHz) |
+| `units=` | `"stored"` (Hz) or `"shown"` (the plot's prefixes: GHz) |
+| `to_csv(layout=)` | `"rows"` or `"matrix"`; `rows_are="x"` turns the matrix the other way |
+
+The file starts with comment lines (`#`): the column names, where the numbers come from (file,
+complex mode, fixed parameters), and each column's unit. Numbers are written at full precision,
+with `.` as decimal point and `,` between columns. Give `encoding="utf-8"` when reading: units
+like µ and ° are in the comments. `t.estimate()` says how big the file will be before writing it.
+
 ## Recipes
 
 ### Make every figure of a paper consistent

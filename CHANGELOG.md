@@ -48,6 +48,15 @@ are still written as 1.2).
 
 **Viewer**
 
+- **Getting data out of Explore** (each panel's **Data ▾** menu, and the right-click menu):
+  **Save as CSV…** writes the numbers the panel shows (complex mode, operations, equations and
+  chosen traces applied) into a new file next to the data. You choose the numbers (as shown,
+  stored, or both), everything or the zoomed range, one data point per row or a table (matrix)
+  for 2-D data, stored units or those on screen, and this panel or all panels. The dialog says
+  how big the file will be and warns above 100 MB or beyond what Excel opens; large data is
+  written part by part with progress and Cancel. The file reads back with `numpy.loadtxt`.
+  **Copy picture** puts a PNG of the panel (or all panels) on the clipboard, as on screen or
+  the plot alone; Figure has **Copy picture** too.
 - **Values bigger than the memory available open**: a value that fits is read whole as before;
   a bigger one is read by part, only the map or curves shown. Parts read are kept while memory
   is free, the next slider positions are read ahead, and LBD always leaves some memory for the
@@ -163,6 +172,9 @@ are still written as 1.2).
 
 **Plotting (Figure, `lbd.plot`)**
 
+- `lbd.plot.table(...)`: the numbers a curve plot or heat map shows (same arguments as
+  `lbd.plot.plot`), as shown, stored or both; `Table.to_csv(path, layout="rows" | "matrix")`
+  writes them as Explore's Save as CSV does, readable by `numpy.loadtxt`.
 - Curves can use a value as the horizontal axis (one with the same axes as the plotted value):
   each trace is drawn at its own x, e.g. a frequency span that changes with power.
 - Complex modes `phase_unwrap` and `phase_deg_unwrap`: the phase without its 2π jumps along the

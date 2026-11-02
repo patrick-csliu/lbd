@@ -94,6 +94,21 @@ For figures you draw with matplotlib yourself.
     options:
       heading_level: 3
 
+## The numbers a plot shows
+
+| You want… | Use |
+|---|---|
+| what a curve plot or heat map shows, as a table or CSV file | [`table`][lbd.plot.table], then [`Table.to_csv`][lbd.plot.Table.to_csv] |
+
+::: lbd.plot.table
+    options:
+      heading_level: 3
+
+::: lbd.plot.Table
+    options:
+      heading_level: 3
+      members: [to_csv, estimate, columns]
+
 ## Manage presets
 
 Only needed to create, change or delete presets from code, or to reproduce the viewer's exact

@@ -319,6 +319,83 @@ at all are shown from a summary made once (with a progress bar and Cancel) and k
 see [Large files](../getting-started/large-files.md#large-files-in-lbd-viewer) for what works on
 such data and the **⚙ Memory for data** settings.
 
+## Getting data out
+
+Each panel has a **Data ▾** menu (next to **Reset view**); the same entries are in the plot's
+right-click menu.
+
+### Save as CSV
+
+**Save as CSV…** writes the numbers the panel shows into a new `.csv` file next to the data file
+(the data file is not changed). The dialog has these choices; the last ones used are kept:
+
+| Choice | Options |
+|---|---|
+| **Numbers** | **as shown** (complex mode, operations and equations applied) · **as shown + stored** (each shown column followed by the file's own numbers) · **stored** |
+| **How much** | **everything** (all chosen traces, every point) · **the zoomed range** |
+| **Layout** | **one data point per row** · **table (matrix)**, for 2-D data: a map, or curves of a series |
+| **Units** | **stored** (Hz: nothing rounded) · **as on screen** (GHz) |
+| **Panels** | **this panel** · **all panels**: one file when they share their axes (a column per panel), else one file each |
+
+Some choices can't be made for every panel; they are greyed, and pointing at one says why (for
+example the stored numbers after an FFT, whose points aren't stored ones).
+
+Under the choices, the dialog says how big the file will be (*About 48 MB, 1 010 101 rows ×
+3 columns*). Above 100 MB it warns, and **Save** becomes **Save anyway**; it also says when
+Excel would open only part of the file (more than 1 048 576 rows or 16 384 columns). A large
+file is written part by part, with a progress bar and **Cancel saving** (which leaves no file).
+
+One data point per row (the coordinates, then the values):
+
+```text
+# power,freq,S21
+# LBD export: power_sweep.lbd, 2026-11-01 14:03, LBD 1.3.0
+# complex mode: db (for S21)
+# numbers as shown; stored units
+# after: subtract mean (along x)
+# columns: power: Power (dBm); freq: Frequency (Hz); S21: |S21| − mean (dB)
+-60,6990000000,-0.512
+-60,6990100000,-0.52
+```
+
+A table (matrix): the first row holds the horizontal axis, the first column the traces (or
+the other way round, as chosen); the corner is `nan`, so the whole file is numbers:
+
+```text
+# table: rows = power: Power (dBm), columns = freq: Frequency (Hz), cells = S21: |S21| (dB)
+# the first row holds the columns' coordinates, the first column the rows'; the corner is nan
+nan,6990000000,6990100000
+-60,-0.512,-0.52
+-59,-0.509,-0.517
+```
+
+Reading it back in Python (the names come from the first line):
+
+<!-- no-check -->
+```python
+a = np.loadtxt("power_sweep_S21_db.csv", delimiter=",", encoding="utf-8")
+t = np.genfromtxt("power_sweep_S21_db.csv", delimiter=",", names=True, encoding="utf-8")
+t["freq"], t["S21"]
+```
+
+Excel and Origin read the file too (`,` between columns, `.` as decimal point; in Excel with
+another decimal sign, use **Data → From Text/CSV**). The same table comes from a script with
+[`lbd.plot.table`](../python/plotting.md#as-numbers-a-csv-table).
+
+### Copy picture
+
+**Copy picture** puts a PNG of the panel on the clipboard, to paste into slides, a chat or your
+notes. Two choices in the same menu decide what it holds (the ones used last are kept):
+
+- **Picture as on screen (cursors, cuts)** or **Picture of the plot only**;
+- **Picture of this panel** or **Picture of all panels**, as laid out side by side or stacked.
+
+It is the picture on screen, at the screen's resolution: a quick look to share, not a figure
+for print. For a figure at its real size, in the file's style, use **Open in Figure** and its
+**Copy picture** or **Export** ([Saving and exporting](saving-and-exporting.md)). Where the
+browser can't put pictures on the clipboard, **Save picture as PNG…** saves the same picture as
+a file.
+
 ## What is remembered, and where
 
 The viewer remembers how you explored each file: its panels and what each plots, the chosen
