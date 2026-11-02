@@ -615,15 +615,18 @@ class LibraryIndex:
 
 
 def writing_status(path: str) -> Optional[str]:
-    """"measuring" or "stopped" for a file being written (name.lbd.writing), else None."""
+    """For a file being written (name.lbd.writing): "measuring" (here), "elsewhere" (on another
+    computer, synced here), "silent" (no sign from that computer lately) or "stopped" (live.py);
+    else None."""
     if not scan.is_writing(path):
         return None
-    import lbd
+    from . import live
 
     try:
-        return lbd.writing_status(path)
-    except (OSError, lbd.LBDError):              # gone meanwhile (finished: renamed)
+        state = live.shared().status(path)["state"]
+    except OSError:                              # gone meanwhile (finished: renamed)
         return None
+    return None if state == "gone" else state
 
 
 def _listdir(folder: str) -> List[str]:

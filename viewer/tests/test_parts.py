@@ -24,7 +24,9 @@ def test_config_settings_roundtrip(tmp_path):
                               "open_data_in": "explore", "theme": "system",
                               "library": {"read_headers": True, "notice_seen": False, "columns": ["name", "date", "sweep"],
                                           "previews": "all", "list_view": "list"},
-                              "memory": {"reserve_gb": None, "maximum_gb": None, "summary_cache_gb": 20.0}}
+                              "memory": {"reserve_gb": None, "maximum_gb": None, "summary_cache_gb": 20.0},
+                              "measurements": {"progress": True, "time": True, "percent": True, "points": True,
+                                               "axes": True, "notify": False}}
     assert cfg.problems() == []
     # the Library's settings: checked, kept
     assert cfg.set_library({"read_headers": False, "columns": ["name", "values"]})["read_headers"] is False

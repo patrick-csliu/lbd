@@ -43,6 +43,10 @@ LIBRARY_DEFAULTS: Dict[str, Any] = {"read_headers": True, "notice_seen": False, 
 # automatic, max(2 GB, 10% of RAM)), the most LBD may use (None: no maximum), and the disk cache
 # of large maps' and curves' summaries. In GB.
 MEMORY_DEFAULTS: Dict[str, Any] = {"reserve_gb": None, "maximum_gb": None, "summary_cache_gb": 20.0}
+# Files being measured (plan 9, live.py): show the progress at all, and each of its parts; a
+# browser notification when a measurement finishes or stops while the page is in the background.
+MEASUREMENTS_DEFAULTS: Dict[str, Any] = {"progress": True, "time": True, "percent": True, "points": True,
+                                         "axes": True, "notify": False}
 EVERY_FILE_NEEDS_HEADERS = ("Previews of every file can't be drawn while \"Read each data file's details\" is "
                             "off: drawing them would read every file. Turn that on first, or choose \"The "
                             "selected file and nearby rows\".")
@@ -82,7 +86,8 @@ class Config:
             data = _read_json(self.settings_path)
         if data is None:
             return {"roots": [], "default_style": None, "open_files_in": "viewer", "open_data_in": "explore",
-                    "theme": "system", "library": dict(LIBRARY_DEFAULTS), "memory": dict(MEMORY_DEFAULTS)}
+                    "theme": "system", "library": dict(LIBRARY_DEFAULTS), "memory": dict(MEMORY_DEFAULTS),
+                    "measurements": dict(MEASUREMENTS_DEFAULTS)}
         if not isinstance(data, dict):
             raise ConfigError(f"{self.settings_path} must contain a JSON object; fix or delete the file")
         roots = data.get("roots", [])
@@ -112,8 +117,13 @@ class Config:
             memory = _check_memory({**MEMORY_DEFAULTS, **(data.get("memory") or {})})
         except ConfigError as e:
             raise ConfigError(f"{self.settings_path}: {e}; fix or delete the file") from None
+        try:
+            measurements = _check_measurements({**MEASUREMENTS_DEFAULTS, **(data.get("measurements") or {})})
+        except ConfigError as e:
+            raise ConfigError(f"{self.settings_path}: {e}; fix or delete the file") from None
         return {"roots": list(roots), "default_style": default or None, "open_files_in": open_in,
-                "open_data_in": open_data, "theme": theme, "library": library, "memory": memory}
+                "open_data_in": open_data, "theme": theme, "library": library, "memory": memory,
+                "measurements": measurements}
 
     def settings(self) -> Dict[str, Any]:
         """{"roots": [...], "default_style": name, "open_files_in": ..., "open_data_in": ...,
@@ -124,7 +134,7 @@ class Config:
             default = "default"
         return {"roots": stored["roots"], "default_style": default, "open_files_in": stored["open_files_in"],
                 "open_data_in": stored["open_data_in"], "theme": stored["theme"], "library": stored["library"],
-                "memory": stored["memory"]}
+                "memory": stored["memory"], "measurements": stored["measurements"]}
 
     def problems(self) -> List[str]:
         """Things the user should know about the settings (shown as warnings in the viewer)."""
@@ -215,6 +225,18 @@ class Config:
             s["memory"] = _check_memory({**s["memory"], **changes})
             self._save_settings(s)
             return s["memory"]
+
+    def set_measurements(self, changes: Dict[str, Any]) -> Dict[str, Any]:
+        """Change what the status of a file being measured shows (MEASUREMENTS_DEFAULTS, each
+        true or false); returns them all."""
+        unknown = sorted(set(changes) - set(MEASUREMENTS_DEFAULTS))
+        if unknown:
+            raise ConfigError(f"unknown measurement setting(s) {unknown}; known: {sorted(MEASUREMENTS_DEFAULTS)}")
+        with self._lock:
+            s = self.settings()
+            s["measurements"] = _check_measurements({**s["measurements"], **changes})
+            self._save_settings(s)
+            return s["measurements"]
 
     def set_theme(self, theme: str) -> None:
         """The viewer's colours: "system" (follow the operating system), "light" or "dark"."""
@@ -311,6 +333,13 @@ def _check_memory(memory: Dict[str, Any]) -> Dict[str, Any]:
     if isinstance(x, bool) or not isinstance(x, (int, float)) or x < 0:
         raise ConfigError(f"memory setting 'summary_cache_gb' must be a number of GB (≥ 0), not {x!r}")
     return {k: (None if memory[k] is None else float(memory[k])) for k in MEMORY_DEFAULTS}
+
+
+def _check_measurements(m: Dict[str, Any]) -> Dict[str, Any]:
+    for k in MEASUREMENTS_DEFAULTS:
+        if not isinstance(m.get(k), bool):
+            raise ConfigError(f"measurement setting '{k}' must be true or false, not {m.get(k)!r}")
+    return {k: m[k] for k in MEASUREMENTS_DEFAULTS}
 
 
 def _same_path(a: str, b: str) -> bool:

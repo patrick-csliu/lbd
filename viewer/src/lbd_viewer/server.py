@@ -47,7 +47,7 @@ from .catalog import Catalog, catalog_dir, fitting, structure  # noqa: E402
 from . import labels, library_labels  # noqa: E402
 from .library import LibraryIndex, writing_status  # noqa: E402
 from .previews import PreviewCache, PreviewError, Previewer  # noqa: E402
-from . import memory, reading, summaries  # noqa: E402
+from . import live, memory, reading, summaries  # noqa: E402
 from . import export as csv_export  # noqa: E402
 from .explore import ExploreClosed, ExploreError, ExploreSession, Sessions  # noqa: E402
 from .pages import PageError, Pages, UnknownPage  # noqa: E402
@@ -114,6 +114,7 @@ class AppState:
         self.opened: Set[str] = set()
         self.explore = Sessions()           # the Explore views' sessions (explore.py)
         self.exports = csv_export.Exports()  # CSV files being written (export.py)
+        self.live = live.shared()           # files being measured: state and progress (live.py)
         self._catalog: Optional[Catalog] = None
         self._library: Optional[LibraryIndex] = None
         self._previews: Optional[Previewer] = None
@@ -262,6 +263,8 @@ def collect_warnings() -> Iterator[List[str]]:
     for w in caught:
         if issubclass(w.category, lbd.LBDWarning):
             text = str(w.message)
+            if "is still being written" in text:      # a file being measured: its status line says so
+                continue
             if text not in found:
                 found.append(text)
 
@@ -351,6 +354,7 @@ class SettingsBody(_Body):
     theme: Optional[str] = None           # "system", "light" or "dark" (config.THEMES)
     library: Optional[Dict[str, Any]] = None  # {read_headers?, notice_seen?, columns?} (config.LIBRARY_DEFAULTS)
     memory: Optional[Dict[str, Any]] = None   # {reserve_gb?, maximum_gb?, summary_cache_gb?} (config.MEMORY_DEFAULTS)
+    measurements: Optional[Dict[str, Any]] = None   # {progress?, time?, percent?, points?, axes?, notify?}
 
 
 class FilePlotBody(_Body):
@@ -862,7 +866,7 @@ def create_app(state: AppState) -> FastAPI:
             "version": VERSION, "lbd_version": lbd.FORMAT_VERSION,
             "roots": s["roots"], "default_style": s["default_style"], "styles": names,
             "open_files_in": s["open_files_in"], "open_data_in": s["open_data_in"], "theme": s["theme"],
-            "library": s["library"], "memory": {**s["memory"], **memory_now()}, "login": getpass.getuser(), "platform": sys.platform, "config_dir": str(cfg.dir), "warnings": problems + warns,
+            "library": s["library"], "memory": {**s["memory"], **memory_now()}, "measurements": s["measurements"], "login": getpass.getuser(), "platform": sys.platform, "config_dir": str(cfg.dir), "warnings": problems + warns,
         }
 
     @app.post("/api/open")
@@ -906,13 +910,19 @@ def create_app(state: AppState) -> FastAPI:
         version and each folder's listing signature, None when it is gone. Only sizes and times
         are read; no file is opened, so a program writing it is never in the way. A path that
         isn't allowed is listed under "errors" with the reason."""
-        out: Dict[str, Any] = {"files": {}, "dirs": {}, "errors": {}}
+        out: Dict[str, Any] = {"files": {}, "dirs": {}, "errors": {}, "finished": {}}
         for kind, paths in (("files", body.files), ("dirs", body.dirs)):
             for path in paths:
                 try:
                     p = state.check_allowed(path)
                     if kind == "files":
                         out[kind][path] = file_version(p) if p.is_file() else None
+                        if out[kind][path] is None and scan.is_writing(p.name):
+                            new = state.live.finished(str(p))       # measured to the end: renamed
+                            if new is not None:
+                                out["finished"][path] = str(new)
+                                if state.live.mark_followed(str(p)):
+                                    _follow_rename(p, new)
                     else:
                         out[kind][path] = scan.list_dir(p)["signature"] if p.is_dir() else None
                 except HTTPException as e:
@@ -1259,7 +1269,9 @@ def create_app(state: AppState) -> FastAPI:
         rec = state.catalog.view(str(p))
         if rec is None:
             return {"state": None, "note": None}
-        kept, reason = fitting(rec["structure"], structure(lbd.info(p)), rec["state"])
+        with quiet_writing():                       # a file being measured: its status says so
+            now = structure(lbd.info(p))
+        kept, reason = fitting(rec["structure"], now, rec["state"])
         if kept is None:
             return {"state": None, "note": f"The Explore view remembered for {p.name} no longer fits the file "
                                             f"({reason}), so it starts afresh."}
@@ -1270,7 +1282,9 @@ def create_app(state: AppState) -> FastAPI:
     @app.put("/api/explore/remembered")
     def explore_remember(body: RememberBody):
         p = state.check_allowed(body.path)
-        state.catalog.remember(str(p), structure(lbd.info(p)), body.state)
+        with quiet_writing():
+            now = structure(lbd.info(p))
+        state.catalog.remember(str(p), now, body.state)
         return {"ok": True}
 
     @app.delete("/api/explore/remembered")
@@ -1539,9 +1553,12 @@ def create_app(state: AppState) -> FastAPI:
     @app.put("/api/settings")
     def put_settings(body: SettingsBody):
         if (body.default_style is None and body.open_files_in is None and body.open_data_in is None
-                and body.theme is None and body.library is None and body.memory is None):
+                and body.theme is None and body.library is None and body.memory is None
+                and body.measurements is None):
             raise HTTPException(400, "nothing to change: send default_style, open_files_in, open_data_in, theme, "
-                                     "library and/or memory")
+                                     "library, memory and/or measurements")
+        if body.measurements is not None:
+            cfg.set_measurements(body.measurements)
         if body.memory is not None:
             apply_memory(cfg.set_memory(body.memory))
             summaries.shared().trim()                     # a smaller limit: the oldest summaries go
@@ -1559,7 +1576,7 @@ def create_app(state: AppState) -> FastAPI:
             if cfg.set_library(body.library)["read_headers"] != before:
                 state.wake_library()                      # read what is missing (or stop reading)
         if (body.open_files_in is not None or body.open_data_in is not None or body.theme is not None
-                or body.library is not None or body.memory is not None):
+                or body.library is not None or body.memory is not None or body.measurements is not None):
             state.pages.broadcast("settings_changed")      # every page shows the new setting
         return get_state()
 
@@ -1599,36 +1616,57 @@ def create_app(state: AppState) -> FastAPI:
             raise HTTPException(400, str(e))
         except FileNotFoundError as e:
             raise HTTPException(404, str(e))
+        _follow_rename(p, new)
+        return {"path": str(new)}
+
+    def _follow_rename(p: Path, new: Path) -> None:
+        """Everything LBD keeps about a file follows it to its new name: the double-click
+        permission, the remembered Explore view and chosen preview, the automatic preview, the
+        labels; and every page's tabs (the "renamed" event)."""
         if _key(p) in state.opened:  # a file opened by double-click stays readable
             state.opened.add(_key(new))
-        state.catalog.renamed(str(p), str(new))       # its remembered Explore view (and chosen preview) follows it
+        state.catalog.renamed(str(p), str(new))
         if state._previews is not None:
             state._previews.renamed(str(p), str(new))
         _labels_follow(lambda lib: library_labels.renamed(lib, str(p), str(new)))
         state.pages.broadcast("renamed", old=str(p), new=str(new))
-        return {"path": str(new)}
 
     @app.post("/api/file/recover")
     def recover_file(body: PathBody):
         """Make a file whose measurement stopped before finishing (name.lbd.writing) an .lbd file
-        with everything it holds (lbd.recover): name.lbd, or "name (2).lbd" if that is taken."""
+        with everything it holds (lbd.recover): name.lbd, or "name (2).lbd" if that is taken. When
+        this computer can't know that it stopped (it is measured on another computer and synced
+        here, or no sign of it came for a while), a copy is made instead, "name (recovered).lbd",
+        and the file being written is left as it is: removing it would travel back through the
+        sync to a measurement that may still run."""
         p = state.check_allowed(body.path)
         if not p.name.lower().endswith(".lbd.writing"):
             raise HTTPException(400, f"{p.name} is not a file being written (name.lbd.writing)")
         if not p.is_file():
             raise HTTPException(404, f"not a file: {p}")
+        copy = state.live.status(str(p))["state"] in ("elsewhere", "silent")
         try:
-            new = lbd.recover(p)
+            new = lbd.recover(p, keep=copy)
         except lbd.LBDError as e:
             raise HTTPException(409, str(e))
         except OSError as e:
             raise HTTPException(500, f"{p.name} couldn't be recovered: {e}")
-        if _key(p) in state.opened:
-            state.opened.add(_key(new))
-        state.catalog.renamed(str(p), str(new))       # its remembered Explore view follows it
-        _labels_follow(lambda lib: library_labels.renamed(lib, str(p), str(new)))
-        state.pages.broadcast("renamed", old=str(p), new=str(new))
-        return {"path": str(new)}
+        if copy:
+            if _key(p) in state.opened:
+                state.opened.add(_key(new))
+            return {"path": str(new), "copy": True}
+        state.live.forget(str(p))
+        _follow_rename(p, new)
+        return {"path": str(new), "copy": False}
+
+    @app.get("/api/live")
+    def live_status(path: str = Query(...), value: Optional[str] = Query(None)):
+        """The state of a file being measured (measuring here or on another computer, no sign
+        lately, stopped) and its progress as steady text (live.py)."""
+        p = state.check_allowed(path)
+        if not scan.is_writing(p.name):
+            raise HTTPException(400, f"{p.name} is not a file being measured (name.lbd.writing)")
+        return state.live.status(str(p), value)
 
     @app.post("/api/file/trash")
     def trash_file(body: PathBody):

@@ -138,12 +138,12 @@ function CursorNumbers({ n, c, kind, type, actions }: { n: number; c: CursorRead
       {y && yEditable && <PositionBox it={y} onSet={(v) => actions.current?.typed(n - 1, "y", v)} />}
       {y && !yEditable && (
         <div className="cursor-value">
-          {y.label} = <strong>{si(y.value, y.unit)}</strong>
+          {y.label} = <strong>{y.text ?? si(y.value, y.unit)}</strong>
         </div>
       )}
       {z && (
         <div className="cursor-value">
-          {z.label} = <strong>{si(z.value, z.unit)}</strong>
+          {z.label} = <strong>{z.text ?? si(z.value, z.unit)}</strong>
         </div>
       )}
       {series && (

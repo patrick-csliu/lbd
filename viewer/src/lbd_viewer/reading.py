@@ -194,7 +194,22 @@ def cursors(s: "ExploreSession", items: List[Dict[str, Any]], kind: str, view: D
                 if drawn is not None:
                     c["line"] = [[float(a), float(b)] if np.isfinite(a) and np.isfinite(b) else None
                                  for a, b in zip(*drawn)]
+    if s.path.name.lower().endswith(".lbd.writing"):
+        _not_measured_yet(out["cursors"])
     return out
+
+
+def _not_measured_yet(found: Any) -> None:
+    """In a file being measured, a value without a number is one not measured yet: say so
+    (the page shows an item's `text` instead of its number)."""
+    if isinstance(found, dict):
+        if "value" in found and found.get("value") is None and "text" not in found and "unit" in found:
+            found["text"] = "not measured yet"
+        for v in found.values():
+            _not_measured_yet(v)
+    elif isinstance(found, list):
+        for v in found:
+            _not_measured_yet(v)
 
 
 def _check_point(c: Dict[str, Any]) -> Tuple[float, float]:

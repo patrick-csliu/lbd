@@ -59,11 +59,11 @@ def test_listed_with_their_status(client, data_dir, writing):
     assert info["writing"] == "stopped" and info["title"] == "stopped"
 
 
-def test_opened_with_a_notice(client, writing):
+def test_opened_with_its_status_not_a_warning(client, writing):
     w, _ = writing
     r = client.get("/api/file", params={"path": str(w.writing_path)}).json()
     assert r["writing"] == "measuring"
-    assert any("still being written" in m for m in r["warnings"])
+    assert not any("still being written" in m for m in r["warnings"])    # the status says it (plan 9)
     assert [a["length"] for a in r["axes"] if a["name"] == "time"] == [2]
 
 
@@ -118,5 +118,5 @@ def test_explored_while_written(client, writing):
         r = client.post("/api/explore", json={"path": str(p), "width": 400, "height": 300, "dpr": 1})
         assert r.status_code == 200, r.text
         o = r.json()
-        assert any("still being written" in m for m in o.get("warnings", [])), o.get("warnings")
+        assert not any("still being written" in m for m in o.get("warnings", [])), o.get("warnings")   # plan 9
         client.delete(f"/api/explore/{o['session']}")

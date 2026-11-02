@@ -614,6 +614,7 @@ class Writer:
         with self._lock:
             self._pending.extend(items)
             self._beat.record(plan["puts"])
+        self._beat_now()                    # the first at once, then when due (the thread does the rest)
         return plan["result"]
 
     def flush(self) -> None:
