@@ -940,6 +940,17 @@ function parseWarnings(header: string | null): string[] {
 }
 
 /** Fetch a file from the API and hand it to the browser as a download. Returns the file name. */
+/** The figure as PNG bytes (Figure's Copy picture), as Export makes it. */
+export async function figurePng(path: string, spec: PlotSpec | null, preset: string | null, style: JsonObject | null): Promise<Blob> {
+  const r = await fetch("/api/export", {
+    method: "POST",
+    headers: { "X-LBD-Token": token, "Content-Type": "application/json" },
+    body: JSON.stringify({ path, spec, preset, style, format: "png" }),
+  });
+  if (!r.ok) throw new ApiError(r.status, await errorText(r));
+  return r.blob();
+}
+
 async function download(url: string, method: string, body: unknown, fallbackName: string): Promise<string> {
   const r = await fetch(url, {
     method,

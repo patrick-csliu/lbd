@@ -7,6 +7,8 @@ import CursorPanel, { OtherPanel } from "./CursorPanel";
 import { CursorsState, NO_CURSORS } from "./cursors";
 import ExploreView, { ExploreActions, Follow, View, ViewSettings } from "./ExploreView";
 import ExportDialog, { ExportSource } from "./ExportDialog";
+import { around, compose, copyPng, downloadPng, pageBackground, pictureChoice, rememberPictureChoice } from "./clipboard";
+import type { MenuEntry } from "./menu";
 import AxisSelect from "./AxisSelect";
 import { COMPLEX_MODES, SliceControl } from "./FileView";
 import { useDiskVersion } from "./watch";
@@ -169,6 +171,62 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
   const actionRefs = useRef<Record<string, MutableRefObject<ExploreActions | null>>>({});
   const actionsOf = (id: string) => (actionRefs.current[id] ??= { current: null });
   const [exporting, setExporting] = useState<ExportSource[] | null>(null); // Save as CSV open: panel asked, then the others
+  const [picture, setPicture] = useState(pictureChoice); // Copy picture: what, and which panels
+  const setPictureChoice = (c: typeof picture) => {
+    setPicture(c);
+    rememberPictureChoice(c);
+  };
+  /** The picture of panel `id` (or all panels, as laid out), from what is on screen now. */
+  const pictureOf = (id: string): HTMLCanvasElement | null => {
+    const ids = picture.all && rec ? rec.panels.map((q) => q.id) : [id];
+    const shots = ids.map((i) => actionsOf(i).current?.snapshot(picture.what) ?? null).filter((x) => !!x);
+    if (!shots.length) return null;
+    const areas = shots.map((s) => s!.area);
+    return compose(shots.flatMap((s) => s!.canvases), around(areas), pageBackground(areas[0]));
+  };
+  const copyPicture = async (id: string) => {
+    const c = pictureOf(id);
+    if (!c) return onError("The plot isn't drawn yet.");
+    try {
+      await copyPng(c);
+      toast("Picture copied: paste it into slides, a chat or your notes.");
+    } catch (e) {
+      onError(`${(e as Error).message}.`);
+    }
+  };
+  const dataItems = (id: string): MenuEntry[] => {
+    const several = (rec?.panels.length ?? 0) > 1;
+    const mark = (on: boolean) => (on ? "● " : "○ ");
+    return [
+      {
+        label: "Save as CSV…",
+        onClick: () => {
+          const ids = [id, ...(rec?.panels ?? []).filter((q) => q.id !== id).map((q) => q.id)];
+          const sources = ids.map((i) => actionsOf(i).current?.exportSource() ?? null);
+          if (!sources[0]) return onError("The plot isn't open yet.");
+          setExporting(sources.filter((x): x is ExportSource => !!x));
+        },
+      },
+      "-",
+      { label: picture.all && several ? "Copy picture of all panels" : "Copy picture", onClick: () => void copyPicture(id) },
+      {
+        label: "Save picture as PNG…",
+        onClick: () => {
+          const c = pictureOf(id);
+          if (!c) return onError("The plot isn't drawn yet.");
+          downloadPng(c, `${infoRef.current?.name.replace(/\.lbd$/i, "") ?? "picture"}.png`).catch((e) => onError((e as Error).message));
+        },
+      },
+      { label: mark(picture.what === "screen") + "Picture as on screen (cursors, cuts)", onClick: () => setPictureChoice({ ...picture, what: "screen" }) },
+      { label: mark(picture.what === "plot") + "Picture of the plot only", onClick: () => setPictureChoice({ ...picture, what: "plot" }) },
+      ...(several
+        ? ([
+            { label: mark(!picture.all) + "Picture of this panel", onClick: () => setPictureChoice({ ...picture, all: false }) },
+            { label: mark(picture.all) + "Picture of all panels", onClick: () => setPictureChoice({ ...picture, all: true }) },
+          ] as MenuEntry[])
+        : []),
+    ];
+  };
   const disk = useDiskVersion("file", path);
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
@@ -720,12 +778,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
                       onOpsInfo={(o) => setLive(p.id, { opsInfo: o })}
                       follow={follows[p.id] ?? null}
                       onUserView={(v) => onUserView(p.id, v)}
-                      onData={() => {
-                        const ids = [p.id, ...rec.panels.filter((q) => q.id !== p.id).map((q) => q.id)];
-                        const sources = ids.map((id) => actionsOf(id).current?.exportSource() ?? null);
-                        if (!sources[0]) return onError("The plot isn't open yet.");
-                        setExporting(sources.filter((x): x is ExportSource => !!x));
-                      }}
+                      dataItems={() => dataItems(p.id)}
                       onSync={(sy) => {
                         const old = liveRef.current[p.id]?.sync;
                         if (!old || JSON.stringify(old) !== JSON.stringify(sy)) setLive(p.id, { sync: sy });

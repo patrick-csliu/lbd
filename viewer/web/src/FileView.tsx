@@ -1,6 +1,7 @@
 import { MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, ApiError, AxisValues, baseName, FileInfo, formatBytes, Json, JsonObject, lastDownloadWarnings, PlotSpec, RenderResult, Slice, TabState, ValueInfo } from "./api";
+import { api, ApiError, AxisValues, baseName, figurePng, FileInfo, formatBytes, Json, JsonObject, lastDownloadWarnings, PlotSpec, RenderResult, Slice, TabState, ValueInfo } from "./api";
 import { deepMerge, isEmptyObject } from "./util";
+import { copyPng } from "./clipboard";
 import { ConfirmDialog, ConfirmRequest } from "./menu";
 import { useToast } from "./toast";
 import { HelpLink } from "./help";
@@ -241,6 +242,16 @@ export default function FileView(props: Props) {
     }
   };
 
+  // Copy picture: the exported PNG on the clipboard.
+  const copyFigure = async () => {
+    try {
+      await copyPng(figurePng(path, spec, preset, isEmptyObject(override) ? null : override));
+      toast("Picture copied: paste it into slides, a chat or your notes.");
+    } catch (e) {
+      onError(`${(e as Error).message}.`);
+    }
+  };
+
   // Save the view into the file. `overwrite`: even if the file changed since this tab loaded it.
   const saveToFile = async (overwrite = false) => {
     if (!result || !info) return;
@@ -401,6 +412,9 @@ export default function FileView(props: Props) {
               <button onClick={() => doExport("svg")}>SVG</button>
               <button onClick={() => doExport("png")}>PNG</button>
               <button onClick={() => doExport("jpg")} title="Blurs thin lines and text a little; prefer PDF or PNG">JPG</button>
+              <button onClick={copyFigure} title="The figure as PNG on the clipboard, as Export makes it: paste it into slides or a chat">
+                Copy picture
+              </button>
             </div>
             {renderError && <div className="error-box">{renderError}</div>}
             {(() => {

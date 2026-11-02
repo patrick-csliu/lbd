@@ -30,6 +30,7 @@ import {
 import { between, CursorsState, HELP, item, readText, si } from "./cursors";
 import { ConfirmDialog, ConfirmRequest, ContextMenu, MenuAt, MenuEntry } from "./menu";
 import type { ExportSource } from "./ExportDialog";
+import type { PictureWhat } from "./clipboard";
 import { SummaryProgress } from "./SummaryProgress";
 
 /**
@@ -161,8 +162,8 @@ interface Props {
   onUserView?: (v: View | null) => void;
   /** With each picture: what this view must share with another to follow its zoom, and where all its data is. */
   onSync?: (s: SyncKeys & { full: [Lim, Lim] }) => void;
-  /** Getting data out (plan 5): Save as CSV… asked from this panel's Data menu or right-click. */
-  onData?: (what: "csv") => void;
+  /** Getting data out (plan 5): the entries of this panel's Data menu (also in the right-click menu). */
+  dataItems?: () => MenuEntry[];
 }
 
 /** Limits pushed from another panel: x, y or both. */
@@ -189,6 +190,9 @@ export interface ExploreActions {
   calculate: (what: "delay" | "rotation", index: number) => Promise<number>;
   /** What Save as CSV needs from this panel: its session, its view now and its kind. */
   exportSource: () => ExportSource | null;
+  /** What Copy picture takes from this panel: its canvases and the area they fill on the page
+   *  ("screen": the plot with cursors and cuts; "plot": the plot alone). */
+  snapshot: (what: PictureWhat) => { canvases: HTMLCanvasElement[]; area: Element } | null;
 }
 
 const CURSOR_COLORS = ["#e0001b", "#0057d9"];
@@ -226,7 +230,7 @@ export default function ExploreView({
   follow = null,
   onUserView,
   onSync,
-  onData,
+  dataItems,
 }: Props) {
   const [limitsOpen, setLimitsOpen] = useState(false);
   // Pictures travel as raw pixels (fastest on this computer; "png" is the server's other choice).
@@ -297,6 +301,7 @@ export default function ExploreView({
   // (with a new picture, or a move) is dropped, so it never brings them back.
   const cursorsGone = useRef(0);
   const drag = useRef<number | null>(null); // the cursor being dragged
+  const stage = useRef<HTMLDivElement>(null);
   const topCut = useRef<HTMLCanvasElement>(null);
   const rightCut = useRef<HTMLCanvasElement>(null);
   const box = useRef<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
@@ -971,6 +976,13 @@ export default function ExploreView({
       const sid = session.current, m = frame.current?.meta, kind = kindRef.current;
       return sid && kind ? { session: sid, view: m ? { xlim: [...m.xlim], ylim: [...m.ylim] } : null, kind } : null;
     },
+    snapshot: (what) => {
+      const pic = picture.current;
+      if (!pic || !pic.width) return null;
+      if (what === "plot" || !stage.current) return { canvases: [pic], area: pic };
+      const more = [overlay.current, topCut.current, rightCut.current].filter((c): c is HTMLCanvasElement => !!c);
+      return { canvases: [pic, ...more], area: stage.current };
+    },
   };
 
   const openMenu = (clientX: number, clientY: number, x: number, y: number) => {
@@ -994,7 +1006,7 @@ export default function ExploreView({
           ] as MenuEntry[])
         : ([{ label: "Save trace as .lbd…", onClick: () => saveCut("trace"), disabled: !c1 }] as MenuEntry[])),
       "-",
-      ...(onData ? ([{ label: "Save as CSV…", onClick: () => onData("csv") }, "-"] as MenuEntry[]) : []),
+      ...(dataItems ? ([...dataItems(), "-"] as MenuEntry[]) : []),
       { label: "Show everything", onClick: () => setView(null) },
       { label: "Mouse and keys…", onClick: () => setHelp(true) },
     ];
@@ -1062,13 +1074,13 @@ export default function ExploreView({
         <button onClick={() => setView(null)} title="Show all the data (or double-click the plot)">
           Reset view
         </button>
-        {onData && (
+        {dataItems && (
           <button
             aria-haspopup="menu"
-            title="Get the data out: the numbers shown as a CSV file"
+            title="Get the data out: the numbers shown as a CSV file, or the picture"
             onClick={(e) => {
               const r = e.currentTarget.getBoundingClientRect();
-              setMenu({ x: r.left, y: r.bottom, items: [{ label: "Save as CSV…", onClick: () => onData("csv") }] });
+              setMenu({ x: r.left, y: r.bottom, items: dataItems() });
             }}
           >
             Data ▾
@@ -1121,7 +1133,7 @@ export default function ExploreView({
           ))}
         </div>
       )}
-      <div className={"explore-stage" + (showCuts ? " with-cuts" : "")}>
+      <div ref={stage} className={"explore-stage" + (showCuts ? " with-cuts" : "")}>
         {showCuts && (
           <div className="explore-cut explore-cut-top">
             <canvas
