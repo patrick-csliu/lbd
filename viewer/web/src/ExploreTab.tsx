@@ -6,6 +6,7 @@ import Contrast from "./Contrast";
 import CursorPanel, { OtherPanel } from "./CursorPanel";
 import { CursorsState, NO_CURSORS } from "./cursors";
 import ExploreView, { ExploreActions, Follow, View, ViewSettings } from "./ExploreView";
+import ExportDialog, { ExportSource } from "./ExportDialog";
 import AxisSelect from "./AxisSelect";
 import { COMPLEX_MODES, SliceControl } from "./FileView";
 import { useDiskVersion } from "./watch";
@@ -167,6 +168,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
   const restart = useCallback((id: string) => setPanelKeys((k) => ({ ...k, [id]: (k[id] ?? 0) + 1 })), []);
   const actionRefs = useRef<Record<string, MutableRefObject<ExploreActions | null>>>({});
   const actionsOf = (id: string) => (actionRefs.current[id] ??= { current: null });
+  const [exporting, setExporting] = useState<ExportSource[] | null>(null); // Save as CSV open: panel asked, then the others
   const disk = useDiskVersion("file", path);
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
@@ -718,6 +720,12 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
                       onOpsInfo={(o) => setLive(p.id, { opsInfo: o })}
                       follow={follows[p.id] ?? null}
                       onUserView={(v) => onUserView(p.id, v)}
+                      onData={() => {
+                        const ids = [p.id, ...rec.panels.filter((q) => q.id !== p.id).map((q) => q.id)];
+                        const sources = ids.map((id) => actionsOf(id).current?.exportSource() ?? null);
+                        if (!sources[0]) return onError("The plot isn't open yet.");
+                        setExporting(sources.filter((x): x is ExportSource => !!x));
+                      }}
                       onSync={(sy) => {
                         const old = liveRef.current[p.id]?.sync;
                         if (!old || JSON.stringify(old) !== JSON.stringify(sy)) setLive(p.id, { sync: sy });
@@ -731,6 +739,13 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
         </div>
       )}
       {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} />}
+      {exporting && (
+        <ExportDialog
+          sources={exporting}
+          onClose={() => setExporting(null)}
+          onSaved={(paths) => toast(`Saved ${paths.join(", ")}`)}
+        />
+      )}
     </div>
   );
 }

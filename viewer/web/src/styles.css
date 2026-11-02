@@ -544,3 +544,14 @@ details.group fieldset > .group-fields { margin-top: -4px; }
   width: 100%;
   margin: 0.4em 0;
 }
+
+/* Save as CSV (ExportDialog.tsx) */
+.export-dialog { width: min(480px, calc(100vw - 32px)); }
+.export-dialog fieldset { border: 0; padding: 0; margin: 0 0 8px; display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+.export-dialog legend { float: left; width: 6.5em; font-weight: 600; padding: 0; }
+.export-sub { flex-basis: 100%; padding-left: 6.5em; display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.export-name { display: block; margin: 10px 0 6px; }
+.export-name input { margin-top: 4px; }
+.export-size { margin: 4px 0; }
+.export-warning { background: var(--warn-soft); padding: 4px 8px; border-radius: 4px; margin: 4px 0 !important; }
+.export-dialog progress { width: 100%; }

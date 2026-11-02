@@ -29,6 +29,7 @@ import {
 } from "./api";
 import { between, CursorsState, HELP, item, readText, si } from "./cursors";
 import { ConfirmDialog, ConfirmRequest, ContextMenu, MenuAt, MenuEntry } from "./menu";
+import type { ExportSource } from "./ExportDialog";
 import { SummaryProgress } from "./SummaryProgress";
 
 /**
@@ -160,6 +161,8 @@ interface Props {
   onUserView?: (v: View | null) => void;
   /** With each picture: what this view must share with another to follow its zoom, and where all its data is. */
   onSync?: (s: SyncKeys & { full: [Lim, Lim] }) => void;
+  /** Getting data out (plan 5): Save as CSV… asked from this panel's Data menu or right-click. */
+  onData?: (what: "csv") => void;
 }
 
 /** Limits pushed from another panel: x, y or both. */
@@ -184,6 +187,8 @@ export interface ExploreActions {
   /** Operation `index`'s delay (s) or rotation (°), from the data between the cursors (else in
    *  view), on cursor 1's trace (else all shown). */
   calculate: (what: "delay" | "rotation", index: number) => Promise<number>;
+  /** What Save as CSV needs from this panel: its session, its view now and its kind. */
+  exportSource: () => ExportSource | null;
 }
 
 const CURSOR_COLORS = ["#e0001b", "#0057d9"];
@@ -221,6 +226,7 @@ export default function ExploreView({
   follow = null,
   onUserView,
   onSync,
+  onData,
 }: Props) {
   const [limitsOpen, setLimitsOpen] = useState(false);
   // Pictures travel as raw pixels (fastest on this computer; "png" is the server's other choice).
@@ -961,6 +967,10 @@ export default function ExploreView({
       const res = await api.exploreCalculate(sid, what, index, xlim, kindRef.current === "curve" ? c1?.trace : undefined);
       return res.value;
     },
+    exportSource: () => {
+      const sid = session.current, m = frame.current?.meta, kind = kindRef.current;
+      return sid && kind ? { session: sid, view: m ? { xlim: [...m.xlim], ylim: [...m.ylim] } : null, kind } : null;
+    },
   };
 
   const openMenu = (clientX: number, clientY: number, x: number, y: number) => {
@@ -984,6 +994,7 @@ export default function ExploreView({
           ] as MenuEntry[])
         : ([{ label: "Save trace as .lbd…", onClick: () => saveCut("trace"), disabled: !c1 }] as MenuEntry[])),
       "-",
+      ...(onData ? ([{ label: "Save as CSV…", onClick: () => onData("csv") }, "-"] as MenuEntry[]) : []),
       { label: "Show everything", onClick: () => setView(null) },
       { label: "Mouse and keys…", onClick: () => setHelp(true) },
     ];
@@ -1051,6 +1062,18 @@ export default function ExploreView({
         <button onClick={() => setView(null)} title="Show all the data (or double-click the plot)">
           Reset view
         </button>
+        {onData && (
+          <button
+            aria-haspopup="menu"
+            title="Get the data out: the numbers shown as a CSV file"
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              setMenu({ x: r.left, y: r.bottom, items: [{ label: "Save as CSV…", onClick: () => onData("csv") }] });
+            }}
+          >
+            Data ▾
+          </button>
+        )}
         {compact && (
           <button aria-expanded={limitsOpen} onClick={() => setLimitsOpen((o) => !o)} title="Type the limits of the view">
             Limits {limitsOpen ? "▴" : "▾"}
