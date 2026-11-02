@@ -67,7 +67,11 @@ to the next start:
 3. **Memory for data:** how much memory to leave free for the rest of the computer, an
    optional most to use, and how much disk the summaries of large data may take
    ([Large files](../getting-started/large-files.md#large-files-in-lbd-viewer)).
-4. **Theme:**
+4. **Measurements:** what the status line of a file being measured shows (time left,
+   percentage, points, the slow outer axes; or nothing), and a browser notification when a
+   measurement finishes or stops while the viewer is in the background (off at first; the
+   browser asks once) ([Writing while measuring](../getting-started/writing-while-measuring.md)).
+5. **Theme:**
     - **System** follows the light or dark mode of Windows, macOS or Linux, also when it changes
       while the viewer is open.
     - **Light** and **Dark** stay as chosen.

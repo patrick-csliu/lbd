@@ -225,9 +225,11 @@ only the warning that an integer value wasn't measured everywhere is left out.
 
 ## While it is written
 
-- **LBD Viewer** lists the file as **measuring…** and opens it as it is now; open it again to see
-  newer data. It draws no Library preview until the file is finished, and doesn't rename,
-  recycle or save views into it.
+- **LBD Viewer** lists the file as **measuring…** and shows it as it grows, with a status line:
+  *Measuring · power 23 of 90 · 26 % · 47 069 of 180 090 points · about 12 min left* (what it
+  shows is set in ⚙ → Measurements). When the measurement finishes, its tabs move to the
+  finished file by themselves. It draws no Library preview until the file is finished, and
+  never writes into it: only the program that measures does.
 - **Your own scripts** read it with `lbd.load("power_sweep.lbd.writing")` (any language), which warns
   that it is still being written. `lbd.writing_status(...)` (MATLAB `lbd.writingStatus`) says
   `"measuring"` or `"stopped"`.
@@ -237,6 +239,25 @@ only the warning that an integer value wasn't measured everywhere is left out.
 Data reaches the file within half a second of `write` (`flush_every`; `w.flush()` writes at
 once) and is forced to the disk every 2 seconds (`force_every`), so a power cut loses at most
 the last moments.
+
+### The heartbeat: `power_sweep.lbd.live`
+
+Beside the file being written, the Writer (every language) keeps a small text file,
+`power_sweep.lbd.live`: which computer and program measure, and how far they are (points written
+and how many there will be, the outer axes' positions and how long each step takes). It is
+rewritten at least every 30 seconds, even while nothing new is measured, and removed when the
+measurement finishes. LBD Viewer reads it for the status line, and on **another computer** (the
+folder synced there) to tell *Measuring on LAB-PC* from *No sign from LAB-PC since 10:06* (see
+[Several computers](several-computers.md)). Scripts read it too:
+
+<!-- no-check -->
+```python
+p = lbd.writing_progress("power_sweep.lbd.writing")
+p["computer"], p["values"]["S21"]["points"], p["values"]["S21"]["total"]
+```
+
+In MATLAB and Julia the heartbeat is rewritten when MATLAB / Julia is free: an instrument call
+that blocks for longer than about ten minutes shows as *no sign* on other computers meanwhile.
 
 ## When it stops before finishing
 
@@ -269,8 +290,13 @@ LBD Viewer marks such a file **stopped before finishing** with a **Recover** but
     ```
 
 Recover copies what was written into an `.lbd` file (the same measurement: it keeps its id),
-checks the copy and removes the `.writing` file. It refuses while the measurement is still
-running.
+checks the copy and removes the `.writing` file (and its heartbeat). It refuses while the
+measurement is still running.
+
+A file measured **on another computer** and synced here can't be known to have stopped (it may
+still run there). LBD Viewer then offers **Recover a copy…**: `power_sweep (recovered).lbd`, with
+everything it holds now, and the file being written is left as it is (removing it would travel
+back through the sync). In Python: `lbd.recover(path, keep=True)`.
 
 ## Good to know
 
@@ -279,8 +305,9 @@ running.
 - If another program still has the file open when the measurement ends, the Writer waits up to
   10 seconds, then says which program holds it; the complete file stays as `.writing`
   (Recover, or rename it).
-- **Measure into a folder on this computer.** Writing while measuring onto a network share
-  (NAS) isn't tested yet; every language warns when the folder is on one (Windows).
+- **Measure into a folder on this computer** (or a synced folder: the sync tool copies it).
+  Writing while measuring onto a network share (NAS) isn't tested yet; every language warns
+  when the folder is on one (Windows).
 - Tested on Windows; macOS and Linux are checked by the automatic tests.
 - Files being written use the HDF5 1.10 format, readable by every HDF5 since 1.10 (MATLAB needs
   HDF5 1.10 or newer to write them).

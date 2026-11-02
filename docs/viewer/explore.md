@@ -425,6 +425,14 @@ was shown, the view grows with it. If the file was rewritten with other contents
 values), Explore starts afresh and a note says why. A file that is still being written shows
 "Updating…" until it can be read.
 
+A file being measured (`name.lbd.writing`, a ● on its tab) has a status line under its name:
+where it is measured and how far (*Measuring · power 23 of 90 · 26 % · about 12 min left*; on
+another computer *Measuring on LAB-PC*). Its numbers keep their place while they change. A map
+being measured is drawn at its full planned size, the rows not measured yet empty; a cursor
+there reads *not measured yet*. When the measurement finishes, the tab moves to the finished
+file with the same panels, zoom and cursors, and a message says so. See
+[Writing while measuring](../getting-started/writing-while-measuring.md).
+
 ## Explore and Figure
 
 - **Open in Figure** (at the top of an Explore tab) opens the same file in Figure, with the

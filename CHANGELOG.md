@@ -48,6 +48,20 @@ are still written as 1.2).
 
 **Viewer**
 
+- **Files being measured: a status line, and the finished file takes over.** A file being
+  written (`name.lbd.writing`, ● on its tab) shows where it is measured and how far: *Measuring
+  · power 23 of 90 · 26 % · 47 069 of 180 090 points · about 12 min left*, in Explore, Figure and
+  the Library; the numbers keep their place while they change. ⚙ Measurements chooses the parts,
+  and can turn on a browser notification when a measurement finishes or stops while the viewer
+  is in the background. When it finishes, its tabs move to the finished file (panels, zoom,
+  cursors and the remembered view kept) with a message, instead of staying on a name that is
+  gone. The "still being written" message no longer repeats with every update; a cursor on a
+  cell not measured yet says so.
+- **Measured on another computer:** a file being written that comes through a synced folder
+  shows *Measuring on LAB-PC*, or *No sign from LAB-PC since 10:06* (it probably stopped, or the
+  sync is paused) instead of always "stopped"; **Recover a copy…** makes `name (recovered).lbd`
+  and leaves the file being written alone. New page *Several computers*: what is safe to sync
+  and what to watch out for (LBD has no sync of its own).
 - **Getting data out of Explore** (each panel's **Data ▾** menu, and the right-click menu):
   **Save as CSV…** writes the numbers the panel shows (complex mode, operations, equations and
   chosen traces applied) into a new file next to the data. You choose the numbers (as shown,
@@ -185,6 +199,13 @@ are still written as 1.2).
 
 **File format and languages**
 
+- **The heartbeat of a measurement, `name.lbd.live`** (spec §7; every language's Writer): a small
+  JSON file beside a file being written, saying which computer and program measure and how far
+  (points of how many, the outer axes' positions and seconds per step), rewritten at least every
+  30 s and removed at the finish, so other computers can tell a running measurement from a
+  stopped one. Python: `lbd.writing_progress(path)` reads it; `lbd.recover(path, keep=True)` makes
+  a copy and leaves the file being written. Recover (every language) also removes a left-over
+  heartbeat.
 - **MATLAB and Julia name the program that keeps a file open** when a measurement can't be
   finished or recovered because of it ("… LBD Viewer (process 1234) kept it open …"), as Python
   does, and **warn when a Writer writes onto a network share** (Windows).

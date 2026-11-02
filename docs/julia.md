@@ -7,7 +7,8 @@ using LBD
 Exported names are `Dataset`, `Axis`, `Value`, `add_axis!`, `add_value!`, `write!`,
 `LBDError` and `LBDVersionError`, and for writing while measuring `Writer`, `lbd_writer`,
 `writing_status` and `recover` (see
-[Writing while measuring](getting-started/writing-while-measuring.md)). The file functions are called with the module prefix (`LBD.save`,
+[Writing while measuring](getting-started/writing-while-measuring.md); the Writer also keeps the
+heartbeat file `name.lbd.live`). The file functions are called with the module prefix (`LBD.save`,
 `LBD.load`, `LBD.info`, `LBD.version`), so they don't clash with other packages.
 
 Requires Julia 1.9 or newer; it installs HDF5.jl, JSON3.jl and OrderedCollections.jl. To

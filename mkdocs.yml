@@ -129,6 +129,7 @@ nav:
       - Concepts: getting-started/concepts.md
       - Writing while measuring: getting-started/writing-while-measuring.md
       - Large files: getting-started/large-files.md
+      - Several computers: getting-started/several-computers.md
   - Examples:
       - examples/index.md
       # gallery:start  (written by scripts/make_gallery.py)

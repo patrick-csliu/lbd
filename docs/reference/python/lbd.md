@@ -53,6 +53,10 @@ and recipes, see [Reading and writing files](../../python/files.md).
     options:
       heading_level: 3
 
+::: lbd.writing_progress
+    options:
+      heading_level: 3
+
 ## Changing a file's saved view
 
 ::: lbd.set_plot

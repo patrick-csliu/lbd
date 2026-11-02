@@ -2,7 +2,8 @@
 
 All functions live in the `lbd` package: `lbd.Dataset`, `lbd.load`, `lbd.info` and
 `lbd.version`; to write a file while measuring, `lbd.Writer`, `lbd.writingStatus` and
-`lbd.recover` (see [Writing while measuring](getting-started/writing-while-measuring.md)). Requires MATLAB R2021b or newer; no extra toolboxes are needed. To install, see
+`lbd.recover` (see [Writing while measuring](getting-started/writing-while-measuring.md); the Writer
+also keeps the heartbeat file `name.lbd.live`). Requires MATLAB R2021b or newer; no extra toolboxes are needed. To install, see
 [Install → MATLAB](getting-started/install.md#matlab).
 
 ## Quick example

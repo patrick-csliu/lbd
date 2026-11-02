@@ -65,15 +65,21 @@ A measurement written with the Writer (see
 [Writing while measuring](../getting-started/writing-while-measuring.md)) is called
 `name.lbd.writing` until it is finished. The Library lists it with its state:
 
-- **measuring…**: its measurement is writing it right now. Explore opens it as it is at that
-  moment (open it again to see newer data). It gets no preview until it is finished, and LBD
-  doesn't rename, recycle or save views into it.
+- **measuring…**: its measurement is writing it right now, on this computer. Explore and the
+  selected file show its progress as it grows. It gets no preview until it is finished, and LBD
+  never writes into it (only the measuring program does).
+- **measuring elsewhere…**: it is measured on another computer and synced here (its heartbeat,
+  `name.lbd.live`, says so and keeps changing): *Measuring on LAB-PC*.
+- **no sign lately**: measured on another computer, but no sign of it came for about ten minutes
+  (longer for a measurement with slow steps): it probably stopped, or the sync is paused; this
+  computer can't tell which. **Recover a copy…** makes `name (recovered).lbd` and leaves the
+  file being written as it is.
 - **stopped before finishing**: its measurement ended without finishing it (a crash, an error,
   a script that ended without closing it). Select it and click **Recover**: it becomes
   `name.lbd` (or `name (2).lbd`) with everything it holds.
 
-A file measured on another computer and synced here always shows as stopped: the state is only
-known on the computer that writes it.
+See [Writing while measuring](../getting-started/writing-while-measuring.md) and
+[Several computers](../getting-started/several-computers.md).
 
 ## Previews
 
