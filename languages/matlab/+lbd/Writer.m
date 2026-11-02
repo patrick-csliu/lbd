@@ -54,6 +54,8 @@ classdef Writer < handle
         LastFlush = []
         LastForce = []
         FlushTimer = []
+        Beat = []                      % the heartbeat file name.lbd.live (lbd_live_beat)
+        BeatTimer = []                 % rewrites it on time, also between writes
         Failure = []                   % MException from a background flush
     end
 
@@ -179,6 +181,14 @@ classdef Writer < handle
             obj.LastFlush = tic;
             obj.LastForce = tic;
             lbd_own_writers("add", obj.WritingPath, fid);
+            obj.Beat = lbd_live_beat("new", [], obj.WritingPath, obj.D, obj.D.Writer);
+            % The heartbeat is rewritten when MATLAB is free: an instrument call that blocks
+            % longer than a few minutes shows as "no sign" on other computers for that long.
+            t = timer('StartDelay', 5, 'Period', 5, 'ExecutionMode', 'fixedSpacing', 'BusyMode', 'drop', ...
+                'Name', 'lbd.Writer heartbeat');
+            t.TimerFcn = @(~, ~) obj.beatNow();
+            obj.BeatTimer = t;
+            start(t);
         end
 
         function index = write(obj, varargin)
@@ -202,11 +212,15 @@ classdef Writer < handle
                 lv = plan.levels{k};
                 obj.Pending{end+1} = {"level", lv{1}, lv{2}, lv{3}, numel(obj.D.Axes.(lv{1}).Data)};
             end
+            counted = {};
             for k = 1:numel(plan.puts)
                 p = plan.puts{k};
                 if isempty(p.data), continue; end           % no points (e.g. an (A, B) without C)
                 obj.Pending{end+1} = {"put", p.name, p.idx, p.data};
+                counted{end+1} = p; %#ok<AGROW>
             end
+            obj.Beat = lbd_live_beat("record", obj.Beat, counted);
+            obj.beatNow();
             index = plan.result;
             if toc(obj.LastFlush) >= obj.FlushEvery
                 obj.writePending();
@@ -281,6 +295,7 @@ classdef Writer < handle
             obj.State = "finished";
             obj.Path = target;
             path = target;
+            lbd_live_beat("remove", obj.Beat);
         end
 
         function abort(obj)
@@ -320,6 +335,14 @@ classdef Writer < handle
     end
 
     methods (Hidden)
+        function beatNow(obj)
+            % Rewrite the heartbeat file when it is due (lbd_live_beat).
+            if obj.State ~= "writing" || isempty(obj.Beat), return; end
+            if lbd_live_beat("due", obj.Beat)
+                obj.Beat = lbd_live_beat("write", obj.Beat);
+            end
+        end
+
         function writePending(obj)
             if isempty(obj.Fid) || ~isempty(obj.Failure), return; end
             items = obj.Pending;
@@ -487,6 +510,11 @@ classdef Writer < handle
                 stop(obj.FlushTimer);
             end
             obj.FlushTimer = [];
+            if ~isempty(obj.BeatTimer) && isvalid(obj.BeatTimer)
+                stop(obj.BeatTimer);
+                delete(obj.BeatTimer);
+            end
+            obj.BeatTimer = [];
         end
 
         function raiseFailure(obj)

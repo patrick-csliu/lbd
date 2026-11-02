@@ -53,7 +53,10 @@ Folders whose names start with `_` (like `languages/_template/`) are ignored.
      with the language's Writer;
    - `check`: read **every** `<root>/*/fixture.lbd` and `<root>/*/live.lbd`, compare them with
      their definitions, print one line per file, and exit non-zero on any mismatch;
-   - `read_live` (optional): read a measurement while Python writes it.
+   - `read_live` (optional): read a measurement while Python writes it;
+   - `write_heartbeat` (optional, for a language with a Writer): write `<out>/stopped.lbd`
+     (3 of 4 rows, then stop without finishing) and `<out>/finished.lbd` (all rows), so the
+     heartbeat file `name.lbd.live` is checked (spec §7).
 
    The existing scripts in `python/crosslang/` are the reference.
 5. **Write `example.<ext>`**, the same example as the other languages, and `README.md`.
@@ -118,6 +121,7 @@ requires = "julia"
 write = ["julia", "--project=.", "crosslang/write.jl", "{out}"]
 check = ["julia", "--project=.", "crosslang/check.jl", "{root}"]
 read_live = ["julia", "--project=.", "crosslang/read_live.jl", "{file}"]   # optional
+write_heartbeat = ["julia", "--project=.", "crosslang/write_heartbeat.jl", "{out}"]   # optional
 
 [sdk]
 requires = "matlab"        # needed by `build`

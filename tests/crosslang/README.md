@@ -105,6 +105,16 @@ with `T = 10·time`, and a group `G` (`gi → gj`): at row `i` the points `gi = 
 3. reads the finished `measuring.lbd` (every row measured), and fails unless at least two reads
    saw the measurement part-way.
 
+## The heartbeat (plan 9)
+
+Every language with a `write_heartbeat` command writes, in its folder `{out}`, with its Writer:
+`stopped.lbd` — `S21(power, freq)` with 4 powers (0 … 3 dBm) and 7 frequencies, rows 0, 1, 2
+written, then about 11 s waited (the heartbeat is rewritten) and stopped without finishing (as a
+crash) — and `finished.lbd`, the same with all 4 rows, finished. `run_all.py` then reads
+`stopped.lbd.live` with Python's `lbd.writing_progress`: `points` 21 of `total` 28, `per_write`
+7, the axis `power` at `index` 2 of `length` 4, this computer's name, `program` naming the
+language; and there must be no `finished.lbd.live`.
+
 When the format gains a feature, extend these tables and every language's `write`/`check`
 script together.
 

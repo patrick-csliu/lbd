@@ -1732,6 +1732,7 @@ to_plain(x::JSON3.Object) = Dict{String,Any}(String(k) => to_plain(v) for (k, v)
 to_plain(x::JSON3.Array) = Any[to_plain(v) for v in x]
 to_plain(x) = x
 
+include("live.jl")
 include("writer.jl")
 include("lazy.jl")
 

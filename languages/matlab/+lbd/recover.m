@@ -39,5 +39,7 @@ while isfile(src)
         pause(0.1);
     end
 end
+beat = extractBefore(src, strlength(src) - strlength(".writing") + 1) + ".live";   % its heartbeat, left by the crash
+if isfile(beat), delete(beat); end
 path = target;
 end

@@ -45,6 +45,8 @@ mutable struct Writer
     last_flush::Float64
     last_force::Float64
     timer::Union{Timer,Nothing}
+    beat::Union{Heartbeat,Nothing}        # the heartbeat file name.lbd.live (live.jl)
+    beat_timer::Union{Timer,Nothing}      # rewrites it on time, also between writes
     failure::Any                  # an exception from writing to the file
     state::Symbol                 # :new, :writing, :finished, :stopped
     lock::ReentrantLock
@@ -131,7 +133,7 @@ function Writer(path::AbstractString; title::AbstractString="", description::Abs
     d = Dataset(title; description=description, created=created)
     d.live = true
     return Writer(String(path), writing, d, flush_every, force_every, nothing, nothing, Any[], 0.0, 0.0,
-                  nothing, nothing, :new, ReentrantLock())
+                  nothing, nothing, nothing, nothing, :new, ReentrantLock())
 end
 
 function Base.getproperty(w::Writer, s::Symbol)
@@ -224,6 +226,10 @@ function start!(w::Writer)
     w.state = :writing
     w.last_flush = w.last_force = time()
     OWN_WRITERS[own_key(w.writing_path)] = w
+    w.beat = Heartbeat(w.writing_path, d, d.writer)
+    # Rewritten when Julia is free: an instrument call that blocks longer than a few minutes
+    # shows as "no sign" on other computers for that long.
+    w.beat_timer = Timer(_ -> beat_now!(w), 5.0; interval=5.0)
     return w
 end
 
@@ -327,11 +333,15 @@ function write!(w::Writer, names::AbstractDict=Dict{String,Any}(); parent=nothin
         for (a, c, p) in plan.levels
             push!(w.pending, (:level, a, Float64.(c), p, length(w.d.axes[a].data)))
         end
+        counted = Any[]
         for p in plan.puts
             p.data isa AbstractArray && isempty(p.data) && continue    # no points (an (A, B) without C)
             push!(w.pending, (:put, p.name, p.idx, copy(p.data)))   # a copy: the caller may reuse its buffer
+            push!(counted, p)
         end
+        record!(w.beat, counted)
     end
+    beat_now!(w)
     if time() - w.last_flush >= w.flush_every
         flush_pending!(w)
         raise_failure(w)
@@ -347,6 +357,13 @@ function Base.flush(w::Writer)
     w.state == :writing && flush_pending!(w)
     raise_failure(w)
     return w
+end
+
+"""Rewrite the heartbeat file when it is due (live.jl)."""
+function beat_now!(w::Writer)
+    lock(w.lock) do
+        (w.state === :writing && w.beat !== nothing && due(w.beat)) && write_beat!(w.beat)
+    end
 end
 
 # A one-off timer, so a burst of writes followed by a pause still reaches the file.
@@ -499,6 +516,7 @@ function Base.close(w::Writer; stopped::Bool=false)
     end
     w.state = :finished
     w.path = target
+    w.beat === nothing || remove_beat(w.beat)
     return target
 end
 
@@ -525,6 +543,8 @@ end
 function stop_timer!(w::Writer)
     w.timer === nothing || close(w.timer)
     w.timer = nothing
+    w.beat_timer === nothing || close(w.beat_timer)
+    w.beat_timer = nothing
 end
 
 function check_description(d::Dataset)
@@ -728,5 +748,6 @@ function recover(path::AbstractString)
             sleep(0.1)
         end
     end
+    rm(live_path(src); force=true)              # its heartbeat, left by the crash
     return target
 end

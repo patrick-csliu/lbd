@@ -70,6 +70,7 @@ def main(argv=None) -> int:
         show(r)
         ok &= r.returncode == 0
     ok &= read_while_measuring(langs, root)
+    ok &= heartbeats(langs, root)
     if not args.keep:
         shutil.rmtree(root, ignore_errors=True)
     n = len(langs)
@@ -107,6 +108,47 @@ def read_while_measuring(langs, root: Path) -> bool:
             out += f"\n{lang.name}: still reading after 180 s"
         print("\n".join("    " + line for line in out.strip().splitlines()))
         ok &= proc.returncode == 0
+    return ok
+
+
+def heartbeats(langs, root: Path) -> bool:
+    """Every language's Writer leaves a heartbeat that Python reads (README.md, "The heartbeat")."""
+    import socket
+
+    import lbd
+
+    ok = True
+    for lang in [lang for lang in langs if lang.section("crosslang").get("write_heartbeat")]:
+        print(f"[heartbeat] {lang.name}")
+        out = root / f"heartbeat-{lang.id}"
+        r = lang.run(lang.section("crosslang")["write_heartbeat"], out=out, root=root)
+        show(r)
+        problems = [] if r.returncode == 0 else ["the script failed"]
+        if not problems:
+            try:
+                beat = lbd.writing_progress(out / "stopped.lbd.writing")
+            except lbd.LBDError as e:
+                beat, problems = None, [str(e)]
+            if beat is None and not problems:
+                problems.append("no stopped.lbd.live")
+            if beat is not None:
+                v = (beat.get("values") or {}).get("S21") or {}
+                want = {"points": 21, "total": 28, "per_write": 7,
+                        "axes": [{"name": "power", "index": 2, "length": 4}]}
+                got = {"points": v.get("points"), "total": v.get("total"), "per_write": v.get("per_write"),
+                       "axes": [{k: a.get(k) for k in ("name", "index", "length")} for a in v.get("axes") or []]}
+                if got != want:
+                    problems.append(f"S21 progress {got}, expected {want}")
+                if (beat.get("computer") or "").lower() != socket.gethostname().lower():
+                    problems.append(f"computer {beat.get('computer')!r}, expected {socket.gethostname()!r}")
+                if not str(beat.get("program", "")).lower().startswith(lang.id):
+                    problems.append(f"program {beat.get('program')!r} doesn't name {lang.id}")
+            if (out / "finished.lbd.live").exists():
+                problems.append("finished.lbd.live is left after the finish")
+            if not (out / "finished.lbd").exists():
+                problems.append("finished.lbd is missing")
+        print(f"    {'ok' if not problems else 'FAILED: ' + '; '.join(problems)}")
+        ok &= not problems
     return ok
 
 

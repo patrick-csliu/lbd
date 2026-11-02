@@ -26,6 +26,7 @@ requires = "matlab"
 write = ["matlab", "-batch", "addpath(getenv('LBD_LANG_DIR')); addpath(fullfile(getenv('LBD_LANG_DIR'), 'crosslang')); write_fixture(getenv('LBD_OUT'))"]
 check = ["matlab", "-batch", "addpath(getenv('LBD_LANG_DIR')); addpath(fullfile(getenv('LBD_LANG_DIR'), 'crosslang')); check_fixture(getenv('LBD_ROOT'))"]
 read_live = ["matlab", "-batch", "addpath(getenv('LBD_LANG_DIR')); addpath(fullfile(getenv('LBD_LANG_DIR'), 'crosslang')); read_live(getenv('LBD_FILE'))"]
+write_heartbeat = ["matlab", "-batch", "addpath(getenv('LBD_LANG_DIR')); addpath(fullfile(getenv('LBD_LANG_DIR'), 'crosslang')); write_heartbeat(getenv('LBD_OUT'))"]
 
 [sdk]
 requires = "matlab"

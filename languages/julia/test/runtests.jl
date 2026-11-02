@@ -686,6 +686,32 @@ end
     end
 end
 
+@testset "LBD.Writer heartbeat (name.lbd.live, spec section 7)" begin
+    mktempdir() do dir
+        p = joinpath(dir, "beat.lbd")
+        w = LBD.Writer(p; flush_every=60)
+        add_axis!(w, "power", [1.0, 2, 3])
+        add_axis!(w, "freq", collect(range(0, 1; length=4)))
+        add_value!(w, "S21"; axes=["power", "freq"], dtype=ComplexF64)
+        write!(w; power=1, S21=ComplexF64[1, 2, 3, 4])
+        text = read(p * ".live", String)
+        @test occursin("\"lbd_live\": 1", text) && occursin("\"program\": \"julia LBD", text)
+        @test occursin("\"points\": 4, \"total\": 12, \"per_write\": 4", text)
+        @test occursin("\"name\": \"power\", \"index\": 0, \"length\": 3", text)
+        LBD.abort!(w)
+        @test isfile(p * ".live")                       # a stopped measurement keeps it
+        recover(p * ".writing")
+        @test !isfile(p * ".live")
+        q = joinpath(dir, "beat2.lbd")
+        w2 = LBD.Writer(q; flush_every=60)
+        add_axis!(w2, "power", [1.0, 2])
+        add_value!(w2, "y"; axes=["power"])
+        write!(w2; power=1, y=1.0)
+        close(w2)
+        @test !isfile(q * ".live")
+    end
+end
+
 @testset "LBD.open: read only what is needed" begin
     dir = mktempdir()
     function big()

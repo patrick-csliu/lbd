@@ -24,7 +24,7 @@ TOP_KEYS = {"id", "name", "order", "requirements", "example", "check", "notes",
             "version", "format_version", "test", "crosslang", "sdk", "install"}
 SECTION_KEYS = {
     "test": {"requires", "command"},
-    "crosslang": {"requires", "write", "check", "read_live"},
+    "crosslang": {"requires", "write", "check", "read_live", "write_heartbeat"},
     "sdk": {"requires", "build", "fallback_copy", "copy"},
 }
 INSTALL_KEYS = {"where", "if_exists", "steps", "upgrade", "uninstall"}
@@ -156,7 +156,7 @@ def load(lang_dir: Path) -> Language:
             fail(f"[{sec}] has unknown keys {sorted(extra)}")
         if "requires" in data[sec]:
             text(data[sec]["requires"], f"[{sec}].requires")
-    for sec, key in (("test", "command"), ("crosslang", "write"), ("crosslang", "check"), ("crosslang", "read_live"),
+    for sec, key in (("test", "command"), ("crosslang", "write"), ("crosslang", "check"), ("crosslang", "read_live"), ("crosslang", "write_heartbeat"),
                      ("sdk", "build")):
         cmd = data.get(sec, {}).get(key)
         if cmd is not None:

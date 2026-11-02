@@ -569,6 +569,27 @@ tc.verifyEqual(r.Values.S21.Data(1, :), (1:4) * 1i);
 tc.verifyEqual(r.Values.n.Measured, [true; false; false]);
 end
 
+function testWriterHeartbeat(tc)
+% name.lbd.live (spec section 7): how far the measurement is, left by a stop, removed by recover
+p = fullfile(tc.TestData.dir, "beat.lbd");
+w = makeWriter(p);
+w.write(power=1, S21=(1:4) * 1i, n=1);
+beat = jsondecode(fileread(p + ".live"));
+tc.verifyEqual(beat.lbd_live, 1);
+tc.verifyTrue(startsWith(beat.program, "matlab lbd"));
+tc.verifyEqual([beat.values.S21.points beat.values.S21.total beat.values.S21.per_write], [4 12 4]);
+tc.verifyEqual(beat.values.S21.axes.name, 'power');
+tc.verifyEqual(beat.values.S21.axes.index, 0);
+w.abort();
+tc.verifyTrue(isfile(p + ".live"));               % a stopped measurement keeps it
+lbd.recover(p + ".writing");
+tc.verifyFalse(isfile(p + ".live"));
+w2 = makeWriter(fullfile(tc.TestData.dir, "beat2.lbd"));
+w2.write(power=1, S21=(1:4) * 1i, n=1);
+w2.close(Stopped=true);                 % only one row: stopped on purpose
+tc.verifyFalse(isfile(fullfile(tc.TestData.dir, "beat2.lbd.live")));
+end
+
 function testWriterStoppedAndNameTaken(tc)
 p = fullfile(tc.TestData.dir, "taken.lbd");
 w = makeWriter(p);
