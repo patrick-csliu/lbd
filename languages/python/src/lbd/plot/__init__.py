@@ -39,11 +39,13 @@ from .api import (
 from .presets import BUILTIN_PRESETS, PresetStore, config_dir
 from .render import COMPLEX_MODES, KINDS, RenderError, RenderWarning
 from .style import STYLE_SUFFIX, Style, StyleError, StyleWarning
+from .tables import Column, Table, table
 from .units import PREFIXES, UnitWarning
 
 __all__ = [
     "activate", "apply", "axis_label", "default_style", "list_styles", "load_style", "plot", "prefix",
-    "quick", "save", "subplots", "use",
+    "quick", "save", "subplots", "table", "use",
     "BUILTIN_PRESETS", "PresetStore", "config_dir", "COMPLEX_MODES", "KINDS", "PREFIXES",
     "RenderError", "RenderWarning", "STYLE_SUFFIX", "Style", "StyleError", "StyleWarning", "UnitWarning",
+    "Column", "Table",
 ]
