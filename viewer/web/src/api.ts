@@ -43,6 +43,31 @@ export interface SummaryJob {
   seconds: number;
 }
 
+/** Save as CSV (server: export.py, /api/explore/export-csv): the choices of the dialog. */
+export interface ExportChoice {
+  numbers: "shown" | "stored" | "both";
+  zoomed: boolean;
+  layout: "rows" | "matrix";
+  rows_are: "t" | "x";
+  units: "stored" | "shown";
+}
+
+/** Without a path: a file name, the size, and the choices that can't be made (with why). */
+export interface ExportPlan {
+  path: string;
+  options: { stored: string | null; both: string | null; zoomed: string | null };
+  error: string | null;
+  estimate: { bytes: number; rows: number; columns: number; files: number; warnings: string[]; big: boolean } | null;
+}
+
+/** A CSV file being written (or just finished). */
+export interface ExportJob extends SummaryJob {
+  id: string;
+  paths: string[];
+  state: "writing" | "done" | "cancelled" | "failed";
+  error: string | null;
+}
+
 // ---- Library (server: library.py; keep in sync with /api/library in server.py) ----
 
 /** A column of the Library's list. */
@@ -732,6 +757,16 @@ export const api = {
   /** Save a cut as a new .lbd file; without a path, only suggest one. */
   exploreSaveCut: (session: string, which: "row" | "column" | "trace", index: Record<string, number>, trace?: number, path?: string) =>
     call<{ path: string }>("POST", `/api/explore/${encodeURIComponent(session)}/save-cut`, { which, index, trace, path: path ?? null }),
+  /** Save what panels show as CSV: without `path` the plan (name, size, options); with it, a job. */
+  exportCsv: (sessions: string[], choice: ExportChoice, views: { xlim: number[]; ylim: number[] }[] | null, path?: string) =>
+    call<ExportPlan & { job: string; paths: string[] }>("POST", "/api/explore/export-csv", {
+      sessions,
+      ...choice,
+      views,
+      path: path ?? null,
+    }),
+  exports: () => call<{ jobs: ExportJob[] }>("GET", "/api/exports"),
+  cancelExport: (job: string) => call<{ ok: boolean }>("POST", "/api/exports/cancel", { job }),
   /** The Explore view LBD remembers for a file (its database, never the file); `note` says why
    *  a remembered view no longer fits. */
   remembered: (path: string) => call<{ state: JsonObject | null; note: string | null }>("GET", "/api/explore/remembered", undefined, { path }),

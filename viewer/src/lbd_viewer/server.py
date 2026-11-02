@@ -48,6 +48,7 @@ from . import labels, library_labels  # noqa: E402
 from .library import LibraryIndex, writing_status  # noqa: E402
 from .previews import PreviewCache, PreviewError, Previewer  # noqa: E402
 from . import memory, reading, summaries  # noqa: E402
+from . import export as csv_export  # noqa: E402
 from .explore import ExploreClosed, ExploreError, ExploreSession, Sessions  # noqa: E402
 from .pages import PageError, Pages, UnknownPage  # noqa: E402
 from .config import MEMORY_DEFAULTS, Config, ConfigError, Style, StyleError, from_dict, previews_mode  # noqa: E402
@@ -112,6 +113,7 @@ class AppState:
         self.check_host = check_host
         self.opened: Set[str] = set()
         self.explore = Sessions()           # the Explore views' sessions (explore.py)
+        self.exports = csv_export.Exports()  # CSV files being written (export.py)
         self._catalog: Optional[Catalog] = None
         self._library: Optional[LibraryIndex] = None
         self._previews: Optional[Previewer] = None
@@ -452,6 +454,21 @@ class CalculateBody(_Body):
     trace: Optional[int] = None           # curves: cursor 1's trace (else all shown traces)
 
 
+class ExportBody(_Body):
+    sessions: List[str]                   # the panels' sessions; the first is the panel asked from
+    numbers: str = "shown"                # "shown", "stored" or "both"
+    zoomed: bool = False                  # only the zoomed range (views below), else everything
+    views: Optional[List[Dict[str, List[float]]]] = None   # per session {"xlim", "ylim"} in plot units
+    layout: str = "rows"                  # "rows" or "matrix"
+    rows_are: str = "t"                   # matrix: "t" (series / map rows) or "x"
+    units: str = "stored"                 # "stored" (Hz) or "shown" (GHz, as on screen)
+    path: Optional[str] = None            # None: only the size, the options and a file name
+
+
+class JobBody(_Body):
+    job: str
+
+
 class SaveCutBody(_Body):
     which: str                            # "row" or "column" (maps), "trace" (curves)
     index: Dict[str, int]                 # the cursor's stored indices
@@ -462,7 +479,7 @@ class SaveCutBody(_Body):
 # What a request was doing, for the message of an unexpected error.
 UNEXPECTED_DOING = (("/render", "drawing the plot"), ("/cursors", "reading the cursors"), ("/find", "searching"),
                     ("/histogram", "counting the values"), ("/calculate", "calculating"),
-                    ("/save-cut", "saving the cut"), ("/spec", "changing the plot"), ("/api/explore", "opening the file"))
+                    ("/save-cut", "saving the cut"), ("/export-csv", "saving the numbers"), ("/spec", "changing the plot"), ("/api/explore", "opening the file"))
 
 
 def viewer_log(settings_dir: Path) -> Path:
@@ -1316,6 +1333,56 @@ def create_app(state: AppState) -> FastAPI:
         if _key(s.path.resolve()) in state.opened:              # a file opened by double-click: so is its cut
             state.opened.add(_key(saved))
         return {"path": str(saved)}
+
+    def _export_tables(body: ExportBody) -> Tuple[List[ExploreSession], list]:
+        sessions = [_session(sid) for sid in body.sessions]
+        if not sessions:
+            raise HTTPException(400, "no panel to save")
+        if body.zoomed and (not body.views or len(body.views) != len(sessions)):
+            raise HTTPException(400, "the zoomed range needs each panel's view")
+        tables = []
+        for k, s in enumerate(sessions):
+            s.last_used = time.monotonic()
+            view = body.views[k] if body.zoomed else None
+            tables.append(csv_export.session_table(s, body.numbers, view, body.units))
+        return sessions, csv_export.join(tables)
+
+    @app.post("/api/explore/export-csv")
+    def explore_export_csv(body: ExportBody):
+        """Save what panels show as CSV. Without a path: a file name next to the data, the size
+        and warnings, and the choices that aren't possible (with why). With a path: start
+        writing in the background ({job}; progress from /api/exports)."""
+        sessions, tables = _export_tables(body)
+        s = sessions[0]
+        if body.path is None:
+            out = {"path": str(csv_export.suggest_path(s)), "options": csv_export.options(s), "error": None}
+            try:
+                out["estimate"] = csv_export.plan(tables, body.layout, body.rows_are)
+            except ValueError as e:
+                out["estimate"], out["error"] = None, str(e)
+            return out
+        target = Path(body.path).expanduser().resolve()
+        paths = csv_export.files_for(target, len(tables))
+        for p in paths:
+            if p.parent != s.path.resolve().parent:            # next to its file is always allowed
+                state.check_allowed(str(p.parent))
+            csv_export.check_target(p)
+        if body.layout == "matrix":
+            for t in tables:
+                t.check_matrix()
+        job = state.exports.start(list(zip(tables, paths)), body.layout, body.rows_are)
+        return {"job": job, "paths": [str(p) for p in paths]}
+
+    @app.get("/api/exports")
+    def exports_now():
+        """CSV files being written (and those finished in the last minutes): fraction, state, error."""
+        return {"jobs": state.exports.info()}
+
+    @app.post("/api/exports/cancel")
+    def exports_cancel(body: JobBody):
+        if not state.exports.cancel(body.job):
+            raise HTTPException(404, "this file isn't being written any more")
+        return {"ok": True}
 
     @app.delete("/api/explore/{session_id}")
     def explore_close(session_id: str):
