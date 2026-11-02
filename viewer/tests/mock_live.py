@@ -7,11 +7,16 @@ and a growing temperature log), so the Library shows it as "measuring…" and Ex
 it grows; it becomes an ordinary .lbd file at the end. First it leaves `FOLDER/stopped
 sweep.lbd.writing`, a measurement that stopped before finishing, to try Recover on. Stop the
 script with Ctrl+C to see a running measurement become "stopped before finishing".
+
+With `--copy-to OTHER --as-computer LAB-PC`, the file being written and its heartbeat are also
+copied into OTHER every few traces, as a sync tool would bring them from another computer (no
+lock travels): open OTHER in the viewer to see "Measuring on LAB-PC", then "No sign …".
 """
 
 import argparse
 import time
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 
@@ -48,7 +53,25 @@ def stopped(folder: Path) -> Path:
     return w.writing_path
 
 
-def measure(folder: Path, seconds: float) -> Path:
+def copy_as_synced(w: lbd.Writer, to: Path, computer: str) -> None:
+    """What a sync tool brings to another computer: the file being written and its heartbeat,
+    copied (no lock travels), the heartbeat naming the measuring computer `computer`."""
+    import json
+    import shutil
+
+    to.mkdir(parents=True, exist_ok=True)
+    beat = lbd.live.live_path(w.writing_path)
+    try:
+        w.flush()
+        shutil.copyfile(w.writing_path, to / w.writing_path.name)
+        content = json.loads(beat.read_text(encoding="utf-8"))
+        content["computer"] = computer
+        (to / beat.name).write_text(json.dumps(content), encoding="utf-8")
+    except (OSError, ValueError):            # caught mid-write: the next copy brings it
+        pass
+
+
+def measure(folder: Path, seconds: float, copy_to: Optional[Path] = None, computer: str = "OTHER-PC") -> Path:
     powers = np.linspace(-60, 0, max(2, int(seconds)))
     w = start(folder / "live sweep.lbd", powers)
     t0 = time.monotonic()
@@ -57,6 +80,8 @@ def measure(folder: Path, seconds: float) -> Path:
             w.write(power=i, S21=trace(p))
             w.write(time=time.monotonic() - t0, T_mK=12 + np.random.default_rng().normal(scale=0.05))
             print(f"\r{i + 1} of {len(powers)} traces", end="", flush=True)
+            if copy_to is not None and i % 3 == 0:
+                copy_as_synced(w, copy_to, computer)
             time.sleep(seconds / len(powers))
     print()
     return w.path
@@ -66,7 +91,9 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("folder", type=Path)
     ap.add_argument("--seconds", type=float, default=120.0, help="how long the live measurement takes")
+    ap.add_argument("--copy-to", type=Path, help="also copy it there every few traces, as a sync tool would")
+    ap.add_argument("--as-computer", default="OTHER-PC", help="the computer the copies' heartbeat names")
     args = ap.parse_args()
     args.folder.mkdir(parents=True, exist_ok=True)
     print("left", stopped(args.folder))
-    print("finished", measure(args.folder, args.seconds))
+    print("finished", measure(args.folder, args.seconds, args.copy_to, args.as_computer))

@@ -26,6 +26,14 @@ type Listener = (state: DiskState) => void;
 
 const watched = new Map<string, { kind: WatchKind; path: string; listeners: Set<Listener>; last: DiskState }>();
 let timer: number | null = null;
+// A measurement finished (its name.lbd.writing became name.lbd): told once per page.
+const told = new Set<string>();
+let finishedHandler: ((old: string, now: string) => void) | null = null;
+
+/** Who hears that a watched file being measured has finished (App: tabs move, a message). */
+export function onFinished(handler: (old: string, now: string) => void): void {
+  finishedHandler = handler;
+}
 let running = false;
 
 const keyOf = (kind: WatchKind, path: string) => `${kind}\n${path}`;
@@ -41,6 +49,12 @@ async function check(): Promise<void> {
     // reports a viewer that can't be reached. The next check tries again.
     const r = await api.changes(files, dirs).catch(() => null);
     if (!r) return;
+    for (const [old, now] of Object.entries(r.finished ?? {})) {
+      if (!told.has(old)) {
+        told.add(old);
+        finishedHandler?.(old, now);
+      }
+    }
     for (const e of entries) {
       const found = e.kind === "file" ? r.files : r.dirs;
       const state: DiskState = e.path in r.errors ? { error: r.errors[e.path] } : e.path in found ? { version: found[e.path] } : {};

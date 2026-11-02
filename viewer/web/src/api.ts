@@ -20,8 +20,32 @@ export interface AppState {
   library: LibrarySettings;
   /** memory for data (config.MEMORY_DEFAULTS, server memory_now) */
   memory: MemorySettings;
+  /** what the status of a file being measured shows (config.MEASUREMENTS_DEFAULTS) */
+  measurements: MeasurementSettings;
   /** this computer's user name (suggested first when labelling users) */
   login: string;
+}
+
+/** Files being measured (plan 9): show the progress, each of its parts; browser notifications. */
+export interface MeasurementSettings {
+  progress: boolean;
+  time: boolean;
+  percent: boolean;
+  points: boolean;
+  axes: boolean;
+  notify: boolean;
+}
+
+/** A file being measured (server: live.py): its state as this computer can know it, and its
+ *  progress as steady text (each part with the widest text it can take, for a box that wide). */
+export interface LiveStatus {
+  state: "measuring" | "elsewhere" | "silent" | "stopped" | "gone";
+  /** the computer measuring it (null: not known, e.g. an older writer without a heartbeat) */
+  computer: string | null;
+  /** seconds since 1970 when this computer last saw it change (elsewhere, silent, stopped) */
+  since: number | null;
+  progress: { kind: "axes" | "percent" | "points" | "time"; text: string; width: string }[] | null;
+  note?: string;
 }
 
 /** Memory for data (plan 6d): GB; null = automatic (reserve) / no maximum. */
@@ -147,7 +171,7 @@ export interface LibraryRow {
 }
 
 /** The state of a file being written (name.lbd.writing); null for every other file. */
-export type Writing = "measuring" | "stopped" | null;
+export type Writing = "measuring" | "elsewhere" | "silent" | "stopped" | null;
 
 /** A nested label (project, user or tag) with the number of files that have it or one inside it. */
 export interface LabelNode {
@@ -291,6 +315,8 @@ export interface Changes {
   files: { [path: string]: string | null };
   dirs: { [path: string]: string | null };
   errors: { [path: string]: string };
+  /** a measurement finished: its file being written (gone) → the finished file */
+  finished: { [path: string]: string };
 }
 
 export interface SearchResult {
@@ -904,7 +930,10 @@ export const api = {
   /** Move a data, style or image file to the Recycle Bin / Trash (never deleted permanently). */
   trashFile: (path: string) => call<{ ok: boolean }>("POST", "/api/file/trash", { path }),
   /** a file whose measurement stopped before finishing (name.lbd.writing) becomes an .lbd file */
-  recoverFile: (path: string) => call<{ path: string }>("POST", "/api/file/recover", { path }),
+  /** `copy`: made as "name (recovered).lbd" and the file being written left (another computer's) */
+  recoverFile: (path: string) => call<{ path: string; copy: boolean }>("POST", "/api/file/recover", { path }),
+  live: (path: string, value?: string) => call<LiveStatus>("GET", "/api/live", undefined, value ? { path, value } : { path }),
+  setMeasurements: (changes: Partial<MeasurementSettings>) => call<AppState>("PUT", "/api/settings", { measurements: changes }),
 
   /** Export a figure with the system's "Save as" dialog (data file's folder, name filled in).
    *  `path` is null if the user cancelled. 501: no dialog on this system, use exportFigure. */

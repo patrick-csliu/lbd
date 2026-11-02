@@ -67,6 +67,7 @@ def test_another_computers_heartbeat_elsewhere_then_silent_then_back(data_dir):
     clock.t += 2                                       # 10 min without a change it saw
     st = watch.status(str(s))
     assert st["state"] == "silent" and st["since"] == pytest.approx(wall.t)
+    assert [part["kind"] for part in st["progress"]] == ["axes", "percent", "points"]     # no time left to tell
     heartbeat(s, points=11)                             # the sync brings a new heartbeat
     touch(beat, wall.t + 700)
     assert watch.status(str(s))["state"] == "elsewhere"

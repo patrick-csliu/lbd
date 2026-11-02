@@ -25,6 +25,7 @@ import { FileDetails } from "./FileView";
 import { ConfirmDialog, ConfirmRequest, ContextMenu, isMenuKey, MenuAt, menuAt, MenuEntry, systemNames } from "./menu";
 import { fileEntries, renameRequest } from "./fileActions";
 import { useToast } from "./toast";
+import { MeasuringStatus } from "./MeasuringStatus";
 
 /**
  * The Library workspace: every data file under the open folders, as one list (Labber's Log
@@ -1138,55 +1139,40 @@ function DateTree({ dates, date, onDate }: { dates: LibraryFacets["dates"]; date
 // ---- right: the selected file
 
 const WRITING_TIP = {
-  measuring: "Being written by a measurement right now: it grows as data comes in.",
+  measuring: "Being written by a measurement on this computer right now: it grows as data comes in.",
+  elsewhere: "Being written by a measurement on another computer, synced here: it grows as the sync brings data.",
+  silent: "Measured on another computer, but no sign of it came for a while: it probably stopped, or the sync is paused.",
   stopped: "Its measurement stopped before finishing (a crash, an error, or a script that ended without closing it). " +
     "Recover makes it an .lbd file with everything it holds.",
 };
+const WRITING_TEXT = {
+  measuring: "measuring…",
+  elsewhere: "measuring elsewhere…",
+  silent: "no sign lately",
+  stopped: "stopped before finishing",
+};
 
-/** "measuring…" or "stopped before finishing", next to a file being written (name.lbd.writing). */
-function WritingMark({ writing }: { writing: "measuring" | "stopped" }) {
+/** "measuring…", "measuring elsewhere…", "no sign lately" or "stopped before finishing", next to a
+ *  file being written (name.lbd.writing). */
+function WritingMark({ writing }: { writing: Exclude<LibraryRow["writing"], null> }) {
   return (
     <span className={`mark-writing ${writing} small`} title={WRITING_TIP[writing]}>
       {" "}
-      {writing === "measuring" ? "measuring…" : "stopped before finishing"}
+      {WRITING_TEXT[writing]}
     </span>
   );
 }
 
-/** What a file being written is, and Recover once its measurement stopped. */
+/** What a file being written is: its status line (MeasuringStatus: progress, Recover). */
 function WritingBox({ row, onRecovered }: { row: LibraryRow; onRecovered: (path: string) => void }) {
-  const [busy, setBusy] = useState(false);
-  const toast = useToast();
-  const when = new Date(row.mtime * 1000).toLocaleString();
-  const recover = () => {
-    setBusy(true);
-    api
-      .recoverFile(row.path)
-      .then((r) => {
-        toast(`Recovered as ${baseName(r.path)}`, "info");
-        onRecovered(r.path);
-      })
-      .catch((e) => toast((e as Error).message, "error"))
-      .finally(() => setBusy(false));
-  };
   return (
-    <div className={`writing-box ${row.writing}`} role="status">
-      {row.writing === "measuring" ? (
-        <p>
-          <strong>Measuring…</strong> (last written {when}). This file is being written by a measurement; it is
-          shown as it is now, and becomes <code>{baseName(row.path).replace(/\.writing$/i, "")}</code> when the
-          measurement finishes. LBD doesn't change, rename or recycle it meanwhile.
-        </p>
-      ) : (
-        <p>
-          <strong>Stopped before finishing</strong> (last written {when}). Its measurement ended without finishing
-          the file (a crash, an error, or a script that ended without closing it).{" "}
-          <button className="primary" disabled={busy} onClick={recover}>
-            {busy ? "Recovering…" : "Recover"}
-          </button>{" "}
-          makes it an .lbd file with everything it holds.
-        </p>
-      )}
+    <div className={`writing-box ${row.writing}`}>
+      <MeasuringStatus path={row.path} onRecovered={(p, copy) => !copy && onRecovered(p)} />
+      <p className="small muted">
+        This file is being written by a measurement and becomes{" "}
+        <code>{baseName(row.path).replace(/\.writing$/i, "")}</code> when it finishes. LBD doesn't change, rename or recycle it
+        meanwhile.
+      </p>
     </div>
   );
 }

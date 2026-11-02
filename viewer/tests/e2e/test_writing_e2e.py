@@ -29,12 +29,13 @@ def test_measuring_and_a_stopped_file_recovered(viewer, new_page):
         page = new_page("Library")
         expect(row(page, "live.lbd.writing")).to_contain_text("measuring…", timeout=20_000)
         row(page, "live.lbd.writing").click()
-        expect(page.locator(".writing-box")).to_contain_text("Measuring…")
+        expect(page.locator(".writing-box")).to_contain_text("Measuring")              # its status line (plan 9)
         expect(page.locator(".library-detail .preview")).to_contain_text("No preview while it is being written")
 
         expect(row(page, "stopped.lbd.writing")).to_contain_text("stopped before finishing")
         row(page, "stopped.lbd.writing").click()
-        page.locator(".writing-box").get_by_role("button", name="Recover").click()
+        page.locator(".writing-box").get_by_role("button", name="Recover…").click()
+        page.get_by_role("dialog", name="Recover").get_by_role("button", name="Recover").click()
         expect(row(page, "stopped.lbd")).to_be_visible(timeout=20_000)
         expect(row(page, "stopped.lbd.writing")).to_have_count(0)
         assert lbd.load(viewer.data / "stopped.lbd").values["y"].data[0] == 2.0

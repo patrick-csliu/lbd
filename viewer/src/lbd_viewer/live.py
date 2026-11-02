@@ -170,7 +170,14 @@ class LiveWatch:
 
     def status(self, path: str, value: Optional[str] = None) -> Dict[str, Any]:
         """The state of a file being measured, and its progress (for `value`, else the value
-        with the most points)."""
+        with the most points). A measurement that stopped, or gave no sign lately, has no time
+        left to tell."""
+        out = self._status(path, value)
+        if out.get("state") in ("silent", "stopped") and out.get("progress"):
+            out["progress"] = [part for part in out["progress"] if part["kind"] != "time"]
+        return out
+
+    def _status(self, path: str, value: Optional[str]) -> Dict[str, Any]:
         p = Path(path)
         with self._lock:
             try:

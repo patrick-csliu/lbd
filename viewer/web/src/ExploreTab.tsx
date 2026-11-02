@@ -14,6 +14,7 @@ import { COMPLEX_MODES, SliceControl } from "./FileView";
 import { useDiskVersion } from "./watch";
 import { ContextMenu, MenuAt, menuAt } from "./menu";
 import { useToast } from "./toast";
+import { MeasuringStatus } from "./MeasuringStatus";
 
 /**
  * One file in the Explore workspace: its header, what to plot (values, kind, axes, slices,
@@ -626,6 +627,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
           <div className="muted small path" title={info.path}>
             {info.path}
           </div>
+          {/\.lbd\.writing$/i.test(info.path) && <MeasuringStatus path={info.path} />}
         </div>
         <div className="actions">
           <button onClick={onOpenInFigure} title="Make a figure of this file: styles and export">

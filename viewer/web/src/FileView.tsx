@@ -4,6 +4,7 @@ import { deepMerge, isEmptyObject } from "./util";
 import { copyPng } from "./clipboard";
 import { ConfirmDialog, ConfirmRequest } from "./menu";
 import { useToast } from "./toast";
+import { MeasuringStatus } from "./MeasuringStatus";
 import { HelpLink } from "./help";
 import { useDiskVersion } from "./watch";
 
@@ -341,6 +342,7 @@ export default function FileView(props: Props) {
           <div className="muted small path" title={info.path}>
             {info.path}
           </div>
+          {/\.lbd\.writing$/i.test(info.path) && <MeasuringStatus path={info.path} />}
         </div>
         <div className="actions">
           {!plotted && (

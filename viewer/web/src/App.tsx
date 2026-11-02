@@ -1,5 +1,8 @@
 import { CSSProperties, KeyboardEvent, MouseEvent, PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MemorySettings } from "./MemorySettings";
+import { MeasurementSettings } from "./MeasurementSettings";
+import { DEFAULT_MEASUREMENTS, MeasurementsContext, notifyInBackground } from "./MeasuringStatus";
+import { onFinished } from "./watch";
 import { api, ApiError, AppState, baseName, fileKind, OpenDataIn, OpenFilesIn, PageCommand, PageEntry, TabState, Theme, viewerUrl, Workspace } from "./api";
 import FolderPanel from "./FolderPanel";
 import FileView from "./FileView";
@@ -378,6 +381,20 @@ function Shell() {
       initialStates.current.set(newPath, state);
     }
   }, []);
+
+  // A measurement shown here finished: its tabs move to the finished file (as a rename), and say so.
+  const measurementsRef = useRef(DEFAULT_MEASUREMENTS);
+  measurementsRef.current = state?.measurements ?? DEFAULT_MEASUREMENTS;
+  useEffect(
+    () =>
+      onFinished((old, now) => {
+        fileRenamed(old, now);
+        const text = `Finished: now ${baseName(now)}`;
+        toast(text);
+        notifyInBackground(measurementsRef.current, "LBD: a measurement finished", text);
+      }),
+    [fileRenamed, toast],
+  );
 
   // ---- moving tabs to another page (rule 4: a two-step hand-off, nothing lost or doubled) -----
 
@@ -796,6 +813,7 @@ function Shell() {
   }
 
   return (
+    <MeasurementsContext.Provider value={state?.measurements ?? DEFAULT_MEASUREMENTS}>
     <div className="app">
       <header className="topbar">
         <div className="brand">
@@ -880,6 +898,7 @@ function Shell() {
                 </p>
                 <PreviewSettings settings={state.library} onSettings={setState} />
                 <MemorySettings settings={state.memory} onSettings={setState} />
+                <MeasurementSettings settings={state.measurements ?? DEFAULT_MEASUREMENTS} onSettings={setState} />
                 <div className="settings-title">Theme</div>
                 {(
                   [
@@ -992,6 +1011,7 @@ function Shell() {
                     onClick={() => setExploreActive(t.path)}
                     onDoubleClick={() => openExplore([t.path], true)}
                   >
+                    {measuredMark(t.path)}
                     {baseName(t.path)}
                   </button>
                   <button className="tab-close" aria-label={`Close ${baseName(t.path)}`} onClick={() => closeExplore([t.path])}>
@@ -1054,6 +1074,7 @@ function Shell() {
                       onDoubleClick={() => openFile(t.path)}
                     >
                       {lock ? (lock.transfer ? "⇢ " : "🔒 ") : ""}
+                      {measuredMark(t.path)}
                       {baseName(t.path)}
                     </button>
                     <button className="tab-close" aria-label={`Close ${baseName(t.path)}`} onClick={() => closeTabs([t.path])}>
@@ -1135,6 +1156,7 @@ function Shell() {
         </div>
       )}
     </div>
+    </MeasurementsContext.Provider>
   );
 }
 
@@ -1158,3 +1180,11 @@ function EmptyMain({ hasRoots, where }: { hasRoots: boolean; where: "explore" | 
   );
 }
 
+/** "● " before the name of a file being measured (name.lbd.writing). */
+function measuredMark(path: string) {
+  return /\.lbd\.writing$/i.test(path) ? (
+    <span className="tab-measuring" title="Being measured" aria-label="being measured">
+      ●{" "}
+    </span>
+  ) : null;
+}
