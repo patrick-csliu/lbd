@@ -250,3 +250,25 @@ def test_labels_are_one_pill_each_with_the_x_inside(viewer, library_files, new_p
     assert len(heights) == 1                                                          # the long one stays one line
     expect(chips.nth(1)).to_have_attribute("title", " › ".join(long_tag.strip().split("/")))
     expect(chips.nth(1).locator(".chip-text")).to_contain_text("…")                   # shortened in the middle
+
+
+def test_the_label_sections_fold_and_line_up(viewer, library_files, new_page):
+    page = new_page("Library")
+    shows(page, every_file(viewer), 20_000)
+    find(page, "Late resonator sweep")
+    pick(page, "Add a tag", "flux/bias")
+    pick(page, "Add a tag", "noise")
+    side = page.locator(".library-left")
+    tags_head = side.get_by_role("button", name=re.compile(r"^Tags · \d+$"))
+    expect(tags_head).to_have_attribute("aria-expanded", "true")
+    tree = side.get_by_role("tree", name="Tags")
+    tree.get_by_role("button", name="noise", exact=True).click()                      # chosen: a filter
+    tags_head.click()                                                                  # fold the tags away
+    expect(tree).to_have_count(0)
+    expect(side.locator(".label-tree-chosen .label-chip")).to_have_text(re.compile("noise"))   # the filter still shows
+    page.reload()
+    expect(page.locator(".library-left").get_by_role("button", name=re.compile(r"^Tags · \d+$"))).to_have_attribute("aria-expanded", "false")
+    page.locator(".library-left").get_by_role("button", name=re.compile(r"^Tags · \d+$")).click()
+    # every count ends at the same x
+    rights = {round(b["x"] + b["width"]) for b in (c.bounding_box() for c in page.locator(".library-dates .count, .library-labels .library-folder .count").all()) if b}
+    assert len(rights) == 1, rights

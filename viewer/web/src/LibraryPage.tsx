@@ -1027,7 +1027,7 @@ function LibraryFolders({
   const unfolded = (f: LibraryFolder, isRoot: boolean) => (isRoot ? !open.has("-" + f.path) : open.has(f.path));
   const node = (f: LibraryFolder, depth: number, isRoot: boolean) => (
     <li key={f.path} role="treeitem" aria-expanded={f.children.length ? unfolded(f, isRoot) : undefined} aria-selected={folder === f.path}>
-      <div className={"library-folder" + (folder === f.path ? " active" : "")} style={{ paddingLeft: 8 + depth * 14 }}>
+      <div className={"library-folder" + (folder === f.path ? " active" : "")} style={indent(depth)}>
         {f.children.length ? (
           <button className="link twisty" aria-label={(unfolded(f, isRoot) ? "Fold " : "Unfold ") + f.name} onClick={() => toggle(isRoot ? "-" + f.path : f.path)}>
             {unfolded(f, isRoot) ? "▾" : "▸"}
@@ -1045,7 +1045,7 @@ function LibraryFolders({
           </button>
         )}
       </div>
-      {f.children.length > 0 && unfolded(f, isRoot) && <ul role="group">{f.children.map((c) => node(c, depth + 1, false))}</ul>}
+      {f.children.length > 0 && unfolded(f, isRoot) && <ul role="group" style={guide(depth)}>{f.children.map((c) => node(c, depth + 1, false))}</ul>}
     </li>
   );
 
@@ -1090,6 +1090,15 @@ function LibraryFolders({
   );
 }
 
+/** A tree row's indent at `depth`, and the guide line of the group under a row at `depth` (at
+ * the middle of that row's twisty; styles.css draws it). */
+function indent(depth: number): CSSProperties {
+  return { paddingLeft: 8 + depth * 16 };
+}
+function guide(depth: number): CSSProperties {
+  return { "--d": depth } as CSSProperties;
+}
+
 // ---- left: the date tree (year → month → day), from each file's `created`
 
 function DateTree({ dates, date, onDate }: { dates: LibraryFacets["dates"]; date: string; onDate: (d: string) => void }) {
@@ -1127,7 +1136,7 @@ function DateTree({ dates, date, onDate }: { dates: LibraryFacets["dates"]; date
         <ul className="library-tree" role="tree" aria-label="Dates">
           {years.map((y) => (
             <li key={y} role="treeitem" aria-expanded={open.has(y)} aria-selected={date === y}>
-              <div className={"library-folder" + (date === y ? " active" : "")} style={{ paddingLeft: 8 }}>
+              <div className={"library-folder" + (date === y ? " active" : "")} style={indent(0)}>
                 <button className="link twisty" aria-label={(open.has(y) ? "Fold " : "Unfold ") + y} onClick={() => toggle(y)}>
                   {open.has(y) ? "▾" : "▸"}
                 </button>
@@ -1137,7 +1146,7 @@ function DateTree({ dates, date, onDate }: { dates: LibraryFacets["dates"]; date
                 <span className="count">{sum(dates[y])}</span>
               </div>
               {open.has(y) && (
-                <ul role="group">
+                <ul role="group" style={guide(0)}>
                   {Object.keys(dates[y])
                     .sort()
                     .reverse()
@@ -1145,7 +1154,7 @@ function DateTree({ dates, date, onDate }: { dates: LibraryFacets["dates"]; date
                       const ym = `${y}-${m}`;
                       return (
                         <li key={ym} role="treeitem" aria-expanded={open.has(ym)} aria-selected={date === ym}>
-                          <div className={"library-folder" + (date === ym ? " active" : "")} style={{ paddingLeft: 22 }}>
+                          <div className={"library-folder" + (date === ym ? " active" : "")} style={indent(1)}>
                             <button className="link twisty" aria-label={(open.has(ym) ? "Fold " : "Unfold ") + `${MONTHS[Number(m) - 1]} ${y}`} onClick={() => toggle(ym)}>
                               {open.has(ym) ? "▾" : "▸"}
                             </button>
@@ -1155,7 +1164,7 @@ function DateTree({ dates, date, onDate }: { dates: LibraryFacets["dates"]; date
                             <span className="count">{sum(dates[y][m])}</span>
                           </div>
                           {open.has(ym) && (
-                            <ul role="group">
+                            <ul role="group" style={guide(1)}>
                               {Object.keys(dates[y][m])
                                 .sort()
                                 .reverse()
@@ -1163,7 +1172,8 @@ function DateTree({ dates, date, onDate }: { dates: LibraryFacets["dates"]; date
                                   const ymd = `${ym}-${d}`;
                                   return (
                                     <li key={ymd} role="treeitem" aria-selected={date === ymd}>
-                                      <div className={"library-folder" + (date === ymd ? " active" : "")} style={{ paddingLeft: 50 }}>
+                                      <div className={"library-folder" + (date === ymd ? " active" : "")} style={indent(2)}>
+                                        <span className="twisty" />
                                         <button className="link folder-name" aria-label={`${Number(d)} ${MONTHS[Number(m) - 1]} ${y}`} onClick={() => pick(ymd)}>
                                           {Number(d)}
                                         </button>
@@ -1602,6 +1612,10 @@ export interface LabelManagement {
 }
 
 const DRAG_LABEL = "application/x-lbd-label";
+/** The label kinds folded away in the sidebar (this browser). */
+const FOLDED_KEY = "lbd-library-folded-labels";
+/** "Find a label…" is shown from this many labels (all kinds). */
+const FIND_FROM = 15;
 export const DRAG_FILES = "application/x-lbd-files";
 
 function LabelFilters(props: {
@@ -1622,6 +1636,26 @@ function LabelFilters(props: {
   const { facets, project, tags, users, starred, conflicts, manage } = props;
   const many = (list: string[], set: (l: string[]) => void) => (label: string) =>
     set(list.includes(label) ? list.filter((x) => x !== label) : [...list, label]);
+  const [find, setFind] = useState("");
+  const [folded, setFolded] = useState<LabelKind[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(FOLDED_KEY) ?? "[]");
+    } catch {
+      return [];
+    }
+  });
+  const fold = (kind: LabelKind) =>
+    setFolded((f) => {
+      const next = f.includes(kind) ? f.filter((k) => k !== kind) : [...f, kind];
+      try {
+        localStorage.setItem(FOLDED_KEY, JSON.stringify(next));
+      } catch {
+        /* storage unavailable: not remembered */
+      }
+      return next;
+    });
+  const foldProps = (kind: LabelKind) => ({ find, folded: folded.includes(kind), onFold: () => fold(kind) });
+  const labelCount = facets ? flatten(facets.projects).length + flatten(facets.users).length + flatten(facets.tags).length : 0;
   return (
     <div className="library-labels">
       <div className="panel-head">
@@ -1644,9 +1678,14 @@ function LabelFilters(props: {
           </button>
         )}
       </div>
-      <LabelTree kind="project" title="Project" empty="No projects yet" nodes={facets?.projects ?? []} chosen={project ? [project] : []} onPick={(l) => props.onProject(project === l ? "" : l)} manage={manage} />
-      <LabelTree kind="users" title="Users" empty="No users yet" nodes={facets?.users ?? []} chosen={users} onPick={many(users, props.onUsers)} manage={manage} />
-      <LabelTree kind="tags" title="Tags" empty="No tags yet" nodes={facets?.tags ?? []} chosen={tags} onPick={many(tags, props.onTags)} manage={manage} />
+      {labelCount > FIND_FROM && (
+        <div className="label-find">
+          <input type="search" value={find} onChange={(e) => setFind(e.target.value)} placeholder="Find a label…" aria-label="Find a label" />
+        </div>
+      )}
+      <LabelTree kind="project" title="Project" empty="No projects yet" nodes={facets?.projects ?? []} chosen={project ? [project] : []} onPick={(l) => props.onProject(project === l ? "" : l)} manage={manage} {...foldProps("project")} />
+      <LabelTree kind="users" title="Users" empty="No users yet" nodes={facets?.users ?? []} chosen={users} onPick={many(users, props.onUsers)} manage={manage} {...foldProps("users")} />
+      <LabelTree kind="tags" title="Tags" empty="No tags yet" nodes={facets?.tags ?? []} chosen={tags} onPick={many(tags, props.onTags)} manage={manage} {...foldProps("tags")} />
     </div>
   );
 }
@@ -1664,6 +1703,9 @@ function LabelTree({
   chosen,
   onPick,
   manage,
+  find,
+  folded,
+  onFold,
 }: {
   kind: LabelKind;
   title: string;
@@ -1672,8 +1714,13 @@ function LabelTree({
   chosen: string[];
   onPick: (label: string) => void;
   manage: LabelManagement;
+  /** the "Find a label" text: only matching labels (and the ones they are in) are shown */
+  find: string;
+  folded: boolean;
+  onFold: () => void;
 }) {
   const [open, setOpen] = useState<Set<string>>(new Set());
+  const [more, setMore] = useState<Set<string>>(new Set()); // levels showing all their labels ("" : the top)
   const [over, setOver] = useState<string | null>(null); // where a drag would drop ("" : the heading)
   const toggle = (k: string) =>
     setOpen((o) => {
@@ -1709,11 +1756,35 @@ function LabelTree({
       else if (d.files?.length && target) manage.dropFiles(kind, target, d.files);
     },
   });
+  // a label is shown when it, or a label inside it, matches the "Find a label" text; found ones are unfolded
+  const needle = find.trim().toLowerCase();
+  const matches = (n: LabelNode): boolean => !needle || n.label.toLowerCase().includes(needle) || n.children.some(matches);
+  const holdsChosen = (n: LabelNode): boolean => chosen.some((c) => c === n.label || c.startsWith(n.label + "/"));
+  const isOpen = (n: LabelNode) => (needle ? n.children.some(matches) : open.has(n.label));
+  /** At most SHOWN rows per level (the most used, kept A→Z; chosen ones always), then "Show N more…". */
+  const level = (list: LabelNode[], parent: string, depth: number): ReactNode[] => {
+    const found = list.filter(matches);
+    let shown = found;
+    if (!needle && found.length > SHOWN && !more.has(parent)) {
+      const top = new Set([...found].sort((a, b) => b.count - a.count).slice(0, SHOWN).map((n) => n.label));
+      shown = found.filter((n) => top.has(n.label) || holdsChosen(n));
+    }
+    const rows = shown.map((n) => node(n, depth));
+    if (shown.length < found.length)
+      rows.push(
+        <li key={"more:" + parent} role="none">
+          <button className="link small tree-more" style={indent(depth)} onClick={() => setMore((m) => new Set([...m, parent]))}>
+            Show {found.length - shown.length} more…
+          </button>
+        </li>,
+      );
+    return rows;
+  };
   const node = (n: LabelNode, depth: number): ReactNode => (
-    <li key={n.label} role="treeitem" aria-selected={chosen.includes(n.label)} aria-expanded={n.children.length ? open.has(n.label) : undefined}>
+    <li key={n.label} role="treeitem" aria-selected={chosen.includes(n.label)} aria-expanded={n.children.length ? isOpen(n) : undefined}>
       <div
-        className={"library-folder" + (chosen.includes(n.label) ? " active" : "") + (over === n.label ? " drop-here" : "")}
-        style={{ paddingLeft: 8 + depth * 14 }}
+        className={"library-folder" + (chosen.includes(n.label) ? " active" : "") + (over === n.label ? " drop-here" : "") + (n.count === 0 ? " unused" : "")}
+        style={indent(depth)}
         draggable
         onDragStart={(e) => {
           e.dataTransfer.setData(DRAG_LABEL, JSON.stringify({ kind, label: n.label }));
@@ -1721,42 +1792,98 @@ function LabelTree({
         }}
         onContextMenu={(e) => manage.menu(e, kind, n)}
         onKeyDown={(e) => isMenuKey(e) && manage.menu(e, kind, n)}
-        title={`${n.label} · right-click: new, rename, move, remove · drag onto another label to move it into it`}
+        title={`${labelPath(n.label)} · right-click: new, rename, move, remove · drag onto another label to move it into it`}
         {...dropTarget(n.label)}
       >
         {n.children.length ? (
-          <button className="link twisty" aria-label={(open.has(n.label) ? "Fold " : "Unfold ") + n.label} onClick={() => toggle(n.label)}>
-            {open.has(n.label) ? "▾" : "▸"}
+          <button className="link twisty" aria-label={(isOpen(n) ? "Fold " : "Unfold ") + n.label} onClick={() => toggle(n.label)}>
+            {isOpen(n) ? "▾" : "▸"}
           </button>
         ) : (
           <span className="twisty" />
         )}
         <button className="link folder-name" onClick={() => onPick(n.label)}>
+          {chosen.includes(n.label) && <span className="tree-check" aria-hidden="true">✓ </span>}
           {n.name}
         </button>
         <span className="count">{n.count}</span>
       </div>
-      {n.children.length > 0 && open.has(n.label) && <ul role="group">{n.children.map((c) => node(c, depth + 1))}</ul>}
+      {n.children.length > 0 && isOpen(n) && (
+        <ul role="group" style={guide(depth)}>
+          {level(n.children, n.label, depth + 1)}
+        </ul>
+      )}
     </li>
   );
+  const word = kind === "users" ? "user" : kind === "tags" ? "tag" : "project";
+  const total = flatten(nodes).length;
+  const hidden = folded && !needle;
   return (
-    <div className="library-label-tree">
+    <div className={"library-label-tree" + (hidden ? " folded" : "")}>
       <div className={"label-tree-head" + (over === "" ? " drop-here" : "")} {...dropTarget(null)} title="Drop a label here to move it to the top level">
-        <h3 className="small">{title}</h3>
-        <button className="link small" onClick={() => manage.create(kind)} aria-label={`New ${title.toLowerCase()}`} title={`A new ${kind === "users" ? "user" : kind === "tags" ? "tag" : "project"}, kept even before a file has it`}>
+        <h3>
+          <button className="link label-tree-title" aria-expanded={!hidden} onClick={onFold} title={hidden ? `Show the ${title.toLowerCase()}` : `Fold the ${title.toLowerCase()} away`}>
+            <span className="twisty" aria-hidden="true">
+              {hidden ? "▸" : "▾"}
+            </span>
+            <LabelKindIcon kind={kind} />
+            {title}
+            <span className="label-tree-count">· {total}</span>
+          </button>
+        </h3>
+        <button className="link small label-new" onClick={() => manage.create(kind)} aria-label={`New ${title.toLowerCase()}`} title={`A new ${word}, kept even before a file has it`}>
           + New
         </button>
       </div>
-      {nodes.length ? (
-        <ul className="library-tree" role="tree" aria-label={title}>
-          {nodes.map((n) => node(n, 0))}
-        </ul>
+      {hidden ? (
+        chosen.length > 0 && (
+          <div className="label-tree-chosen">
+            {chosen.map((c) => (
+              <LabelChip key={c} label={c} max={30} removeLabel={`Not only ${word} ${c}`} onRemove={() => onPick(c)} />
+            ))}
+          </div>
+        )
+      ) : nodes.length ? (
+        nodes.some(matches) ? (
+          <ul className="library-tree" role="tree" aria-label={title}>
+            {level(nodes, "", 0)}
+          </ul>
+        ) : (
+          <p className="muted small pad label-empty">No {title.toLowerCase()} match.</p>
+        )
       ) : (
         <p className="muted small pad label-empty">
           {empty}. <strong>+ New</strong>, or set one on a file.
         </p>
       )}
     </div>
+  );
+}
+
+/** At most this many labels per level before "Show N more…". */
+const SHOWN = 12;
+
+/** The small picture in front of Project, Users and Tags. */
+function LabelKindIcon({ kind }: { kind: LabelKind }) {
+  const common = { width: 13, height: 13, viewBox: "0 0 16 16", fill: "none", stroke: "currentColor", strokeWidth: 1.5, "aria-hidden": true, className: "label-kind-icon" } as const;
+  if (kind === "users")
+    return (
+      <svg {...common}>
+        <circle cx="8" cy="5.5" r="2.8" />
+        <path d="M2.5 14c.6-3 2.8-4.5 5.5-4.5s4.9 1.5 5.5 4.5" />
+      </svg>
+    );
+  if (kind === "tags")
+    return (
+      <svg {...common}>
+        <path d="M2 2.5h5.5l6.5 6.5-5 5-6.5-6.5z" />
+        <circle cx="5.3" cy="5.8" r="1" />
+      </svg>
+    );
+  return (
+    <svg {...common}>
+      <path d="M1.8 3.5h4l1.5 1.5h6.9v8H1.8z" />
+    </svg>
   );
 }
 

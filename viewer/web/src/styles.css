@@ -377,12 +377,21 @@ details.group fieldset > .group-fields { margin-top: -4px; }
 .library-left { background: var(--panel); border-right: 1px solid var(--border); overflow: auto; min-height: 0; padding: 8px 0; }
 .library-tree { list-style: none; margin: 0; padding: 2px 0 8px; user-select: none; }
 .library-tree ul { list-style: none; margin: 0; padding: 0; }
-.library-folder { display: flex; align-items: center; gap: 4px; padding: 2px 8px; font-size: 13px; }
-.library-folder.active { background: var(--accent-soft); }
+/* tree rows (folders, dates, labels): 24 px, 16 px per level, a guide line under an unfolded
+   row (at its twisty, --d = its depth), counts in one right-aligned column */
+.library-tree ul[role=group] { position: relative; }
+.library-tree ul[role=group]::before { content: ""; position: absolute; top: 0; bottom: 6px; left: calc(15px + var(--d, 0) * 16px); width: 1px; background: var(--border); }
+.library-folder { display: flex; align-items: center; gap: 4px; min-height: 24px; padding: 0 12px 0 8px; font-size: 13px; position: relative; }
+.library-folder:hover { background: var(--panel-2); }
+.library-folder.active { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
 .library-folder.active .folder-name { color: var(--accent); font-weight: 600; }
-.library-folder .twisty { width: 14px; flex: none; text-align: center; color: var(--muted); }
+.library-folder .twisty { width: 14px; flex: none; padding: 0; text-align: center; color: var(--muted); }
+.library-folder .twisty:hover { color: var(--text); }
 .library-folder .folder-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; color: var(--text); }
-.library-folder .count { color: var(--muted); font-size: 12px; }
+.library-folder .count { flex: none; min-width: 30px; text-align: right; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.library-folder.unused .folder-name { color: var(--muted); font-style: italic; }
+.tree-check { color: var(--accent); }
+.tree-more { display: block; width: 100%; text-align: left; padding-top: 2px; padding-bottom: 2px; margin-left: 18px; }
 .library-dates { border-top: 1px solid var(--border); padding-top: 6px; }
 .library-middle { display: flex; flex-direction: column; gap: 6px; min-height: 0; min-width: 0; padding: 10px 12px; border-right: 1px solid var(--border); }
 .library-notice { background: var(--accent-soft); border-radius: var(--radius); padding: 8px 10px; font-size: 13px; }
@@ -518,7 +527,6 @@ details.group fieldset > .group-fields { margin-top: -4px; }
 .library-label-switches .count { margin-left: auto; color: var(--muted); font-size: 12px; }
 .library-label-switches label.check { display: flex; align-items: center; gap: 6px; }
 .library-label-switches .link { text-align: left; }
-.library-label-tree h3 { margin: 6px 12px 2px; color: var(--muted); font-weight: 600; }
 .library-row.starred .cell-name { font-weight: 600; }
 .library-row .mark-star { color: #c99a06; }
 .library-row .mark-conflict { color: var(--danger); }
@@ -699,8 +707,20 @@ details.group fieldset > .group-fields { margin-top: -4px; }
 .files-colcell .col-resize:hover { background: var(--accent); opacity: 0.4; }
 
 /* ---- labels on the left: headings with + New; where a dragged label or file would go ---- */
-.label-tree-head { display: flex; align-items: center; justify-content: space-between; padding: 0 12px 0 0; border-radius: var(--radius); }
-.label-tree-head h3 { margin: 6px 12px 2px; color: var(--muted); font-weight: 600; }
+/* Project / Users / Tags: section headings that stay at the top while their labels scroll by */
+.library-label-tree { border-top: 1px solid var(--border); margin-top: 6px; }
+.label-tree-head { display: flex; align-items: center; justify-content: space-between; padding: 0 12px 0 0; position: sticky; top: -8px; z-index: 2;
+  background: var(--panel); }
+.label-tree-head h3 { margin: 0; font-size: 13px; font-weight: 600; flex: 1; min-width: 0; }
+.label-tree-head .label-tree-title { display: flex; align-items: center; gap: 5px; width: 100%; padding: 6px 4px 6px 8px; color: var(--text); font-weight: 600; text-align: left; }
+.label-tree-title .twisty { width: 14px; color: var(--muted); }
+.label-kind-icon { color: var(--muted); flex: none; }
+.label-tree-count { color: var(--muted); font-weight: 400; }
+.label-tree-head .label-new { opacity: 0.6; }
+.label-tree-head:hover .label-new, .label-tree-head .label-new:focus-visible { opacity: 1; }
+.label-tree-chosen { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 12px 6px 26px; }
+.label-find { padding: 4px 12px 2px; }
+.label-find input { width: 100%; box-sizing: border-box; }
 .library-label-tree .label-empty { margin: 0 12px 6px; }
 .library-folder.drop-here, .label-tree-head.drop-here { background: var(--accent-soft); box-shadow: inset 0 0 0 2px var(--accent); }
 .dialog-choice { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
