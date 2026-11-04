@@ -54,9 +54,9 @@ def test_labels_on_one_and_several_files_filter_and_search(viewer, library_files
     expect(rows(page).first).to_contain_text("★")
     expect(detail(page).get_by_role("button", name="Starred (click: unstar)")).to_be_visible()
     pick(page, "Add a tag", "flux/bias")
-    expect(detail(page).get_by_label("Tags", exact=True)).to_contain_text("flux/bias")
+    expect(detail(page).get_by_label("Tags", exact=True)).to_contain_text("flux › bias")
     pick(page, "Set the project", "Qubit A/Device 3")
-    expect(detail(page).get_by_label("Project", exact=True)).to_contain_text("Qubit A/Device 3")
+    expect(detail(page).get_by_label("Project", exact=True)).to_contain_text("Qubit A › Device 3")
     pick(page, "Add a user", "Lab A/Qubit team/Patrick")
     comment = detail(page).get_by_label("Comment")
     comment.fill("punch-out seen at high power")
@@ -231,3 +231,22 @@ def test_a_label_picker_closes_on_a_click_elsewhere_and_on_escape(viewer, librar
     expect(picker).to_be_visible()
     add_tag.click()                                                                  # the button toggles it
     expect(picker).to_have_count(0)
+
+
+def test_labels_are_one_pill_each_with_the_x_inside(viewer, library_files, new_page):
+    page = new_page("Library")
+    shows(page, every_file(viewer), 20_000)
+    find(page, "Late resonator sweep")
+    long_tag = "quality/redo/" + "a very long tag about the averages and the attenuation in the line " * 2
+    pick(page, "Add a tag", "flux/bias")
+    pick(page, "Add a tag", long_tag.strip())
+    chips = detail(page).get_by_label("Tags", exact=True).locator(".label-chip")
+    expect(chips).to_have_count(2)                                                    # two tags, two pills
+    heights = set()
+    for i in range(2):
+        chip, x = chips.nth(i).bounding_box(), chips.nth(i).locator(".chip-x").bounding_box()
+        assert chip["x"] <= x["x"] and x["x"] + x["width"] <= chip["x"] + chip["width"] + 0.5   # the × inside its pill
+        heights.add(round(chip["height"]))
+    assert len(heights) == 1                                                          # the long one stays one line
+    expect(chips.nth(1)).to_have_attribute("title", " › ".join(long_tag.strip().split("/")))
+    expect(chips.nth(1).locator(".chip-text")).to_contain_text("…")                   # shortened in the middle

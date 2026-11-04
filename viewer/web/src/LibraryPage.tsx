@@ -27,6 +27,8 @@ import { ConfirmDialog, ConfirmRequest, ContextMenu, isMenuKey, MenuAt, menuAt, 
 import { copyPath } from "./fileActions";
 import { useToast } from "./toast";
 import { useFileActions } from "./libraryActions";
+import { Chip, LabelChip } from "./LabelChip";
+import { labelPath } from "./labelText";
 import { cellText, COLUMNS, createdText, fittingColumns, localTime } from "./libraryColumns";
 import { DRAWER_MEDIA, ONE_PANE_MEDIA, useMedia } from "./useMedia";
 import { useResizable, widestContent } from "./resizable";
@@ -611,75 +613,44 @@ export default function LibraryPage(props: Props) {
             {total === null ? "…" : filtered && all !== undefined ? `${total} of ${all} files` : `${total} file${total === 1 ? "" : "s"}`}
           </span>
           {folder && (
-            <span className="chip">
+            <Chip removeLabel="Show all folders" onRemove={() => setFolder(null)}>
               Folder: {shownFolder?.name ?? baseName(folder)}
-              <button className="link" aria-label="Show all folders" onClick={() => setFolder(null)}>
-                ×
-              </button>
-            </span>
+            </Chip>
           )}
           {date && (
-            <span className="chip">
+            <Chip removeLabel="Any date" onRemove={() => setDate("")}>
               Date: {dateLabel(date)}
-              <button className="link" aria-label="Any date" onClick={() => setDate("")}>
-                ×
-              </button>
-            </span>
+            </Chip>
           )}
           {q && (
-            <span className="chip">
+            <Chip
+              removeLabel="Clear the search"
+              onRemove={() => {
+                setTyped("");
+                setQ("");
+              }}
+            >
               Search: "{q}"
-              <button
-                className="link"
-                aria-label="Clear the search"
-                onClick={() => {
-                  setTyped("");
-                  setQ("");
-                }}
-              >
-                ×
-              </button>
-            </span>
+            </Chip>
           )}
           {project && (
-            <span className="chip">
-              project {project}
-              <button className="link" aria-label="Any project" onClick={() => setProject("")}>
-                ×
-              </button>
-            </span>
+            <LabelChip prefix="project" label={project} removeLabel="Any project" onRemove={() => setProject("")} />
           )}
           {users.map((u) => (
-            <span key={"u" + u} className="chip">
-              user {u}
-              <button className="link" aria-label={`Not only user ${u}`} onClick={() => setUsers(users.filter((x) => x !== u))}>
-                ×
-              </button>
-            </span>
+            <LabelChip key={"u" + u} prefix="user" label={u} removeLabel={`Not only user ${u}`} onRemove={() => setUsers(users.filter((x) => x !== u))} />
           ))}
           {tags.map((t) => (
-            <span key={"t" + t} className="chip">
-              tag {t}
-              <button className="link" aria-label={`Not only tag ${t}`} onClick={() => setTags(tags.filter((x) => x !== t))}>
-                ×
-              </button>
-            </span>
+            <LabelChip key={"t" + t} prefix="tag" label={t} removeLabel={`Not only tag ${t}`} onRemove={() => setTags(tags.filter((x) => x !== t))} />
           ))}
           {starred && (
-            <span className="chip">
+            <Chip removeLabel="Starred or not" onRemove={() => setStarred(false)}>
               ★ starred
-              <button className="link" aria-label="Starred or not" onClick={() => setStarred(false)}>
-                ×
-              </button>
-            </span>
+            </Chip>
           )}
           {conflicts && (
-            <span className="chip">
+            <Chip removeLabel="All files, not only copies that differ" onRemove={() => setConflicts(false)}>
               ⚠ copies that differ
-              <button className="link" aria-label="All files, not only copies that differ" onClick={() => setConflicts(false)}>
-                ×
-              </button>
-            </span>
+            </Chip>
           )}
           {(filtered || folder) && (
             <button className="link small" onClick={clearAll}>
@@ -853,7 +824,7 @@ export default function LibraryPage(props: Props) {
                         </span>
                       ) : null}
                       {c.id === "name" && r.star ? <span className="mark-star" aria-label="starred">★ </span> : null}
-                      {cellText(r, c.id)}
+                      {c.id === "project" || c.id === "users" || c.id === "tags" ? <LabelCells labels={c.id === "project" ? (r.project ? [r.project] : []) : r[c.id]} /> : cellText(r, c.id)}
                       {c.id === "name" && r.writing ? <WritingMark writing={r.writing} /> : null}
                       {c.id === "name" && r.copies > 0 && !r.conflict ? (
                         <span className="mark-copies muted small" title="The same measurement is also elsewhere (labels are shared)">
@@ -1825,15 +1796,15 @@ function LabelsEditor({ rows, facets, login, onChange, compact = false }: { rows
   const chips = (key: "users" | "tags") => (
     <div className="label-chips" aria-label={key === "users" ? "Users" : "Tags"}>
       {counts(key).map(([l, k]) => (
-        <span key={l} className="chip">
-          {l}
-          {k < n && <span className="muted small"> ({k} of {n})</span>}
-          <button className="link" aria-label={`Remove ${key === "users" ? "user" : "tag"} ${l}`} onClick={() => onChange(key === "users" ? { remove_users: [l] } : { remove_tags: [l] })}>
-            ×
-          </button>
-        </span>
+        <LabelChip
+          key={l}
+          label={l}
+          extra={k < n ? `(${k} of ${n})` : undefined}
+          removeLabel={`Remove ${key === "users" ? "user" : "tag"} ${l}`}
+          onRemove={() => onChange(key === "users" ? { remove_users: [l] } : { remove_tags: [l] })}
+        />
       ))}
-      <button className="link" onClick={(e) => togglePicker(key, e)} aria-expanded={picking === key} aria-label={key === "users" ? "Add a user" : "Add a tag"}>
+      <button className="chip add-chip" onClick={(e) => togglePicker(key, e)} aria-expanded={picking === key} aria-label={key === "users" ? "Add a user" : "Add a tag"}>
         + Add
       </button>
       {picking === key && (
@@ -1865,16 +1836,11 @@ function LabelsEditor({ rows, facets, login, onChange, compact = false }: { rows
         <span className="label-name">Project</span>
         <div className="label-chips" aria-label="Project">
           {projects.length === 1 && projects[0] ? (
-            <span className="chip">
-              {projects[0]}
-              <button className="link" aria-label="Remove the project" onClick={() => onChange({ project: "" })}>
-                ×
-              </button>
-            </span>
+            <LabelChip label={projects[0]} removeLabel="Remove the project" onRemove={() => onChange({ project: "" })} />
           ) : projects.length > 1 ? (
             <span className="muted small">several projects</span>
           ) : null}
-          <button className="link" onClick={(e) => togglePicker("project", e)} aria-expanded={picking === "project"} aria-label="Set the project">
+          <button className="chip add-chip" onClick={(e) => togglePicker("project", e)} aria-expanded={picking === "project"} aria-label="Set the project">
             {projects.length === 1 && projects[0] ? "Change" : "Set"}
           </button>
           {picking === "project" && (
@@ -2175,5 +2141,18 @@ function MissingPanel({
         ))}
       </ul>
     </div>
+  );
+}
+
+/** The labels of one file in a list cell: small chips on one line (the cell clips the rest; the
+ * whole list is in the tooltip). */
+function LabelCells({ labels }: { labels: string[] }) {
+  if (!labels.length) return null;
+  return (
+    <span className="cell-chips" title={labels.map(labelPath).join("\n")}>
+      {labels.map((l) => (
+        <LabelChip key={l} label={l} max={28} small />
+      ))}
+    </span>
   );
 }
