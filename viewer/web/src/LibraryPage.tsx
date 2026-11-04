@@ -72,31 +72,61 @@ export const NOTICE =
   "In a folder kept in cloud storage with files only in the cloud (Synology Drive on-demand sync, OneDrive Files On-Demand, " +
   "Dropbox online-only …), opening a file downloads all of it. Switch this off in ⚙ to list such folders by name only.";
 
-const COLUMNS: { id: LibraryColumn; title: string; width: string }[] = [
-  { id: "name", title: "Name", width: "minmax(180px, 3fr)" },
-  { id: "date", title: "Date", width: "minmax(170px, 1.3fr)" },
-  { id: "sweep", title: "Sweep size", width: "minmax(90px, 0.8fr)" },
-  { id: "values", title: "Values", width: "minmax(120px, 1.5fr)" },
-  { id: "folder", title: "Folder", width: "minmax(120px, 1.5fr)" },
-  { id: "size", title: "File size", width: "minmax(80px, 0.6fr)" },
-  { id: "file", title: "File name", width: "minmax(140px, 1.5fr)" },
-  { id: "modified", title: "Modified", width: "minmax(140px, 1fr)" },
-  { id: "star", title: "★", width: "32px" },
-  { id: "project", title: "Project", width: "minmax(120px, 1.2fr)" },
-  { id: "users", title: "Users", width: "minmax(120px, 1.2fr)" },
-  { id: "tags", title: "Tags", width: "minmax(120px, 1.5fr)" },
-  { id: "comment", title: "Comment", width: "minmax(140px, 2fr)" },
-  { id: "copies", title: "Copies", width: "70px" },
+// `min`: the column's smallest width (px). Fixed-format columns (dates, sizes) get the width
+// their text needs; Name and the free-text columns share what is left.
+const COLUMNS: { id: LibraryColumn; title: string; width: string; min: number }[] = [
+  { id: "name", title: "Name", width: "minmax(120px, 3fr)", min: 120 },
+  { id: "date", title: "Date", width: "176px", min: 176 },
+  { id: "sweep", title: "Sweep size", width: "96px", min: 96 },
+  { id: "values", title: "Values", width: "minmax(90px, 1.5fr)", min: 90 },
+  { id: "folder", title: "Folder", width: "minmax(90px, 1.5fr)", min: 90 },
+  { id: "size", title: "File size", width: "76px", min: 76 },
+  { id: "file", title: "File name", width: "minmax(100px, 1.5fr)", min: 100 },
+  { id: "modified", title: "Modified", width: "128px", min: 128 },
+  { id: "star", title: "★", width: "32px", min: 32 },
+  { id: "project", title: "Project", width: "minmax(90px, 1.2fr)", min: 90 },
+  { id: "users", title: "Users", width: "minmax(90px, 1.2fr)", min: 90 },
+  { id: "tags", title: "Tags", width: "minmax(90px, 1.5fr)", min: 90 },
+  { id: "comment", title: "Comment", width: "minmax(100px, 2fr)", min: 100 },
+  { id: "copies", title: "Copies", width: "64px", min: 64 },
 ];
+/** When the list is too narrow for the chosen columns, they are left out in this order (first
+ * the ones least needed to tell files apart) instead of the list scrolling sideways. Name stays. */
+const DROP_ORDER: LibraryColumn[] = ["modified", "file", "folder", "copies", "size", "comment", "users", "tags", "project", "values", "star", "sweep", "date"];
+
+/** The chosen columns that fit in `width` px. */
+function fittingColumns(chosen: typeof COLUMNS, width: number): typeof COLUMNS {
+  let shown = chosen;
+  const need = (cols: typeof COLUMNS) => cols.reduce((n, c) => n + c.min, 0);
+  for (const id of DROP_ORDER) {
+    if (need(shown) <= width || shown.length <= 1) break;
+    shown = shown.filter((c) => c.id !== id);
+  }
+  return shown;
+}
 const HELP_COPIES = docsUrl("viewer/library.html", "copies-and-the-same-measurement");
 const CONFLICT_TIP = "Looks like a copy of another file, but the two differ — click for details";
 
-/** "2026-03-14 23:30 +08:00": the date as written in the file (its own time zone kept). */
-function createdText(r: LibraryRow): string {
+/** "2026-03-14 23:30 +08": the date as written in the file, in its own time zone (shortened, see
+ * shortZone; `fullZone`: "+08:00" as written). */
+function createdText(r: LibraryRow, fullZone = false): string {
   if (r.date_from_file || !r.created) return localTime(r.mtime);
   const m = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(?::\d{2}(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?$/i.exec(r.created);
   if (!m) return r.created;
-  return `${m[1]} ${m[2]} ${m[3] === "Z" || m[3] === "z" ? "UTC" : m[3] ?? ""}`.trim();
+  const zone = fullZone ? (m[3] === "Z" || m[3] === "z" ? "UTC" : m[3] ?? "") : shortZone(m[1], m[3]);
+  return `${m[1]} ${m[2]} ${zone}`.trim();
+}
+
+/** "+08:00" → "+08" ("+05:30" stays), "Z" → "UTC"; nothing when it is this computer's own zone
+ * on that day (the usual case), so the dates that differ stand out. */
+function shortZone(day: string, zone: string | undefined): string {
+  if (!zone) return "";
+  if (zone === "Z" || zone === "z") return new Date(`${day}T12:00:00Z`).getTimezoneOffset() === 0 ? "" : "UTC";
+  const z = /^([+-])(\d{2}):?(\d{2})$/.exec(zone);
+  if (!z) return zone;
+  const minutes = (z[1] === "-" ? -1 : 1) * (Number(z[2]) * 60 + Number(z[3]));
+  if (-new Date(`${day}T12:00:00`).getTimezoneOffset() === minutes) return "";
+  return z[3] === "00" ? `${z[1]}${z[2]}` : `${z[1]}${z[2]}:${z[3]}`;
 }
 
 function localTime(seconds: number): string {
@@ -158,7 +188,7 @@ export default function LibraryPage(props: Props) {
   const toast = useToast();
   const names = systemNames(state.platform);
   const settings: LibrarySettings = state.library;
-  const columns = COLUMNS.filter((c) => settings.columns.includes(c.id));
+  const chosenColumns = COLUMNS.filter((c) => settings.columns.includes(c.id));
 
   // ---- what is listed
   const [folder, setFolder] = useState<string | null>(null);
@@ -241,6 +271,8 @@ export default function LibraryPage(props: Props) {
   const perLine = pictures ? Math.max(1, Math.floor(view.width / CARD_W)) : 1;
   const lineH = pictures ? CARD_H : ROW_H;
   const head = pictures ? 0 : ROW_H; // the column titles above the rows
+  const columns = fittingColumns(chosenColumns, view.width);
+  const hiddenColumns = chosenColumns.filter((c) => !columns.includes(c)).map((c) => c.title);
 
   // a new query: everything afresh, from the top
   useEffect(() => {
@@ -753,7 +785,7 @@ export default function LibraryPage(props: Props) {
             </div>
           ) : (
           <>
-          <div className="library-head" role="row" style={{ gridTemplateColumns: gridColumns }} onContextMenu={columnMenu} title="Click: sort; right-click: choose the columns">
+          <div className="library-head" role="row" style={{ gridTemplateColumns: gridColumns }} onContextMenu={columnMenu} title={"Click: sort; right-click: choose the columns" + (hiddenColumns.length ? `\nNot shown, the list is too narrow: ${hiddenColumns.join(", ")}` : "")}>
             {columns.map((c) => (
               <div key={c.id} role="columnheader" aria-sort={sort === c.id ? (order === "asc" ? "ascending" : "descending") : "none"}>
                 <button className="link" onClick={() => sortBy(c.id)}>
@@ -762,6 +794,15 @@ export default function LibraryPage(props: Props) {
                 </button>
               </div>
             ))}
+            {hiddenColumns.length > 0 && (
+              <button
+                className="hidden-columns small"
+                onClick={columnMenu}
+                title={`Not shown, the list is too narrow: ${hiddenColumns.join(", ")}. Make the window wider, or choose fewer columns.`}
+              >
+                +{hiddenColumns.length}
+              </button>
+            )}
           </div>
           <div className="library-rows" style={{ height: (total ?? 0) * ROW_H }}>
             {Array.from({ length: Math.max(0, Math.min(total ?? 0, (lastPage + 1) * PAGE) - firstPage * PAGE) }, (_, k) => {
@@ -1233,7 +1274,7 @@ function SelectedFile({
     // `generation`: a file read here (headers off) fills its row; asking again is cheap (indexed)
   }, [path, version, row === null ? generation : 0]);
   const shown = info && info.path === path ? info : null;
-  const date = row ? createdText(row) : shown?.created ?? "";
+  const date = row ? createdText(row, true) : shown?.created ?? "";
   return (
     <div className="file-view">
       <div className="library-file-head">

@@ -341,6 +341,7 @@ details.group fieldset > .group-fields { margin-top: -4px; }
 .library-head { position: sticky; top: 0; z-index: 1; display: grid; height: 28px; align-items: center; background: var(--panel); border-bottom: 1px solid var(--border); font-size: 12px; font-weight: 600; }
 .library-head > div { padding: 0 8px; white-space: nowrap; overflow: hidden; }
 .library-head button { color: var(--text); font-weight: 600; }
+.library-head .hidden-columns { position: absolute; right: 4px; top: 4px; height: 20px; padding: 0 6px; font-weight: 600; color: var(--muted); background: var(--panel-2); border-radius: 10px; }
 .library-rows { position: relative; }
 .library-row { position: absolute; left: 0; right: 0; height: 28px; display: grid; align-items: center; font-size: 13px; cursor: default; border-bottom: 1px solid var(--border-soft, transparent); user-select: none; }
 .library-row > div { padding: 0 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

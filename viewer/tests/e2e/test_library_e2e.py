@@ -47,7 +47,10 @@ def test_folders_dates_and_search_filter_the_list(viewer, library_files, new_pag
     dates.get_by_role("button", name="Unfold Mar 2026").click()
     dates.get_by_role("button", name="14 Mar 2026").click()
     expect(lib_row(page, "Late resonator sweep")).to_be_visible()
-    expect(lib_row(page, "Late resonator sweep")).to_contain_text("2026-03-14 23:30 +08:00")
+    # the zone, shortened; not shown at all on a computer in that zone (the usual case)
+    here = page.evaluate("-new Date('2026-03-14T12:00:00').getTimezoneOffset()") == 480
+    expect(lib_row(page, "Late resonator sweep")).to_contain_text("2026-03-14 23:30" if here else "2026-03-14 23:30 +08")
+    expect(lib_row(page, "Late resonator sweep")).not_to_contain_text("+08:00")
     expect(status(page)).to_contain_text("2026 › Mar › 14")
     page.get_by_role("button", name="Any date").first.click()
     # search: words in the description, a metadata value
@@ -128,7 +131,7 @@ def test_the_notice_and_names_only(viewer, library_files, new_page):
     expect(late).to_contain_text("(file date)")
     late.click()
     expect(page.locator(".library-detail")).to_contain_text("Frequency")   # read when selected ...
-    expect(lib_row(page, "Late resonator sweep")).to_contain_text("2026-03-14 23:30 +08:00", timeout=10_000)  # ... and its row fills in
+    expect(lib_row(page, "Late resonator sweep")).to_contain_text("2026-03-14 23:30", timeout=10_000)  # ... and its row fills in
     # on again: the notice, once
     viewer.state.config.set_library({"read_headers": True})
     page.reload()
