@@ -44,6 +44,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--build", action="store_true", help="build the web UI first")
     ap.add_argument("--files", type=int, default=300, help="new mock data: about how many Library files (default 300)")
     ap.add_argument("--no-labels", action="store_true", help="new mock data: without labels")
+    ap.add_argument("--many-labels", action="store_true", help="new mock data: hundreds of users and tags (long lists)")
     ap.add_argument("--live", action="store_true", help="new mock data: also a measurement being written")
     ap.add_argument("--port", type=int, default=8765, help="the port (default 8765, as lbd-view --dev)")
     ap.add_argument("--no-browser", action="store_true", help="print the address instead of opening a browser")
@@ -64,7 +65,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         import make_mock_data
 
         folder = scratch / "Mock data"
-        made = make_mock_data.make(folder, a.files, not a.no_labels, small=False, live=a.live)
+        made = make_mock_data.make(folder, a.files, not a.no_labels, small=False, live=a.live, many_labels=a.many_labels)
         print("\n".join(make_mock_data.report(folder, made)[:-2]))
     elif not folder.is_dir():
         print(f"{folder} isn't a folder", file=sys.stderr)

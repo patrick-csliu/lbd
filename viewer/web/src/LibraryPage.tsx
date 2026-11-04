@@ -28,7 +28,8 @@ import { copyPath } from "./fileActions";
 import { useToast } from "./toast";
 import { useFileActions } from "./libraryActions";
 import { Chip, LabelChip } from "./LabelChip";
-import { labelPath } from "./labelText";
+import { labelPath, shortLabel } from "./labelText";
+import { LabelPathInput, usedMost, whereItGoes } from "./labelPath";
 import { cellText, COLUMNS, createdText, fittingColumns, localTime } from "./libraryColumns";
 import { DRAWER_MEDIA, ONE_PANE_MEDIA, useMedia } from "./useMedia";
 import { useResizable, widestContent } from "./resizable";
@@ -361,16 +362,22 @@ export default function LibraryPage(props: Props) {
   const manage: LabelManagement = {
     create: (kind, parent) => {
       const roots = state.roots;
+      const known = new Set(groups(kind));
       setConfirm({
         title: `New ${KIND_WORD[kind]}`,
-        text: `It is kept even before a file has it; give it to files later (their labels, or drag files onto it). Nest with /, e.g. "Qubit A/Device 3".`,
+        text: `It is kept even before a file has it; give it to files later (their labels, or drag files onto it). Type its whole path to nest it: "Qubit A/Device 3"; the suggestions show what is there.`,
         action: "Make it",
-        choices: [
-          { label: "Put under", value: parent ?? "", options: [{ value: "", label: "(the top level)" }, ...groups(kind).map((g) => ({ value: g, label: g }))] },
-          ...(roots.length > 1 ? [{ label: "Kept in", value: roots[0], options: roots.map((r) => ({ value: r, label: baseName(r) })) }] : []),
-        ],
-        input: { value: "", check: checkName },
-        onConfirm: (v, [under, root]) => run(api.libraryLabelCreate(kind, under ? `${under}/${v.trim()}` : v.trim(), root), `Made the ${KIND_WORD[kind]} "${under ? `${under}/` : ""}${v.trim()}"`),
+        choices: roots.length > 1 ? [{ label: "Kept in", value: roots[0], options: roots.map((r) => ({ value: r, label: baseName(r) })) }] : [],
+        input: {
+          value: parent ? `${parent}/` : "",
+          labels: kindNodes(kind),
+          check: (v) =>
+            v.trim().endsWith("/") && v.trim().length > 1
+              ? `Type the new ${KIND_WORD[kind]}'s name after "${labelPath(v.trim().slice(0, -1))} ›", or choose a group to go into`
+              : checkName(v) ?? (known.has(v.trim()) ? `There is a ${KIND_WORD[kind]} "${v.trim()}" already` : null),
+          hint: (v) => `A new ${KIND_WORD[kind]} ${whereItGoes(v.trim())}.`,
+        },
+        onConfirm: (v, [root]) => run(api.libraryLabelCreate(kind, v.trim(), root), `Made the ${KIND_WORD[kind]} "${v.trim()}"`),
       });
     },
     menu: (e, kind, node) => {
@@ -392,7 +399,7 @@ export default function LibraryPage(props: Props) {
             onClick: () =>
               withCount(() => api.libraryLabelRename(kind, node.label, node.label, true), (n) =>
                 setConfirm({
-                  title: `Rename the ${word} "${node.label}"`,
+                  title: `Rename the ${word} "${shortLabel(node.label, 60)}"`,
                   text: `It is renamed on ${filesWord(n)}${node.children.length ? ", with the labels inside it" : ""}.`,
                   action: "Rename",
                   input: { value: lastPart(node.label), check: (v) => checkName(v) ?? (v.includes("/") ? "Use Move into… to put it into another group" : null) },
@@ -405,11 +412,23 @@ export default function LibraryPage(props: Props) {
             onClick: () =>
               withCount(() => api.libraryLabelRename(kind, node.label, node.label, true), (n) =>
                 setConfirm({
-                  title: `Move the ${word} "${node.label}"`,
-                  text: `It moves on ${filesWord(n)}${node.children.length ? ", with the labels inside it" : ""}.`,
+                  title: `Move the ${word} "${shortLabel(node.label, 60)}"`,
+                  text: `It moves on ${filesWord(n)}${node.children.length ? ", with the labels inside it" : ""}. Type the group to move it into (empty: the top level).`,
                   action: "Move",
-                  choices: [{ label: "Into", value: parent, options: [{ value: "", label: "(the top level)" }, ...groups(kind, node.label).map((g) => ({ value: g, label: g }))] }],
-                  onConfirm: (_v, [into]) => {
+                  input: {
+                    value: parent ? `${parent}/` : "",
+                    labels: withoutLabel(kindNodes(kind), node.label),
+                    check: (v) => {
+                      const into = v.trim().replace(/\/+$/, "");
+                      return into === node.label || into.startsWith(node.label + "/") ? "Not into itself" : /(^\/|\/\/)/.test(into) ? "A name can't start with /" : null;
+                    },
+                    hint: (v) => {
+                      const into = v.trim().replace(/\/+$/, "");
+                      return `It becomes "${labelPath(into ? `${into}/${node.name}` : node.name)}".`;
+                    },
+                  },
+                  onConfirm: (v) => {
+                    const into = v.trim().replace(/\/+$/, "");
                     const to = into ? `${into}/${node.name}` : node.name;
                     if (to !== node.label) return run(api.libraryLabelRename(kind, node.label, to).then((r) => ({ notes: r.notes })));
                   },
@@ -423,7 +442,7 @@ export default function LibraryPage(props: Props) {
             onClick: () =>
               withCount(() => api.libraryLabelRemove(kind, node.label, true), (n) =>
                 setConfirm({
-                  title: `Remove the ${word} "${node.label}"?`,
+                  title: `Remove the ${word} "${shortLabel(node.label, 60)}"?`,
                   text: `It is taken off ${filesWord(n)}${node.children.length ? ", with the labels inside it" : ""}, and no longer kept. The data files aren't touched.`,
                   action: "Remove",
                   danger: true,
@@ -1889,6 +1908,11 @@ function LabelKindIcon({ kind }: { kind: LabelKind }) {
 
 // ---- right: the labels of one or several files
 
+/** A tree without one label (and what is inside it): where it can move to. */
+function withoutLabel(nodes: LabelNode[], label: string): LabelNode[] {
+  return nodes.filter((n) => n.label !== label).map((n) => ({ ...n, children: withoutLabel(n.children, label) }));
+}
+
 /** Every label of a tree, with its depth: the picker's list. */
 function flatten(nodes: LabelNode[], depth = 0): { node: LabelNode; depth: number }[] {
   return nodes.flatMap((n) => [{ node: n, depth }, ...flatten(n.children, depth + 1)]);
@@ -2015,63 +2039,16 @@ function LabelPicker({ nodes, first, placeholder, onPick, onClose, opener }: { n
   const ref = useRef<HTMLDivElement>(null);
   const onKeyDown = useOutsideClose(ref, onClose, opener);
   const [text, setText] = useState("");
-  const [under, setUnder] = useState(""); // a new label goes under this group ("" : the top level)
-  const t = text.trim().toLowerCase();
-  const newLabel = () => (under ? `${under}/${text.trim()}` : text.trim());
-  const items = flatten(nodes).filter(({ node }) => !t || node.label.toLowerCase().includes(t));
-  const suggested = first && (!t || first.toLowerCase().includes(t)) && !items.some(({ node }) => node.label === first) ? first : null;
+  const most = [...(first ? [{ label: first, note: "this computer's user" }] : []), ...usedMost(nodes).map((l) => ({ label: l }))];
   return (
     <div ref={ref} className="label-picker" role="dialog" aria-label="Pick a label" onKeyDown={onKeyDown}>
-      <input
-        autoFocus
-        value={text}
-        placeholder={placeholder}
-        aria-label="Label"
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") e.preventDefault(); // no keypress: it would click the button the focus goes back to
-          if (e.key === "Enter" && text.trim()) onPick(items.some(({ node }) => node.label === text.trim()) ? text.trim() : newLabel());
-        }}
-      />
-      <ul>
-        {suggested && (
-          <li>
-            <button className="link" onClick={() => onPick(suggested)}>
-              {suggested} <span className="muted small">(this computer's user)</span>
-            </button>
-          </li>
-        )}
-        {items.map(({ node, depth }) => (
-          <li key={node.label} style={{ paddingLeft: depth * 14 }}>
-            <button className="link" title={node.label} onClick={() => onPick(node.label)}>
-              {node.name} <span className="muted small">{node.count}</span>
-            </button>
-          </li>
-        ))}
-        {text.trim() && !items.some(({ node }) => node.label === text.trim()) && (
-          <li className="picker-new">
-            <button className="link" onClick={() => onPick(newLabel())}>
-              New: {newLabel()}
-            </button>
-            {nodes.length > 0 && (
-              <label className="small muted">
-                {" "}put under{" "}
-                <select value={under} onChange={(e) => setUnder(e.target.value)} aria-label="Put the new label under">
-                  <option value="">(the top level)</option>
-                  {flatten(nodes).map(({ node }) => (
-                    <option key={node.label} value={node.label}>
-                      {node.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-          </li>
-        )}
-      </ul>
-      <button className="link small" onClick={onClose}>
-        Close
-      </button>
+      <LabelPathInput nodes={nodes} value={text} onChange={setText} onPick={onPick} placeholder={placeholder} label="Label" first={most} />
+      <div className="label-picker-foot">
+        <span className="muted small">Type a path (Lab A/…); Tab goes into a group</span>
+        <button className="link small" onClick={onClose}>
+          Close
+        </button>
+      </div>
     </div>
   );
 }

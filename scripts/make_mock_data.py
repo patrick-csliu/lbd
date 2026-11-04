@@ -4,6 +4,7 @@ panels, the examples, and (optionally) a measurement being written.
     uv run python scripts/make_mock_data.py FOLDER                 # about 300 files, with labels
     uv run python scripts/make_mock_data.py FOLDER --files 2000    # a larger Library
     uv run python scripts/make_mock_data.py FOLDER --small --no-labels
+    uv run python scripts/make_mock_data.py FOLDER --many-labels  # hundreds of users and tags
     uv run python scripts/make_mock_data.py FOLDER --live          # also a file being written (runs on)
 
 FOLDER gets:
@@ -39,7 +40,7 @@ sys.path.insert(0, str(REPO / "viewer" / "tests"))   # the mock modules, which t
 
 
 def make(folder: Path, files: int = 300, with_labels: bool = True, small: bool = False,
-         live: bool = False, live_seconds: int = 600) -> Dict[str, object]:
+         live: bool = False, live_seconds: int = 600, many_labels: bool = False) -> Dict[str, object]:
     """Write the mock data into `folder` (empty or new). Returns what was made: the open folders
     to add to the viewer, counts, and the live writer's process (or None)."""
     import mock_library
@@ -51,7 +52,7 @@ def make(folder: Path, files: int = 300, with_labels: bool = True, small: bool =
     folder.mkdir(parents=True, exist_ok=True)
     library = folder / "Lab library"
     written = mock_library.write_library(library, files)
-    special = mock_library.add_labels(library, keep_in=folder) if with_labels else {}   # FOLDER is the open folder
+    special = mock_library.add_labels(library, keep_in=folder, many=many_labels) if with_labels else {}   # FOLDER is the open folder
     panels = mock_values.write_all(folder / "Panels", small=small)
     shutil.copytree(REPO / "examples" / "data", folder / "Examples")
     writer: Optional[subprocess.Popen] = None
@@ -85,11 +86,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("folder", type=Path, help="where to write (empty or new)")
     ap.add_argument("--files", type=int, default=300, help="about how many files the Library gets (default 300)")
     ap.add_argument("--no-labels", action="store_true", help="no labels, copies or missing files")
+    ap.add_argument("--many-labels", action="store_true", help="hundreds of users and tags, and very long names (long lists)")
     ap.add_argument("--small", action="store_true", help="the panel files with few points (quick)")
     ap.add_argument("--live", action="store_true", help="also a measurement being written, in the background")
     ap.add_argument("--live-seconds", type=int, default=600, help="how long the live measurement runs (default 600)")
     a = ap.parse_args(argv)
-    made = make(a.folder, a.files, not a.no_labels, a.small, a.live, a.live_seconds)
+    made = make(a.folder, a.files, not a.no_labels, a.small, a.live, a.live_seconds, a.many_labels)
     print("\n".join(report(a.folder, made)))
     return 0
 

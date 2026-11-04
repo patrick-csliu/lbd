@@ -41,7 +41,7 @@ def find(page: Page, text: str):
 def pick(page: Page, button: str, label: str):
     """Open a label picker in the right column, type a label and choose it."""
     detail(page).get_by_role("button", name=button).click()
-    box = detail(page).get_by_role("textbox", name="Label", exact=True)
+    box = detail(page).get_by_role("combobox", name="Label", exact=True)
     box.fill(label)
     box.press("Enter")
 
@@ -272,3 +272,63 @@ def test_the_label_sections_fold_and_line_up(viewer, library_files, new_page):
     # every count ends at the same x
     rights = {round(b["x"] + b["width"]) for b in (c.bounding_box() for c in page.locator(".library-dates .count, .library-labels .library-folder .count").all()) if b}
     assert len(rights) == 1, rights
+
+
+def test_long_label_lists_are_typed_into_never_scrolled(viewer, many_labels_files, new_page):
+    """Hundreds of users and tags: each level shows at most 12 (then Show N more), Find a label
+    narrows the trees, and the New and Move dialogs and the pickers take a typed path with at
+    most 8 suggestions of the next level, instead of a list of every label."""
+    page = new_page("Library")
+    side = page.locator(".library-left")
+    users = side.get_by_role("tree", name="Users")
+    expect(users.get_by_role("button", name="Lab A", exact=True)).to_be_visible(timeout=20_000)
+    users.get_by_role("button", name="Unfold Lab A").click()
+    users.get_by_role("button", name="Unfold Lab A/Qubit team").click()
+    expect(users.get_by_role("button", name=re.compile(r"^Show \d+ more…$"))).to_be_visible()    # not all of them
+    # Find a label
+    side.get_by_label("Find a label").fill("TWPA")
+    tags = side.get_by_role("tree", name="Tags")
+    expect(tags).to_contain_text("TWPA")
+    expect(users.locator(".library-folder")).to_have_count(0)
+    side.get_by_label("Find a label").fill("")
+    # the sticky heading: scrolled into the tags, their heading is at the top of the sidebar
+    tags.get_by_role("button", name=re.compile(r"^Show \d+ more…$")).last.click()      # all the top-level tags
+    side.evaluate("e => e.scrollTop = e.scrollHeight")
+    head = side.locator(".label-tree-head", has_text="Tags")
+    assert abs(head.bounding_box()["y"] - side.bounding_box()["y"]) < 4
+    # New user: a typed path, the next level only
+    side.get_by_role("button", name="New users").click()
+    dialog = page.locator("dialog")
+    expect(dialog.locator("select")).to_have_count(0)                                 # no list of every group
+    box = dialog.get_by_role("combobox")
+    box.fill("Lab A/")
+    options = dialog.get_by_role("option")
+    expect(options).to_have_count(5)                                                   # Lab A's teams
+    expect(options.first).to_contain_text("Lab A ›")
+    box.fill("Lab A/Qu")
+    box.press("Tab")                                                                   # into the Qubit team
+    expect(box).to_have_value("Lab A/Qubit team/")
+    assert options.count() <= 8
+    expect(dialog.get_by_text(re.compile(r"and \d+ more: keep typing"))).to_be_visible()
+    box.press_sequentially("Dana Z.")
+    expect(dialog).to_contain_text("A new user under Lab A › Qubit team.")
+    dialog.get_by_role("button", name="Make it").click()
+    expect(users.get_by_role("button", name="Dana Z.", exact=True)).to_be_visible()
+    # Move into: the same box
+    users.locator(".library-folder", has_text="Dana Z.").click(button="right")
+    page.get_by_role("menuitem", name="Move into…").click()
+    box = page.locator("dialog").get_by_role("combobox")
+    expect(box).to_have_value("Lab A/Qubit team/")
+    box.fill("Lab B/Theory")
+    expect(page.locator("dialog")).to_contain_text('It becomes "Lab B › Theory › Dana Z."')
+    page.locator("dialog").get_by_role("button", name="Move").click()
+    expect(page.locator("dialog")).to_have_count(0)
+    # a picker: Used most first, a long label one line
+    find(page, "Late resonator sweep")
+    detail(page).get_by_role("button", name="Add a tag").click()
+    picker = page.get_by_role("dialog", name="Pick a label")
+    expect(picker).to_contain_text("Used most")
+    assert picker.get_by_role("option").count() <= 8
+    picker.get_by_role("combobox").fill("very long tag")
+    option = picker.get_by_role("option").first
+    assert option.bounding_box()["height"] < 34                                      # one line

@@ -1,4 +1,6 @@
 import type React from "react";
+import type { LabelNode } from "./api";
+import { LabelPathInput } from "./labelPath";
 import { FormEvent, KeyboardEvent, MouseEvent, RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 /** One entry of a right-click menu; "-" is a separator line. */
@@ -138,8 +140,12 @@ export interface ConfirmRequest {
   /** The button that applies the change, e.g. "Rename". */
   action: string;
   danger?: boolean;
-  /** A text box, e.g. for the new name: its first value, the part to select, and a check. */
-  input?: { value: string; selectEnd?: number; check: (value: string) => string | null };
+  /** A text box, e.g. for the new name: its first value, the part to select, and a check. With
+   * `labels`, a label's path box with suggestions (LabelPathInput); `hint` says what the value
+   * means ("under Lab A › Qubit team"). */
+  input?: { value: string; selectEnd?: number; check: (value: string) => string | null; labels?: LabelNode[]; hint?: (value: string) => string };
+  /** More than a line of text: e.g. counts, or a long name on a line of its own. */
+  body?: React.ReactNode;
   /** Choices above the text box (e.g. "Put under" a group, "Kept in" a folder): each a list, its
    * first value, and a label. Their values are given to onConfirm, in order. */
   choices?: { label: string; options: { value: string; label: string }[]; value: string }[];
@@ -186,6 +192,7 @@ export function ConfirmDialog({ request, onClose }: { request: ConfirmRequest; o
       <form onSubmit={submit}>
         <h3 id="confirm-title">{request.title}</h3>
         {request.text && <p>{request.text}</p>}
+        {request.body}
         {(request.choices ?? []).map((c, i) => (
           <label key={c.label} className="dialog-choice">
             {c.label}{" "}
@@ -198,7 +205,21 @@ export function ConfirmDialog({ request, onClose }: { request: ConfirmRequest; o
             </select>
           </label>
         ))}
-        {request.input && (
+        {request.input?.labels && (
+          <LabelPathInput
+            nodes={request.input.labels}
+            value={value}
+            onChange={(v) => {
+              setValue(v);
+              setError(null);
+            }}
+            label={request.title}
+            autoFocus={false}
+            inputRef={inputRef}
+          />
+        )}
+        {request.input?.hint && !problem && <p className="dialog-hint muted small">{request.input.hint(value)}</p>}
+        {request.input && !request.input.labels && (
           <input
             ref={inputRef}
             value={value}

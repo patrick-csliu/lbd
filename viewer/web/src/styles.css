@@ -745,3 +745,22 @@ details.group fieldset > .group-fields { margin-top: -4px; }
 .cell-chips { display: inline-flex; gap: 3px; vertical-align: middle; max-width: 100%; overflow: hidden; }
 .chip.label-chip.small-chip { height: 18px; line-height: 16px; font-size: 11.5px; padding: 0 6px; flex: none; }
 .small-chip .chip-text { padding-right: 0; }
+
+/* ---- a label's path box with suggestions (labelPath.tsx): at most 8 rows, never a long list */
+.label-path { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.label-path input { width: 100%; box-sizing: border-box; }
+.label-path-list { list-style: none; margin: 0; padding: 2px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); }
+.label-path-list li { display: flex; align-items: center; gap: 6px; min-height: 26px; padding: 0 6px 0 10px; cursor: pointer; font-size: 13px; }
+.label-path-list li[role=option]:hover { background: var(--panel-2); }
+.label-path-list li.active { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+.label-path-list li.after-first { border-top: 1px solid var(--border); }
+.label-path-list .label-path-heading, .label-path-list .label-path-more { cursor: default; min-height: 22px; }
+.label-path-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.label-path-list .count { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.label-path-in { width: 22px; height: 22px; padding: 0; border-radius: 4px; font-size: 16px; line-height: 20px; text-align: center; }
+.label-path-in:hover { background: var(--border); }
+.label-path-new { border-top: 1px solid var(--border); }
+.label-picker { width: min(360px, 90vw); max-height: none; overflow: visible; }
+.label-picker-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 4px; }
+.dialog-hint { margin: 4px 0 0; }
+.confirm-dialog .label-path { margin-top: 6px; }

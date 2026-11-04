@@ -1,6 +1,6 @@
 """A mock library of .lbd files for the Library workspace (plan 8a) and its tests.
 
-    uv run python viewer/tests/mock_library.py FOLDER [N] [--labels]
+    uv run python viewer/tests/mock_library.py FOLDER [N] [--labels] [--many-labels]
 
 writes about N files (default 300) into two folders under FOLDER, as two "open folders" of the
 viewer would be: `Lab data/` sorted by date (`YYYY/MM/DD/`) and `Shared/` sorted by project.
@@ -149,23 +149,48 @@ LABEL_COMMENTS = ["", "", "", "punch-out at -20 dBm", "redo with more averages",
 KEPT = [("project", "Qubit C/Device 1"), ("users", "Lab B/New student"), ("tags", "to check")]
 
 
-def random_labels(rng: random.Random) -> Dict[str, Any]:
+def many_labels() -> Dict[str, List[str]]:
+    """A large vocabulary, to try long lists (--many-labels): 300 users in 4 labs and 20 teams,
+    800 tags (some nested 4 deep), 60 projects, and a few names over 80 characters."""
+    rng = random.Random(80)
+    first = ["Alice", "Bob", "Chen", "Dana", "Eli", "Fatima", "Gil", "Hana", "Ivan", "Jun", "Kofi", "Lena", "Mateo",
+             "Nora", "Omar", "Priya", "Quinn", "Rosa", "Sven", "Tara", "Uma", "Viktor", "Wen", "Xavi", "Yara", "Zoe"]
+    teams = ["Qubit team", "Resonator team", "Fridge team", "Theory", "Readout"]
+    users = sorted({f"Lab {lab}/{team}/{rng.choice(first)} {rng.choice('ABCDEFGHKLMNPRSTW')}."
+                    for lab in "ABCD" for team in teams for _ in range(16)})[:300]
+    words = ["flux", "bias", "sweet spot", "quality", "redo", "noise", "drift", "amplifier", "line", "attenuation",
+             "cooldown", "warmup", "calibration", "readout", "pulse", "echo", "ramsey", "spectroscopy", "power",
+             "frequency", "phase", "IQ", "mixer", "LO leakage", "TWPA", "HEMT", "filter", "magnet", "temperature"]
+    tags = set()
+    while len(tags) < 800:
+        depth = rng.choice([1, 1, 2, 2, 3, 4])
+        tags.add("/".join(rng.choice(words) + (f" {rng.randint(1, 40)}" if rng.random() < 0.5 else "") for _ in range(depth)))
+    tags.add("a very long tag that describes the whole measurement setup, the line and the attenuators used here")
+    tags.add("quality/redo/" + "with more averages and a longer wait between the pulses, " * 2)
+    projects = sorted({f"Chip {c}/Wafer {w}/Die {d}" for c in range(1, 6) for w in range(1, 5) for d in range(1, 4)})
+    projects.append("A project with a rather long name for the cooldown of the new dilution fridge in room 3")
+    return {"project": projects, "users": users, "tags": sorted(tags)}
+
+
+def random_labels(rng: random.Random, vocabulary: Optional[Dict[str, List[str]]] = None) -> Dict[str, Any]:
     """One file's labels: a star now and then, a project or none, 0-3 users, 0-4 tags, a comment."""
+    v = vocabulary or {"project": LABEL_PROJECTS, "users": LABEL_USERS, "tags": LABEL_TAGS}
     return {"star": rng.random() < 0.15,
-            "project": rng.choice(LABEL_PROJECTS) if rng.random() < 0.8 else None,
-            "add_users": rng.sample(LABEL_USERS, rng.choice([0, 1, 1, 1, 2, 3])),
-            "add_tags": rng.sample(LABEL_TAGS, rng.choice([0, 0, 1, 1, 2, 3, 4])),
+            "project": rng.choice(v["project"]) if rng.random() < 0.8 else None,
+            "add_users": rng.sample(v["users"], rng.choice([0, 1, 1, 1, 2, 3])),
+            "add_tags": rng.sample(v["tags"], rng.choice([0, 0, 1, 1, 2, 3, 4])),
             "comment": rng.choice(LABEL_COMMENTS)}
 
 
-def add_labels(folder: Path, keep_in: Optional[Path] = None) -> Dict[str, Path]:
+def add_labels(folder: Path, keep_in: Optional[Path] = None, many: bool = False) -> Dict[str, Path]:
     """Organise a mock library written by write_library (plan 8b): labels in the folders' label
     files (stars, projects nested 1-3 levels, users in groups, flat and nested tags, comments of
     one or several lines; LABEL_*), labels kept without a file (KEPT), an identical copy, a copy changed
     after copying (a conflict), a sync conflict copy of a label file, files without an id, and
     labels whose file is gone (missing). The labels kept without a file go into `keep_in`, an open
     folder of the viewer (default: `folder/Lab data`, as the tests open it). Returns the special
-    files by name."""
+    files by name. `many`: a large vocabulary (many_labels), every label of it kept, so the lists
+    are long."""
     import shutil
 
     import h5py
@@ -174,6 +199,7 @@ def add_labels(folder: Path, keep_in: Optional[Path] = None) -> Dict[str, Path]:
 
     folder = Path(folder)
     rng = random.Random(8)
+    vocabulary = many_labels() if many else None
     files = sorted(p for p in folder.rglob("*.lbd") if "broken" not in p.name)
     by_folder: Dict[Path, List[Path]] = {}
     for p in files:
@@ -185,7 +211,7 @@ def add_labels(folder: Path, keep_in: Optional[Path] = None) -> Dict[str, Path]:
                     continue
                 info = lbd.info(p)
                 e = labels.new_entry(info.id, p.name, info.created)
-                labels.apply(e, random_labels(rng))
+                labels.apply(e, random_labels(rng, vocabulary))
                 doc["files"].append(e)
         labels.update(where, change)
     # labels kept although no file has them yet (made with + New in the Library), in an open folder
@@ -194,6 +220,9 @@ def add_labels(folder: Path, keep_in: Optional[Path] = None) -> Dict[str, Path]:
         def keep(doc):
             for kind, label in KEPT:
                 labels.keep(doc, kind, label)
+            for kind, names in (vocabulary or {}).items():
+                for label in names:
+                    labels.keep(doc, kind, label)
         labels.update(keep_in, keep)
     special: Dict[str, Path] = {}
     backup = folder / "Shared" / "Backup"
@@ -235,9 +264,9 @@ def add_labels(folder: Path, keep_in: Optional[Path] = None) -> Dict[str, Path]:
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         sys.exit(__doc__)
-    written = write_library(Path(sys.argv[1]), int(sys.argv[2]) if len(sys.argv) > 2 else 300)
+    written = write_library(Path(sys.argv[1]), int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2].isdigit() else 300)
     for root, paths in written.items():
         print(f"{root}: {len(paths)} files")
-    if "--labels" in sys.argv:
-        for what, path in add_labels(Path(sys.argv[1])).items():
+    if "--labels" in sys.argv or "--many-labels" in sys.argv:
+        for what, path in add_labels(Path(sys.argv[1]), many="--many-labels" in sys.argv).items():
             print(f"{what}: {path}")

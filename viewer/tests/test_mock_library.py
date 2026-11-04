@@ -37,3 +37,13 @@ def test_the_mock_library_with_labels(tmp_path):
     assert ids.count(lbd.info(special["conflict"]).id) == 2              # changed after copying
     assert not special["missing"].exists() and lbd.info(special["no_id"]).id is None
     assert list(tmp_path.rglob(".lbd-library_LAPTOP_*_Conflict.json"))
+
+
+def test_many_labels_make_long_lists():
+    import mock_library
+
+    v = mock_library.many_labels()
+    assert len(v["users"]) == 300 and len(v["tags"]) >= 800 and len(v["project"]) > 50
+    assert any(t.count("/") == 3 for t in v["tags"])                              # nested 4 deep
+    assert any(len(t) > 80 for t in v["tags"]) and any(len(p) > 80 for p in v["project"])
+    assert v == mock_library.many_labels()                                         # the same every time

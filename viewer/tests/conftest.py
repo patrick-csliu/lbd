@@ -86,3 +86,14 @@ def library_files(data_dir):
     import mock_library
 
     return mock_library.write_library(data_dir, 120)
+
+
+@pytest.fixture()
+def many_labels_files(data_dir):
+    """A small mock library with a large label vocabulary (mock_library.many_labels: 300 users,
+    800 tags, very long names), every label kept in the data folder: for long lists."""
+    import mock_library
+
+    written = mock_library.write_library(data_dir, 60)
+    mock_library.add_labels(data_dir, keep_in=data_dir, many=True)
+    return written
