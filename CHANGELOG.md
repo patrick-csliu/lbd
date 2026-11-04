@@ -328,6 +328,13 @@ are still written as 1.2).
 
 **For developers**
 
+- **Mock data and a test viewer in one command each.** `scripts/make_mock_data.py FOLDER` makes a
+  Library with every kind of label (stars, projects nested 1–3 levels, users in groups, flat and
+  nested tags, comments, labels kept without a file), the files for Explore's panels, the
+  examples, and with `--live` a measurement being written. `scripts/dev_viewer.py [FOLDER]`
+  opens a test viewer on it (`lbd-view --dev`, with scratch settings). Documented in
+  *Developers → Mock data* and a new *Quick start for developers*; *Releases* starts with a
+  summary and a "Before releasing" list.
 - `scripts/test_all.py` runs the suites side by side (`--jobs`, default 4), the longest first:
   a whole run takes about as long as the browser tests instead of the sum of all. `--changed
   [REF]` runs only the suites the changed files can affect, `--only` names suites. Viewer and

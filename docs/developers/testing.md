@@ -100,6 +100,12 @@ run doesn't become part of the baseline. When a run fails:
 - if the slowdown is the price of a wanted change, `--accept` makes this run the new baseline;
 - otherwise `--history` lists the runs and their commits, to find the change.
 
+## Mock data in the tests
+
+The viewer's tests write their files with the mock-data modules (`viewer/tests/mock_*.py`), through
+the fixtures `library_files` (the mock Library) and `values_files` (the panels' files, small).
+Every generator, and how to add a case, is described in [Mock data](mock-data.md).
+
 ## Rules the Python tests follow
 
 - **No test touches your real settings.** The root `conftest.py` points `LBD_CONFIG_DIR` and

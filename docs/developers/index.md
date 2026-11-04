@@ -3,6 +3,38 @@
 This page is for working on LBD itself: the format, the language modules, the viewer and the
 installers.
 
+## Quick start for developers
+
+From a fresh clone to a test viewer full of mock data, in three steps:
+
+1. **Set up and build** (once, and `npm run build` again after changing the web UI). Details
+   are in [Setting up](#setting-up).
+   ```bash
+   uv sync --all-packages
+   cd viewer/web && npm ci && npm run build && cd ../..
+   ```
+2. **Make mock data**: a Library of about 300 files with every kind of label, files for
+   Explore's panels, the examples. See [Mock data](mock-data.md).
+   ```bash
+   uv run python scripts/make_mock_data.py ~/lbd-mock
+   ```
+3. **Open a test viewer** on it, with settings of its own (your real settings and presets are
+   never touched):
+   ```bash
+   uv run python scripts/dev_viewer.py ~/lbd-mock
+   ```
+   It serves http://127.0.0.1:8765/?token=dev until Ctrl+C.
+   - Without a folder, `dev_viewer.py` makes new mock data in a scratch folder itself.
+   - `--build` builds the web UI first.
+   - `--live` adds a measurement being written.
+   - For live UI editing, also run `cd viewer/web && npm run dev` (http://localhost:5173, which
+     forwards to it). See [Working on the viewer](#working-on-the-viewer).
+
+Then:
+- **test:** `uv run python scripts/test_all.py` ([Testing](testing.md));
+- **release:** see [Releases](releases.md) (you set the version and push a tag; GitHub builds
+  and checks everything, and you publish).
+
 ## Repository layout
 
 ```

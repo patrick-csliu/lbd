@@ -1,5 +1,26 @@
 # Releases
 
+**In short:**
+- **You:** write the CHANGELOG, set the version, run the tests, and push a tag.
+- **GitHub:** builds every installer and package, checks them, and makes a draft release.
+- **You:** look at the draft and click **Publish**.
+
+Building on your own computer is only for trying a change to the packaging (see
+[Building locally](#building-locally)).
+
+## Before releasing
+
+1. **Notes:** every change has a line in `CHANGELOG.md`.
+2. **Screenshots**, if the viewer's look changed:
+   - `uv run python scripts/make_screenshots.py` (all shots), or one shot by name, e.g.
+     `make_screenshots.py library`;
+   - run a shot that fails now and then on its own, one per process;
+   - look at the images and commit them.
+3. **Tests:** `uv run python scripts/test_all.py --perf`: everything, with the Explore benchmark
+   ([Performance](testing.md#performance)).
+4. **Try it by hand** on mock data: `uv run python scripts/dev_viewer.py` (see
+   [Quick start for developers](index.md#quick-start-for-developers)).
+
 ## How to release
 
 GitHub builds every release; you choose the version and click **Publish**. Nothing becomes

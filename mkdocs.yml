@@ -176,6 +176,7 @@ nav:
   - Developers:
       - developers/index.md
       - Testing: developers/testing.md
+      - Mock data: developers/mock-data.md
       - HTTP API: developers/http-api.md
       - Library label file: developers/library-sidecar.md
       - Extending LBD: developers/extending.md
