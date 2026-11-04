@@ -224,7 +224,8 @@ def test_a_cursor_on_a_cell_not_measured_yet(client, data_dir):
 REFUSED = {"/api/file/plot", "/api/file/rename", "/api/file/trash", "/api/library/duplicate",
            "/api/library/give-ids", "/api/library/resolve"}
 ELSEWHERE = {   # write only beside the file (the labels file), into LBD's database, or a new file
-    "/api/library/labels", "/api/library/missing", "/api/library/preview/want", "/api/library/preview/choose",
+    "/api/library/labels", "/api/library/labels/create", "/api/library/labels/rename", "/api/library/labels/remove",
+    "/api/library/missing", "/api/library/preview/want", "/api/library/preview/choose",
     "/api/library/preview/clear", "/api/file/recover",
 }
 
