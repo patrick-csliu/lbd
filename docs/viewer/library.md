@@ -8,8 +8,11 @@ select described on the right.
 
 1. **Folders:** the folders you opened in the viewer, with the number of data files below each.
    **All folders** lists everything in all of them as one list; a folder lists everything below
-   it, at any depth. **+ Add folder** and **×** add and remove folders (no file is touched); this
-   is the one place to do it.
+   it, at any depth. **+ Add folder** adds one; to remove one, right-click it (or point at it and
+   click **⋯**) → **Remove from the Library…**. LBD first says what changes: how many files leave
+   the Library (and how many have labels), the labels only they have, and open tabs showing them.
+   Nothing on disk is changed, and the files and their labels come back when you add the folder
+   again. The same menu shows a folder in Explorer / Finder and copies its path.
 2. **Dates:** year → month → day, with the number of files on each. Click one to see only those
    files; click it again to see all dates.
 3. **Search:** type words to find files that contain all of them, in their name, description,
@@ -17,7 +20,7 @@ select described on the right.
    shown, e.g. "37 of 412 files · Date: 2026 › Mar · Search: "resonator"", with an **×** for each
    filter and **Clear all**.
 4. **The list:** one row per data file, newest first. Click a column title to sort by it; click
-   again to reverse. Right-click the titles to choose the columns.
+   again to reverse. Right-click the titles to choose the columns (see [Columns](#columns)).
 
 5. **The selected file:** see [The selected file](#the-selected-file).
 
@@ -58,7 +61,14 @@ When a file holds a lot (many values, axes or metadata), the side scrolls; nothi
 | **Folder** | where the file is, below its open folder |
 | **File size**, **File name**, **Modified** | from the disk |
 
-The columns you choose are remembered. When the list is too narrow for them all, the ones least
+- **Move a column:** drag its title left or right (a line shows where it goes), e.g. ★ first.
+  Without a mouse: right-click a title → **Move … left / right / to the start**.
+- **Change a column's width:** drag the right edge of its title; double-click that edge for its
+  own width again. Columns you didn't resize share the rest of the width.
+- **Right-click the titles** to choose the columns (a new one goes at the end), and **Reset
+  columns** for the first order and widths.
+
+The columns, their order and widths are remembered. When the list is too narrow for them all, the ones least
 needed to tell files apart are left out (Modified first, then File name, Folder, …; Name always
 stays), and a **+N** at the end of the titles says how many: point at it for which, click it to
 choose. A wider window shows them again.
@@ -185,17 +195,21 @@ Projects, users and tags can be **nested** with `/`: choosing `Qubit A` in the f
 everything under `Qubit A/…`.
 
 - **Set them** for the selected file: ☆ in front of its title, and the rows Project, Users and
-  Tags beside its preview (**Set** / **+ Add** opens a list of the labels already used, with
-  how many files have each; type to find one or to make a new one, and choose **put under** to
-  place a new one inside a group; for users, this computer's login name comes first), and
-  Comment (saved when you leave the box).
+  Tags beside its preview, each label a pill with its **×** (a nested label reads
+  `quality › redo`; a long one is shortened in the middle, the whole of it shown when you point
+  at it). **Set** / **+ Add** opens a box with the labels used most first (for users, this
+  computer's login name). Type to find one: a word finds it anywhere; a path shows the next level
+  only (`Lab A/` lists Lab A's teams), at most 8 at a time, and **Tab** goes into the group
+  shown. **Enter** takes it, or makes a new label with the path typed. Comment is saved when
+  you leave the box.
 - **Make and manage labels** on the left, under **Labels**: **Project**, **Users** and **Tags**
   are always there.
   - **+ New** makes a label even before a file has it (a new project before its first
-    measurement), at the top level or **put under** a group. It is kept in the labels file of an
-    open folder (you choose which when there are several) until you remove it.
-  - Right-click a label: **New … under it**, **Rename…**, **Move into…** (another group, or the
-    top level), **Remove from all files…**. Every file with it follows, with the labels inside
+    measurement). Type its whole path (`Lab A/Qubit team/Dana`); the suggestions show what is
+    there, one level at a time. It is kept in the labels file of an open folder (you choose which
+    when there are several) until you remove it.
+  - Right-click a label: **New … under it**, **Rename…**, **Move into…** (type the group, or
+    leave it empty for the top level), **Remove from all files…**. Every file with it follows, with the labels inside
     it; LBD first says how many files it changes, and asks.
   - **Drag and drop:** a label onto another moves it inside it; onto its heading (Project, Users,
     Tags), to the top level. Files dragged from the list (the selected ones) onto a label get it
@@ -206,6 +220,11 @@ everything under `Qubit A/…`.
 - **Filter** with the boxes on the left (Project, Users, Tags, ★ Starred only): several choices
   in one box show files with any of them; choices in different boxes must all match. Search also
   finds labels and comments.
+- **Many labels:** each heading (Project · 12, Users · 300 …) says how many there are, stays at
+  the top while its labels scroll by, and folds its section away with a click (this browser
+  remembers it; a label chosen in a folded section still shows under its heading). A level
+  shows its 12 most used labels, then **Show N more…**; with more than 15 labels, **Find a
+  label…** narrows all three lists. A label no file has yet is shown in italic, with 0.
 - Labels are kept in a small file in each folder, `.lbd-library.json`, next to the data files:
   **data files are never changed for a label**, and labels travel with the folder (copied,
   synced, backed up). Its format is described in

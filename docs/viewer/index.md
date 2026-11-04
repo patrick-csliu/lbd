@@ -57,28 +57,24 @@ Only one copy of the viewer runs at a time. Opening more files adds them to the 
 
 ## Settings
 
-![The ⚙ settings](img/settings.png){ width="380" }
+![The ⚙ settings](img/settings.png){ width="620" }
 
-**⚙** at the top right holds these settings (and the [Library](library.md)'s own). They are saved, and apply to every viewer tab and
-to the next start:
+**⚙** at the top right opens the settings, in sections (1). They are saved, and apply to every
+viewer tab and to the next start. **Find a setting…** (2) finds one in any section by a word
+("cloud", "dark", "GB"); a dot marks a section where something isn't as LBD starts, and **Reset
+this section…** puts it back. Each setting has its name, a line about it, and its control (3).
+Esc, **×** or a click beside the dialog closes it. A link can open a section:
+`#settings/memory` at the end of the viewer's address.
 
-1. **Files opened from Explorer / Finder:** *in the open viewer (as a tab)*, which is the
-   default, or *in a new browser tab* every time.
-2. **Data files opened from Explorer / Finder open in** *Explore* (the default) or *Figure*.
-3. **Memory for data:** how much memory to leave free for the rest of the computer, an
-   optional most to use, and how much disk the summaries of large data may take
-   ([Large files](../getting-started/large-files.md#large-files-in-lbd-viewer)).
-4. **Measurements:** what the status line of a file being measured shows (time left,
-   percentage, points, the slow outer axes; or nothing), and a browser notification when a
-   measurement finishes or stops while the viewer is in the background (off at first; the
-   browser asks once) ([Writing while measuring](../getting-started/writing-while-measuring.md)).
-5. **Theme:**
-    - **System** follows the light or dark mode of Windows, macOS or Linux, also when it changes
-      while the viewer is open.
-    - **Light** and **Dark** stay as chosen.
+| Section | Settings |
+|---|---|
+| **General** | **Theme**: *System* follows the light or dark mode of Windows, macOS or Linux, also when it changes while the viewer is open; *Light* and *Dark* stay as chosen. Figures always stay on white, because they are print figures; the Help pages have their own light/dark switch. **Files opened from Explorer / Finder** open *in this viewer (a tab)*, the default, or *in a new browser tab*, and data files go to *Explore* (the default) or *Figure*. |
+| **Library** | **Read each file's details** (for folders in cloud storage, see [Library](library.md#reading-each-files-details-cloud-storage)); which **previews** are drawn, and the picture cache ([Previews](library.md#previews)). |
+| **Files sidebar** | What the [Files sidebar](folders-and-files.md#the-files-sidebar) of Explore and Figure can list besides the Library selection: Folders, Starred, Recent. |
+| **Memory** | How much memory to leave free for the rest of the computer, an optional most to use, and how much disk the summaries of large data may take ([Large files](../getting-started/large-files.md#large-files-in-lbd-viewer)). |
+| **Measurements** | What the status line of a file being measured shows (time left, percentage, points, the slow outer axes; or nothing), and a browser notification when a measurement finishes or stops while the viewer is in the background (off at first; the browser asks once) ([Writing while measuring](../getting-started/writing-while-measuring.md)). |
 
-    Figures always stay on white, because they are print figures. The Help pages have their own
-    light/dark switch.
+The Library's own choices (its columns, the sidebar's layout) are made where they are used.
 
 ## The viewer's pages
 

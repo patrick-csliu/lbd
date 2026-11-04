@@ -24,6 +24,8 @@ export interface AppState {
   measurements: MeasurementSettings;
   /** this computer's user name (suggested first when labelling users) */
   login: string;
+  /** the default of each setting of each Settings section: {section: {"memory.maximum_gb": null, ...}} */
+  defaults?: Record<string, Record<string, unknown>>;
 }
 
 /** Files being measured (plan 9): show the progress, each of its parts; browser notifications. */
@@ -117,6 +119,8 @@ export interface LibrarySettings {
   /** the notice about reading headers in cloud storage was seen */
   notice_seen: boolean;
   columns: LibraryColumn[];
+  /** widths (px) of the columns whose edge was dragged; the others keep their own */
+  column_widths: Partial<Record<LibraryColumn, number>>;
   /** previews drawn without being asked: every file, the rows near the selection, or none ("all" needs read_headers) */
   previews: PreviewMode;
   /** the list as rows or as pictures */
@@ -189,6 +193,15 @@ export type Writing = "measuring" | "elsewhere" | "silent" | "stopped" | null;
 export type LabelKind = "project" | "users" | "tags";
 
 /** A nested label (project, user or tag) with the number of files that have it or one inside it. */
+/** What removing an open folder changes (GET /api/roots/summary). */
+export interface RootSummary {
+  files: number;
+  labelled: number;
+  labels_only_here: { project: string[]; users: string[]; tags: string[] };
+  pages: number;
+  inside: string[];
+}
+
 export interface LabelNode {
   label: string; // the full label, e.g. "Qubit A/Device 3"
   name: string; // its last part
@@ -821,6 +834,7 @@ export const api = {
   open: (path: string) => call<{ path: string }>("POST", "/api/open", { path }),
   addRoot: (path: string) => call<{ roots: string[] }>("POST", "/api/roots", { path }),
   removeRoot: (path: string) => call<{ roots: string[] }>("DELETE", "/api/roots", undefined, { path }),
+  rootSummary: (path: string) => call<RootSummary>("GET", "/api/roots/summary", undefined, { path }),
   pickFolder: () => call<{ path: string | null }>("POST", "/api/pick-folder"),
   list: (path: string) => call<DirListing>("GET", "/api/list", undefined, { path }),
   /** What changed on disk: see watch.ts. Reads only sizes and times; never opens a file. */
@@ -859,6 +873,7 @@ export const api = {
   setOpenFilesIn: (where: OpenFilesIn) => call<AppState>("PUT", "/api/settings", { open_files_in: where }),
   setOpenDataIn: (where: OpenDataIn) => call<AppState>("PUT", "/api/settings", { open_data_in: where }),
   setTheme: (theme: Theme) => call<AppState>("PUT", "/api/settings", { theme }),
+  resetSettings: (section: string) => call<AppState>("POST", "/api/settings/reset", { section }),
   setLibrary: (changes: Partial<LibrarySettings>) => call<AppState>("PUT", "/api/settings", { library: changes }),
   setMemory: (changes: Partial<Pick<MemorySettings, "reserve_gb" | "maximum_gb" | "summary_cache_gb">>) =>
     call<AppState>("PUT", "/api/settings", { memory: changes }),

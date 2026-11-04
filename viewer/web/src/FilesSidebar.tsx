@@ -2,6 +2,7 @@ import { CSSProperties, KeyboardEvent, MouseEvent, ReactNode, useCallback, useEf
 import type React from "react";
 import { api, AppState, baseName, LibraryColumn, LibraryQuery, LibraryRow, LibrarySettings, SidebarScope } from "./api";
 import { cellText, COLUMNS } from "./libraryColumns";
+import { reorder, startResize, useColumnMove } from "./columnDrag";
 import { ConfirmDialog, ConfirmRequest, ContextMenu, isMenuKey, MenuAt, menuAt, MenuEntry } from "./menu";
 import { fileEntries } from "./fileActions";
 import { useToast } from "./toast";
@@ -247,24 +248,23 @@ function LibraryList(props: Props & { showFilters: boolean }) {
   const shownSort = { sort: shownQuery.sort, order: shownQuery.order };
   const sortBy = (c: LibraryColumn) =>
     setOwnSort(shownSort.sort === c ? { sort: c, order: shownSort.order === "asc" ? "desc" : "asc" } : { sort: c, order: c === "date" || c === "size" || c === "modified" || c === "sweep" ? "desc" : "asc" });
-  const startColDrag = (e: React.PointerEvent<HTMLElement>, c: string) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const x0 = e.clientX, w0 = colWidth(c);
-    const move = (ev: PointerEvent) => setWidths((w) => ({ ...w, [c]: Math.max(40, Math.round(w0 + ev.clientX - x0)) }));
-    const up = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      document.body.classList.remove("resizing");
-      setWidths((w) => {
-        saveWidths(w);
-        return w;
-      });
-    };
-    document.body.classList.add("resizing");
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-  };
+  const startColDrag = (e: React.PointerEvent<HTMLElement>, c: string) =>
+    startResize(
+      e,
+      colWidth(c),
+      (w) => setWidths((old) => ({ ...old, [c]: w })),
+      () =>
+        setWidths((w) => {
+          saveWidths(w);
+          return w;
+        }),
+    );
+  // drag a field's title to move it (Name stays first): the order of the chosen fields
+  const colHead = useRef<HTMLDivElement>(null);
+  const colMove = useColumnMove(colHead, (id, to) => {
+    const next = reorder(colFields, colFields.indexOf(id as (typeof colFields)[number]), to - 1); // index 0 is Name
+    setSetting({ sidebar_fields: next });
+  });
 
   let empty: ReactNode = null;
   if (total === 0)
@@ -302,10 +302,16 @@ function LibraryList(props: Props & { showFilters: boolean }) {
         style={layout === "columns" ? ({ "--files-grid": grid } as CSSProperties) : undefined}
       >
         {layout === "columns" && (
-          <div className="files-colhead" style={{ width: gridWidth }}>
-            {["name", ...colFields].map((c) => (
-              <div key={c} className={"files-colcell" + (c === "name" ? " sticky" : "")} aria-sort={shownSort.sort === c ? (shownSort.order === "asc" ? "ascending" : "descending") : "none"}>
-                <button className="link" onClick={() => sortBy(c as LibraryColumn)} title="Sort the sidebar by this (the Library keeps its own order)">
+          <div ref={colHead} className={"files-colhead" + (colMove.dragging ? " moving" : "")} style={{ width: gridWidth }}>
+            {["name", ...colFields].map((c, i) => (
+              <div
+                key={c}
+                data-col={c}
+                className={"files-colcell" + (c === "name" ? " sticky" : "") + (colMove.dragging === c ? " col-dragging" : "") + (colMove.drop === i && i > 0 ? " col-drop-before" : "") + (colMove.drop === colFields.length + 1 && i === colFields.length ? " col-drop-after" : "")}
+                aria-sort={shownSort.sort === c ? (shownSort.order === "asc" ? "ascending" : "descending") : "none"}
+                onPointerDown={c === "name" ? undefined : (e) => colMove.start(e, c, (k) => k === 0)}
+              >
+                <button className="link" onClick={() => !colMove.wasDrag() && sortBy(c as LibraryColumn)} title={c === "name" ? "Sort the sidebar by this (the Library keeps its own order)" : "Click: sort the sidebar by this · drag: move the column"}>
                   {c === "name" ? (main === "file" ? "File name" : "Name") : FIELD_TITLES[c as LibraryColumn]}
                   {shownSort.sort === c ? (shownSort.order === "asc" ? " ▴" : " ▾") : ""}
                 </button>
@@ -510,17 +516,19 @@ export function SidebarScopeSettings({ state, onSettings }: { state: AppState; o
   };
   return (
     <>
-      <div className="settings-title">Files sidebar (Explore, Figure)</div>
-      <label className="settings-choice">
-        <input type="checkbox" checked disabled /> {SCOPE_TITLES.library} (the Library's filters)
-      </label>
-      {(["folders", "starred", "recent"] as SidebarScope[]).map((s) => (
-        <label key={s} className="settings-choice">
-          <input type="checkbox" checked={scopes.includes(s)} onChange={(e) => set(s, e.target.checked)} />
-          {SCOPE_TITLES[s]}
-          {s === "folders" ? " (in Figure also images and style files)" : ""}
+      <p className="settings-intro">What the Files sidebar of Explore and Figure can list; you choose between them in the sidebar.</p>
+      <div className="settings-checks" data-setting="library.sidebar_scopes">
+        <label className="settings-check disabled">
+          <input type="checkbox" checked disabled /> {SCOPE_TITLES.library} <span className="muted small">· the Library's filters, always</span>
         </label>
-      ))}
+        {(["folders", "starred", "recent"] as SidebarScope[]).map((s) => (
+          <label key={s} className="settings-check">
+            <input type="checkbox" checked={scopes.includes(s)} onChange={(e) => set(s, e.target.checked)} />
+            {SCOPE_TITLES[s]}
+            {s === "folders" ? <span className="muted small"> · in Figure also images and style files</span> : null}
+          </label>
+        ))}
+      </div>
     </>
   );
 }

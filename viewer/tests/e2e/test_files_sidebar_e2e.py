@@ -4,11 +4,12 @@ the sidebar, the filters going along to a new browser tab, the lists chosen in �
 the folder tree, which lists images and style files in Figure only."""
 
 import json
+import re
 
 import httpx
 from PIL import Image
 from playwright.sync_api import Page, expect
-from pageui import menu
+from pageui import menu, open_settings
 
 
 def sidebar(page: Page):
@@ -95,8 +96,8 @@ def test_the_lists_offered_are_chosen_in_settings(viewer, library_files, new_pag
     expect(sidebar(page).locator(".files-filters")).to_be_visible()
     expect(sidebar(page).get_by_label("Files listed")).to_have_count(0)
     # ⚙ Settings → Files sidebar
-    page.get_by_role("button", name="Settings").click()
-    page.get_by_role("dialog", name="Settings").get_by_label("Recent").check()
+    open_settings(page, "Files sidebar").get_by_label("Recent").check()
+    page.keyboard.press("Escape")
     expect(sidebar(page).get_by_label("Files listed")).to_be_visible()
     assert json.loads(page.evaluate("JSON.stringify(Array.from(document.querySelectorAll('.files-scope option')).map(o => o.value))")) == \
         ["library", "recent"]
@@ -156,3 +157,13 @@ def test_the_layouts_two_lines_one_line_and_columns(viewer, library_files, new_p
     page.reload()
     page.get_by_role("tab", name="Explore", exact=True).click()
     assert sidebar(page).locator(".files-colhead .files-colcell").nth(1).bounding_box()["width"] > w0 + 30
+    # a column's title dragged to another place: the fields' order (Name stays first)
+    cells = sidebar(page).locator(".files-colhead .files-colcell")
+    expect(cells).to_have_text([re.compile("^Name"), re.compile("^Date"), re.compile("^Sweep")])
+    cells.nth(2).scroll_into_view_if_needed()                                       # the sidebar is narrow
+    sweep, date = cells.nth(2).bounding_box(), cells.nth(1).bounding_box()
+    page.mouse.move(sweep["x"] + 15, sweep["y"] + sweep["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(date["x"] + 5, date["y"] + date["height"] / 2, steps=8)
+    page.mouse.up()
+    expect(cells).to_have_text([re.compile("^Name"), re.compile("^Sweep"), re.compile("^Date")])

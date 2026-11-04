@@ -51,7 +51,8 @@ from . import live, memory, reading, summaries  # noqa: E402
 from . import export as csv_export  # noqa: E402
 from .explore import ExploreClosed, ExploreError, ExploreSession, Sessions  # noqa: E402
 from .pages import PageError, Pages, UnknownPage  # noqa: E402
-from .config import MEMORY_DEFAULTS, Config, ConfigError, Style, StyleError, from_dict, previews_mode  # noqa: E402
+from .config import (MEMORY_DEFAULTS, Config, ConfigError, Style, StyleError, _same_path, from_dict,  # noqa: E402
+                     previews_mode, section_defaults)
 
 CREATOR = f"LBD viewer {VERSION} (matplotlib {matplotlib.__version__})"
 
@@ -375,6 +376,10 @@ class SettingsBody(_Body):
     library: Optional[Dict[str, Any]] = None  # {read_headers?, notice_seen?, columns?} (config.LIBRARY_DEFAULTS)
     memory: Optional[Dict[str, Any]] = None   # {reserve_gb?, maximum_gb?, summary_cache_gb?} (config.MEMORY_DEFAULTS)
     measurements: Optional[Dict[str, Any]] = None   # {progress?, time?, percent?, points?, axes?, notify?}
+
+
+class SectionBody(_Body):
+    section: str          # a section of the Settings dialog (config.SETTINGS_SECTIONS)
 
 
 class FilePlotBody(_Body):
@@ -887,6 +892,7 @@ def create_app(state: AppState) -> FastAPI:
             "roots": s["roots"], "default_style": s["default_style"], "styles": names,
             "open_files_in": s["open_files_in"], "open_data_in": s["open_data_in"], "theme": s["theme"],
             "library": s["library"], "memory": {**s["memory"], **memory_now()}, "measurements": s["measurements"], "login": getpass.getuser(), "platform": sys.platform, "config_dir": str(cfg.dir), "warnings": problems + warns,
+            "defaults": section_defaults(),
         }
 
     @app.post("/api/open")
@@ -906,6 +912,21 @@ def create_app(state: AppState) -> FastAPI:
     def pick_folder():
         """Show the native folder dialog on this computer. Returns {"path": null} if cancelled."""
         return {"path": native_folder_dialog()}
+
+    @app.get("/api/roots/summary")
+    def root_summary(path: str = Query(...)):
+        """What removing an open folder changes (asked before it is removed): its files, those with
+        labels, the labels only they have, the browser tabs showing a file in it, and other open
+        folders inside it (they stay)."""
+        roots = cfg.settings()["roots"]
+        if not any(_same_path(path, r) for r in roots):
+            raise HTTPException(404, f"{path} is not one of your folders")
+        inside = str(Path(path).resolve())
+        prefix = inside.rstrip(os.sep) + os.sep
+        out = state.library.folder_summary(inside)
+        out["pages"] = sum(1 for p in state.pages.live_pages() if any(str(Path(f).resolve()).startswith(prefix) for f in p.files))
+        out["inside"] = [r for r in roots if str(Path(r).resolve()).startswith(prefix)]
+        return out
 
     @app.delete("/api/roots")
     def remove_root(path: str = Query(...)):
@@ -1614,6 +1635,22 @@ def create_app(state: AppState) -> FastAPI:
         if (body.open_files_in is not None or body.open_data_in is not None or body.theme is not None
                 or body.library is not None or body.memory is not None or body.measurements is not None):
             state.pages.broadcast("settings_changed")      # every page shows the new setting
+        return get_state()
+
+    @app.post("/api/settings/reset")
+    def reset_settings(body: SectionBody):
+        """Put one section of the Settings dialog back to its defaults."""
+        before = cfg.settings()["library"]["read_headers"]
+        try:
+            cfg.reset_section(body.section)
+        except ConfigError as e:
+            raise HTTPException(400, str(e))
+        if body.section == "memory":
+            apply_memory(cfg.settings()["memory"])
+            summaries.shared().trim()
+        if cfg.settings()["library"]["read_headers"] != before:
+            state.wake_library()
+        state.pages.broadcast("settings_changed")
         return get_state()
 
     # -- SDK page

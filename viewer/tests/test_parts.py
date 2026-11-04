@@ -23,7 +23,7 @@ def test_config_settings_roundtrip(tmp_path):
     assert cfg.settings() == {"roots": [], "default_style": "default", "open_files_in": "viewer",
                               "open_data_in": "explore", "theme": "system",
                               "library": {"read_headers": True, "notice_seen": False, "columns": ["name", "date", "sweep"],
-                                          "previews": "all", "list_view": "list", "sidebar_scopes": ["library"],
+                                          "column_widths": {}, "previews": "all", "list_view": "list", "sidebar_scopes": ["library"],
                                           "sidebar_layout": "two", "sidebar_main": "title",
                                           "sidebar_fields": ["date", "sweep", "project", "tags"]},
                               "memory": {"reserve_gb": None, "maximum_gb": None, "summary_cache_gb": 20.0},
@@ -35,6 +35,13 @@ def test_config_settings_roundtrip(tmp_path):
     assert cfg.settings()["library"]["columns"] == ["name", "values"]
     with pytest.raises(ConfigError, match="columns"):
         cfg.set_library({"columns": ["colour"]})
+    # the columns' order is the one chosen (★ first, say), and dragged widths are kept and checked
+    assert cfg.set_library({"columns": ["star", "name", "date", "star"]})["columns"] == ["star", "name", "date"]
+    assert cfg.set_library({"column_widths": {"name": 300, "date": 150}})["column_widths"] == {"name": 300, "date": 150}
+    for bad in ({"colour": 100}, {"name": 5}, {"name": 99999}, {"name": "wide"}, {"name": True}):
+        with pytest.raises(ConfigError, match="column_widths"):
+            cfg.set_library({"column_widths": bad})
+    cfg.set_library({"columns": ["name", "values"], "column_widths": {}})
     with pytest.raises(ConfigError, match="unknown Library setting"):
         cfg.set_library({"thumbnails": True})
     # the Files sidebar's lists: the Library's always, in a fixed order, each once
@@ -104,6 +111,28 @@ def test_config_theme(tmp_path):
     assert Config(tmp_path / "c").settings()["theme"] == "dark"
     with pytest.raises(ConfigError, match="one of system, light, dark"):
         cfg.set_theme("blue")
+
+
+def test_a_settings_section_is_reset_to_its_defaults(tmp_path):
+    from lbd_viewer.config import section_defaults
+
+    cfg = Config(tmp_path / "c")
+    cfg.set_theme("dark")
+    cfg.set_open_data_in("figure")
+    cfg.set_library({"read_headers": False, "previews": "off", "columns": ["star", "name"]})
+    cfg.set_memory({"maximum_gb": 4})
+    cfg.reset_section("general")
+    s = cfg.settings()
+    assert (s["theme"], s["open_data_in"]) == ("system", "explore") and s["library"]["read_headers"] is False
+    cfg.reset_section("library")
+    lib = cfg.settings()["library"]
+    assert lib["read_headers"] is True and lib["previews"] == "all" and lib["columns"] == ["star", "name"]   # not the list's columns
+    cfg.reset_section("memory")
+    assert cfg.settings()["memory"]["maximum_gb"] is None
+    assert section_defaults()["general"] == {"theme": "system", "open_files_in": "viewer", "open_data_in": "explore"}
+    assert section_defaults()["sidebar"] == {"library.sidebar_scopes": ["library"]}
+    with pytest.raises(ConfigError, match="no settings section"):
+        cfg.reset_section("colours")
 
 
 def test_config_default_style_and_problems(tmp_path):

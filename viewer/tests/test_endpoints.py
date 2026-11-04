@@ -565,3 +565,11 @@ def test_the_page_is_never_kept_stale_by_the_browser(client):
     assert r.status_code == 200 and r.headers["cache-control"] == "no-cache"
     script = next(p.name for p in (STATIC_DIR / "assets").glob("*.js"))
     assert "no-cache" not in client.get(f"/assets/{script}").headers.get("cache-control", "")
+
+
+def test_a_settings_section_is_reset(client):
+    client.put("/api/settings", json={"theme": "dark", "measurements": {"notify": True}}).raise_for_status()
+    state = client.post("/api/settings/reset", json={"section": "general"}).json()
+    assert state["theme"] == "system" and state["measurements"]["notify"] is True
+    assert state["defaults"]["measurements"]["measurements.notify"] is False
+    assert client.post("/api/settings/reset", json={"section": "nope"}).status_code == 400

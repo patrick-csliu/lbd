@@ -1,16 +1,15 @@
 import { CSSProperties, KeyboardEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MemorySettings } from "./MemorySettings";
-import { MeasurementSettings } from "./MeasurementSettings";
 import { DEFAULT_MEASUREMENTS, MeasurementsContext, notifyInBackground } from "./MeasuringStatus";
 import { onFinished } from "./watch";
 import { api, ApiError, AppState, baseName, fileKind, LibraryQuery, OpenDataIn, SidebarScope, OpenFilesIn, PageCommand, PageEntry, TabState, Theme, viewerUrl, Workspace } from "./api";
-import FilesSidebar, { SidebarScopeSettings } from "./FilesSidebar";
+import FilesSidebar from "./FilesSidebar";
+import { lastSection, SECTIONS, SettingsDialog, SettingsSection } from "./SettingsDialog";
 import { DRAWER_MEDIA, useMedia } from "./useMedia";
 import { useResizable, widestContent } from "./resizable";
 import { SidebarToggle } from "./SidebarToggle";
 import { loadLibraryQuery, saveLibraryQuery } from "./libraryQuery";
 import FileView from "./FileView";
-import LibraryPage, { PreviewSettings } from "./LibraryPage";
+import LibraryPage from "./LibraryPage";
 import ExploreTab from "./ExploreTab";
 import ImageView from "./ImageView";
 import StyleFileView from "./StyleFileView";
@@ -93,9 +92,6 @@ interface Lock {
   transfer?: string; // set while the tab is being moved to another page
 }
 
-/** The operating system's name, for "System (follows Windows)". */
-const systemName = (platform: string) => (platform === "win32" ? "Windows" : platform === "darwin" ? "macOS" : "the system");
-
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /** Run a request; if it didn't reach the viewer (a network error, not a refusal), try once more. */
@@ -172,7 +168,24 @@ function Shell() {
     for (const p of [active, exploreActive])
       if (p && fileKind(p) === "lbd") setRecent((r) => (r[0] === p ? r : [p, ...r.filter((x) => x !== p)].slice(0, RECENT_MAX)));
   }, [active, exploreActive]);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  // ⚙ Settings: the section shown, or null (closed); #settings/<section> in the address opens it
+  const [settingsSection, setSettingsSection] = useState<SettingsSection | null>(() => {
+    const m = /^#settings(?:\/(\w+))?$/.exec(window.location.hash);
+    return m ? (SECTIONS.some((x) => x.id === m[1]) ? (m[1] as SettingsSection) : lastSection()) : null;
+  });
+  const openSettings = useCallback((section?: SettingsSection) => setSettingsSection(section ?? lastSection()), []);
+  useEffect(() => {
+    const onHash = () => {
+      const m = /^#settings(?:\/(\w+))?$/.exec(window.location.hash);
+      if (m) setSettingsSection(SECTIONS.some((x) => x.id === m[1]) ? (m[1] as SettingsSection) : lastSection());
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+  const closeSettings = useCallback(() => {
+    setSettingsSection(null);
+    if (window.location.hash.startsWith("#settings")) history.replaceState(null, "", window.location.pathname + window.location.search);
+  }, []);
   const pageRef = useRef<HTMLDivElement>(null);
   const sidebarRef = useRef<HTMLElement>(null);
   // the Files sidebar's width: dragged at its edge, double-click fits the longest name
@@ -861,62 +874,21 @@ function Shell() {
         </nav>
         {state && (
           <div className="settings">
-            <button className="icon" title="Settings" aria-label="Settings" aria-expanded={settingsOpen} onClick={() => setSettingsOpen((o) => !o)}>
+            <button className="icon" title="Settings" aria-label="Settings" aria-haspopup="dialog" aria-expanded={settingsSection !== null} onClick={() => openSettings()}>
               ⚙
             </button>
-            {settingsOpen && (
-              <div className="settings-popover" role="dialog" aria-label="Settings" onMouseLeave={() => setSettingsOpen(false)}>
-                <div className="settings-title">Files opened from Explorer / Finder</div>
-                {(
-                  [
-                    ["viewer", "In the open viewer (as a tab)"],
-                    ["browser-tab", "In a new browser tab"],
-                  ] as [OpenFilesIn, string][]
-                ).map(([value, label]) => (
-                  <label key={value} className="settings-choice">
-                    <input type="radio" name="open-files-in" checked={state.open_files_in === value} onChange={() => setOpenFilesIn(value)} />
-                    {label}
-                  </label>
-                ))}
-                <div className="settings-title">Data files opened from Explorer / Finder open in</div>
-                {(
-                  [
-                    ["explore", "Explore (look at the data)"],
-                    ["figure", "Figure (make a figure)"],
-                  ] as [OpenDataIn, string][]
-                ).map(([value, label]) => (
-                  <label key={value} className="settings-choice">
-                    <input type="radio" name="open-data-in" checked={state.open_data_in === value} onChange={() => setOpenDataIn(value)} />
-                    {label}
-                  </label>
-                ))}
-                <div className="settings-title">Library</div>
-                <label className="settings-choice">
-                  <input type="checkbox" checked={state.library.read_headers} onChange={(e) => setLibraryReadHeaders(e.target.checked)} />
-                  Read each data file's details (title, date, sweep size, values, metadata)
-                </label>
-                <p className="settings-note small muted">
-                  Off: the Library lists names, sizes and file dates only. Switch it off for folders in cloud storage whose files are kept only
-                  online: opening a file there downloads all of it.
-                </p>
-                <PreviewSettings settings={state.library} onSettings={setState} />
-                <SidebarScopeSettings state={state} onSettings={setState} />
-                <MemorySettings settings={state.memory} onSettings={setState} />
-                <MeasurementSettings settings={state.measurements ?? DEFAULT_MEASUREMENTS} onSettings={setState} />
-                <div className="settings-title">Theme</div>
-                {(
-                  [
-                    ["system", `System (follows ${systemName(state.platform)})`],
-                    ["light", "Light"],
-                    ["dark", "Dark"],
-                  ] as [Theme, string][]
-                ).map(([value, label]) => (
-                  <label key={value} className="settings-choice">
-                    <input type="radio" name="theme" checked={state.theme === value} onChange={() => setTheme(value)} />
-                    {label}
-                  </label>
-                ))}
-              </div>
+            {settingsSection && (
+              <SettingsDialog
+                state={state}
+                section={settingsSection}
+                onSection={setSettingsSection}
+                onClose={closeSettings}
+                onSettings={setState}
+                setTheme={setTheme}
+                setOpenFilesIn={setOpenFilesIn}
+                setOpenDataIn={setOpenDataIn}
+                setReadHeaders={setLibraryReadHeaders}
+              />
             )}
           </div>
         )}
@@ -942,7 +914,7 @@ function Shell() {
             closeTabs([path]);
             setLibraryPath((a) => (a === path ? null : a));
           }}
-          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenSettings={() => openSettings("library")}
         />
       )}
 

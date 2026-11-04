@@ -7,6 +7,7 @@ import re
 
 import httpx
 import lbd
+from pageui import open_settings
 from playwright.sync_api import Page, expect
 
 
@@ -64,13 +65,14 @@ def test_with_previews_off_a_click_draws_one_and_every_file_needs_headers(viewer
     preview(page).get_by_role("button", name="Show preview").click()
     expect(preview(page).locator("img")).to_be_visible(timeout=30_000)
     # the setting: "Every file" can't be chosen while the files' details aren't read
-    page.locator("button[aria-label=Settings]").click()
-    page.get_by_label(re.compile("Read each data file's details")).uncheck()
-    expect(page.get_by_label(re.compile("^Every file"))).to_be_disabled()
-    page.get_by_label(re.compile("Read each data file's details")).check()
-    expect(page.get_by_label(re.compile("^Every file"))).to_be_enabled()
-    page.get_by_label(re.compile("^Every file")).check()
-    expect(page.get_by_text(re.compile(r"Picture cache: \d+ picture"))).to_be_visible()
+    d = open_settings(page, "Library")
+    every = d.get_by_label("Draw previews of").locator("option[value=all]")
+    d.get_by_label("Read each data file's details").uncheck()
+    expect(every).to_be_disabled()
+    d.get_by_label("Read each data file's details").check()
+    expect(every).to_be_enabled()
+    d.get_by_label("Draw previews of").select_option("all")
+    expect(d.locator("[data-setting='library.cache']")).to_contain_text(re.compile(r"\d+ pictures? ·"))
 
 
 def test_a_preview_chosen_in_explore_stays_until_reset(viewer, new_page):

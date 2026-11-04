@@ -513,6 +513,29 @@ class LibraryIndex:
             r["star"] = bool(r["star"])
         return {"rows": rows, "total": total, "generation": self.generation}
 
+    def folder_summary(self, folder: str) -> Dict[str, Any]:
+        """What leaves the Library with `folder` (an open folder being removed): its files, how
+        many have labels, and the labels no file elsewhere has, per kind."""
+        inside = str(Path(folder).resolve())
+        prefix = inside.rstrip(os.sep) + os.sep
+        with self._lock:
+            rows = self._connect().execute("SELECT path, star, project, users, tags, comment FROM files").fetchall()
+        here: Dict[str, set] = {"project": set(), "users": set(), "tags": set()}
+        elsewhere: Dict[str, set] = {"project": set(), "users": set(), "tags": set()}
+        files = labelled = 0
+        for path, star, project, users, tags, comment in rows:
+            mine = path.startswith(prefix)
+            found = {"project": {project} if project else set(),
+                     "users": {u for u in (users or "").split("\n") if u},
+                     "tags": {t for t in (tags or "").split("\n") if t}}
+            for kind, names in found.items():
+                (here if mine else elsewhere)[kind].update(names)
+            if mine:
+                files += 1
+                labelled += 1 if (star or comment or any(found.values())) else 0
+        return {"files": files, "labelled": labelled,
+                "labels_only_here": {k: sorted(here[k] - elsewhere[k]) for k in here}}
+
     def facets(self, folder: Optional[str] = None, q: str = "", date: str = "") -> Dict[str, Any]:
         """The date tree (year → month → day, with counts) of the files under `folder` matching
         the search, the folder tree of every open folder with the number of files below each, and

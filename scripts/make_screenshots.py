@@ -80,7 +80,7 @@ MARK_JS = r"""
       "text-align:center;border:2px solid #fff;box-shadow:0 1px 4px rgb(0 0 0/.4);box-sizing:content-box";
     layer.append(box, dot);
   }
-  document.body.append(layer);
+  (document.querySelector("dialog[open]") || document.body).append(layer);   // above an open dialog
 }
 """
 
@@ -576,16 +576,18 @@ def tabs_menu(page: Page, url: str, ctx) -> None:
 def settings(page: Page, url: str, ctx) -> None:
     fresh(page, url)
     page.get_by_role("button", name="Settings").click()
-    pop = page.locator(".settings-popover")
-    pop.wait_for()
+    dialog = page.locator("dialog.settings-dialog")
+    dialog.wait_for()
+    dialog.get_by_role("tab", name="Library").click()
+    page.wait_for_timeout(300)
     mark(page, [
-        (1, ".settings-popover .settings-title", 0, "L"),
-        (2, ".settings-popover .settings-title", 1, "L"),
-        (3, ".settings-popover .settings-title", 2, "L"),
+        (1, ".settings-sections", 0, "r"),
+        (2, ".settings-find", 0, "b"),
+        (3, ".setting-row", 0, "l"),
     ])
-    box = pop.bounding_box()
-    save(page, VIEWER_IMG / "settings.png", clip={"x": box["x"] - 48, "y": 0, "width": SIZE["width"] - box["x"] + 48,
-                                                  "height": box["y"] + box["height"] + 16})
+    box = dialog.bounding_box()
+    save(page, VIEWER_IMG / "settings.png", clip={"x": box["x"] - 40, "y": box["y"] - 16, "width": box["width"] + 80,
+                                                  "height": box["height"] + 32})
 
 
 @shot

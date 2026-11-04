@@ -4,6 +4,7 @@ remembered, the keyboard, the selected file on the right, unreadable files shown
 reason, files that appear while it is shown, and the setting for not reading headers."""
 
 import re
+import shutil
 
 import httpx
 import lbd
@@ -198,3 +199,92 @@ def test_the_selected_file_fits_its_pane(viewer, new_page):
     page.wait_for_timeout(300)
     assert top.evaluate("e => getComputedStyle(e).flexDirection") == "column"
     assert page.evaluate("document.documentElement.scrollWidth - innerWidth") <= 0
+
+
+def test_an_open_folder_is_removed_from_its_menu_after_a_question(viewer, library_files, new_page, tmp_path):
+    """No × on the rows (counts line up); right-click or ⋯ → Remove from the Library… asks first,
+    saying how many files leave it, and Cancel keeps it."""
+    other = tmp_path / "Other data"
+    other.mkdir()
+    shutil.copy2(library_files["Lab data"][0], other / "copied.lbd")
+    httpx.post(f"http://127.0.0.1:{viewer.port}/api/roots", headers={"X-LBD-Token": viewer.state.token}, json={"path": str(other)}).raise_for_status()
+    page = new_page("Library")
+    shows(page, every_file(viewer) + 1, 20_000)
+    folders = page.locator(".library-folders")
+    expect(folders.get_by_role("button", name=re.compile("^Remove .* from the list$"))).to_have_count(0)
+    rights = {round(b["x"] + b["width"]) for b in (c.bounding_box() for c in folders.locator(".count").all()) if b}
+    assert len(rights) == 1, rights                                                   # every count in one column
+    row = folders.locator(".library-folder.root", has_text="Other data")
+    row.click(button="right")
+    page.get_by_role("menuitem", name="Remove from the Library…").click()
+    dialog = page.locator("dialog")
+    expect(dialog).to_contain_text("1 file leaves the Library")
+    expect(dialog).to_contain_text("Nothing on disk is changed")
+    expect(dialog.get_by_role("button", name="Cancel")).to_be_focused()               # Enter changes nothing
+    dialog.get_by_role("button", name="Cancel").click()
+    expect(row).to_be_visible()
+    row.hover()
+    row.get_by_role("button", name="More for Other data").click()                     # the same menu from ⋯
+    page.get_by_role("menuitem", name="Remove from the Library…").click()
+    page.locator("dialog").get_by_role("button", name="Remove").click()
+    expect(row).to_have_count(0)
+    shows(page, every_file(viewer), 20_000)
+    assert (other / "copied.lbd").exists()                                             # nothing on disk changed
+
+
+def library_settings(viewer, **changes):
+    r = httpx.put(f"http://127.0.0.1:{viewer.port}/api/settings", headers={"X-LBD-Token": viewer.state.token}, json={"library": changes})
+    r.raise_for_status()
+    return r.json()["library"]
+
+
+def width_near(locator, want: float, slack: float = 5, timeout: float = 10.0):
+    import time
+
+    end = time.monotonic() + timeout
+    while abs((got := locator.bounding_box()["width"]) - want) > slack:
+        assert time.monotonic() < end, f"width {got}, wanted about {want}"
+        time.sleep(0.1)
+
+
+def test_columns_are_moved_and_resized_by_dragging_their_titles(viewer, library_files, new_page):
+    library_settings(viewer, columns=["star", "name", "date"])
+    page = new_page("Library")
+    shows(page, every_file(viewer), 20_000)
+    titles = page.locator(".library-head [role=columnheader]")
+    expect(titles).to_have_text(["★", re.compile("^Name"), re.compile("^Date")])        # the order chosen: ★ first
+    # drag Date in front of Name
+    date, name = titles.nth(2).bounding_box(), titles.nth(1).bounding_box()
+    page.mouse.move(date["x"] + 20, date["y"] + date["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(name["x"] + 10, name["y"] + name["height"] / 2, steps=8)
+    page.mouse.up()
+    expect(titles).to_have_text(["★", re.compile("^Date"), re.compile("^Name")])
+    assert library_settings(viewer)["columns"] == ["star", "date", "name"]
+    # a click still sorts
+    titles.nth(2).get_by_role("button").click()
+    expect(titles.nth(2)).to_have_attribute("aria-sort", "ascending")
+    # drag Date's right edge 80 px wider; the rows follow
+    before = titles.nth(1).bounding_box()["width"]
+    edge = titles.nth(1).locator(".col-resize").bounding_box()
+    page.mouse.move(edge["x"] + edge["width"] / 2, edge["y"] + edge["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(edge["x"] + 80, edge["y"] + edge["height"] / 2, steps=8)
+    page.mouse.up()
+    width_near(titles.nth(1), before + 80)
+    cell = rows(page).first.locator("> div").nth(1).bounding_box()
+    assert abs(cell["width"] - titles.nth(1).bounding_box()["width"]) <= 1           # the rows follow
+    page.reload()
+    shows(page, every_file(viewer), 20_000)
+    expect(titles).to_have_text(["★", re.compile("^Date"), re.compile("^Name")])     # kept
+    width_near(titles.nth(1), before + 80)
+    titles.nth(1).locator(".col-resize").dblclick()                                    # its own width again
+    width_near(titles.nth(1), before)
+    # the menu: move without the mouse, and reset
+    titles.nth(2).click(button="right")
+    page.get_by_role("menuitem", name="Move Name to the start").click()
+    expect(titles).to_have_text([re.compile("^Name"), "★", re.compile("^Date")])
+    titles.first.click(button="right")
+    page.get_by_role("menuitem", name="Reset columns (order and widths)").click()
+    expect(titles).to_have_text([re.compile("^Name"), re.compile("^Date"), re.compile("^Sweep size")])
+    assert library_settings(viewer)["column_widths"] == {}

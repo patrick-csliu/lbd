@@ -27,10 +27,27 @@ export const COLUMNS: { id: LibraryColumn; title: string; width: string; min: nu
  * the ones least needed to tell files apart) instead of the list scrolling sideways. Name stays. */
 const DROP_ORDER: LibraryColumn[] = ["modified", "file", "folder", "copies", "size", "comment", "users", "tags", "project", "values", "star", "sweep", "date"];
 
-/** The chosen columns that fit in `width` px. */
-export function fittingColumns(chosen: typeof COLUMNS, width: number): typeof COLUMNS {
+/** The columns of a new Library list (and after "Reset columns"); as config.py's LIBRARY_DEFAULTS. */
+export const DEFAULT_COLUMNS: LibraryColumn[] = ["name", "date", "sweep"];
+
+export type Widths = Partial<Record<LibraryColumn, number>>;
+
+/** The chosen columns, in the order chosen (the setting's order). */
+export function chosenColumns(ids: LibraryColumn[]): typeof COLUMNS {
+  return ids.map((id) => COLUMNS.find((c) => c.id === id)).filter((c): c is (typeof COLUMNS)[number] => !!c);
+}
+
+/** The grid's columns: a dragged width in px, the others their own; the last one also takes
+ * what is left when every column has a dragged width, so the rows reach the right edge. */
+export function gridTemplate(cols: typeof COLUMNS, widths: Widths): string {
+  const fixed = cols.every((c) => widths[c.id]);
+  return cols.map((c, i) => (widths[c.id] ? (fixed && i === cols.length - 1 ? `minmax(${widths[c.id]}px, 1fr)` : `${widths[c.id]}px`) : c.width)).join(" ");
+}
+
+/** The chosen columns that fit in `width` px (dragged widths counted as they are). */
+export function fittingColumns(chosen: typeof COLUMNS, width: number, widths: Widths = {}): typeof COLUMNS {
   let shown = chosen;
-  const need = (cols: typeof COLUMNS) => cols.reduce((n, c) => n + c.min, 0);
+  const need = (cols: typeof COLUMNS) => cols.reduce((n, c) => n + (widths[c.id] ?? c.min), 0);
   for (const id of DROP_ORDER) {
     if (need(shown) <= width || shown.length <= 1) break;
     shown = shown.filter((c) => c.id !== id);

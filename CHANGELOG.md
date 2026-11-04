@@ -59,6 +59,31 @@ are still written as 1.2).
 
 **Viewer**
 
+- **⚙ Settings are a dialog with sections** (General, Library, Files sidebar, Memory,
+  Measurements) instead of one long menu: each setting with its name, a line about it and its
+  control (switches, choices side by side); **Find a setting…**; a dot on a section that was
+  changed and **Reset this section…**; Esc or a click beside it closes it (moving the mouse away
+  no longer does). `#settings/memory` in the address opens a section.
+- **Library: removing a folder asks first.** The **×** on the folders is gone (it moved the
+  counts); right-click a folder or its **⋯** → **Remove from the Library…** says how many files
+  leave the Library, how many have labels, the labels only they have, and open tabs showing
+  them. Nothing on disk changes. The same menu shows the folder in Explorer / Finder and copies
+  its path.
+- **Library: columns in any order and any width.** Drag a column title to move the column (★
+  first, say), drag its edge to resize it; right-click → Move left / right / to the start, and
+  Reset columns. The Files sidebar's columns move the same way.
+- **Library: a clearer sidebar.** Tree rows line up level by level with guide lines and one
+  column of counts; Project, Users and Tags have headings with their number of labels, stay at
+  the top while their labels scroll, and fold away; a level shows its 12 most used labels, then
+  **Show N more…**; **Find a label…** with many labels.
+- **Labels as pills.** Each project, user and tag is one pill with its × inside, `›` between
+  levels, on one line (a long one shortened in the middle) — in the selected file, the list's
+  label columns and the filters above the list.
+- **Long label lists are typed into, not scrolled.** New label, Move into and the Set / + Add
+  pickers take a path (`Lab A/`) and suggest the next level, at most 8 at a time (Tab goes into a
+  group); the pickers show the labels used most first. The pickers close on a click elsewhere and
+  on Esc.
+
 - **The Library in narrower windows and its filters.** The filters on the left (folders, dates,
   labels) can be hidden (◧‹ in their sidebar, ◧› to show them again; the number of filters in
   use on it) and dragged wider, as can the selected file's side; they stay while you go to Explore or
@@ -327,6 +352,11 @@ are still written as 1.2).
   `viewer/tests/mock_live.py` writes a file slowly (and leaves a stopped one) to try the viewer.
 
 **For developers**
+
+- Mock data with long lists: `--many-labels` (`make_mock_data.py`, `dev_viewer.py`,
+  `mock_library.py`; 300 users, 800 tags, names over 80 characters) and the
+  `many_labels_files` fixture. New endpoints: `GET /api/roots/summary`, `POST
+  /api/settings/reset`; the Library setting `column_widths`.
 
 - **Mock data and a test viewer in one command each.** `scripts/make_mock_data.py FOLDER` makes a
   Library with every kind of label (stars, projects nested 1–3 levels, users in groups, flat and

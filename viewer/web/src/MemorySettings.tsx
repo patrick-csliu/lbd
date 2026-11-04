@@ -6,6 +6,7 @@
 import { useEffect, useState } from "react";
 import { api, AppState, formatBytes, MemorySettings as Settings } from "./api";
 import { useToast } from "./toast";
+import { Setting, SettingsGroup } from "./settingsUi";
 
 /** A number of GB typed in a box: "" means automatic / no maximum. */
 function parseGb(text: string): number | null | undefined {
@@ -54,58 +55,52 @@ export function MemorySettings({ settings, onSettings }: { settings: Settings; o
     }
   };
 
-  const here = settings.total_gb !== null ? `${settings.total_gb} GB in this computer` : "this computer's memory isn't known";
+  const number = (key: "reserve_gb" | "maximum_gb" | "summary_cache_gb", text: string, set: (v: string) => void, label: string, placeholder: string | undefined, empty: number | null) => (
+    <span className="settings-number-unit">
+      <input
+        className="settings-number"
+        aria-label={label}
+        placeholder={placeholder}
+        value={text}
+        onChange={(e) => set(e.target.value)}
+        onBlur={() => save(key, text, empty)}
+        onKeyDown={(e) => e.key === "Enter" && save(key, text, empty)}
+      />
+      <span className="unit">GB</span>
+    </span>
+  );
   return (
     <>
-      <div className="settings-title">Memory for data</div>
-      <p className="settings-note small muted">
-        A value that fits in the memory available is read whole; a bigger one is read by part, only what is shown. LBD uses what
-        is free and always leaves some for the rest of the computer ({here}
-        {settings.room_gb !== null ? `; ${settings.room_gb} GB available to LBD now` : ""}).
-      </p>
-      <label className="settings-choice">
-        Leave free (GB)
-        <input
-          className="settings-number"
-          aria-label="Memory to leave free, in GB"
-          placeholder={`automatic: ${settings.reserve_now_gb ?? "2"}`}
-          value={reserve}
-          onChange={(e) => setReserve(e.target.value)}
-          onBlur={() => save("reserve_gb", reserve, null)}
-          onKeyDown={(e) => e.key === "Enter" && save("reserve_gb", reserve, null)}
-        />
-      </label>
-      <label className="settings-choice">
-        Use at most (GB)
-        <input
-          className="settings-number"
-          aria-label="Most memory to use, in GB"
-          placeholder="no limit"
-          value={maximum}
-          onChange={(e) => setMaximum(e.target.value)}
-          onBlur={() => save("maximum_gb", maximum, null)}
-          onKeyDown={(e) => e.key === "Enter" && save("maximum_gb", maximum, null)}
-        />
-      </label>
-      <label className="settings-choice">
-        Summaries of large data on disk, up to (GB)
-        <input
-          className="settings-number"
-          aria-label="Disk cache for summaries of large data, in GB"
-          value={cache}
-          onChange={(e) => setCache(e.target.value)}
-          onBlur={() => save("summary_cache_gb", cache, 20)}
-          onKeyDown={(e) => e.key === "Enter" && save("summary_cache_gb", cache, 20)}
-        />
-      </label>
-      <p className="settings-note small muted">
-        A map or curves larger than the memory are summarised once (this takes a while); the summary is kept on disk so
-        they open quickly next time, the least recently used going first. Summaries:{" "}
-        {kept ? `${kept.count.toLocaleString()}, ${formatBytes(kept.bytes)}` : "…"}{" "}
-        <button className="link" onClick={empty} disabled={!kept || kept.count === 0}>
-          Empty
-        </button>
-      </p>
+      <dl className="settings-facts">
+        <dt>This computer</dt>
+        <dd>{settings.total_gb !== null ? `${settings.total_gb} GB` : "not known"}</dd>
+        {settings.room_gb !== null && (
+          <>
+            <dt>Available to LBD now</dt>
+            <dd>{settings.room_gb} GB</dd>
+          </>
+        )}
+      </dl>
+      <p className="settings-intro">A value that fits in the memory available is read whole; a bigger one is read by part, only what is shown.</p>
+      <SettingsGroup title="Limits">
+        <Setting id="memory.reserve_gb" name="Leave free" help="For the rest of the computer; empty: automatic.">
+          {number("reserve_gb", reserve, setReserve, "Memory to leave free, in GB", `automatic: ${settings.reserve_now_gb ?? "2"}`, null)}
+        </Setting>
+        <Setting id="memory.maximum_gb" name="Use at most" help="Empty: no limit.">
+          {number("maximum_gb", maximum, setMaximum, "Most memory to use, in GB", "no limit", null)}
+        </Setting>
+      </SettingsGroup>
+      <SettingsGroup title="Summaries of large data">
+        <Setting id="memory.summary_cache_gb" name="Keep on disk, up to" help="A map or curves larger than the memory are summarised once; the summary is kept so they open quickly next time, the least recently used going first.">
+          {number("summary_cache_gb", cache, setCache, "Disk cache for summaries of large data, in GB", undefined, 20)}
+        </Setting>
+        <Setting id="memory.summaries" name="Summaries now">
+          <span className="settings-value">{kept ? `${kept.count.toLocaleString()} · ${formatBytes(kept.bytes)}` : "…"}</span>
+          <button onClick={empty} disabled={!kept || kept.count === 0}>
+            Empty
+          </button>
+        </Setting>
+      </SettingsGroup>
     </>
   );
 }

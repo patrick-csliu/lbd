@@ -317,7 +317,7 @@ Cursor values never come from the picture: they are read from the file's data.
 A file larger than the memory available is read by part, and a map or curves too large to read
 at all are shown from a summary made once (with a progress bar and Cancel) and kept on disk:
 see [Large files](../getting-started/large-files.md#large-files-in-lbd-viewer) for what works on
-such data and the **⚙ Memory for data** settings.
+such data and **⚙ → Memory** in the settings.
 
 ## Getting data out
 

@@ -17,20 +17,23 @@ import {
   LibraryRow,
   LibrarySettings,
   MissingLabels,
+  RootSummary,
   Preview,
   PreviewMode,
   SameId,
 } from "./api";
 import { docsUrl } from "./help";
 import { FileDetails, FileFacts } from "./FileView";
-import { ConfirmDialog, ConfirmRequest, ContextMenu, isMenuKey, MenuAt, menuAt, useOutsideClose } from "./menu";
-import { copyPath } from "./fileActions";
+import { ConfirmDialog, ConfirmRequest, ContextMenu, isMenuKey, MenuAt, menuAt, MenuEntry, useOutsideClose } from "./menu";
+import { copyPath, fileEntries } from "./fileActions";
 import { useToast } from "./toast";
 import { useFileActions } from "./libraryActions";
 import { Chip, LabelChip } from "./LabelChip";
+import { Setting } from "./settingsUi";
 import { labelPath, shortLabel } from "./labelText";
 import { LabelPathInput, usedMost, whereItGoes } from "./labelPath";
-import { cellText, COLUMNS, createdText, fittingColumns, localTime } from "./libraryColumns";
+import { cellText, chosenColumns as chosenColumnsOf, COLUMNS, createdText, DEFAULT_COLUMNS, fittingColumns, gridTemplate, localTime, Widths } from "./libraryColumns";
+import { reorder, startResize, useColumnMove } from "./columnDrag";
 import { DRAWER_MEDIA, ONE_PANE_MEDIA, useMedia } from "./useMedia";
 import { useResizable, widestContent } from "./resizable";
 import { SidebarToggle } from "./SidebarToggle";
@@ -169,7 +172,11 @@ export default function LibraryPage(props: Props) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [filtersOpen, onePane, detailOpen]);
-  const chosenColumns = COLUMNS.filter((c) => settings.columns.includes(c.id));
+  const chosenColumns = chosenColumnsOf(settings.columns);
+  // widths dragged at the titles' edges: shown at once, saved when the mouse is let go
+  const [liveWidths, setLiveWidths] = useState<Widths | null>(null);
+  const widths: Widths = liveWidths ?? settings.column_widths ?? {};
+  useEffect(() => setLiveWidths(null), [settings.column_widths]);
 
   // ---- what is listed
   // the filters belong to this browser tab (App): the Files sidebar lists the same files
@@ -218,6 +225,7 @@ export default function LibraryPage(props: Props) {
 
   // ---- the rows: pages of PAGE rows, asked for when they come into view
   const scroller = useRef<HTMLDivElement>(null);
+  const headRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState({ top: 0, height: 600, width: 800 });
   const measure = (el: HTMLElement) => setView({ top: el.scrollTop, height: el.clientHeight, width: el.clientWidth });
   // rows, or pictures in a grid: how many items per line, and a line's height
@@ -225,7 +233,7 @@ export default function LibraryPage(props: Props) {
   const perLine = pictures ? Math.max(1, Math.floor(view.width / CARD_W)) : 1;
   const lineH = pictures ? CARD_H : ROW_H;
   const head = pictures ? 0 : ROW_H; // the column titles above the rows
-  const columns = fittingColumns(chosenColumns, view.width);
+  const columns = fittingColumns(chosenColumns, view.width, widths);
   const hiddenColumns = chosenColumns.filter((c) => !columns.includes(c)).map((c) => c.title);
 
   // a new query: from the top
@@ -485,20 +493,73 @@ export default function LibraryPage(props: Props) {
     }
   };
 
+  const setLibraryColumns = async (changes: Partial<LibrarySettings>) => {
+    try {
+      onLibrarySettings(await api.setLibrary(changes));
+    } catch (e) {
+      setLiveWidths(null);
+      toast((e as Error).message, "error");
+    }
+  };
+  /** Move a shown column to `to` (among the shown ones); columns not shown keep their places. */
+  const moveColumn = (id: string, to: number) => {
+    const shown = columns.map((c) => c.id);
+    const from = shown.indexOf(id as LibraryColumn);
+    if (from < 0) return;
+    const next = reorder(shown, from, to);
+    let k = 0;
+    setColumns(settings.columns.map((c) => (shown.includes(c) ? next[k++] : c)));
+  };
+  const columnMove = useColumnMove(headRef, moveColumn);
+  const resizeColumn = (e: React.PointerEvent<HTMLElement>, c: (typeof COLUMNS)[number]) => {
+    const cell = (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect().width;
+    startResize(
+      e,
+      Math.round(cell),
+      (w) => setLiveWidths({ ...widths, [c.id]: w }),
+      (w) => setLibraryColumns({ column_widths: { ...(settings.column_widths ?? {}), [c.id]: Math.max(c.min, w) } }),
+      c.min,
+    );
+  };
+  const resetWidth = (c: LibraryColumn) => {
+    const { [c]: _gone, ...rest } = settings.column_widths ?? {};
+    void _gone;
+    setLibraryColumns({ column_widths: rest });
+  };
+
   const columnMenu = (e: MouseEvent) => {
     e.preventDefault();
+    const at = (e.target as HTMLElement).closest<HTMLElement>("[data-col]")?.dataset.col as LibraryColumn | undefined;
+    const i = at ? columns.findIndex((c) => c.id === at) : -1;
+    const title = (id: LibraryColumn) => (id === "star" ? "★ Star" : COLUMNS.find((c) => c.id === id)?.title ?? id);
+    const moves: MenuEntry[] =
+      i >= 0
+        ? [
+            { label: `Move ${title(at!)} left`, disabled: i === 0, onClick: () => moveColumn(at!, i - 1) },
+            { label: `Move ${title(at!)} right`, disabled: i === columns.length - 1, onClick: () => moveColumn(at!, i + 1) },
+            { label: `Move ${title(at!)} to the start`, disabled: i === 0, onClick: () => moveColumn(at!, 0) },
+            "-",
+          ]
+        : [];
     setMenu(
-      menuAt(
-        e,
-        [{ label: "Columns shown", onClick: () => undefined, disabled: true }, "-" as const, ...COLUMNS.map((c) => {
+      menuAt(e, [
+        ...moves,
+        { label: "Columns shown", onClick: () => undefined, disabled: true },
+        "-",
+        ...COLUMNS.map((c) => {
           const on = settings.columns.includes(c.id);
           return {
-            label: `${on ? "✓" : "\u2003"} ${c.id === "star" ? "★ Star" : c.title}`,
+            label: `${on ? "✓" : "\u2003"} ${title(c.id)}`,
             disabled: on && settings.columns.length === 1, // at least one column
-            onClick: () => setColumns(on ? settings.columns.filter((x) => x !== c.id) : COLUMNS.map((x) => x.id).filter((x) => x === c.id || settings.columns.includes(x))),
+            onClick: () => setColumns(on ? settings.columns.filter((x) => x !== c.id) : [...settings.columns, c.id]), // a new one at the end
           };
-        })],
-      ),
+        }),
+        "-",
+        {
+          label: "Reset columns (order and widths)",
+          onClick: () => setLibraryColumns({ columns: [...DEFAULT_COLUMNS], column_widths: {} }),
+        },
+      ]),
     );
   };
 
@@ -534,7 +595,7 @@ export default function LibraryPage(props: Props) {
   const filtered = !!(q || date || project || tags.length || users.length || starred || conflicts);
   // the filters chosen on the left (not the search: it is in view), on the Filters button
   const filterCount = (folder ? 1 : 0) + (date ? 1 : 0) + (project ? 1 : 0) + tags.length + users.length + (starred ? 1 : 0) + (conflicts ? 1 : 0);
-  const gridColumns = columns.map((c) => c.width).join(" ");
+  const gridColumns = gridTemplate(columns, widths);
 
   return (
     <div
@@ -564,6 +625,9 @@ export default function LibraryPage(props: Props) {
             setFiltersOpen(false);
           }}
           onRootsChanged={onRootsChanged}
+          platform={state.platform}
+          onMenu={setMenu}
+          onConfirm={setConfirm}
         />
         <DateTree
           dates={facets?.dates ?? {}}
@@ -759,13 +823,33 @@ export default function LibraryPage(props: Props) {
             </div>
           ) : (
           <>
-          <div className="library-head" role="row" style={{ gridTemplateColumns: gridColumns }} onContextMenu={columnMenu} title={"Click: sort; right-click: choose the columns" + (hiddenColumns.length ? `\nNot shown, the list is too narrow: ${hiddenColumns.join(", ")}` : "")}>
-            {columns.map((c) => (
-              <div key={c.id} role="columnheader" aria-sort={sort === c.id ? (order === "asc" ? "ascending" : "descending") : "none"}>
-                <button className="link" onClick={() => sortBy(c.id)}>
+          <div
+            ref={headRef}
+            className={"library-head" + (columnMove.dragging ? " moving" : "")}
+            role="row"
+            style={{ gridTemplateColumns: gridColumns }}
+            onContextMenu={columnMenu}
+            title={"Click: sort · drag a title: move the column · drag its edge: its width · right-click: choose the columns" + (hiddenColumns.length ? `\nNot shown, the list is too narrow: ${hiddenColumns.join(", ")}` : "")}
+          >
+            {columns.map((c, i) => (
+              <div
+                key={c.id}
+                data-col={c.id}
+                role="columnheader"
+                aria-sort={sort === c.id ? (order === "asc" ? "ascending" : "descending") : "none"}
+                className={(columnMove.dragging === c.id ? "col-dragging" : "") + (columnMove.drop === i ? " col-drop-before" : "") + (columnMove.drop === columns.length && i === columns.length - 1 ? " col-drop-after" : "")}
+                onPointerDown={(e) => columnMove.start(e, c.id)}
+              >
+                <button className="link" onClick={() => !columnMove.wasDrag() && sortBy(c.id)}>
                   {c.title}
                   {sort === c.id ? (order === "asc" ? " ▴" : " ▾") : ""}
                 </button>
+                <span
+                  className="col-resize"
+                  title="Drag to change the width; double-click: its own width again"
+                  onPointerDown={(e) => resizeColumn(e, c)}
+                  onDoubleClick={() => resetWidth(c.id)}
+                />
               </div>
             ))}
             {hiddenColumns.length > 0 && (
@@ -988,6 +1072,9 @@ function LibraryFolders({
   folder,
   onFolder,
   onRootsChanged,
+  platform,
+  onMenu,
+  onConfirm,
 }: {
   /** the button that hides the sidebar (in its first heading) */
   hideButton: ReactNode;
@@ -996,6 +1083,9 @@ function LibraryFolders({
   folder: string | null;
   onFolder: (f: string | null) => void;
   onRootsChanged: (roots: string[]) => void;
+  platform: string;
+  onMenu: (m: MenuAt) => void;
+  onConfirm: (r: ConfirmRequest) => void;
 }) {
   const toast = useToast();
   const [adding, setAdding] = useState(roots.length === 0);
@@ -1023,12 +1113,56 @@ function LibraryFolders({
     }
   };
   const removeRoot = async (path: string) => {
+    onRootsChanged((await api.removeRoot(path)).roots);
+    if (folder && (folder === path || folder.startsWith(path))) onFolder(null);
+  };
+  /** Ask first, saying what leaves the Library with it (nothing on disk changes). */
+  const askRemove = async (f: LibraryFolder) => {
+    let s: RootSummary;
     try {
-      onRootsChanged((await api.removeRoot(path)).roots);
-      if (folder && (folder === path || folder.startsWith(path))) onFolder(null);
+      s = await api.rootSummary(f.path);
     } catch (e) {
       toast((e as Error).message, "error");
+      return;
     }
+    const n = (k: number, one: string, many = one + "s") => `${k} ${k === 1 ? one : many}`;
+    const only = s.labels_only_here;
+    const onlyText = [
+      only.project.length && n(only.project.length, "project"),
+      only.users.length && n(only.users.length, "user"),
+      only.tags.length && n(only.tags.length, "tag"),
+    ].filter(Boolean);
+    onConfirm({
+      title: `Remove "${f.name}" from the Library?`,
+      danger: true,
+      action: "Remove",
+      body: (
+        <div className="remove-summary">
+          <p className="dialog-path small muted">{f.path}</p>
+          <ul>
+            <li>
+              <strong>{n(s.files, "file")}</strong> {s.files === 1 ? "leaves" : "leave"} the Library and the Files sidebar{s.labelled ? ` (${s.labelled} of them with labels)` : ""}.
+            </li>
+            {onlyText.length > 0 && <li>{onlyText.join(", ")} that only these files have are no longer listed.</li>}
+            {s.pages > 0 && <li>{n(s.pages, "open browser tab shows", "open browser tabs show")} files in it; they can no longer read them.</li>}
+            {s.inside.length > 0 && <li>{n(s.inside.length, "folder")} inside it that you added separately stay.</li>}
+          </ul>
+          <p>Nothing on disk is changed: the files and their labels stay in the folder, and come back if you add it again.</p>
+        </div>
+      ),
+      onConfirm: () => removeRoot(f.path),
+    });
+  };
+  const folderMenu = (e: MouseEvent | KeyboardEvent, f: LibraryFolder, isRoot: boolean) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onMenu(
+      menuAt(e, [
+        ...fileEntries(f.path, platform, toast),
+        { label: folder === f.path ? "Show all folders" : "Show only this folder", onClick: () => onFolder(folder === f.path ? null : f.path) },
+        ...(isRoot ? (["-", { label: "Remove from the Library…", danger: true, onClick: () => askRemove(f) }] as MenuEntry[]) : []),
+      ]),
+    );
   };
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -1046,7 +1180,12 @@ function LibraryFolders({
   const unfolded = (f: LibraryFolder, isRoot: boolean) => (isRoot ? !open.has("-" + f.path) : open.has(f.path));
   const node = (f: LibraryFolder, depth: number, isRoot: boolean) => (
     <li key={f.path} role="treeitem" aria-expanded={f.children.length ? unfolded(f, isRoot) : undefined} aria-selected={folder === f.path}>
-      <div className={"library-folder" + (folder === f.path ? " active" : "")} style={indent(depth)}>
+      <div
+        className={"library-folder" + (folder === f.path ? " active" : "") + (isRoot ? " root" : "")}
+        style={indent(depth)}
+        onContextMenu={(e) => folderMenu(e, f, isRoot)}
+        onKeyDown={(e) => isMenuKey(e) && folderMenu(e, f, isRoot)}
+      >
         {f.children.length ? (
           <button className="link twisty" aria-label={(unfolded(f, isRoot) ? "Fold " : "Unfold ") + f.name} onClick={() => toggle(isRoot ? "-" + f.path : f.path)}>
             {unfolded(f, isRoot) ? "▾" : "▸"}
@@ -1054,15 +1193,14 @@ function LibraryFolders({
         ) : (
           <span className="twisty" />
         )}
-        <button className="link folder-name" title={f.path} onClick={() => onFolder(folder === f.path ? null : f.path)}>
+        <button className="link folder-name" title={`${f.path}\nRight-click (or ⋯) for more`} onClick={() => onFolder(folder === f.path ? null : f.path)}>
+          {isRoot && <FolderIcon />}
           {f.name}
         </button>
+        <button className="link row-more" aria-label={`More for ${f.name}`} title="More: show in the file manager, copy the path, remove from the Library" onClick={(e) => folderMenu(e, f, isRoot)}>
+          ⋯
+        </button>
         <span className="count">{f.count}</span>
-        {isRoot && (
-          <button className="icon subtle" title="Remove from the list (files are not deleted)" aria-label={`Remove ${f.name} from the list`} onClick={() => removeRoot(f.path)}>
-            ×
-          </button>
-        )}
       </div>
       {f.children.length > 0 && unfolded(f, isRoot) && <ul role="group" style={guide(depth)}>{f.children.map((c) => node(c, depth + 1, false))}</ul>}
     </li>
@@ -1100,12 +1238,22 @@ function LibraryFolders({
             <button className="link folder-name" onClick={() => onFolder(null)}>
               All folders
             </button>
+            <span className="row-more" aria-hidden="true" />
             <span className="count">{total}</span>
           </div>
         </li>
         {trees.map((t) => node(t, 0, true))}
       </ul>
     </div>
+  );
+}
+
+/** The folder picture in front of an open folder's name. */
+function FolderIcon() {
+  return (
+    <svg className="folder-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
+      <path d="M1.8 3.5h4l1.5 1.5h6.9v8H1.8z" />
+    </svg>
   );
 }
 
@@ -1581,37 +1729,35 @@ export function PreviewSettings({ settings, onSettings }: { settings: LibrarySet
     }
   };
   const choices: [PreviewMode, string][] = [
-    ["all", "Every file, drawn in the background (previews show at once)"],
-    ["nearby", "The selected file and the rows near it"],
+    ["all", "Every file (in the background)"],
+    ["nearby", "The selected file and rows near it"],
     ["off", "Only when I click Show preview"],
   ];
   return (
     <>
-      <div className="settings-subtitle">Previews</div>
-      {choices.map(([value, label]) => {
-        const blocked = value === "all" && !settings.read_headers;
-        return (
-          <label key={value} className={"settings-choice" + (blocked ? " disabled" : "")}
-                 title={blocked ? 'Needs "Read each data file\'s details": drawing every preview reads every file' : undefined}>
-            <input type="radio" name="previews" disabled={blocked} checked={mode === value && !blocked}
-                   onChange={() => choose(value)} />
-            {label}
-          </label>
-        );
-      })}
-      {!settings.read_headers && (
-        <p className="settings-note small muted">
-          "Every file" needs "Read each data file's details" on: drawing every preview reads every file{settings.previews === "all" ? "; until then, the selected file and the rows near it are drawn" : ""}.
-        </p>
-      )}
-      <p className="settings-note small muted">
-        Picture cache: {cache ? `${cache.count.toLocaleString()} picture${cache.count === 1 ? "" : "s"}, ${formatBytes(cache.bytes)}` : "…"}{" "}
-        <button className="link" onClick={empty} disabled={!cache || cache.count === 0}>
+      <Setting
+        id="library.previews"
+        name="Draw previews of"
+        help={
+          !settings.read_headers
+            ? `"Every file" needs "Read each file's details" on: drawing every preview reads every file${settings.previews === "all" ? "; until then, the selected file and the rows near it are drawn" : ""}.`
+            : "Every file: previews show at once, but every file is read."
+        }
+      >
+        <select aria-label="Draw previews of" value={mode === "all" && !settings.read_headers ? "nearby" : mode} onChange={(e) => choose(e.target.value as PreviewMode)}>
+          {choices.map(([value, label]) => (
+            <option key={value} value={value} disabled={value === "all" && !settings.read_headers}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </Setting>
+      <Setting id="library.cache" name="Picture cache" help="Drawn again as needed. Previews you chose in Explore are kept.">
+        <span className="settings-value">{cache ? `${cache.count.toLocaleString()} picture${cache.count === 1 ? "" : "s"} · ${formatBytes(cache.bytes)}` : "…"}</span>
+        <button onClick={empty} disabled={!cache || cache.count === 0}>
           Empty
         </button>
-        <br />
-        Previews you chose in Explore are kept.
-      </p>
+      </Setting>
     </>
   );
 }

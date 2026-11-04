@@ -5,6 +5,7 @@
 import { useState } from "react";
 import { api, AppState, MeasurementSettings as Settings } from "./api";
 import { useToast } from "./toast";
+import { Setting, SettingsGroup, Switch } from "./settingsUi";
 
 const PARTS: [keyof Settings, string][] = [
   ["time", "Time left"],
@@ -40,26 +41,22 @@ export function MeasurementSettings({ settings, onSettings }: { settings: Settin
   };
   return (
     <>
-      <div className="settings-title">Measurements</div>
-      <p className="settings-note small muted">
-        A file being measured shows a status line: where it is measured (here, or on another computer through a synced folder) and
-        how far it is.
+      <p className="settings-intro">
+        A file being measured shows a status line: where it is measured (here, or on another computer through a synced folder) and how far it is.
       </p>
-      <label className="settings-choice">
-        <input type="checkbox" checked={settings.progress} onChange={(e) => set({ progress: e.target.checked })} />
-        Show the progress
-      </label>
+      <Setting id="measurements.progress" name="Show the progress">
+        <Switch label="Show the progress" checked={settings.progress} onChange={(on) => set({ progress: on })} />
+      </Setting>
       {PARTS.map(([key, label]) => (
-        <label key={key} className="settings-choice settings-sub">
-          <input type="checkbox" checked={settings[key]} disabled={!settings.progress} onChange={(e) => set({ [key]: e.target.checked })} />
-          {label}
-        </label>
+        <Setting key={key} id={`measurements.${key}`} name={label} sub disabled={!settings.progress}>
+          <Switch label={label.replace(/ \(.*\)$/, "")} checked={settings[key]} disabled={!settings.progress} title={settings.progress ? undefined : "Needs Show the progress"} onChange={(on) => set({ [key]: on })} />
+        </Setting>
       ))}
-      <label className="settings-choice">
-        <input type="checkbox" checked={settings.notify} onChange={(e) => setNotify(e.target.checked)} />
-        Notify me when a measurement finishes or stops while the viewer is in the background
-      </label>
-      {note && <p className="settings-note small">{note}</p>}
+      <SettingsGroup title="Notifications">
+        <Setting id="measurements.notify" name="Notify me when a measurement ends" help={note ?? "When it finishes or stops while the viewer is in the background (the browser asks once)."}>
+          <Switch label="Notify me when a measurement finishes or stops" checked={settings.notify} onChange={setNotify} />
+        </Setting>
+      </SettingsGroup>
     </>
   );
 }

@@ -249,3 +249,21 @@ def test_a_label_is_renamed_moved_and_removed_on_every_file_with_its_children(li
     ll.remove_label(ix, "tags", "flux bias")
     assert row(ix, "one.lbd")["tags"] == [] and row(ix, "three.lbd")["tags"] == []
     assert not any(label.startswith("flux") for label, _ in tree_labels(ix.facets()["tags"]))
+
+
+def test_what_removing_a_folder_changes(lib):
+    ix, a, b = lib
+    ll.set_labels(ix, [str(a / "one.lbd")], {"add_tags": ["only in A", "shared"]})
+    ll.set_labels(ix, [str(b / "three.lbd")], {"add_tags": ["shared"], "project": "B project"})
+    s = ix.folder_summary(str(a))
+    assert s["files"] == 2 and s["labelled"] == 1
+    assert s["labels_only_here"] == {"project": [], "users": [], "tags": ["only in A"]}
+    assert ix.folder_summary(str(b))["labels_only_here"]["project"] == ["B project"]
+
+
+def test_the_folder_summary_api(client, data_dir, library_files):
+    lib = client.app.state.lbd.library
+    lib.scan()
+    s = client.get("/api/roots/summary", params={"path": str(data_dir)}).json()
+    assert s["files"] == lib.facets()["total"] and s["labelled"] == 0 and s["pages"] == 0 and s["inside"] == []
+    assert client.get("/api/roots/summary", params={"path": str(data_dir / "nowhere")}).status_code == 404

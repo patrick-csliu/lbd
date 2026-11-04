@@ -8,7 +8,7 @@ import re
 import lbd
 import numpy as np
 import pytest
-from pageui import row
+from pageui import open_settings, row
 from playwright.sync_api import Page, expect
 from test_explore_e2e import explore, frames
 
@@ -73,8 +73,7 @@ def test_the_settings_choose_the_parts(viewer, new_page):
         page = new_page("Explore")
         frames(page, lambda: row(page, "parts.lbd.writing").dblclick())
         expect(status(page)).to_contain_text("%")
-        page.get_by_role("button", name="Settings").click()
-        box = page.get_by_role("dialog", name="Settings").get_by_label("Percentage")
+        box = open_settings(page, "Measurements").get_by_label("Percentage")
         box.click()                                    # saved, then shown unchecked (the server's answer)
         expect(box).not_to_be_checked()
         page.keyboard.press("Escape")

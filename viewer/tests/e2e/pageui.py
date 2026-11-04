@@ -58,3 +58,12 @@ def deliver(viewer, *names) -> dict:
                    json={"files": [viewer.path(n) for n in names], "dirs": []}, timeout=15)
     r.raise_for_status()
     return r.json()
+
+
+def open_settings(page: Page, section: str):
+    """⚙ (top right) → the Settings dialog, on `section` (General, Library, Files sidebar, Memory,
+    Measurements). Returns the dialog."""
+    page.locator("button[aria-label=Settings]").click()                # ⚙ (not the Library notice's Settings)
+    dialog = page.get_by_role("dialog", name="Settings")
+    dialog.get_by_role("tab", name=re.compile(rf"^{re.escape(section)}")).click()
+    return dialog

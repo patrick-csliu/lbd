@@ -48,6 +48,7 @@ SIDEBAR_LAYOUTS = ("one", "two", "columns")
 SIDEBAR_MAIN = ("title", "file")
 SIDEBAR_FIELDS = tuple(c for c in LIBRARY_COLUMNS if c != "name")
 LIBRARY_DEFAULTS: Dict[str, Any] = {"read_headers": True, "notice_seen": False, "columns": ["name", "date", "sweep"],
+                                    "column_widths": {},
                                     "previews": "all", "list_view": "list", "sidebar_scopes": ["library"],
                                     "sidebar_layout": "two", "sidebar_main": "title",
                                     "sidebar_fields": ["date", "sweep", "project", "tags"]}
@@ -59,6 +60,32 @@ MEMORY_DEFAULTS: Dict[str, Any] = {"reserve_gb": None, "maximum_gb": None, "summ
 # browser notification when a measurement finishes or stops while the page is in the background.
 MEASUREMENTS_DEFAULTS: Dict[str, Any] = {"progress": True, "time": True, "percent": True, "points": True,
                                          "axes": True, "notify": False}
+# The sections of the Settings dialog (SettingsDialog.tsx) and the settings in each, as
+# "key" (top level) or "group.key"; "Reset this section" puts these back to their defaults.
+GENERAL_DEFAULTS: Dict[str, Any] = {"theme": "system", "open_files_in": "viewer", "open_data_in": "explore"}
+SETTINGS_SECTIONS: Dict[str, List[str]] = {
+    "general": ["theme", "open_files_in", "open_data_in"],
+    "library": ["library.read_headers", "library.previews"],
+    "sidebar": ["library.sidebar_scopes"],
+    "memory": [f"memory.{k}" for k in MEMORY_DEFAULTS],
+    "measurements": [f"measurements.{k}" for k in MEASUREMENTS_DEFAULTS],
+}
+
+
+def setting_default(key: str) -> Any:
+    """The default of a setting named as in SETTINGS_SECTIONS."""
+    group, _, name = key.rpartition(".")
+    table = {"": GENERAL_DEFAULTS, "library": LIBRARY_DEFAULTS, "memory": MEMORY_DEFAULTS,
+             "measurements": MEASUREMENTS_DEFAULTS}[group]
+    value = table[name]
+    return list(value) if isinstance(value, list) else dict(value) if isinstance(value, dict) else value
+
+
+def section_defaults() -> Dict[str, Dict[str, Any]]:
+    """{section: {key: default}}: what the Settings dialog compares with, to mark changed sections."""
+    return {section: {k: setting_default(k) for k in keys} for section, keys in SETTINGS_SECTIONS.items()}
+
+
 EVERY_FILE_NEEDS_HEADERS = ("Previews of every file can't be drawn while \"Read each data file's details\" is "
                             "off: drawing them would read every file. Turn that on first, or choose \"The "
                             "selected file and nearby rows\".")
@@ -251,6 +278,23 @@ class Config:
             self._save_settings(s)
             return s["measurements"]
 
+    def reset_section(self, section: str) -> None:
+        """Put the settings of one Settings section back to their defaults."""
+        if section not in SETTINGS_SECTIONS:
+            raise ConfigError(f"no settings section {section!r}; known: {', '.join(SETTINGS_SECTIONS)}")
+        groups: Dict[str, Dict[str, Any]] = {}
+        for key in SETTINGS_SECTIONS[section]:
+            group, _, name = key.rpartition(".")
+            groups.setdefault(group, {})[name] = setting_default(key)
+        for name, value in groups.pop("", {}).items():
+            {"theme": self.set_theme, "open_files_in": self.set_open_files_in, "open_data_in": self.set_open_data_in}[name](value)
+        if "library" in groups:
+            self.set_library(groups["library"])
+        if "memory" in groups:
+            self.set_memory(groups["memory"])
+        if "measurements" in groups:
+            self.set_measurements(groups["measurements"])
+
     def set_theme(self, theme: str) -> None:
         """The viewer's colours: "system" (follow the operating system), "light" or "dark"."""
         if theme not in THEMES:
@@ -331,6 +375,11 @@ def _check_library(library: Dict[str, Any]) -> Dict[str, Any]:
     cols = library.get("columns")
     if not isinstance(cols, list) or not cols or any(c not in LIBRARY_COLUMNS for c in cols):
         raise ConfigError(f"Library 'columns' must be a list of {', '.join(LIBRARY_COLUMNS)}, not {cols!r}")
+    library = {**library, "columns": list(dict.fromkeys(cols))}                    # once each, in the order chosen
+    widths = library.get("column_widths")
+    if (not isinstance(widths, dict) or any(k not in LIBRARY_COLUMNS for k in widths)
+            or any(isinstance(w, bool) or not isinstance(w, int) or not 24 <= w <= 2000 for w in widths.values())):
+        raise ConfigError(f"Library 'column_widths' must map columns to widths of 24 to 2000 pixels, not {widths!r}")
     scopes = library.get("sidebar_scopes")
     if not isinstance(scopes, list) or "library" not in scopes or any(x not in SIDEBAR_SCOPES for x in scopes):
         raise ConfigError(f"Library 'sidebar_scopes' must be a list of {', '.join(SIDEBAR_SCOPES)} with library in it, "

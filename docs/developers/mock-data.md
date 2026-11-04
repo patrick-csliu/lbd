@@ -20,8 +20,8 @@ test viewer on it at once with [`scripts/dev_viewer.py`](index.md#quick-start-fo
 | `Examples/` | the repository's examples (`examples/data`) | `examples/make_examples.py` |
 | `Live/` (with `--live`) | a measurement being written slowly (it runs on in the background; the script prints its process), and one that stopped before finishing | `viewer/tests/mock_live.py` |
 
-Options: `--files N` (the Library's size), `--no-labels`, `--small` (the panel files with few
-points), `--live` and `--live-seconds S`.
+Options: `--files N` (the Library's size), `--no-labels`, `--many-labels` (long lists, below),
+`--small` (the panel files with few points), `--live` and `--live-seconds S`.
 
 ## The Library and its labels
 
@@ -57,10 +57,16 @@ It also makes the cases labels must survive:
 The label vocabulary is at the top of `viewer/tests/mock_library.py`: change `LABEL_*` or `KEPT`
 to try other names.
 
+**Long lists:** `--many-labels` (`make_mock_data.py`, `dev_viewer.py`, `mock_library.py`) uses a
+large vocabulary instead (`many_labels()`): 300 users in 4 labs and 20 teams, 800 tags (some
+nested 4 deep), 60 projects, and a few names over 80 characters. Every label is kept in the open
+folder, so the lists are long even where few files have them. The tests use it through the
+`many_labels_files` fixture.
+
 ## Each generator on its own
 
 ```bash
-uv run python viewer/tests/mock_library.py FOLDER [N] [--labels]   # the Library (N files, default 300)
+uv run python viewer/tests/mock_library.py FOLDER [N] [--labels] [--many-labels]   # the Library (N files, default 300)
 uv run python viewer/tests/mock_values.py FOLDER [--small]          # the panels' files
 uv run python viewer/tests/mock_live.py FOLDER [--seconds 120]       # a measurement being written
 uv run python viewer/tests/mock_live.py FOLDER --copy-to OTHER --as-computer LAB-PC
