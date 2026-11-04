@@ -677,7 +677,7 @@ export default function LibraryPage(props: Props) {
               Indexing {status.done.toLocaleString()} of {status.total.toLocaleString()}…
             </span>
           )}
-          {status?.previews && status.previews.mode === "all" && status.previews.drawing > 0 && (
+          {status?.previews && status.previews.mode === "all" && status.previews.drawing > 0 && status.previews.total > 0 && (
             <span className="muted" title="Previews of every file are drawn in the background (⚙ Settings → Library)">
               Drawing previews {status.previews.drawn.toLocaleString()} of {status.previews.total.toLocaleString()}…
             </span>
@@ -1325,7 +1325,9 @@ function PreviewBox({ path, version }: { path: string; version: string }) {
         <button onClick={show}>Show preview</button>
       </span>
     );
-  else if (!preview.picture) inside = <span className="muted">No preview: {preview.reason}</span>;
+  else if (!preview.picture)
+    // a reason that already says so ("No preview while …") is shown as it is
+    inside = <span className="muted">{/^no preview\b/i.test(preview.reason ?? "") ? preview.reason : `No preview: ${preview.reason}`}</span>;
   return (
     <div className="preview" aria-label="Preview">
       <div className="preview-box" data-state={url ? "picture" : preview && !preview.picture ? preview.state : "asking"}>

@@ -8,6 +8,7 @@
   --accent: #0072b2;
   --accent-text: #ffffff;
   --accent-soft: #e3f0f8;
+  --accent-selected: #cfe4f3;
   --danger: #b3261e;
   --danger-soft: #fbeaea;
   --warn-soft: #fff6dc;
@@ -29,6 +30,7 @@
   --accent: #4aa8e0;
   --accent-text: #0b1620;
   --accent-soft: #1d3446;
+  --accent-selected: #22405a;
   --danger: #f28b82;
   --danger-soft: #3a2222;
   --warn-soft: #3a3320;
@@ -231,8 +233,8 @@ td.num { font-variant-numeric: tabular-nums; }
 .color-item { display: inline-flex; align-items: center; }
 .color-item input[type="color"] { width: 34px; height: 26px; padding: 1px; }
 .quantities input, .quantities select { width: 100%; }
-.preview { position: sticky; top: 12px; }
-.preview img { width: 100%; max-width: 700px; background: var(--figure-bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px; }
+.styles-page .preview { position: sticky; top: 12px; }
+.styles-page .preview img { width: 100%; max-width: 700px; background: var(--figure-bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px; }
 
 /* ---- SDK page ---- */
 .sdk-page { max-width: 860px; margin: 0 auto; padding: 18px 18px 60px; }
@@ -259,7 +261,7 @@ td.num { font-variant-numeric: tabular-nums; }
   .sidebar { max-height: 40vh; border-right: none; border-bottom: 1px solid var(--border); }
   .sidebar-handle { display: none; }
   .plot-area, .editor-body, .styles-page { grid-template-columns: 1fr; }
-  .preview { position: static; }
+  .styles-page .preview { position: static; }
   .topbar { gap: 8px; }
   .version { display: none; }
 }
@@ -340,10 +342,10 @@ details.group fieldset > .group-fields { margin-top: -4px; }
 .library-head > div { padding: 0 8px; white-space: nowrap; overflow: hidden; }
 .library-head button { color: var(--text); font-weight: 600; }
 .library-rows { position: relative; }
-.library-row { position: absolute; left: 0; right: 0; height: 28px; display: grid; align-items: center; font-size: 13px; cursor: default; border-bottom: 1px solid var(--border-soft, transparent); }
+.library-row { position: absolute; left: 0; right: 0; height: 28px; display: grid; align-items: center; font-size: 13px; cursor: default; border-bottom: 1px solid var(--border-soft, transparent); user-select: none; }
 .library-row > div { padding: 0 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .library-row:hover { background: var(--panel-2); }
-.library-row.selected { background: var(--accent-soft); }
+.library-row.selected { background: var(--accent-selected); box-shadow: inset 3px 0 0 var(--accent); }
 .library-row.unreadable { color: var(--muted); font-style: italic; }
 .library-row .cell-date, .library-row .cell-size, .library-row .cell-sweep, .library-row .cell-modified { font-variant-numeric: tabular-nums; }
 .library-empty { position: absolute; left: 0; right: 0; top: 60px; text-align: center; padding: 0 16px; }
@@ -508,9 +510,9 @@ details.group fieldset > .group-fields { margin-top: -4px; }
 .list-view-switch button:last-child { border-radius: 0 var(--radius) var(--radius) 0; margin-left: -1px; }
 .list-view-switch button.on { background: var(--accent-soft); font-weight: 600; }
 .library-cards { position: relative; }
-.library-card { position: absolute; height: 206px; box-sizing: border-box; padding: 6px; cursor: default; border-radius: var(--radius); }
+.library-card { position: absolute; height: 206px; box-sizing: border-box; padding: 6px; cursor: default; border-radius: var(--radius); user-select: none; }
 .library-card:hover { background: var(--panel-2); }
-.library-card.selected { background: var(--accent-soft); }
+.library-card.selected { background: var(--accent-selected); box-shadow: inset 0 0 0 2px var(--accent); }
 .library-card.unreadable { color: var(--muted); font-style: italic; }
 .library-card.conflict .card-picture { box-shadow: inset 3px 0 0 var(--danger); }
 .library-card .card-picture { aspect-ratio: 4 / 3; max-height: 150px; margin: 0 auto; display: flex; align-items: center; justify-content: center; background: #fff; border: 1px solid var(--border); border-radius: 3px; overflow: hidden; }
