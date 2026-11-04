@@ -269,9 +269,12 @@ def test_the_label_sections_fold_and_line_up(viewer, library_files, new_page):
     page.reload()
     expect(page.locator(".library-left").get_by_role("button", name=re.compile(r"^Tags · \d+$"))).to_have_attribute("aria-expanded", "false")
     page.locator(".library-left").get_by_role("button", name=re.compile(r"^Tags · \d+$")).click()
-    # every count ends at the same x
-    rights = {round(b["x"] + b["width"]) for b in (c.bounding_box() for c in page.locator(".library-dates .count, .library-labels .library-folder .count").all()) if b}
-    assert len(rights) == 1, rights
+    expect(page.locator(".library-left").get_by_role("tree", name="Tags")).to_be_visible()
+    # every count ends at the same x (once the sidebar has settled)
+    def rights():
+        boxes = (c.bounding_box() for c in page.locator(".library-dates .count, .library-labels .library-folder .count").all())
+        return {round(b["x"] + b["width"]) for b in boxes if b}
+    eventually(lambda: len(rights()), 1)
 
 
 def test_long_label_lists_are_typed_into_never_scrolled(viewer, many_labels_files, new_page):
