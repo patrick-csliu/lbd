@@ -57,7 +57,7 @@ Mark = Tuple[int, str, int, str]
 MARK_JS = r"""
 (marks) => {
   // a neutral example path instead of the scratch folder's (first: a shorter path can move the page)
-  for (const el of document.querySelectorAll(".path"))
+  for (const el of document.querySelectorAll(".path, .path-line .path-folder"))
     el.textContent = el.textContent.replace(/^.*[\\/]Lab data/, String.raw`C:\Users\me\Documents\Lab data`);
   document.getElementById("doc-marks")?.remove();
   const layer = document.createElement("div");
@@ -396,7 +396,7 @@ def library(page: Page, url: str, ctx) -> None:
         (2, ".library-tree[aria-label='Dates']", 0, "r"),
         (3, ".library-search", 0, "r"),
         (4, ".library-head", 0, "b"),
-        (5, ".library-detail .file-head", 0, "L"),
+        (5, ".library-detail .library-file-head", 0, "L"),
     ])
     save(page, VIEWER_IMG / "library.png")
 

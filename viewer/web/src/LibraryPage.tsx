@@ -23,7 +23,7 @@ import {
 import { docsUrl } from "./help";
 import { FileDetails } from "./FileView";
 import { ConfirmDialog, ConfirmRequest, ContextMenu, isMenuKey, MenuAt, menuAt, MenuEntry, systemNames } from "./menu";
-import { fileEntries, renameRequest } from "./fileActions";
+import { copyPath, fileEntries, renameRequest } from "./fileActions";
 import { useToast } from "./toast";
 import { MeasuringStatus } from "./MeasuringStatus";
 
@@ -869,16 +869,23 @@ export default function LibraryPage(props: Props) {
             <LabelsEditor rows={chosenRows()} facets={facets} login={state.login} onChange={(c) => label(chosenRows().map((r) => r.path), c)} />
           </div>
         ) : selected ? (
-          <SelectedFile path={selected} row={selectedRow} generation={generation} onOpenIn={onOpenIn}>
-            {selectedRow?.writing && (
-              <WritingBox
-                row={selectedRow}
-                onRecovered={(path) => {
-                  setChosen([path]);
-                  onSelect(path);
-                }}
-              />
-            )}
+          <SelectedFile
+            path={selected}
+            row={selectedRow}
+            generation={generation}
+            onOpenIn={onOpenIn}
+            status={
+              selectedRow?.writing && (
+                <WritingBox
+                  row={selectedRow}
+                  onRecovered={(path) => {
+                    setChosen([path]);
+                    onSelect(path);
+                  }}
+                />
+              )
+            }
+          >
             {selectedRow && !selectedRow.error && (
               <>
                 <LabelsEditor rows={[selectedRow]} facets={facets} login={state.login} onChange={(c) => label([selectedRow.path], c)} />
@@ -1169,9 +1176,18 @@ function WritingBox({ row, onRecovered }: { row: LibraryRow; onRecovered: (path:
     <div className={`writing-box ${row.writing}`}>
       <MeasuringStatus path={row.path} onRecovered={(p, copy) => !copy && onRecovered(p)} />
       <p className="small muted">
-        This file is being written by a measurement and becomes{" "}
-        <code>{baseName(row.path).replace(/\.writing$/i, "")}</code> when it finishes. LBD doesn't change, rename or recycle it
-        meanwhile.
+        {row.writing === "stopped" ? (
+          <>
+            Its measurement ended without finishing it. <strong>Recover…</strong> makes it{" "}
+            <code>{baseName(row.path).replace(/\.writing$/i, "")}</code> with everything it holds.
+          </>
+        ) : (
+          <>
+            This file is being written by a measurement and becomes{" "}
+            <code>{baseName(row.path).replace(/\.writing$/i, "")}</code> when it finishes. LBD doesn't change, rename or recycle it
+            meanwhile.
+          </>
+        )}
       </p>
     </div>
   );
@@ -1182,12 +1198,15 @@ function SelectedFile({
   row,
   generation,
   onOpenIn,
+  status,
   children,
 }: {
   path: string;
   row: LibraryRow | null;
   generation: number;
   onOpenIn: (path: string, where: "explore" | "figure") => void;
+  /** what is happening to the file (a measurement writing it): shown above its preview */
+  status?: ReactNode;
   children?: ReactNode;
 }) {
   const [info, setInfo] = useState<FileInfo | null>(null);
@@ -1217,19 +1236,15 @@ function SelectedFile({
   const date = row ? createdText(row) : shown?.created ?? "";
   return (
     <div className="file-view">
-      <div className="file-head">
-        <div>
-          <h1>{shown?.title || row?.title || baseName(path)}</h1>
-          <div className="muted small path" title={path}>
-            {path}
+      <div className="library-file-head">
+        <h1>{shown?.title || row?.title || baseName(path)}</h1>
+        <PathLine path={path} />
+        {date && (
+          <div className="small">
+            {date}
+            {row?.date_from_file ? <span className="muted"> (file date: the file has no date of its own{row.read ? "" : " read yet"})</span> : null}
           </div>
-          {date && (
-            <div className="small">
-              {date}
-              {row?.date_from_file ? <span className="muted"> (file date: the file has no date of its own{row.read ? "" : " read yet"})</span> : null}
-            </div>
-          )}
-        </div>
+        )}
         <div className="actions">
           <button className="primary" onClick={() => onOpenIn(path, "explore")}>
             Open in Explore
@@ -1242,10 +1257,27 @@ function SelectedFile({
           <strong>This file can't be read.</strong> {error ?? row?.error}
         </div>
       )}
+      {status}
       {!row?.error && <PreviewBox path={path} version={`${version}-${generation}`} />}
       {children}
       {!shown && !error && <p className="muted">Reading…</p>}
       {shown && <FileDetails info={shown} metaFilter />}
+    </div>
+  );
+}
+
+/** A path on one line: the folder is cut in the middle when it is too long ("C:\Data\…"),
+ * the file's name stays whole; the full path in the tooltip and a copy button. */
+function PathLine({ path }: { path: string }) {
+  const toast = useToast();
+  const cut = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1;
+  return (
+    <div className="path-line small muted" title={path}>
+      <span className="path-folder">{path.slice(0, cut)}</span>
+      <span className="path-name">{path.slice(cut)}</span>
+      <button className="icon subtle" aria-label="Copy the path" title="Copy the path" onClick={() => copyPath(path, toast)}>
+        ⧉
+      </button>
     </div>
   );
 }
@@ -1328,6 +1360,13 @@ function PreviewBox({ path, version }: { path: string; version: string }) {
   else if (!preview.picture)
     // a reason that already says so ("No preview while …") is shown as it is
     inside = <span className="muted">{/^no preview\b/i.test(preview.reason ?? "") ? preview.reason : `No preview: ${preview.reason}`}</span>;
+  // nothing to show (being written, can't be drawn, previews off): one line, not an empty box
+  if (!url && (error || (preview && !preview.picture && preview.state !== "drawing")))
+    return (
+      <div className="preview preview-none small" aria-label="Preview">
+        {inside}
+      </div>
+    );
   return (
     <div className="preview" aria-label="Preview">
       <div className="preview-box" data-state={url ? "picture" : preview && !preview.picture ? preview.state : "asking"}>
