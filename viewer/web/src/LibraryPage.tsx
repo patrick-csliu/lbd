@@ -1,4 +1,4 @@
-import { FormEvent, KeyboardEvent, MouseEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Dispatch, FormEvent, KeyboardEvent, MouseEvent, ReactNode, SetStateAction, useCallback, useEffect, useRef, useState } from "react";
 import {
   api,
   ApiError,
@@ -51,6 +51,9 @@ import { MeasuringStatus } from "./MeasuringStatus";
 
 interface Props {
   state: AppState;
+  /** this browser tab's Library filters (App keeps them: the Files sidebar shows the same list) */
+  query: LibraryQuery;
+  onQuery: Dispatch<SetStateAction<LibraryQuery>>;
   selected: string | null;
   onSelect: (path: string | null) => void;
   onRootsChanged: (roots: string[]) => void;
@@ -184,32 +187,34 @@ function findFolder(trees: LibraryFolder[], path: string): LibraryFolder | null 
 }
 
 export default function LibraryPage(props: Props) {
-  const { state, selected, onSelect, onRootsChanged, onLibrarySettings, onOpenIn, onOpenInNewBrowserTab, onRenamed, onDeleted, onOpenSettings } = props;
+  const { state, query, onQuery, selected, onSelect, onRootsChanged, onLibrarySettings, onOpenIn, onOpenInNewBrowserTab, onRenamed, onDeleted, onOpenSettings } = props;
   const toast = useToast();
   const names = systemNames(state.platform);
   const settings: LibrarySettings = state.library;
   const chosenColumns = COLUMNS.filter((c) => settings.columns.includes(c.id));
 
   // ---- what is listed
-  const [folder, setFolder] = useState<string | null>(null);
-  const [typed, setTyped] = useState(""); // the search box
-  const [q, setQ] = useState(""); // the search, a moment after typing stops
-  const [date, setDate] = useState("");
-  const [sort, setSort] = useState<LibraryColumn>("date");
-  const [order, setOrder] = useState<"asc" | "desc">("desc");
-  const [project, setProject] = useState("");
-  const [tags, setTags] = useState<string[]>([]);
-  const [users, setUsers] = useState<string[]>([]);
-  const [starred, setStarred] = useState(false);
-  const [conflicts, setConflicts] = useState(false);
+  // the filters belong to this browser tab (App): the Files sidebar lists the same files
+  const { folder, q, date, sort, order, project, tags, users, starred, conflicts } = query;
+  const patch = (p: Partial<LibraryQuery>) => onQuery((old) => ({ ...old, ...p }));
+  const setFolder = (v: string | null) => patch({ folder: v });
+  const setQ = (v: string) => patch({ q: v });
+  const setDate = (v: string) => patch({ date: v });
+  const setProject = (v: string) => patch({ project: v });
+  const setTags = (v: string[]) => patch({ tags: v });
+  const setUsers = (v: string[]) => patch({ users: v });
+  const setStarred = (v: boolean) => patch({ starred: v });
+  const setConflicts = (v: boolean) => patch({ conflicts: v });
+  const [typed, setTyped] = useState(q); // the search box; `q` follows it a moment after typing stops
   useEffect(() => {
-    const id = window.setTimeout(() => setQ(typed.trim()), 200);
+    const id = window.setTimeout(() => typed.trim() !== q && setQ(typed.trim()), 200);
     return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [typed]);
-  const query: LibraryQuery = useMemo(
-    () => ({ folder, q, date, sort, order, project, tags, users, starred, conflicts }),
-    [folder, q, date, sort, order, project, tags, users, starred, conflicts],
-  );
+  useEffect(() => {
+    // the search changed elsewhere (a chip's ×, another page's filters): show it in the box
+    setTyped((t) => (t.trim() === q ? t : q));
+  }, [q]);
   const queryKey = JSON.stringify(query);
 
   // ---- the index: changes (generation), progress
@@ -535,11 +540,8 @@ export default function LibraryPage(props: Props) {
   };
 
   const sortBy = (c: LibraryColumn) => {
-    if (c === sort) setOrder((o) => (o === "asc" ? "desc" : "asc"));
-    else {
-      setSort(c);
-      setOrder(c === "date" || c === "size" || c === "modified" || c === "sweep" ? "desc" : "asc");
-    }
+    if (c === sort) patch({ order: order === "asc" ? "desc" : "asc" });
+    else patch({ sort: c, order: c === "date" || c === "size" || c === "modified" || c === "sweep" ? "desc" : "asc" });
   };
 
   const onListKey = (e: KeyboardEvent) => {
@@ -577,8 +579,7 @@ export default function LibraryPage(props: Props) {
           facets={facets}
           folder={folder}
           onFolder={(f) => {
-            setFolder(f);
-            setDate("");
+            patch({ folder: f, date: "" });
           }}
           onRootsChanged={onRootsChanged}
         />
@@ -935,8 +936,7 @@ export default function LibraryPage(props: Props) {
                     row={selectedRow}
                     generation={generation}
                     onShow={(path) => {
-                      setFolder(null);
-                      setConflicts(false);
+                      patch({ folder: null, conflicts: false });
                       setChosen([path]);
                       onSelect(path);
                     }}

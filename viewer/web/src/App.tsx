@@ -3,8 +3,9 @@ import { MemorySettings } from "./MemorySettings";
 import { MeasurementSettings } from "./MeasurementSettings";
 import { DEFAULT_MEASUREMENTS, MeasurementsContext, notifyInBackground } from "./MeasuringStatus";
 import { onFinished } from "./watch";
-import { api, ApiError, AppState, baseName, fileKind, OpenDataIn, OpenFilesIn, PageCommand, PageEntry, TabState, Theme, viewerUrl, Workspace } from "./api";
+import { api, ApiError, AppState, baseName, fileKind, LibraryQuery, OpenDataIn, OpenFilesIn, PageCommand, PageEntry, TabState, Theme, viewerUrl, Workspace } from "./api";
 import FolderPanel from "./FolderPanel";
+import { loadLibraryQuery, saveLibraryQuery } from "./libraryQuery";
 import FileView from "./FileView";
 import LibraryPage, { PreviewSettings } from "./LibraryPage";
 import ExploreTab from "./ExploreTab";
@@ -147,6 +148,9 @@ function Shell() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const selectAnchor = useRef<string | null>(null);
   const [foldersShown, setFoldersShown] = useState(loadFoldersShown);
+  // this browser tab's Library filters: the Library page and the Files sidebar share them
+  const [libraryQuery, setLibraryQuery] = useState<LibraryQuery>(loadLibraryQuery);
+  useEffect(() => saveLibraryQuery(libraryQuery), [libraryQuery]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const pageRef = useRef<HTMLDivElement>(null);
   const sidebarRef = useRef<HTMLElement>(null);
@@ -924,6 +928,8 @@ function Shell() {
       {page === "library" && state && (
         <LibraryPage
           state={state}
+          query={libraryQuery}
+          onQuery={setLibraryQuery}
           selected={libraryPath}
           onSelect={setLibraryPath}
           onRootsChanged={(roots) => setState({ ...state, roots })}
