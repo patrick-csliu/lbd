@@ -19,14 +19,33 @@ select described on the right.
 4. **The list:** one row per data file, newest first. Click a column title to sort by it; click
    again to reverse. Right-click the titles to choose the columns.
 
-The folders, dates and labels on the left are the **Filters**: the **Filters** button left of
-the search box hides or shows them (the number on it counts the filters in use). The filters
-belong to the browser tab: they stay while you go to Explore or Figure and back, and the
+5. **The selected file:** see [The selected file](#the-selected-file).
+
+The folders, dates and labels on the left are the **filters**. Their sidebar hides with the
+◧‹ button at the top of it, and comes back with ◧› at the edge of the list (the number on it
+counts the filters in use while they are hidden). Drag the sidebar's edge, or the edge of the
+selected file, to make them wider or narrower (double-click the sidebar's edge: fit the longest
+name); the widths are remembered in this browser. The filters belong to the browser tab: they
+stay while you go to Explore or Figure and back, and the
 [Files sidebar](folders-and-files.md#the-files-sidebar) there lists the same files.
-5. **The selected file:** its title, its path on one line (⧉ copies it; point at it for the
-   whole path) and date, **Open in Explore** and **Open in Figure**, a [preview](#previews) of
-   its data, then its axes (points and range), values, description and metadata (with a filter
-   box for long lists).
+
+## The selected file
+
+The right side shows as much as it can without scrolling, and works out its layout from its own
+width (any screen, any zoom, any width you drag it to):
+
+- **The header:** ☆ / ★ (click to star), the title, **Open in Explore** and **Open in Figure**;
+  then the date and the path on one line (⧉ copies it; point at it for the whole path).
+- **The [preview](#previews) and the file's facts side by side** when the side is wide enough
+  (about 650 pixels): the description, when it was created, its size, and its labels, one row
+  each: **Project**, **Users**, **Tags** and **Comment** (one line; click it to write more).
+  On a narrower side, one under the other.
+- **Values** and **Axes:** the tables of what the file holds (a column that is empty in every row,
+  such as Unit, is left out; a wide table scrolls by itself on a narrow side).
+- **Metadata**, in columns, with a filter box.
+- At the end, folded: **File (written by, format)**.
+
+When a file holds a lot (many values, axes or metadata), the side scrolls; nothing is squeezed.
 
 ## Columns
 
@@ -72,9 +91,9 @@ to see why in plain words (the technical message is under **Details**).
 
 ## Narrow windows
 
-In a window narrower than about 1280 pixels (half a screen, a laptop), the **Filters** slide over
-the list when you click the button, and close when you choose a folder or a date, press Esc or
-click beside them. Below about 900 pixels the Library shows one thing at a time: the list, or
+In a window narrower than about 1280 pixels (half a screen, a laptop), the filters slide over the
+list when you click ◧›, and close when you choose a folder or a date, press Esc or click beside
+them. Below about 900 pixels the Library shows one thing at a time: the list, or
 the file you clicked, with **← Back to the list** (or Esc).
 
 ## Files being written
@@ -102,7 +121,9 @@ See [Writing while measuring](../getting-started/writing-while-measuring.md) and
 ## Previews
 
 The selected file shows a picture of its data on the right, as Explore first shows it: one panel
-per value (up to four), curves for a value over one swept axis, a heat map over two. Step through
+per value (up to four), curves for a value over one swept axis, a heat map over two. A preview
+is **the data only**: no axes, numbers, colour bar or legend (those are in the file's details
+next to it); it is drawn sharp enough for high-density (4K, Retina) screens. Step through
 the list with ↑ ↓ and the pictures follow at once: the files near the selection are drawn ahead.
 
 - **Pictures** (above the list, next to **List**) shows the files as a grid of pictures, with
@@ -163,10 +184,22 @@ Give files labels to find them again, as in Labber's Log Browser:
 Projects, users and tags can be **nested** with `/`: choosing `Qubit A` in the filter also shows
 everything under `Qubit A/…`.
 
-- **Set them** in the right column (the **Labels** section): ★, Project, Users and Tags (**+**
-  opens a list of the labels already used, with how many files have each; type to find one or
-  to make a new one; for users, this computer's login name comes first), and Comment (saved when
-  you leave the box).
+- **Set them** for the selected file: ☆ in front of its title, and the rows Project, Users and
+  Tags beside its preview (**Set** / **+ Add** opens a list of the labels already used, with
+  how many files have each; type to find one or to make a new one, and choose **put under** to
+  place a new one inside a group; for users, this computer's login name comes first), and
+  Comment (saved when you leave the box).
+- **Make and manage labels** on the left, under **Labels**: **Project**, **Users** and **Tags**
+  are always there.
+  - **+ New** makes a label even before a file has it (a new project before its first
+    measurement), at the top level or **put under** a group. It is kept in the labels file of an
+    open folder (you choose which when there are several) until you remove it.
+  - Right-click a label: **New … under it**, **Rename…**, **Move into…** (another group, or the
+    top level), **Remove from all files…**. Every file with it follows, with the labels inside
+    it; LBD first says how many files it changes, and asks.
+  - **Drag and drop:** a label onto another moves it inside it; onto its heading (Project, Users,
+    Tags), to the top level. Files dragged from the list (the selected ones) onto a label get it
+    (onto a project: it becomes their project). Each asks first.
 - **Several files at once:** select them (**Ctrl**+click, **Shift**+click, **Ctrl+A**), then
   label them in the right column ("5 of 12" shows a label only some of them have) or with the
   right-click menu. **Space** stars or unstars the selected files.

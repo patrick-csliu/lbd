@@ -45,10 +45,19 @@ anyone who wants to read or write it from their own program.
 | `comment` | Text (may span lines). |
 | `changed` | When each field was last set: `[UTC time with milliseconds, computer]`. For `users` and `tags`, per label: `[time, computer, true]` when added, `false` when removed (a removal is remembered). |
 | `history` | Values that lost a merge (the latest 50), so nothing is lost silently. |
+| `labels` | Optional, at the top level next to `files`: labels the folder **keeps without a file** (made with **+ New** in the Library, e.g. a project before its first measurement). Per kind (`"project"`, `"users"`, `"tags"`), per label: `[time, computer, true]` while it is kept, `false` once it was removed (remembered, like a removed tag). |
 
 Labels can be nested with `/` (`Qubit A/Device 3`; users as `group/sub-group/name`); each part is
-trimmed and must not be empty. An entry with no label left is removed; a folder with none has no
-file.
+trimmed and must not be empty. An entry with no label left is removed; a folder with no entry and
+no kept label has no file.
+
+```json
+ "labels": {"project": {"Qubit C/Device 1": ["2026-11-04T05:12:00.250Z", "LAB-PC-2", true]},
+            "tags": {"old tag": ["2026-11-04T06:00:00.000Z", "LAPTOP", false]}}
+```
+
+A writer keeps keys it doesn't know (written by a newer program of the same `version`), and merges
+two `labels` per label: the newer decision wins.
 
 ## Writing it safely
 

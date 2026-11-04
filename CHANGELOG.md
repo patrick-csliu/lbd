@@ -52,18 +52,36 @@ are still written as 1.2).
   sidebar; **Edit ↗** goes to the Library. The folder tree is still there as a list to switch on
   (**⚙ → Files sidebar → Folders**; in Figure with images and style files, in Explore with data
   files only), with **Starred** and **Recent**. Folders are added and removed in the Library
-  only (**Filters → + Add folder**). The button at the left of the tab row is now **Files**.
+  only (**Filters → + Add folder**). The sidebar's toggle is ◧‹ inside it and ◧› at the left
+  of the tab row. **⋯** next to its search shows each file on **two lines** (the default: the
+  fields you tick on a second line), **one line**, or as **columns** that sort the sidebar only,
+  with column widths dragged and kept; the name is the title or the file name.
 
 **Viewer**
 
 - **The Library in narrower windows and its filters.** The filters on the left (folders, dates,
-  labels) can be hidden (**Filters**, left of the search), and stay while you go to Explore or
+  labels) can be hidden (◧‹ in their sidebar, ◧› to show them again; the number of filters in
+  use on it) and dragged wider, as can the selected file's side; they stay while you go to Explore or
   Figure and back; a new browser tab made from a page (Open in new browser tab, Move to a new
   browser tab) starts with its filters. Below about 1280 pixels the filters (and Explore's and
   Figure's Files sidebar) slide over the content when asked for; below about 900 pixels the
   Library shows the list or the selected file, with ← Back. No more sideways scrolling: columns
   that don't fit are left out (a **+N** says which), and the date's time zone is shortened
   (`+08`, none when it is the computer's own).
+- **Library: the selected file shows as much as it can without scrolling, on any screen.** It
+  works out its layout from its own width: from about 650 pixels the preview and the file's
+  facts sit side by side (the description, created, size, and its labels one row per kind:
+  project, users, tags, comment); the star is ☆/★ in front of the title; the Values and Axes
+  tables follow (columns empty in every row left out), then the metadata in columns, and at the
+  end, folded, what wrote the file. Tested from 1280×720 to 3440×1440 and on 2× screens.
+- **Library labels, managed.** Project, Users and Tags are always on the left, with **+ New**: a
+  label can be kept before any file has it (in the folder's label file, new key `labels`).
+  Right-click a label to make one under it, rename it, move it into another group or remove it
+  from all files; drag a label onto another to move it, or files onto a label to give it to
+  them. Each asks first, saying how many files it changes. A new label given to a file can be
+  put under a group.
+- **Previews are the data only** (no axes, numbers, colour bar or legend), drawn at 2× for
+  high-density screens; the automatic ones are drawn again once.
 - **Library: the selected file.** The title, the path (one line, cut in the middle; ⧉ copies it)
   and the date use the whole width, with the buttons below; a stopped or measuring file shows
   its state and **Recover…** above its preview; a preview with nothing to show takes one line.

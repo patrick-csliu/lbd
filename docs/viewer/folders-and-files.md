@@ -11,7 +11,7 @@ going back to the [Library](library.md).
 2. **The Library's filters** of this browser tab, and **Edit ↗**.
 3. **Search in these files…**
 4. **The file shown.**
-5. **Files:** hides or shows the sidebar.
+5. **◧‹** hides the sidebar; **◧›** at the left of the tab row shows it again.
 
 - **Library selection** (always there): the Library's list with this browser tab's filters
   (folder, date, search, labels) and sort. The filters show above the list, read-only;
@@ -22,9 +22,19 @@ going back to the [Library](library.md).
 - **Click** a file to look at it, **double-click** (or Enter) to keep it open. **↑ ↓** step
   through the list, showing each file in turn. **Space** stars it; **right-click** gives the
   same menu as in the Library (star, tags, project, open, show in folder, rename, …).
-- **Files** at the left of the tab row hides or shows the sidebar (each browser tab remembers
-  its own choice). Drag its right edge to make it wider; double-click the edge to fit the
-  longest name.
+- **◧‹** at the top of the sidebar hides it; **◧›** at the left of the tab row shows it again
+  (each browser tab remembers its own choice). Drag its right edge to make it wider;
+  double-click the edge to fit the longest name.
+
+**How each file is shown** (the **⋯** next to the search; the same in every browser tab):
+
+| Layout | Each file |
+|---|---|
+| **Two lines** (default) | the name and the date, then a small line with the fields you tick (sweep size, project, tags, …) |
+| **One line** | the name, and the first field you tick on the right |
+| **Columns** | a small version of the Library's list, to **sort** by any column: click a title (the sidebar's own order; the Library keeps its own). Drag a title's edge to make the column wider (remembered); when the columns don't fit, the list scrolls sideways with the names kept in place |
+
+The name is the file's title, or its file name (**⋯ → Name: the file name**).
 
 **⚙ Settings → Files sidebar** adds other lists, chosen with a menu at the top of the sidebar
 (Explore and Figure show the same one):
@@ -41,7 +51,7 @@ to a new browser tab**) starts with the same Library filters; after that each ta
 **Move to Page N** leaves that page's filters as they are.
 
 In a window narrower than about 1280 pixels the sidebar slides over the plot when you click
-**Files**, and closes when you keep a file open (double-click), press Esc or click beside it.
+**◧›**, and closes when you keep a file open (double-click), press Esc or click beside it.
 
 ## Folders
 

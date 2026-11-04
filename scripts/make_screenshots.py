@@ -380,11 +380,31 @@ def explore_panels(page: Page, url: str, ctx) -> None:
     page.set_viewport_size(SIZE)
 
 
+LABEL_JS = r"""
+async () => {
+  // a few labels, as people give them, so the label trees on the left aren't empty
+  const h = { "x-lbd-token": sessionStorage.getItem("lbd-token"), "content-type": "application/json" };
+  const r = await (await fetch("/api/library/list?q=&date=&sort=date&order=desc&offset=0&limit=60", { headers: h })).json();
+  const paths = r.rows.filter((x) => !x.error && !x.writing).map((x) => x.path);
+  const post = (ps, c) => fetch("/api/library/labels", { method: "POST", headers: h, body: JSON.stringify({ paths: ps, ...c }) });
+  await post(paths.filter((_, i) => i % 3 === 0), { project: "Qubit A/Device 3", add_users: ["Alice"], add_tags: ["cooldown-7"] });
+  await post(paths.filter((_, i) => i % 3 === 1), { project: "Resonator B", add_users: ["Bob"], add_tags: ["calibration"] });
+  await post(paths.filter((_, i) => i % 7 === 2), { star: true, add_tags: ["good fit"] });
+}
+"""
+
+
+def give_labels(page: Page) -> None:
+    page.evaluate(LABEL_JS)
+    page.locator(".library-tree[aria-label='Tags']").wait_for(timeout=15_000)
+
+
 @shot
 def library(page: Page, url: str, ctx) -> None:
     fresh(page, url, "Library")
     page.locator(".library-row").first.wait_for(timeout=60_000)   # the index reads the files first
     page.get_by_role("button", name="OK", exact=True).click()     # the first-time notice (described in the text)
+    give_labels(page)
     page.get_by_label("Search the files").fill("resonator")       # a search, shown as it is used
     rows = page.locator(".library-row", has_text="Late resonator sweep")
     rows.first.wait_for()

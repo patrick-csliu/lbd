@@ -29,8 +29,8 @@ It has three workspaces, switched at the top left:
    folder tree, the starred or the recent files). Click a file to look at it, double-click to keep
    it open (here, in Figure: to plot it); ↑ ↓ step through the list. See
    [The Files sidebar](folders-and-files.md#the-files-sidebar).
-6. **Tabs:** the files open in this page. **Files** at the left hides the Files sidebar for
-   more room. Right-click a tab to close it or move it to another page. See
+6. **Tabs:** the files open in this page. **◧‹** at the top of the Files sidebar hides it for
+   more room; **◧›** at the left of the tabs shows it again. Right-click a tab to close it or move it to another page. See
    [Tabs](folders-and-files.md#tabs).
 7. **File header:** the file's title and path, and **Show in folder**.
 8. **Plot controls:** what to plot and how, and the style. See [Plotting](plotting.md).
