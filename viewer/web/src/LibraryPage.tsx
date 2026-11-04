@@ -14,7 +14,6 @@ import {
   LibraryQuery,
   LibraryRow,
   LibrarySettings,
-  LibraryStatus,
   MissingLabels,
   Preview,
   PreviewMode,
@@ -22,10 +21,12 @@ import {
 } from "./api";
 import { docsUrl } from "./help";
 import { FileDetails } from "./FileView";
-import { ConfirmDialog, ConfirmRequest, ContextMenu, isMenuKey, MenuAt, menuAt, MenuEntry, systemNames } from "./menu";
-import { copyPath, fileEntries, renameRequest } from "./fileActions";
+import { ConfirmDialog, ConfirmRequest, ContextMenu, isMenuKey, MenuAt, menuAt } from "./menu";
+import { copyPath } from "./fileActions";
 import { useToast } from "./toast";
+import { useFileActions } from "./libraryActions";
 import { MeasuringStatus } from "./MeasuringStatus";
+import { PAGE, useLibraryRows, useLibraryStatus } from "./libraryRows";
 
 /**
  * The Library workspace: every data file under the open folders, as one list (Labber's Log
@@ -68,7 +69,6 @@ interface Props {
 const ROW_H = 28; // px: every row has this height (the list is windowed)
 const CARD_W = 220, CARD_H = 206; // px: a picture of the picture view, with its name and date (at least this wide)
 const NEAR = 5; // rows above and below the selection whose previews are drawn ahead
-const PAGE = 100; // rows asked for at a time
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 export const NOTICE =
   "To list date, sweep size and values and to search inside files, LBD opens each data file and reads its header (not its data). " +
@@ -189,7 +189,6 @@ function findFolder(trees: LibraryFolder[], path: string): LibraryFolder | null 
 export default function LibraryPage(props: Props) {
   const { state, query, onQuery, selected, onSelect, onRootsChanged, onLibrarySettings, onOpenIn, onOpenInNewBrowserTab, onRenamed, onDeleted, onOpenSettings } = props;
   const toast = useToast();
-  const names = systemNames(state.platform);
   const settings: LibrarySettings = state.library;
   const chosenColumns = COLUMNS.filter((c) => settings.columns.includes(c.id));
 
@@ -218,37 +217,7 @@ export default function LibraryPage(props: Props) {
   const queryKey = JSON.stringify(query);
 
   // ---- the index: changes (generation), progress
-  const [status, setStatus] = useState<LibraryStatus | null>(null);
-  const [generation, setGeneration] = useState(0);
-  useEffect(() => {
-    let live = true;
-    const ask = () =>
-      api
-        .libraryStatus()
-        .then((s) => {
-          if (!live) return;
-          setStatus(s);
-          setGeneration(s.generation);
-          for (const n of s.notes ?? []) toast(n, "info"); // about labels: told once
-        })
-        .catch(() => undefined); // the next try reports nothing new; the list keeps what it shows
-    ask();
-    const id = window.setInterval(ask, 2000);
-    return () => {
-      live = false;
-      window.clearInterval(id);
-    };
-  }, [toast]);
-
-  /** The index changed because of something done here: show it now, not at the next check. */
-  const refresh = useCallback(
-    () =>
-      api
-        .libraryStatus()
-        .then((s) => setGeneration(s.generation))
-        .catch(() => undefined),
-    [],
-  );
+  const { status, generation, refresh } = useLibraryStatus(true);
 
   // ---- facets: folders with counts, the date tree
   const [facets, setFacets] = useState<LibraryFacets | null>(null);
@@ -264,10 +233,6 @@ export default function LibraryPage(props: Props) {
   }, [folder, q, date, generation, state.roots, toast]);
 
   // ---- the rows: pages of PAGE rows, asked for when they come into view
-  const [total, setTotal] = useState<number | null>(null);
-  const [pages, setPages] = useState<Map<number, LibraryRow[]>>(new Map());
-  const asked = useRef<Map<number, string>>(new Map()); // page -> the query+generation it was asked for
-  const [listError, setListError] = useState<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const [view, setView] = useState({ top: 0, height: 600, width: 800 });
   const measure = (el: HTMLElement) => setView({ top: el.scrollTop, height: el.clientHeight, width: el.clientWidth });
@@ -279,47 +244,15 @@ export default function LibraryPage(props: Props) {
   const columns = fittingColumns(chosenColumns, view.width);
   const hiddenColumns = chosenColumns.filter((c) => !columns.includes(c)).map((c) => c.title);
 
-  // a new query: everything afresh, from the top
+  // a new query: from the top
   useEffect(() => {
-    setPages(new Map());
-    asked.current = new Map();
-    setTotal(null);
     if (scroller.current) scroller.current.scrollTop = 0;
     setView((v) => ({ ...v, top: 0 }));
   }, [queryKey]);
 
   const firstPage = Math.max(0, Math.floor((Math.floor(view.top / lineH) * perLine) / PAGE));
   const lastPage = Math.floor(((Math.floor((view.top + view.height) / lineH) + 1) * perLine) / PAGE) + 1;
-  useEffect(() => {
-    for (let p = firstPage; p <= lastPage; p++) {
-      if (total !== null && p * PAGE >= total && p > 0) break;
-      const key = `${queryKey}|${generation}`;
-      if (asked.current.get(p) === key) continue;
-      asked.current.set(p, key);
-      api
-        .libraryList(query, p * PAGE, PAGE)
-        .then((r) => {
-          if (asked.current.get(p) !== key) return; // a newer query or change was asked meanwhile
-          setTotal(r.total);
-          setListError(null);
-          setPages((old) => new Map(old).set(p, r.rows));
-        })
-        .catch((e) => {
-          asked.current.delete(p);
-          setListError((e as Error).message);
-        });
-    }
-  }, [firstPage, lastPage, queryKey, generation, query, total]);
-
-  const rowAt = (i: number): LibraryRow | undefined => pages.get(Math.floor(i / PAGE))?.[i % PAGE];
-  const indexOf = (path: string | null): number => {
-    if (!path) return -1;
-    for (const [p, rows] of pages) {
-      const k = rows.findIndex((r) => r.path === path);
-      if (k >= 0) return p * PAGE + k;
-    }
-    return -1;
-  };
+  const { total, rowAt, indexOf, loadedRows, listError, pages } = useLibraryRows(query, generation, firstPage, lastPage);
   const selectedRow = (() => {
     const i = indexOf(selected);
     return i >= 0 ? rowAt(i) ?? null : null;
@@ -330,7 +263,6 @@ export default function LibraryPage(props: Props) {
   useEffect(() => {
     setChosen((c) => (selected && c.includes(selected) ? c : selected ? [selected] : []));
   }, [selected]);
-  const loadedRows = (): LibraryRow[] => [...pages.entries()].sort((a, b) => a[0] - b[0]).flatMap(([, rows]) => rows);
   const chosenRows = (): LibraryRow[] => {
     const set = new Set(chosen);
     return loadedRows().filter((r) => set.has(r.path));
@@ -359,20 +291,6 @@ export default function LibraryPage(props: Props) {
   // ---- labels and identities: what the right column, the menu and the keys change
   const [pointing, setPointing] = useState<MissingLabels | null>(null); // missing labels waiting for a file
   const [showMissing, setShowMissing] = useState(false);
-  const run = async (what: Promise<{ notes: string[] }>, done?: string) => {
-    try {
-      const r = await what;
-      for (const n of r.notes) toast(n, "info");
-      if (done) toast(done);
-    } catch (e) {
-      toast((e as Error).message, "error");
-    } finally {
-      refresh();
-    }
-  };
-  const label = (paths: string[], changes: LabelChanges) => run(api.librarySetLabels(paths, changes));
-  const toggleStar = (rows: LibraryRow[]) => rows.length && label(rows.map((r) => r.path), { star: !rows.every((r) => r.star) });
-
   const onScroll = () => {
     const el = scroller.current;
     if (el) measure(el);
@@ -426,48 +344,16 @@ export default function LibraryPage(props: Props) {
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
 
-  const askTrash = (path: string) => {
-    const name = baseName(path);
-    setConfirm({
-      title: `Move to the ${names.trash}?`,
-      text: `Move "${name}" to the ${names.trash}? You can restore it from there.`,
-      action: `Move to ${names.trash}`,
-      danger: true,
-      onConfirm: async () => {
-        await api.trashFile(path);
-        onDeleted(path);
-        toast(`Moved ${name} to the ${names.trash}`);
-      },
-    });
-  };
-
-  const askText = (title: string, action: string, value: string, what: string, apply: (v: string) => Promise<void>) =>
-    setConfirm({
-      title,
-      action,
-      input: { value, check: (v) => (v.trim() ? null : `Type ${what}`) },
-      onConfirm: (v) => apply(v.trim()),
-    });
-
-  const askNewMeasurement = (r: LibraryRow) =>
-    setConfirm({
-      title: "Make this a new measurement?",
-      text:
-        `${r.path} gets its own identity. It is written into this file only (a small change to its header); ` +
-        "the other file is not touched. Its labels are kept and stop following the other file's.",
-      action: "Make it a new measurement",
-      onConfirm: () => run(api.libraryResolve(r.path, "new_id"), `${r.name} is now a separate measurement`),
-    });
-
-  const askGiveIds = (rows: LibraryRow[]) =>
-    setConfirm({
-      title: rows.length === 1 ? "Give this file an identity?" : `Give ${rows.length} files an identity?`,
-      text:
-        "Files written before LBD 1.3 (or by other programs) have no hidden identity, so LBD follows them by name and date. " +
-        "This writes one into each file's header (its data is not changed), so their labels follow them anywhere.",
-      action: "Give them an identity",
-      onConfirm: () => run(api.libraryGiveIds(rows.map((x) => x.path))),
-    });
+  const { run, label, toggleStar, askTrash, askNewMeasurement, menuEntries } = useFileActions({
+    platform: state.platform,
+    login: state.login,
+    refresh,
+    setConfirm,
+    onOpenIn,
+    onOpenInNewBrowserTab,
+    onRenamed,
+    onDeleted,
+  });
 
   const rowMenu = (e: MouseEvent | KeyboardEvent, r: LibraryRow) => {
     e.preventDefault();
@@ -476,42 +362,7 @@ export default function LibraryPage(props: Props) {
       setChosen([r.path]);
       onSelect(r.path);
     }
-    const rows = many ? chosenRows() : [r];
-    const paths = rows.map((x) => x.path);
-    const allStarred = rows.every((x) => x.star);
-    const which = rows.length > 1 ? `${rows.length} files` : r.name;
-    const withoutId = rows.filter((x) => !x.id && x.read && !x.error);
-    const items: MenuEntry[] = [
-      { label: allStarred ? "Unstar" : "Star", onClick: () => toggleStar(rows) },
-      { label: "Add tag…", onClick: () => askText(`Add a tag to ${which}`, "Add", "", "a tag", (v) => label(paths, { add_tags: [v] })) },
-      { label: "Set project…", onClick: () => askText(`Project of ${which}`, "Set", rows[0].project ?? "", "a project", (v) => label(paths, { project: v })) },
-      { label: "Add user…", onClick: () => askText(`Add a user to ${which}`, "Add", state.login, "a user", (v) => label(paths, { add_users: [v] })) },
-    ];
-    // the measurement's identity (copies, older files)
-    const identity: MenuEntry[] = [
-      ...(rows.length === 1
-        ? [
-            { label: "Duplicate as new measurement", onClick: () => run(api.libraryDuplicate(r.path).then((d) => ({ notes: [`Copied as ${baseName(d.path)}`, ...d.notes] }))) },
-            ...(r.copies || r.conflict ? [{ label: "Make this a new measurement…", onClick: () => askNewMeasurement(r) }] : []),
-          ]
-        : []),
-      ...(withoutId.length ? [{ label: withoutId.length === 1 ? "Give this file an identity…" : `Give ${withoutId.length} files an identity…`, onClick: () => askGiveIds(withoutId) }] : []),
-    ];
-    if (identity.length) items.push("-", ...identity);
-    if (!many)
-      // one file: also what can be done with the file itself
-      items.push(
-        "-",
-        { label: "Open in Explore", onClick: () => onOpenIn(r.path, "explore") },
-        { label: "Open in Figure", onClick: () => onOpenIn(r.path, "figure") },
-        "-",
-        ...fileEntries(r.path, state.platform, toast),
-        { label: "Open in new browser tab", onClick: () => onOpenInNewBrowserTab(r.path) },
-        "-",
-        { label: "Rename…", onClick: () => setConfirm(renameRequest(r.path, (newPath) => onRenamed(r.path, newPath), toast)) },
-        { label: `Move to ${names.trash}…`, onClick: () => askTrash(r.path), danger: true },
-      );
-    setMenu(menuAt(e, items));
+    setMenu(menuAt(e, menuEntries(many ? chosenRows() : [r], r)));
   };
 
   const setColumns = async (cols: LibraryColumn[]) => {
