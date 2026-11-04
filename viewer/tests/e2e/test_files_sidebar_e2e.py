@@ -68,8 +68,7 @@ def test_a_new_browser_tab_starts_with_the_same_filters(viewer, library_files, n
     library_search(page, "fridge")
     page.get_by_role("tab", name="Figure", exact=True).click()
     choose(page, "library")
-    row = sidebar(page).locator(".files-row").first
-    expect(row).to_contain_text("Fridge")
+    row = sidebar(page).locator(".files-row", has_text="Fridge").first   # (metadata matches some others)
     row.click(button="right")
     with context.expect_page() as opened:
         menu(page, "Open in new browser tab").click()

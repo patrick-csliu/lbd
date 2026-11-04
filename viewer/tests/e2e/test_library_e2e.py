@@ -72,8 +72,10 @@ def test_columns_sorting_keyboard_and_the_selected_file(viewer, library_files, n
     expect(page.get_by_role("columnheader", name=re.compile("Name"))).to_have_attribute("aria-sort", "ascending")
     top = httpx.get(f"http://127.0.0.1:{viewer.port}/api/library/list", headers={"X-LBD-Token": viewer.state.token},
                     params={"sort": "name", "order": "asc", "limit": "2"}).json()["rows"]
-    expect(rows(page).nth(0).locator(".cell-name")).to_have_text(top[0]["title"] or top[0]["name"])
-    expect(rows(page).nth(1).locator(".cell-name")).to_have_text(top[1]["title"] or top[1]["name"])
+    # (an unreadable file's name starts with ⚠)
+    for k in (0, 1):
+        expect(rows(page).nth(k).locator(".cell-name")).to_have_text(
+            ("⚠ " if top[k]["error"] else "") + (top[k]["title"] or top[k]["name"]))
     # the column menu: Values added, remembered after a reload
     page.locator(".library-head").click(button="right")
     page.locator(".context-menu").get_by_role("menuitem", name=re.compile("Values")).click()
@@ -128,7 +130,7 @@ def test_the_notice_and_names_only(viewer, library_files, new_page):
     shows(page, every_file(viewer), 20_000)
     page.get_by_label("Search the files").fill("late resonator")       # names only: the file name is found
     late = lib_row(page, "late resonator.lbd")                           # no title read: the file name
-    expect(late).to_contain_text("(file date)")
+    expect(late.locator(".cell-date")).to_have_attribute("title", re.compile("no date of its own"))   # the file's date, greyed
     late.click()
     expect(page.locator(".library-detail")).to_contain_text("Frequency")   # read when selected ...
     expect(lib_row(page, "Late resonator sweep")).to_contain_text("2026-03-14 23:30", timeout=10_000)  # ... and its row fills in
@@ -136,7 +138,7 @@ def test_the_notice_and_names_only(viewer, library_files, new_page):
     viewer.state.config.set_library({"read_headers": True})
     page.reload()
     notice = page.locator(".library-notice")
-    expect(notice).to_contain_text("cloud storage")
+    expect(notice).to_contain_text("cloud folder")
     notice.get_by_role("button", name="OK").click()
     expect(notice).to_have_count(0)
     page.reload()

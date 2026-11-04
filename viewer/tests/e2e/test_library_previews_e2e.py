@@ -48,7 +48,8 @@ def test_the_picture_view_shows_the_files_as_pictures(viewer, new_page):
     expect(cards.first.locator("img")).to_be_visible(timeout=30_000)
     cards.first.click()
     expect(cards.first).to_have_class(re.compile("selected"))
-    expect(preview(page).locator("img")).to_be_visible(timeout=30_000)
+    expect(page.locator(".library-detail .library-file-head")).to_be_visible()
+    expect(preview(page)).to_have_count(0)                  # the card shows the picture: not again on the right
     page.reload()                                           # remembered
     expect(page.locator(".library-card").first).to_be_visible(timeout=20_000)
     page.get_by_role("button", name="List", exact=True).click()

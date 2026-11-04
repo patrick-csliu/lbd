@@ -332,12 +332,20 @@ function RecentList(props: Props & { paths: string[] }) {
 /** ⚙ Settings → Files sidebar: which lists it offers (the Library selection always). */
 export function SidebarScopeSettings({ state, onSettings }: { state: AppState; onSettings: (s: AppState) => void }) {
   const toast = useToast();
-  const scopes = state.library.sidebar_scopes;
-  const set = (s: SidebarScope, on: boolean) =>
+  // shown at once; the viewer's answer (or a refusal, with the old value) follows
+  const [scopes, setScopes] = useState(state.library.sidebar_scopes);
+  useEffect(() => setScopes(state.library.sidebar_scopes), [state.library.sidebar_scopes]);
+  const set = (s: SidebarScope, on: boolean) => {
+    const next = on ? [...scopes, s] : scopes.filter((x) => x !== s);
+    setScopes(next);
     api
-      .setLibrary({ sidebar_scopes: on ? [...scopes, s] : scopes.filter((x) => x !== s) })
+      .setLibrary({ sidebar_scopes: next })
       .then(onSettings)
-      .catch((e) => toast((e as Error).message, "error"));
+      .catch((e) => {
+        setScopes(state.library.sidebar_scopes);
+        toast((e as Error).message, "error");
+      });
+  };
   return (
     <>
       <div className="settings-title">Files sidebar (Explore, Figure)</div>
