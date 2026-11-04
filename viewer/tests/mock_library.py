@@ -13,10 +13,11 @@ library every time.
 """
 
 import json
+import random
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
@@ -132,12 +133,39 @@ def write_library(folder: Path, n: int = 300) -> Dict[str, List[Path]]:
 
 
 
-def add_labels(folder: Path) -> Dict[str, Path]:
+# The labels the mock library is given (add_labels): nested 1-3 levels, flat and nested, a long one
+# to try layouts with; and labels kept without any file (a new project before its first data).
+LABEL_PROJECTS = ["Qubit A", "Qubit A/Device 1", "Qubit A/Device 3", "Qubit A/Device 3/Cooldown 7",
+                  "Qubit B/Device 2", "Resonator chip 3", "Resonator chip 3/Wafer 12/Die 4", "Fridge"]
+LABEL_USERS = ["Lab A/Qubit team/Patrick", "Lab A/Qubit team/Alice", "Lab A/Resonator team/Chen",
+               "Lab B/Bob", "Guest"]
+LABEL_TAGS = ["resonator", "calibration", "flux/bias", "flux/sweet spot", "quality/good", "quality/redo",
+              "quality/redo/more averages", "punch-out", "two-tone", "noise", "after re-cooling",
+              "a rather long tag to see how the lists and chips cope with it"]
+LABEL_COMMENTS = ["", "", "", "punch-out at -20 dBm", "redo with more averages",
+                  "flux bias 0.2 mA\nsweet spot found at 0.31 mA\nnext: T2 echo",
+                  "The resonance moved by about 2 MHz after the amplifier was changed; compare with the run "
+                  "of last week before drawing conclusions, and check the attenuation on line 3 first."]
+KEPT = [("project", "Qubit C/Device 1"), ("users", "Lab B/New student"), ("tags", "to check")]
+
+
+def random_labels(rng: random.Random) -> Dict[str, Any]:
+    """One file's labels: a star now and then, a project or none, 0-3 users, 0-4 tags, a comment."""
+    return {"star": rng.random() < 0.15,
+            "project": rng.choice(LABEL_PROJECTS) if rng.random() < 0.8 else None,
+            "add_users": rng.sample(LABEL_USERS, rng.choice([0, 1, 1, 1, 2, 3])),
+            "add_tags": rng.sample(LABEL_TAGS, rng.choice([0, 0, 1, 1, 2, 3, 4])),
+            "comment": rng.choice(LABEL_COMMENTS)}
+
+
+def add_labels(folder: Path, keep_in: Optional[Path] = None) -> Dict[str, Path]:
     """Organise a mock library written by write_library (plan 8b): labels in the folders' label
-    files (stars, nested projects, users and tags, comments), an identical copy, a copy changed
+    files (stars, projects nested 1-3 levels, users in groups, flat and nested tags, comments of
+    one or several lines; LABEL_*), labels kept without a file (KEPT), an identical copy, a copy changed
     after copying (a conflict), a sync conflict copy of a label file, files without an id, and
-    labels whose file is gone (missing). Returns the special files by name."""
-    import random
+    labels whose file is gone (missing). The labels kept without a file go into `keep_in`, an open
+    folder of the viewer (default: `folder/Lab data`, as the tests open it). Returns the special
+    files by name."""
     import shutil
 
     import h5py
@@ -147,25 +175,26 @@ def add_labels(folder: Path) -> Dict[str, Path]:
     folder = Path(folder)
     rng = random.Random(8)
     files = sorted(p for p in folder.rglob("*.lbd") if "broken" not in p.name)
-    tags = ["resonator", "flux/bias", "flux/sweet spot", "calibration", "good"]
-    users = ["Lab A/Qubit team/Patrick", "Lab A/Qubit team/Alice", "Lab B/Bob"]
     by_folder: Dict[Path, List[Path]] = {}
     for p in files:
         by_folder.setdefault(p.parent, []).append(p)
-    for k, (where, members) in enumerate(sorted(by_folder.items())):
+    for where, members in sorted(by_folder.items()):
         def change(doc, members=members):
             for p in members:
-                if rng.random() < 0.4:
+                if rng.random() < 0.3:                          # about a third without any label
                     continue
                 info = lbd.info(p)
                 e = labels.new_entry(info.id, p.name, info.created)
-                labels.apply(e, {"star": rng.random() < 0.2,
-                                 "project": f"{PROJECTS[rng.randrange(len(PROJECTS))]}/Device {rng.randrange(1, 4)}",
-                                 "add_users": rng.sample(users, rng.randrange(1, 3)),
-                                 "add_tags": rng.sample(tags, rng.randrange(0, 3)),
-                                 "comment": rng.choice(["", "", "punch-out at -20 dBm", "redo with more averages"])})
+                labels.apply(e, random_labels(rng))
                 doc["files"].append(e)
         labels.update(where, change)
+    # labels kept although no file has them yet (made with + New in the Library), in an open folder
+    keep_in = Path(keep_in) if keep_in else folder / "Lab data"
+    if keep_in.is_dir():
+        def keep(doc):
+            for kind, label in KEPT:
+                labels.keep(doc, kind, label)
+        labels.update(keep_in, keep)
     special: Dict[str, Path] = {}
     backup = folder / "Shared" / "Backup"
     backup.mkdir(parents=True, exist_ok=True)
