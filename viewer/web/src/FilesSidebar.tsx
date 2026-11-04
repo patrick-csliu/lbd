@@ -29,6 +29,8 @@ export const SCOPE_TITLES: Record<SidebarScope, string> = {
 };
 
 interface Props {
+  /** the button that hides the sidebar (in its heading) */
+  hideButton?: ReactNode;
   workspace: "explore" | "figure";
   state: AppState;
   /** this browser tab's Library filters */
@@ -57,6 +59,7 @@ export default function FilesSidebar(props: Props) {
     <div className="files-sidebar">
       <div className="panel-head">
         <h2>Files</h2>
+        <span className="files-head-end">
         {offered.length > 1 && (
           <select className="files-scope" value={scope} onChange={(e) => props.onScope(e.target.value as SidebarScope)} aria-label="Files listed">
             {offered.map((s) => (
@@ -66,6 +69,8 @@ export default function FilesSidebar(props: Props) {
             ))}
           </select>
         )}
+        {props.hideButton}
+        </span>
       </div>
       {scope === "folders" ? (
         <FolderPanel

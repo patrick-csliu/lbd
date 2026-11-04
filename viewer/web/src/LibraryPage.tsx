@@ -1,4 +1,4 @@
-import { Dispatch, FormEvent, KeyboardEvent, MouseEvent, ReactNode, SetStateAction, useCallback, useEffect, useRef, useState } from "react";
+import { CSSProperties, Dispatch, FormEvent, KeyboardEvent, MouseEvent, ReactNode, SetStateAction, useCallback, useEffect, useRef, useState } from "react";
 import {
   api,
   ApiError,
@@ -26,6 +26,8 @@ import { copyPath } from "./fileActions";
 import { useToast } from "./toast";
 import { useFileActions } from "./libraryActions";
 import { DRAWER_MEDIA, ONE_PANE_MEDIA, useMedia } from "./useMedia";
+import { useResizable, widestContent } from "./resizable";
+import { SidebarToggle } from "./SidebarToggle";
 import { NO_FILTERS } from "./libraryQuery";
 import { MeasuringStatus } from "./MeasuringStatus";
 import { PAGE, useLibraryRows, useLibraryStatus } from "./libraryRows";
@@ -210,6 +212,25 @@ export default function LibraryPage(props: Props) {
   const [filtersOpen, setFiltersOpen] = useState(false); // the drawer
   useEffect(() => setFiltersOpen(false), [drawerMode]);
   const filtersShown = drawerMode ? filtersOpen : filtersDocked;
+  // the widths of the filters and of the selected file: dragged at their edges, remembered
+  const pageRef = useRef<HTMLDivElement>(null);
+  const filtersPane = useRef<HTMLElement>(null);
+  const filtersWidth = useResizable({
+    key: "lbd-library-filters-width",
+    initial: 250,
+    min: 180,
+    maxShare: 0.4,
+    container: pageRef,
+    fit: () => widestContent(filtersPane.current, ".library-folder .folder-name", 56),
+  });
+  const detailWidth = useResizable({
+    key: "lbd-library-detail-width",
+    initial: Math.round(window.innerWidth * 0.38),
+    min: 300,
+    maxShare: 0.7,
+    side: "right",
+    container: pageRef,
+  });
   const toggleFilters = () => {
     if (drawerMode) setFiltersOpen((o) => !o);
     else
@@ -476,6 +497,8 @@ export default function LibraryPage(props: Props) {
 
   return (
     <div
+      ref={pageRef}
+      style={{ "--filters-width": `${filtersWidth.width}px`, "--detail-width": `${detailWidth.width}px` } as CSSProperties}
       className={
         "page library" +
         (drawerMode ? " drawer-mode" : filtersDocked ? "" : " no-filters") +
@@ -483,8 +506,15 @@ export default function LibraryPage(props: Props) {
       }
     >
       {drawerMode && filtersOpen && <div className="drawer-backdrop" onClick={() => setFiltersOpen(false)} aria-hidden="true" />}
-      <aside className="library-left" aria-label="Filters: folders, dates and labels" hidden={!filtersShown}>
+      {!drawerMode && filtersDocked && (
+        <div className="pane-handle filters-handle" aria-label="Width of the sidebar" title="Drag to change the width · Double-click: fit the longest name" {...filtersWidth.handle} />
+      )}
+      {!onePane && (
+        <div className="pane-handle detail-handle" aria-label="Width of the selected file" title="Drag to change the width" {...detailWidth.handle} />
+      )}
+      <aside className="library-left" ref={filtersPane} aria-label="Filters: folders, dates and labels" hidden={!filtersShown}>
         <LibraryFolders
+          hideButton={<SidebarToggle open onToggle={toggleFilters} what="folders, dates, labels" />}
           roots={state.roots}
           facets={facets}
           folder={folder}
@@ -545,15 +575,7 @@ export default function LibraryPage(props: Props) {
           </div>
         )}
         <div className="library-search-row">
-          <button
-            className="filters-toggle"
-            aria-pressed={filtersShown}
-            aria-expanded={filtersShown}
-            title={filtersShown ? "Hide the filters (folders, dates, labels)" : "Show the filters (folders, dates, labels)"}
-            onClick={toggleFilters}
-          >
-            Filters{filterCount ? <span className="count"> {filterCount}</span> : null}
-          </button>
+          {!filtersShown && <SidebarToggle open={false} onToggle={toggleFilters} what="folders, dates, labels" count={filterCount} />}
           <input
             className="library-search"
             type="search"
@@ -937,12 +959,15 @@ export default function LibraryPage(props: Props) {
 // ---- left: the open folders, with counts
 
 function LibraryFolders({
+  hideButton,
   roots,
   facets,
   folder,
   onFolder,
   onRootsChanged,
 }: {
+  /** the button that hides the sidebar (in its first heading) */
+  hideButton: ReactNode;
   roots: string[];
   facets: LibraryFacets | null;
   folder: string | null;
@@ -1028,6 +1053,7 @@ function LibraryFolders({
           <button onClick={() => setAdding((a) => !a)} aria-expanded={adding}>
             + Add folder
           </button>
+          {hideButton}
         </div>
       </div>
       {adding && (

@@ -144,3 +144,36 @@ def test_the_notice_and_names_only(viewer, library_files, new_page):
     page.reload()
     expect(status(page)).to_contain_text("files", timeout=10_000)
     expect(page.locator(".library-notice")).to_have_count(0)
+
+
+def test_the_panes_are_dragged_wider_and_the_sidebar_hidden(viewer, new_page):
+    """The filters and the selected file are dragged at their edges (remembered after a reload);
+    the sidebar's toggle is inside it while it is open and at its edge while it is closed."""
+    page = new_page("Library")
+    expect(rows(page).first).to_be_visible(timeout=20_000)
+    left = page.locator(".library-left")
+    detail = page.locator(".library-detail")
+    before = (left.bounding_box()["width"], detail.bounding_box()["width"])
+    for handle, dx in ((".filters-handle", 80), (".detail-handle", -100)):
+        box = page.locator(handle).bounding_box()
+        page.mouse.move(box["x"] + 3, 300)
+        page.mouse.down()
+        page.mouse.move(box["x"] + 3 + dx, 300, steps=5)
+        page.mouse.up()
+    after = (left.bounding_box()["width"], detail.bounding_box()["width"])
+    assert after[0] > before[0] + 60 and after[1] > before[1] + 80
+    page.reload()
+    page.get_by_role("tab", name="Library", exact=True).click()
+    expect(rows(page).first).to_be_visible()
+    assert abs(left.bounding_box()["width"] - after[0]) < 2 and abs(detail.bounding_box()["width"] - after[1]) < 2
+    # the toggle: in the sidebar while open, at the list's edge while closed
+    left.get_by_role("button", name="Hide the sidebar").click()
+    expect(left).to_be_hidden()
+    page.locator(".library-middle").get_by_role("button", name="Show the sidebar").click()
+    expect(left).to_be_visible()
+    # the same in Explore: the Files sidebar hides with its own button, the tab row shows it again
+    page.get_by_role("tab", name="Explore", exact=True).click()
+    page.locator(".sidebar").get_by_role("button", name="Hide the sidebar").click()
+    expect(page.locator(".sidebar")).to_be_hidden()
+    page.locator("main:not([hidden]) .tabbar").get_by_role("button", name="Show the sidebar").click()
+    expect(page.locator(".sidebar")).to_be_visible()

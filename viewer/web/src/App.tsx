@@ -1,4 +1,4 @@
-import { CSSProperties, KeyboardEvent, MouseEvent, PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CSSProperties, KeyboardEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MemorySettings } from "./MemorySettings";
 import { MeasurementSettings } from "./MeasurementSettings";
 import { DEFAULT_MEASUREMENTS, MeasurementsContext, notifyInBackground } from "./MeasuringStatus";
@@ -6,6 +6,8 @@ import { onFinished } from "./watch";
 import { api, ApiError, AppState, baseName, fileKind, LibraryQuery, OpenDataIn, SidebarScope, OpenFilesIn, PageCommand, PageEntry, TabState, Theme, viewerUrl, Workspace } from "./api";
 import FilesSidebar, { SidebarScopeSettings } from "./FilesSidebar";
 import { DRAWER_MEDIA, useMedia } from "./useMedia";
+import { useResizable, widestContent } from "./resizable";
+import { SidebarToggle } from "./SidebarToggle";
 import { loadLibraryQuery, saveLibraryQuery } from "./libraryQuery";
 import FileView from "./FileView";
 import LibraryPage, { PreviewSettings } from "./LibraryPage";
@@ -39,27 +41,6 @@ function loadPage(): Page {
     return p === "library" || p === "figure" || p === "styles" || p === "sdk" ? p : "explore";
   } catch {
     return "explore";
-  }
-}
-
-function clampSidebar(w: number): number {
-  return Math.round(Math.max(SIDEBAR_MIN, Math.min(w, window.innerWidth * 0.6)));
-}
-
-function loadSidebarWidth(): number {
-  try {
-    const w = Number(localStorage.getItem(SIDEBAR_KEY));
-    return w > 0 ? clampSidebar(w) : SIDEBAR_DEFAULT;
-  } catch {
-    return SIDEBAR_DEFAULT;
-  }
-}
-
-function saveSidebarWidth(w: number) {
-  try {
-    localStorage.setItem(SIDEBAR_KEY, String(w));
-  } catch {
-    /* storage unavailable: the width just isn't remembered */
   }
 }
 
@@ -194,8 +175,15 @@ function Shell() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const pageRef = useRef<HTMLDivElement>(null);
   const sidebarRef = useRef<HTMLElement>(null);
-  const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
-  const dragging = useRef(false);
+  // the Files sidebar's width: dragged at its edge, double-click fits the longest name
+  const sidebar = useResizable({
+    key: SIDEBAR_KEY,
+    initial: SIDEBAR_DEFAULT,
+    min: SIDEBAR_MIN,
+    container: pageRef,
+    fit: () => widestContent(sidebarRef.current, ".tree .row-label, .files-row .files-name", 48),
+  });
+  const sidebarWidth = sidebar.width;
 
   // The other open pages (from the viewer's page list, kept current): "Move to Page N".
   const [otherPages, setOtherPages] = useState<PageEntry[]>([]);
@@ -818,53 +806,6 @@ function Shell() {
     return { x: exploreMenu.x, y: exploreMenu.y, items };
   }, [exploreMenu, exploreTabs, closeExplore, openIn, state?.platform, toast, fileRenamed]);
 
-  // ---- Files sidebar width: drag the handle, double-click to fit the longest name
-
-  const setWidth = (w: number) => {
-    const c = clampSidebar(w);
-    setSidebarWidth(c);
-    saveSidebarWidth(c);
-  };
-
-  const onHandleDown = (e: PointerEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.currentTarget.setPointerCapture(e.pointerId);
-    dragging.current = true;
-    document.body.classList.add("resizing");
-  };
-
-  const onHandleMove = (e: PointerEvent<HTMLDivElement>) => {
-    if (!dragging.current || !pageRef.current) return;
-    setSidebarWidth(clampSidebar(e.clientX - pageRef.current.getBoundingClientRect().left));
-  };
-
-  const onHandleUp = () => {
-    if (!dragging.current) return;
-    dragging.current = false;
-    document.body.classList.remove("resizing");
-    saveSidebarWidth(sidebarWidth);
-  };
-
-  const fitToNames = () => {
-    const side = sidebarRef.current;
-    if (!side) return;
-    const left = side.getBoundingClientRect().left;
-    let widest = 0;
-    side.querySelectorAll<HTMLElement>(".tree .row-label").forEach((el) => {
-      widest = Math.max(widest, el.getBoundingClientRect().left - left + el.scrollWidth);
-    });
-    // room for the row's right padding, the folder's × button and a scroll bar
-    if (widest) setWidth(widest + 48);
-  };
-
-  const onHandleKey = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === "ArrowLeft") setWidth(sidebarWidth - 20);
-    else if (e.key === "ArrowRight") setWidth(sidebarWidth + 20);
-    else if (e.key === "Home") setWidth(SIDEBAR_DEFAULT);
-    else return;
-    e.preventDefault();
-  };
-
   if (fatal) {
     return (
       <div className="fatal">
@@ -1015,6 +956,7 @@ function Shell() {
         <aside className="sidebar" ref={sidebarRef} hidden={!sidebarShown}>
           {state && (
             <FilesSidebar
+              hideButton={<SidebarToggle open onToggle={toggleFolders} what="Files" />}
               workspace={page === "explore" ? "explore" : "figure"}
               state={state}
               query={libraryQuery}
@@ -1042,31 +984,14 @@ function Shell() {
         {foldersShown && !drawerMode && (
           <div
             className="sidebar-handle"
-            role="separator"
-            aria-orientation="vertical"
             aria-label="Width of the Files sidebar"
-            aria-valuenow={sidebarWidth}
-            aria-valuemin={SIDEBAR_MIN}
-            tabIndex={0}
             title="Drag to change the width · Double-click: fit the longest name"
-            onPointerDown={onHandleDown}
-            onPointerMove={onHandleMove}
-            onPointerUp={onHandleUp}
-            onPointerCancel={onHandleUp}
-            onDoubleClick={fitToNames}
-            onKeyDown={onHandleKey}
+            {...sidebar.handle}
           />
         )}
         <main className="main" hidden={page !== "explore"}>
           <div className="tabbar">
-            <button
-              className="folders-toggle"
-              aria-pressed={sidebarShown}
-              title={sidebarShown ? "Hide the Files sidebar (more room for plots)" : "Show the Files sidebar"}
-              onClick={toggleFolders}
-            >
-              <SidebarIcon /> Files
-            </button>
+            {!sidebarShown && <SidebarToggle open={false} onToggle={toggleFolders} what="Files: the Library selection" className="folders-toggle" />}
             <div className="tabs" role="tablist" aria-label="Files in Explore">
               {exploreTabs.map((t) => (
                 <div
@@ -1115,14 +1040,7 @@ function Shell() {
           {/* The open-files bar. Right-click on a tab: that tab's menu; anywhere else on the bar,
               or the ⋯ button (always visible, outside the part that scrolls): the menu for all tabs. */}
           <div className="tabbar" onContextMenu={(e) => tabs.length > 0 && openTabMenu(e, null)}>
-            <button
-              className="folders-toggle"
-              aria-pressed={sidebarShown}
-              title={sidebarShown ? "Hide the Files sidebar (more room for plots)" : "Show the Files sidebar"}
-              onClick={toggleFolders}
-            >
-              <SidebarIcon /> Files
-            </button>
+            {!sidebarShown && <SidebarToggle open={false} onToggle={toggleFolders} what="Files: the Library selection" className="folders-toggle" />}
             <div className="tabs" role="tablist">
               {tabs.map((t) => {
                 const lock = locks.get(t.path);
@@ -1231,16 +1149,6 @@ function Shell() {
       )}
     </div>
     </MeasurementsContext.Provider>
-  );
-}
-
-/** The Files sidebar's button: a window with a panel on its left (not ◧, the data files' icon). */
-function SidebarIcon() {
-  return (
-    <svg className="sidebar-icon" width="14" height="12" viewBox="0 0 14 12" aria-hidden="true">
-      <rect x="0.5" y="0.5" width="13" height="11" rx="1.5" fill="none" stroke="currentColor" />
-      <rect x="0.5" y="0.5" width="4.5" height="11" rx="1.5" fill="currentColor" />
-    </svg>
   );
 }
 

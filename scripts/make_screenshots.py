@@ -461,7 +461,7 @@ def files_sidebar(page: Page, url: str, ctx) -> None:
         (2, ".sidebar .files-filters", 0, "r"),
         (3, ".sidebar .filter", 0, "r"),
         (4, ".sidebar .files-row.active", 0, "r"),
-        (5, "main:not([hidden]) .folders-toggle", 0, "b"),
+        (5, ".sidebar .sidebar-toggle", 0, "b"),
     ])
     save(page, VIEWER_IMG / "files-sidebar.png", clip={"x": 0, "y": 0, "width": 720, "height": 560})
 

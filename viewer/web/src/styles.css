@@ -123,7 +123,8 @@ textarea { font-family: var(--mono); font-size: 12.5px; width: 100%; resize: ver
 /* ---- the Files sidebar (Explore, Figure) ---- */
 .files-sidebar { display: flex; flex-direction: column; height: 100%; min-height: 0; padding-top: 8px; }
 .files-sidebar > .panel-head { gap: 8px; }
-.files-sidebar .files-scope { min-width: 0; max-width: 60%; }
+.files-sidebar .files-head-end { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.files-sidebar .files-scope { min-width: 0; max-width: 160px; }
 .files-sidebar > .folders { flex: 1; min-height: 0; overflow: auto; padding-top: 0; }
 .files-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 2px 12px; }
 .files-filters .chip { background: var(--panel-2); border-radius: 10px; padding: 1px 8px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -354,18 +355,25 @@ details.group fieldset > .group-fields { margin-top: -4px; }
 .pages.secondary { margin-left: 0; }
 .pages.secondary button { font-size: 13px; }
 /* Library (plan 8a): folders and dates | the list of files | the selected file */
-.page.library { grid-template-columns: 250px minmax(360px, 1fr) minmax(320px, 38%); }
-.page.library.no-filters { grid-template-columns: minmax(360px, 1fr) minmax(320px, 38%); }
-.page.library.drawer-mode { grid-template-columns: minmax(0, 1fr) minmax(300px, 40%); grid-template-rows: none; }
+.page.library { grid-template-columns: var(--filters-width, 250px) minmax(320px, 1fr) var(--detail-width, 38%); }
+.page.library.no-filters { grid-template-columns: minmax(320px, 1fr) var(--detail-width, 38%); }
+.page.library.drawer-mode { grid-template-columns: minmax(0, 1fr) min(var(--detail-width, 40%), 55%); grid-template-rows: none; }
+/* the edges that are dragged: between the filters and the list, and between the list and the file */
+.pane-handle { position: absolute; top: 0; bottom: 0; width: 6px; cursor: col-resize; z-index: 3; touch-action: none; }
+.pane-handle:hover, .pane-handle:focus-visible, body.resizing .pane-handle:active { background: var(--accent); opacity: 0.5; }
+.filters-handle { left: calc(var(--filters-width, 250px) - 3px); }
+.detail-handle { right: calc(var(--detail-width, 38%) - 3px); }
+.page.library.drawer-mode > .detail-handle { right: calc(min(var(--detail-width, 40%), 55%) - 3px); }
 .page.library.one-pane { grid-template-columns: minmax(0, 1fr); }
 .page.library.one-pane > .library-detail { display: none; }
 .page.library.one-pane.detail-open > .library-detail { display: block; position: absolute; inset: 0; z-index: 4; background: var(--bg); }
 .library-detail > .back { margin: 10px 18px 0; }
 .library-search-row { display: flex; gap: 6px; align-items: center; }
 .library-search-row .library-search { flex: 1; min-width: 0; }
-.filters-toggle { flex: none; }
-.filters-toggle[aria-pressed="true"] { color: var(--accent); }
-.filters-toggle .count { display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 2px; border-radius: 9px; background: var(--accent); color: var(--accent-text); font-size: 11px; }
+.sidebar-toggle { flex: none; display: inline-flex; align-items: center; gap: 2px; padding: 3px 7px; color: var(--muted); background: var(--panel); }
+.sidebar-toggle:hover { color: var(--accent); }
+.sidebar-toggle .sidebar-arrow { font-size: 15px; line-height: 12px; }
+.sidebar-toggle .count { display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 2px; border-radius: 9px; background: var(--accent); color: var(--accent-text); font-size: 11px; }
 .library-left { background: var(--panel); border-right: 1px solid var(--border); overflow: auto; min-height: 0; padding: 8px 0; }
 .library-tree { list-style: none; margin: 0; padding: 2px 0 8px; user-select: none; }
 .library-tree ul { list-style: none; margin: 0; padding: 0; }
@@ -632,3 +640,5 @@ details.group fieldset > .group-fields { margin-top: -4px; }
 .settings-sub { padding-left: 1.6em; }
 @keyframes measuring-pulse { 50% { opacity: 0.35; } }
 @media (prefers-reduced-motion: reduce) { .measuring-status .measuring-dot { animation: none; } }
+/* the sidebar's show button in Explore's and Figure's tab row: as tall as a tab */
+.tabbar .sidebar-toggle.folders-toggle { padding: 6px 10px; border: none; border-right: 1px solid var(--border); border-radius: 0; background: none; }
