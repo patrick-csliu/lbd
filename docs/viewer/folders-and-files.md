@@ -5,6 +5,14 @@
 Explore and Figure have a **Files** sidebar on the left: a quick way to the next file without
 going back to the [Library](library.md).
 
+![The Files sidebar in Figure, listing the Library selection](img/files-sidebar.png){ width="560" }
+
+1. **Which list** (when ⚙ Settings → Files sidebar offers more than one).
+2. **The Library's filters** of this browser tab, and **Edit ↗**.
+3. **Search in these files…**
+4. **The file shown.**
+5. **Files:** hides or shows the sidebar.
+
 - **Library selection** (always there): the Library's list with this browser tab's filters
   (folder, date, search, labels) and sort. The filters show above the list, read-only;
   **Edit ↗** goes to the Library to change them. So: narrow the files down once in the Library,

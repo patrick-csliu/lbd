@@ -157,6 +157,8 @@ def start_viewer(data: Path) -> Tuple[str, uvicorn.Server]:
         port = s.getsockname()[1]
     cfg = Config(SCRATCH / "config")
     cfg.add_root(str(data))
+    # the Files sidebar offers every list; most shots open files from its folder tree (see main)
+    cfg.set_library({"sidebar_scopes": ["library", "folders", "starred", "recent"]})
     state = AppState(cfg, token=TOKEN, port=port)
     srv = uvicorn.Server(uvicorn.Config(create_app(state), host="127.0.0.1", port=port, log_level="warning"))
     threading.Thread(target=srv.run, daemon=True).start()
@@ -414,7 +416,7 @@ def library_pictures(page: Page, url: str, ctx) -> None:
     page.wait_for_function(                             # the pictures in view, drawn (or why not)
         "() => [...document.querySelectorAll('.library-card:not(.loading)')].every(c => !c.textContent.includes('Drawing'))",
         timeout=60_000)
-    page.locator(".library-detail .preview img").wait_for(timeout=60_000)
+    page.locator(".library-detail .library-file-head").wait_for()   # (no second preview on the right)
     page.mouse.move(5, 400)
     page.wait_for_timeout(800)
     mark(page, [])                                      # no numbers; the path as on the other shots
@@ -430,13 +432,38 @@ def folders(page: Page, url: str, ctx) -> None:
     page.locator(".context-menu").wait_for()
     mark(page, [
         (1, ".sidebar .filter", 0, "r"),
-        (2, ".sidebar .panel-head .actions", 0, "tl"),
+        (2, ".sidebar .filter-row .icon", 0, "r"),
         (3, ".sidebar .root-row", 0, "r"),
         (4, ".sidebar .dir-row", 0, "r"),
         (5, ".sidebar .file-row", 0, "r"),
         (6, ".context-menu", 0, "tr"),
     ])
     save(page, VIEWER_IMG / "folders.png", clip={"x": 0, "y": 0, "width": 640, "height": 520})
+
+
+@shot
+def files_sidebar(page: Page, url: str, ctx) -> None:
+    fresh(page, url, "Library")
+    page.locator(".library-row").first.wait_for(timeout=60_000)
+    notice = page.get_by_role("button", name="OK", exact=True)
+    if notice.is_visible():
+        notice.click()
+    page.get_by_label("Search the files").fill("resonator")
+    page.locator(".library-row", has_text="Late resonator sweep").first.wait_for()
+    page.get_by_role("tab", name="Figure", exact=True).click()
+    page.locator(".files-scope").select_option("library")
+    row = page.locator(".files-row", has_text="Late resonator sweep").first
+    row.dblclick()                                       # in Figure: plotted (a click shows what is inside)
+    page.locator(".tab-body:not([hidden]) .figure img").first.wait_for()
+    settle(page)
+    mark(page, [
+        (1, ".sidebar .files-scope", 0, "r"),
+        (2, ".sidebar .files-filters", 0, "r"),
+        (3, ".sidebar .filter", 0, "r"),
+        (4, ".sidebar .files-row.active", 0, "r"),
+        (5, "main:not([hidden]) .folders-toggle", 0, "b"),
+    ])
+    save(page, VIEWER_IMG / "files-sidebar.png", clip={"x": 0, "y": 0, "width": 720, "height": 560})
 
 
 @shot
@@ -635,6 +662,8 @@ def main(names: List[str]) -> int:
             for name in [n.replace("-", "_") for n in names] or list(SHOTS):
                 # a fresh browser window per shot: one page, nothing left from the shot before
                 ctx = browser.new_context(viewport=SIZE, color_scheme="light")
+                ctx.add_init_script("try { if (!sessionStorage.getItem('lbd-sidebar-scope')) "
+                                    "sessionStorage.setItem('lbd-sidebar-scope', 'folders') } catch (e) {}")
                 ctx.set_default_timeout(15_000)
                 page = ctx.new_page()
                 SHOTS[name](page, url, ctx)
