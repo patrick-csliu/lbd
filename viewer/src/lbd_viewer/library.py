@@ -172,6 +172,7 @@ class LibraryIndex:
         self.generation = 0                      # changes whenever the index does
         self.status: Dict[str, Any] = {"indexing": False, "done": 0, "total": 0, "errors": [], "scans": 0}
         self.missing: List[Dict[str, Any]] = []          # labels whose file can't be found
+        self.kept: Dict[str, Dict[str, List[str]]] = {}  # kind -> label -> folders keeping it without a file
         self.notes: List[str] = []                       # about labels, for the page (told once)
         self._sidecar_state: Optional[Dict[str, Optional[str]]] = None
 
@@ -533,6 +534,9 @@ class LibraryIndex:
                 y, m, d = day.split("-")
                 dates.setdefault(y, {}).setdefault(m, {})[d] = n
         trees = {"projects": {}, "users": {}, "tags": {}}
+        for kind, tree in (("project", "projects"), ("users", "users"), ("tags", "tags")):
+            for label in self.kept.get(kind, {}):                # kept without a file: shown, with 0
+                _count(trees[tree], label, 0)
         starred = 0
         for project, users, tags, star in labelled:
             starred += 1 if star else 0
@@ -636,12 +640,13 @@ def _listdir(folder: str) -> List[str]:
         return []
 
 
-def _count(tree: Dict[str, Any], label: str) -> None:
-    """Count a nested label (a/b/c) in a tree of {part: {"n": count, "c": children}}."""
+def _count(tree: Dict[str, Any], label: str, n: int = 1) -> None:
+    """Count a nested label (a/b/c) in a tree of {part: {"n": count, "c": children}} (n 0: only
+    make sure it is there, e.g. a label kept without a file)."""
     node = tree
     for part in label.split("/"):
         child = node.setdefault(part, {"n": 0, "c": {}})
-        child["n"] += 1
+        child["n"] += n
         node = child["c"]
 
 

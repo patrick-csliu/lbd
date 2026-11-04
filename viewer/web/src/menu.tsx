@@ -98,8 +98,11 @@ export interface ConfirmRequest {
   danger?: boolean;
   /** A text box, e.g. for the new name: its first value, the part to select, and a check. */
   input?: { value: string; selectEnd?: number; check: (value: string) => string | null };
+  /** Choices above the text box (e.g. "Put under" a group, "Kept in" a folder): each a list, its
+   * first value, and a label. Their values are given to onConfirm, in order. */
+  choices?: { label: string; options: { value: string; label: string }[]; value: string }[];
   /** Do the change. If it throws, the message is shown in the dialog and it stays open. */
-  onConfirm: (value: string) => Promise<void> | void;
+  onConfirm: (value: string, choices: string[]) => Promise<void> | void;
   /** An optional third choice next to Cancel, e.g. "Reload" beside "Overwrite". */
   secondary?: { label: string; onClick: () => Promise<void> | void };
 }
@@ -109,6 +112,7 @@ export function ConfirmDialog({ request, onClose }: { request: ConfirmRequest; o
   const ref = useRef<HTMLDialogElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState(request.input?.value ?? "");
+  const [chosen, setChosen] = useState<string[]>(() => (request.choices ?? []).map((c) => c.value));
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const problem = request.input ? request.input.check(value) : null;
@@ -127,7 +131,7 @@ export function ConfirmDialog({ request, onClose }: { request: ConfirmRequest; o
     if (problem || busy) return;
     setBusy(true);
     try {
-      await request.onConfirm(value);
+      await request.onConfirm(value, chosen);
       onClose();
     } catch (err) {
       setError((err as Error).message);
@@ -140,6 +144,18 @@ export function ConfirmDialog({ request, onClose }: { request: ConfirmRequest; o
       <form onSubmit={submit}>
         <h3 id="confirm-title">{request.title}</h3>
         {request.text && <p>{request.text}</p>}
+        {(request.choices ?? []).map((c, i) => (
+          <label key={c.label} className="dialog-choice">
+            {c.label}{" "}
+            <select value={chosen[i]} onChange={(e) => setChosen((old) => old.map((v, k) => (k === i ? e.target.value : v)))}>
+              {c.options.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        ))}
         {request.input && (
           <input
             ref={inputRef}

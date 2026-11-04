@@ -185,6 +185,9 @@ export interface LibraryRow {
 /** The state of a file being written (name.lbd.writing); null for every other file. */
 export type Writing = "measuring" | "elsewhere" | "silent" | "stopped" | null;
 
+/** The kinds of label that are nested and managed (a project, users, tags). */
+export type LabelKind = "project" | "users" | "tags";
+
 /** A nested label (project, user or tag) with the number of files that have it or one inside it. */
 export interface LabelNode {
   label: string; // the full label, e.g. "Qubit A/Device 3"
@@ -879,6 +882,15 @@ export const api = {
     call<LibraryFacets>("GET", "/api/library/facets", undefined, { ...(folder ? { folder } : {}), q, date }),
   librarySetLabels: (paths: string[], changes: LabelChanges) =>
     call<{ notes: string[] }>("POST", "/api/library/labels", { paths, ...changes }),
+  /** Keep a label although no file has it yet, in an open folder (`root`; default the first). */
+  libraryLabelCreate: (kind: LabelKind, label: string, root?: string) =>
+    call<{ notes: string[] }>("POST", "/api/library/labels/create", { kind, label, root: root ?? null }),
+  /** Rename a label, or move it into another group, on every file (`dry`: only count them). */
+  libraryLabelRename: (kind: LabelKind, old: string, newLabel: string, dry = false) =>
+    call<{ files: number; notes: string[] }>("POST", "/api/library/labels/rename", { kind, old, new: newLabel, dry }),
+  /** Take a label and the ones under it off every file (`dry`: only count them). */
+  libraryLabelRemove: (kind: LabelKind, label: string, dry = false) =>
+    call<{ files: number; notes: string[] }>("POST", "/api/library/labels/remove", { kind, label, dry }),
   librarySame: (path: string) => call<SameId>("GET", "/api/library/same", undefined, { path }),
   libraryResolve: (path: string, action: "new_id" | "same" | "trash") =>
     call<{ notes: string[] }>("POST", "/api/library/resolve", { path, action }),

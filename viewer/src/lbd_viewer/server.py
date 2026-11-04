@@ -286,6 +286,26 @@ class RenameBody(_Body):
     name: str
 
 
+class LabelKindBody(_Body):
+    kind: str                                # "project", "users" or "tags"
+
+
+class LabelCreateBody(LabelKindBody):
+    label: str
+    root: Optional[str] = None               # the open folder that keeps it (default: the first)
+
+
+class LabelRenameBody(LabelKindBody):
+    old: str
+    new: str
+    dry: bool = False                        # only count the files it would change
+
+
+class LabelRemoveBody(LabelKindBody):
+    label: str
+    dry: bool = False
+
+
 class LabelsBody(_Body):
     paths: List[str]
     star: Optional[bool] = None
@@ -994,6 +1014,22 @@ def create_app(state: AppState) -> FastAPI:
         if "project" in changes and changes["project"] == "":
             changes["project"] = None
         return {"notes": _labels_call(lambda: library_labels.set_labels(state.library, paths, changes))}
+
+    @app.post("/api/library/labels/create")
+    def library_label_create(body: LabelCreateBody):
+        """Keep a project, user or tag although no file has it yet (in an open folder's labels)."""
+        root = str(state.check_allowed(body.root)) if body.root else None
+        return {"notes": _labels_call(lambda: library_labels.create_label(state.library, body.kind, body.label, root))}
+
+    @app.post("/api/library/labels/rename")
+    def library_label_rename(body: LabelRenameBody):
+        """Rename a label, or move it into another group, on every file (`dry`: only count them)."""
+        return _labels_call(lambda: library_labels.rename_label(state.library, body.kind, body.old, body.new, body.dry))
+
+    @app.post("/api/library/labels/remove")
+    def library_label_remove(body: LabelRemoveBody):
+        """Take a label (and the ones under it) off every file (`dry`: only count them)."""
+        return _labels_call(lambda: library_labels.remove_label(state.library, body.kind, body.label, body.dry))
 
     @app.post("/api/library/resolve")
     def library_resolve(body: ResolveBody):

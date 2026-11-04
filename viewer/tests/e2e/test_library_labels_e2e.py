@@ -167,3 +167,44 @@ def test_duplicate_as_new_measurement_and_missing_labels(viewer, library_files, 
     panel.get_by_role("button", name="Discard").click()
     page.locator(".confirm-dialog").get_by_role("button", name="Discard").click()
     expect(missing).to_have_count(0, timeout=10_000)
+
+
+def test_labels_are_made_given_by_dragging_moved_and_renamed(viewer, library_files, new_page):
+    """The label headings show even before any file has one; + New makes a label kept without a
+    file; files dragged onto it get it; a label dragged onto another moves into it; the menu
+    renames it on every file. Each asks first, saying how many files it changes."""
+    page = new_page("Library")
+    shows(page, every_file(viewer), 20_000)
+    tags = page.locator(".library-tree[aria-label='Tags']")
+    expect(page.locator(".library-label-tree", has_text="Tags")).to_contain_text("No tags yet")
+    def new_tag(name):
+        page.get_by_role("button", name="New tags").click()
+        page.locator("dialog input").fill(name)
+        page.locator("dialog").get_by_role("button", name="Make it").click()
+        expect(tags.locator(".library-folder", has_text=name)).to_be_visible()
+    new_tag("cooldown-7")
+    expect(tags.locator(".library-folder", has_text="cooldown-7").locator(".count")).to_have_text("0")
+    # two files dragged onto it
+    rows(page).nth(1).click()
+    rows(page).nth(2).click(modifiers=["Shift"])
+    rows(page).nth(1).drag_to(tags.locator(".library-folder", has_text="cooldown-7"))
+    expect(page.locator("dialog h3")).to_have_text('Give the tag "cooldown-7" to 2 files?')
+    page.locator("dialog").get_by_role("button", name="Give the tag").click()
+    # (identical copies of those files elsewhere share their labels: the count can be more)
+    expect(tags.locator(".library-folder", has_text="cooldown-7").locator(".count")).not_to_have_text("0")
+    # moved into another tag by dragging
+    new_tag("fridge")
+    tags.locator(".library-folder", has_text="cooldown-7").drag_to(tags.locator(".library-folder", has_text="fridge"))
+    expect(page.locator("dialog")).to_contain_text(re.compile(r'it becomes "fridge/cooldown-7" on \d+ files'))
+    page.locator("dialog").get_by_role("button", name="Move").click()
+    # renamed with the menu, the label inside it following
+    expect(tags.get_by_role("button", name="Unfold fridge")).to_be_visible()      # it holds cooldown-7 now
+    tags.locator(".library-folder", has_text="fridge").first.click(button="right")
+    page.get_by_role("menuitem", name="Rename…").click()
+    expect(page.locator("dialog")).to_contain_text(re.compile(r"renamed on \d+ files, with the labels inside it"))
+    page.locator("dialog input").fill("fridge 2")
+    page.locator("dialog").get_by_role("button", name="Rename").click()
+    tags.get_by_role("button", name="Unfold fridge 2").click()
+    expect(tags.locator(".library-folder", has_text="cooldown-7")).to_be_visible()
+    page.get_by_label("Search the files").fill("fridge 2/cooldown-7")            # labels are searched
+    expect(status(page)).not_to_contain_text("0 of")

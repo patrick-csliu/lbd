@@ -704,3 +704,11 @@ details.group fieldset > .group-fields { margin-top: -4px; }
 .files-list.layout-columns .files-colhead button { color: var(--text); font-weight: 600; }
 .files-colcell .col-resize { position: absolute; top: 0; right: 0; width: 6px; height: 100%; cursor: col-resize; }
 .files-colcell .col-resize:hover { background: var(--accent); opacity: 0.4; }
+
+/* ---- labels on the left: headings with + New; where a dragged label or file would go ---- */
+.label-tree-head { display: flex; align-items: center; justify-content: space-between; padding: 0 12px 0 0; border-radius: var(--radius); }
+.label-tree-head h3 { margin: 6px 12px 2px; color: var(--muted); font-weight: 600; }
+.library-label-tree .label-empty { margin: 0 12px 6px; }
+.library-folder.drop-here, .label-tree-head.drop-here { background: var(--accent-soft); box-shadow: inset 0 0 0 2px var(--accent); }
+.dialog-choice { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+.dialog-choice select { flex: 1; min-width: 0; }

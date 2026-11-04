@@ -40,8 +40,9 @@ def _rows(ix: "LibraryIndex") -> List[Dict[str, Any]]:
 
 
 def _folders(ix: "LibraryIndex", rows: List[Dict[str, Any]]) -> List[str]:
-    """Folders whose sidecar matters: those with data files, and those that had labels before."""
-    out = {str(Path(r["path"]).parent) for r in rows}
+    """Folders whose sidecar matters: those with data files, those that had labels before, and
+    the open folders (where labels kept without a file are)."""
+    out = {str(Path(r["path"]).parent) for r in rows} | {str(Path(root).resolve()) for root in ix.roots()}
     with ix._lock:
         out |= {f for (f,) in ix._connect().execute("SELECT folder FROM sidecars")}
     return sorted(out)
@@ -110,6 +111,12 @@ def apply(ix: "LibraryIndex", renames: Optional[Dict[str, str]] = None) -> List[
         give(row, e)
     _store(ix, rows, shown, accepted)
     ix.missing = missing
+    kept: Dict[str, Dict[str, List[str]]] = {k: {} for k in labels.KINDS}
+    for folder, doc in docs.items():
+        for kind, items in labels.kept(doc).items():
+            for label in items:
+                kept[kind].setdefault(label, []).append(folder)
+    ix.kept = kept
     with ix._lock:
         db = ix._connect()
         db.execute("BEGIN")
@@ -376,3 +383,96 @@ def resolve_missing(ix: "LibraryIndex", entry: Dict[str, Any], path: Optional[st
         raise labels.LabelsError("those labels are gone already (changed elsewhere); nothing was done")
     notes += _move(frm, e, r, ix)
     return notes + apply(ix)
+
+
+# ---- managing labels: create, rename or move, remove (everywhere) -------------------------------
+
+def _sidecar_folders(ix: "LibraryIndex") -> List[str]:
+    with ix._lock:
+        known = {f for (f,) in ix._connect().execute("SELECT folder FROM sidecars")}
+    return sorted(known | {str(Path(root).resolve()) for root in ix.roots()})
+
+
+def _each(ix: "LibraryIndex", change, dry: bool) -> Tuple[int, List[str]]:
+    """Run `change(doc) -> entries changed` on every folder's labels (dry: only count). Returns the
+    number of entries changed and notes."""
+    count, notes = 0, []
+    for folder in _sidecar_folders(ix):
+        if not (Path(folder) / labels.SIDECAR).exists():
+            continue
+        if dry:
+            count += change(labels.read(Path(folder), notes))
+            continue
+        n = [0]
+
+        def run(doc, n=n):
+            n[0] = change(doc)
+        try:
+            notes += labels.update(Path(folder), run, ix.trash)
+        except labels.LabelsError as err:
+            notes.append(str(err))
+        count += n[0]
+    return count, notes
+
+
+def create_label(ix: "LibraryIndex", kind: str, label: str, root: Optional[str] = None) -> List[str]:
+    """Keep a label although no file has it yet (a new project before its first measurement), in
+    the open folder `root` (the only one when there is one)."""
+    roots = [str(Path(r).resolve()) for r in ix.roots()]
+    if not roots:
+        raise labels.LabelsError("add a folder first: labels are kept in the open folders")
+    folder = str(Path(root).resolve()) if root else roots[0]
+    if folder not in roots:
+        raise labels.LabelsError(f"{root} isn't one of the open folders")
+    notes = labels.update(Path(folder), lambda doc: labels.keep(doc, kind, label, True), ix.trash)
+    notes += apply(ix)
+    ix.generation += 1
+    return notes
+
+
+def rename_label(ix: "LibraryIndex", kind: str, old: str, new: str, dry: bool = False) -> Dict[str, Any]:
+    """`old` and every label under it become `new/…` on every file (and where it is kept): a rename
+    ("flux" → "flux bias") or a move into another group ("Device 3" → "Qubit B/Device 3")."""
+    old, new = labels._clean(old), labels._clean(new)
+    if labels._under(new, old) and new != old:
+        raise labels.LabelsError(f"'{old}' can't be moved inside itself ('{new}')")
+
+    def change(doc):
+        n = sum(1 for e in doc.get("files", []) if labels.relabel(e, kind, old, new))
+        for label in [x for x in labels.kept(doc)[kind] if labels._under(x, old)]:
+            labels.keep(doc, kind, label, False)
+            labels.keep(doc, kind, labels.renamed_label(label, old, new), True)
+        return n
+    count = _files_with(ix, kind, old)
+    if dry:
+        return {"files": count, "notes": []}
+    _, notes = _each(ix, change, False)
+    notes += apply(ix)
+    ix.generation += 1
+    return {"files": count, "notes": notes}
+
+
+def remove_label(ix: "LibraryIndex", kind: str, label: str, dry: bool = False) -> Dict[str, Any]:
+    """`label` and every label under it are taken off every file, and no longer kept."""
+    label = labels._clean(label)
+
+    def change(doc):
+        n = sum(1 for e in doc.get("files", []) if labels.relabel(e, kind, label, None))
+        for x in [x for x in labels.kept(doc)[kind] if labels._under(x, label)]:
+            labels.keep(doc, kind, x, False)
+        return n
+    count = _files_with(ix, kind, label)
+    if dry:
+        return {"files": count, "notes": []}
+    _, notes = _each(ix, change, False)
+    notes += apply(ix)
+    ix.generation += 1
+    return {"files": count, "notes": notes}
+
+
+def _files_with(ix: "LibraryIndex", kind: str, top: str) -> int:
+    """How many files in the Library have `top` or a label under it (identical copies counted, as
+    the label trees count them)."""
+    if kind == "project":
+        return ix.list(project=top, limit=1)["total"]
+    return ix.list(**{kind: [top]}, limit=1)["total"]

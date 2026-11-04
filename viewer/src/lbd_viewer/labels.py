@@ -33,6 +33,8 @@ LOCK = ".lbd-library.lock"
 FORMAT, VERSION = "lbd-library", 1
 SCALARS = ("star", "project", "comment")
 LISTS = ("users", "tags")
+KINDS = ("project", "users", "tags")   # the labels that can be kept without a file (`labels`)
+OWN_KEYS = ("format", "version", "files", "labels", "read_only")   # anything else a newer writer added is kept
 LOCK_STALE = 10.0                      # a lock older than this was left behind (a crash)
 LOCK_WAIT = 3.0                        # how long a writer waits for another one
 
@@ -156,9 +158,76 @@ def merge(a: Dict[str, Any], b: Dict[str, Any], notes: Optional[List[str]] = Non
     return out
 
 
+# ---- labels kept without a file (a new project before its first measurement) ------------------
+
+def kept(doc: Dict[str, Any]) -> Dict[str, List[str]]:
+    """The labels the folder keeps although no file needs to have them, per kind."""
+    marks = doc.get("labels") or {}
+    return {k: sorted((label for label, m in (marks.get(k) or {}).items() if m and m[-1]), key=str.lower) for k in KINDS}
+
+
+def keep(doc: Dict[str, Any], kind: str, label: str, on: bool = True,
+         when: Optional[str] = None, by: Optional[str] = None) -> str:
+    """Keep (or stop keeping) a label in the folder; recorded like a tag (newer wins on a merge)."""
+    if kind not in KINDS:
+        raise LabelsError(f"unknown kind of label {kind!r}; use one of {', '.join(KINDS)}")
+    label = _clean(label)
+    doc.setdefault("labels", {}).setdefault(kind, {})[label] = [when or now(), by or computer(), bool(on)]
+    return label
+
+
+def _merge_kept(a: Dict[str, Any], b: Dict[str, Any]) -> Dict[str, Any]:
+    out: Dict[str, Any] = {}
+    for kind in KINDS:
+        ma, mb = (a.get("labels") or {}).get(kind) or {}, (b.get("labels") or {}).get(kind) or {}
+        merged = {}
+        for label in set(ma) | set(mb):
+            ra, rb = ma.get(label), mb.get(label)
+            merged[label] = rb if rb and (not ra or rb[0] > ra[0]) else ra
+        if merged:
+            out[kind] = merged
+    return out
+
+
+def _under(label: str, top: str) -> bool:
+    """`label` is `top` or nested inside it ("Qubit A/Device 3" is under "Qubit A")."""
+    return label == top or label.startswith(top + "/")
+
+
+def renamed_label(label: str, old: str, new: str) -> str:
+    """`label` with its `old` part replaced by `new` ("Qubit A/Device 3", "Qubit A" → "Qubit B")."""
+    return new + label[len(old):]
+
+
+def relabel(e: Dict[str, Any], kind: str, old: str, new: Optional[str],
+            when: Optional[str] = None, by: Optional[str] = None) -> bool:
+    """In one file's entry: `old` and every label under it become `new/…` (None: removed). Each
+    change is recorded as an edit would be. Returns whether the entry changed."""
+    when, by = when or now(), by or computer()
+    if kind == "project":
+        p = e.get("project")
+        if not p or not _under(p, old):
+            return False
+        apply(e, {"project": renamed_label(p, old, new) if new else None}, when, by)
+        return True
+    hit = [x for x in e.get(kind, []) if _under(x, old)]
+    if not hit:
+        return False
+    changes: Dict[str, Any] = {f"remove_{kind}": hit}
+    if new:
+        changes[f"add_{kind}"] = [renamed_label(x, old, new) for x in hit]
+    apply(e, changes, when, by)
+    return True
+
+
 def merge_docs(a: Dict[str, Any], b: Dict[str, Any], notes: Optional[List[str]] = None) -> Dict[str, Any]:
-    """Two sidecars of one folder as one (entries matched by id, else by name)."""
-    out = {"format": FORMAT, "version": VERSION, "files": []}
+    """Two sidecars of one folder as one (entries matched by id, else by name; kept labels by
+    label, the newer decision wins; keys of a newer format kept)."""
+    out = {**{k: v for k, v in b.items() if k not in OWN_KEYS}, **{k: v for k, v in a.items() if k not in OWN_KEYS},
+           "format": FORMAT, "version": VERSION, "files": []}
+    marks = _merge_kept(a, b)
+    if marks:
+        out["labels"] = marks
     def key(e):
         return ("id", e["id"]) if e.get("id") else ("name", e.get("name"))
     index: Dict[Tuple[str, Any], Dict[str, Any]] = {}
@@ -283,7 +352,9 @@ def update(folder: Path, change: Callable[[Dict[str, Any]], None],
         if _version(p) != before:                      # changed while we worked: merge, don't overwrite
             doc = merge_docs(read(folder, notes), doc, notes)
         doc["files"] = [e for e in doc["files"] if not is_empty(e)]
-        doc = {"format": FORMAT, "version": VERSION, "files": doc["files"]}
+        # what this version doesn't know (written by a newer LBD of the same format version) is kept
+        doc = {**{k: v for k, v in doc.items() if k not in OWN_KEYS}, "format": FORMAT, "version": VERSION,
+               "files": doc["files"], **({"labels": doc["labels"]} if doc.get("labels") else {})}
         _write(p, doc)
         for c in copies:
             try:
@@ -303,7 +374,7 @@ def update(folder: Path, change: Callable[[Dict[str, Any]], None],
 def _write(p: Path, doc: Dict[str, Any]) -> None:
     from .files import _while_in_use
 
-    if not doc["files"]:
+    if not doc["files"] and not any(kept(doc).values()):    # nothing left to keep: no file
         if p.exists():
             _while_in_use(lambda: p.unlink())
         return

@@ -199,3 +199,53 @@ def test_the_labels_api(client, data_dir, library_files):
     assert client.post("/api/library/resolve", json={"path": paths[1], "action": "nonsense"}).status_code == 400
     assert client.get("/api/library/missing").json() == {"missing": []}
     assert client.get("/api/state").json()["login"]
+
+
+def tree_labels(nodes):
+    out = []
+    for n in nodes:
+        out.append((n["label"], n["count"]))
+        out += tree_labels(n["children"])
+    return out
+
+
+def test_a_label_kept_without_a_file_is_listed_with_none_and_survives_writes(lib):
+    ix, a, b = lib
+    ll.create_label(ix, "project", "Qubit C/Device 1", str(b))
+    assert ("Qubit C/Device 1", 0) in tree_labels(ix.facets()["projects"])
+    doc = json.loads((b / labels.SIDECAR).read_text())
+    assert doc["labels"]["project"]["Qubit C/Device 1"][2] is True and doc["files"] == []   # kept with no file
+    # another edit in that folder keeps it; so does a merge with a sync tool's copy
+    ll.set_labels(ix, [str(b / "three.lbd")], {"add_tags": ["x"]})
+    assert "Qubit C/Device 1" in labels.kept(labels.read(b))["project"]
+    other = {"format": labels.FORMAT, "version": 1, "files": [], "future_key": {"kept": True},
+             "labels": {"tags": {"later": [labels.now(), "LAPTOP", True]}}}
+    merged = labels.merge_docs(labels.read(b), other)
+    assert labels.kept(merged)["tags"] == ["later"] and "Qubit C/Device 1" in labels.kept(merged)["project"]
+    assert merged["future_key"] == {"kept": True}                     # a newer writer's key isn't dropped
+    with pytest.raises(labels.LabelsError):
+        ll.create_label(ix, "colour", "red", str(b))
+
+
+def test_a_label_is_renamed_moved_and_removed_on_every_file_with_its_children(lib):
+    ix, a, b = lib
+    ll.set_labels(ix, [str(a / "one.lbd"), str(b / "three.lbd")], {"add_tags": ["flux", "flux/bias"]})
+    ll.set_labels(ix, [str(a / "two.lbd")], {"project": "Qubit A/Device 3"})
+    ll.create_label(ix, "tags", "flux/new", str(a))
+    # the dry run counts the files, and changes nothing
+    assert ll.rename_label(ix, "tags", "flux", "flux bias", dry=True)["files"] == 2
+    assert row(ix, "one.lbd")["tags"] == ["flux", "flux/bias"]
+    r = ll.rename_label(ix, "tags", "flux", "flux bias")
+    assert r["files"] == 2
+    assert row(ix, "one.lbd")["tags"] == ["flux bias", "flux bias/bias"] and row(ix, "three.lbd")["tags"] == ["flux bias", "flux bias/bias"]
+    assert ("flux bias/new", 0) in tree_labels(ix.facets()["tags"])   # a kept label follows too
+    # move a project into another group
+    ll.rename_label(ix, "project", "Qubit A/Device 3", "Qubit B/Device 3")
+    assert row(ix, "two.lbd")["project"] == "Qubit B/Device 3"
+    with pytest.raises(labels.LabelsError):                            # not inside itself
+        ll.rename_label(ix, "project", "Qubit B", "Qubit B/Device 3/Qubit B")
+    # remove a tag and the ones under it from every file
+    assert ll.remove_label(ix, "tags", "flux bias", dry=True)["files"] == 2
+    ll.remove_label(ix, "tags", "flux bias")
+    assert row(ix, "one.lbd")["tags"] == [] and row(ix, "three.lbd")["tags"] == []
+    assert not any(label.startswith("flux") for label, _ in tree_labels(ix.facets()["tags"]))

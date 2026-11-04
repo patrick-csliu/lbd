@@ -1,3 +1,4 @@
+import type React from "react";
 import { CSSProperties, Dispatch, FormEvent, KeyboardEvent, MouseEvent, ReactNode, SetStateAction, useCallback, useEffect, useRef, useState } from "react";
 import {
   api,
@@ -7,6 +8,7 @@ import {
   FileInfo,
   formatBytes,
   LabelChanges,
+  LabelKind,
   LabelNode,
   LibraryColumn,
   LibraryFacets,
@@ -345,6 +347,115 @@ export default function LibraryPage(props: Props) {
     setMenu(menuAt(e, menuEntries(many ? chosenRows() : [r], r)));
   };
 
+  // ---- managing labels (the left column): new, rename, move, remove; drag and drop
+  const KIND_WORD: Record<LabelKind, string> = { project: "project", users: "user", tags: "tag" };
+  const kindNodes = (kind: LabelKind) => (kind === "project" ? facets?.projects : kind === "users" ? facets?.users : facets?.tags) ?? [];
+  const groups = (kind: LabelKind, except?: string) =>
+    flatten(kindNodes(kind))
+      .map(({ node }) => node.label)
+      .filter((l) => !except || (l !== except && !l.startsWith(except + "/")));
+  const filesWord = (n: number) => (n === 1 ? "1 file" : `${n} files`);
+  const checkName = (v: string) => (!v.trim() ? "Type a name" : /(^\/|\/$|\/\/)/.test(v.trim()) ? "A name can't start or end with /" : null);
+  const manage: LabelManagement = {
+    create: (kind, parent) => {
+      const roots = state.roots;
+      setConfirm({
+        title: `New ${KIND_WORD[kind]}`,
+        text: `It is kept even before a file has it; give it to files later (their labels, or drag files onto it). Nest with /, e.g. "Qubit A/Device 3".`,
+        action: "Make it",
+        choices: [
+          { label: "Put under", value: parent ?? "", options: [{ value: "", label: "(the top level)" }, ...groups(kind).map((g) => ({ value: g, label: g }))] },
+          ...(roots.length > 1 ? [{ label: "Kept in", value: roots[0], options: roots.map((r) => ({ value: r, label: baseName(r) })) }] : []),
+        ],
+        input: { value: "", check: checkName },
+        onConfirm: (v, [under, root]) => run(api.libraryLabelCreate(kind, under ? `${under}/${v.trim()}` : v.trim(), root), `Made the ${KIND_WORD[kind]} "${under ? `${under}/` : ""}${v.trim()}"`),
+      });
+    },
+    menu: (e, kind, node) => {
+      e.preventDefault();
+      const word = KIND_WORD[kind];
+      const parent = node.label.includes("/") ? node.label.slice(0, node.label.lastIndexOf("/")) : "";
+      const withCount = async (count: () => Promise<{ files: number }>, ask: (n: number) => void) => {
+        try {
+          ask((await count()).files);
+        } catch (err) {
+          toast((err as Error).message, "error");
+        }
+      };
+      setMenu(
+        menuAt(e, [
+          { label: `New ${word} under it…`, onClick: () => manage.create(kind, node.label) },
+          {
+            label: "Rename…",
+            onClick: () =>
+              withCount(() => api.libraryLabelRename(kind, node.label, node.label, true), (n) =>
+                setConfirm({
+                  title: `Rename the ${word} "${node.label}"`,
+                  text: `It is renamed on ${filesWord(n)}${node.children.length ? ", with the labels inside it" : ""}.`,
+                  action: "Rename",
+                  input: { value: lastPart(node.label), check: (v) => checkName(v) ?? (v.includes("/") ? "Use Move into… to put it into another group" : null) },
+                  onConfirm: (v) => run(api.libraryLabelRename(kind, node.label, parent ? `${parent}/${v.trim()}` : v.trim()).then((r) => ({ notes: r.notes }))),
+                }),
+              ),
+          },
+          {
+            label: "Move into…",
+            onClick: () =>
+              withCount(() => api.libraryLabelRename(kind, node.label, node.label, true), (n) =>
+                setConfirm({
+                  title: `Move the ${word} "${node.label}"`,
+                  text: `It moves on ${filesWord(n)}${node.children.length ? ", with the labels inside it" : ""}.`,
+                  action: "Move",
+                  choices: [{ label: "Into", value: parent, options: [{ value: "", label: "(the top level)" }, ...groups(kind, node.label).map((g) => ({ value: g, label: g }))] }],
+                  onConfirm: (_v, [into]) => {
+                    const to = into ? `${into}/${node.name}` : node.name;
+                    if (to !== node.label) return run(api.libraryLabelRename(kind, node.label, to).then((r) => ({ notes: r.notes })));
+                  },
+                }),
+              ),
+          },
+          "-",
+          {
+            label: "Remove from all files…",
+            danger: true,
+            onClick: () =>
+              withCount(() => api.libraryLabelRemove(kind, node.label, true), (n) =>
+                setConfirm({
+                  title: `Remove the ${word} "${node.label}"?`,
+                  text: `It is taken off ${filesWord(n)}${node.children.length ? ", with the labels inside it" : ""}, and no longer kept. The data files aren't touched.`,
+                  action: "Remove",
+                  danger: true,
+                  onConfirm: () => run(api.libraryLabelRemove(kind, node.label).then((r) => ({ notes: r.notes }))),
+                }),
+              ),
+          },
+        ]),
+      );
+    },
+    dropLabel: (kind, from, to) => {
+      const target = to ? `${to}/${lastPart(from)}` : lastPart(from);
+      if (target === from || (to && (to === from || to.startsWith(from + "/")))) return;
+      api
+        .libraryLabelRename(kind, from, target, true)
+        .then((r) =>
+          setConfirm({
+            title: `Move the ${KIND_WORD[kind]} "${from}"?`,
+            text: `${to ? `Into "${to}"` : "To the top level"}: it becomes "${target}" on ${filesWord(r.files)}.`,
+            action: "Move",
+            onConfirm: () => run(api.libraryLabelRename(kind, from, target).then((x) => ({ notes: x.notes }))),
+          }),
+        )
+        .catch((err) => toast((err as Error).message, "error"));
+    },
+    dropFiles: (kind, target, paths) =>
+      setConfirm({
+        title: kind === "project" ? `Set the project of ${filesWord(paths.length)}?` : `Give the ${KIND_WORD[kind]} "${target}" to ${filesWord(paths.length)}?`,
+        text: kind === "project" ? `Their project becomes "${target}"; a project they have now is replaced.` : undefined,
+        action: kind === "project" ? "Set the project" : `Give the ${KIND_WORD[kind]}`,
+        onConfirm: () => label(paths, kind === "project" ? { project: target } : kind === "tags" ? { add_tags: [target] } : { add_users: [target] }),
+      }),
+  };
+
   const setColumns = async (cols: LibraryColumn[]) => {
     try {
       onLibrarySettings(await api.setLibrary({ columns: cols }));
@@ -454,6 +565,7 @@ export default function LibraryPage(props: Props) {
           onStarred={setStarred}
           onConflicts={setConflicts}
           onMissing={() => setShowMissing(true)}
+          manage={manage}
         />
       </aside>
 
@@ -715,6 +827,13 @@ export default function LibraryPage(props: Props) {
                   }}
                   onDoubleClick={() => onOpenIn(r.path, "explore")}
                   onContextMenu={(e) => rowMenu(e, r)}
+                  draggable
+                  onDragStart={(e) => {
+                    // onto a label on the left: the selected files (this one when it isn't selected)
+                    const paths = chosen.includes(r.path) ? chosen : [r.path];
+                    e.dataTransfer.setData(DRAG_FILES, JSON.stringify(paths));
+                    e.dataTransfer.effectAllowed = "copy";
+                  }}
                 >
                   {columns.map((c) => (
                     <div
@@ -1499,6 +1618,21 @@ export function PreviewSettings({ settings, onSettings }: { settings: LibrarySet
 
 // ---- left: projects, users and tags (nested), starred, copies that differ, missing labels
 
+/** What can be done to the labels in the left column: made, renamed, moved, removed; dropped. */
+export interface LabelManagement {
+  /** + New (under `parent`, or at the top level) */
+  create: (kind: LabelKind, parent?: string) => void;
+  /** right-click (or the menu key) on a label */
+  menu: (e: MouseEvent | KeyboardEvent, kind: LabelKind, node: LabelNode) => void;
+  /** a label dropped on another (into it) or on its heading (`to` null: to the top level) */
+  dropLabel: (kind: LabelKind, from: string, to: string | null) => void;
+  /** files dragged from the list onto a label: given it */
+  dropFiles: (kind: LabelKind, label: string, paths: string[]) => void;
+}
+
+const DRAG_LABEL = "application/x-lbd-label";
+export const DRAG_FILES = "application/x-lbd-files";
+
 function LabelFilters(props: {
   facets: LibraryFacets | null;
   project: string;
@@ -1512,8 +1646,9 @@ function LabelFilters(props: {
   onStarred: (s: boolean) => void;
   onConflicts: (c: boolean) => void;
   onMissing: () => void;
+  manage: LabelManagement;
 }) {
-  const { facets, project, tags, users, starred, conflicts } = props;
+  const { facets, project, tags, users, starred, conflicts, manage } = props;
   const many = (list: string[], set: (l: string[]) => void) => (label: string) =>
     set(list.includes(label) ? list.filter((x) => x !== label) : [...list, label]);
   return (
@@ -1538,15 +1673,37 @@ function LabelFilters(props: {
           </button>
         )}
       </div>
-      <LabelTree title="Project" nodes={facets?.projects ?? []} chosen={project ? [project] : []} onPick={(l) => props.onProject(project === l ? "" : l)} />
-      <LabelTree title="Users" nodes={facets?.users ?? []} chosen={users} onPick={many(users, props.onUsers)} />
-      <LabelTree title="Tags" nodes={facets?.tags ?? []} chosen={tags} onPick={many(tags, props.onTags)} />
+      <LabelTree kind="project" title="Project" empty="No projects yet" nodes={facets?.projects ?? []} chosen={project ? [project] : []} onPick={(l) => props.onProject(project === l ? "" : l)} manage={manage} />
+      <LabelTree kind="users" title="Users" empty="No users yet" nodes={facets?.users ?? []} chosen={users} onPick={many(users, props.onUsers)} manage={manage} />
+      <LabelTree kind="tags" title="Tags" empty="No tags yet" nodes={facets?.tags ?? []} chosen={tags} onPick={many(tags, props.onTags)} manage={manage} />
     </div>
   );
 }
 
-function LabelTree({ title, nodes, chosen, onPick }: { title: string; nodes: LabelNode[]; chosen: string[]; onPick: (label: string) => void }) {
+/** A label's own name: its last part ("Device 3" of "Qubit A/Device 3"). */
+function lastPart(label: string): string {
+  return label.slice(label.lastIndexOf("/") + 1);
+}
+
+function LabelTree({
+  kind,
+  title,
+  empty,
+  nodes,
+  chosen,
+  onPick,
+  manage,
+}: {
+  kind: LabelKind;
+  title: string;
+  empty: string;
+  nodes: LabelNode[];
+  chosen: string[];
+  onPick: (label: string) => void;
+  manage: LabelManagement;
+}) {
   const [open, setOpen] = useState<Set<string>>(new Set());
+  const [over, setOver] = useState<string | null>(null); // where a drag would drop ("" : the heading)
   const toggle = (k: string) =>
     setOpen((o) => {
       const n = new Set(o);
@@ -1554,9 +1711,48 @@ function LabelTree({ title, nodes, chosen, onPick }: { title: string; nodes: Lab
       else n.add(k);
       return n;
     });
+  const dragged = (e: React.DragEvent): { label?: { kind: LabelKind; label: string }; files?: string[] } => {
+    try {
+      const l = e.dataTransfer.getData(DRAG_LABEL);
+      if (l) return { label: JSON.parse(l) };
+      const f = e.dataTransfer.getData(DRAG_FILES);
+      if (f) return { files: JSON.parse(f) };
+    } catch {
+      /* something else was dropped */
+    }
+    return {};
+  };
+  const accepts = (e: React.DragEvent) => e.dataTransfer.types.includes(DRAG_LABEL) || e.dataTransfer.types.includes(DRAG_FILES);
+  const dropTarget = (target: string | null) => ({
+    onDragOver: (e: React.DragEvent) => {
+      if (!accepts(e)) return;
+      e.preventDefault();
+      setOver(target ?? "");
+    },
+    onDragLeave: () => setOver(null),
+    onDrop: (e: React.DragEvent) => {
+      setOver(null);
+      const d = dragged(e);
+      e.preventDefault();
+      if (d.label && d.label.kind === kind && d.label.label !== target) manage.dropLabel(kind, d.label.label, target);
+      else if (d.files?.length && target) manage.dropFiles(kind, target, d.files);
+    },
+  });
   const node = (n: LabelNode, depth: number): ReactNode => (
     <li key={n.label} role="treeitem" aria-selected={chosen.includes(n.label)} aria-expanded={n.children.length ? open.has(n.label) : undefined}>
-      <div className={"library-folder" + (chosen.includes(n.label) ? " active" : "")} style={{ paddingLeft: 8 + depth * 14 }}>
+      <div
+        className={"library-folder" + (chosen.includes(n.label) ? " active" : "") + (over === n.label ? " drop-here" : "")}
+        style={{ paddingLeft: 8 + depth * 14 }}
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.setData(DRAG_LABEL, JSON.stringify({ kind, label: n.label }));
+          e.dataTransfer.effectAllowed = "move";
+        }}
+        onContextMenu={(e) => manage.menu(e, kind, n)}
+        onKeyDown={(e) => isMenuKey(e) && manage.menu(e, kind, n)}
+        title={`${n.label} · right-click: new, rename, move, remove · drag onto another label to move it into it`}
+        {...dropTarget(n.label)}
+      >
         {n.children.length ? (
           <button className="link twisty" aria-label={(open.has(n.label) ? "Fold " : "Unfold ") + n.label} onClick={() => toggle(n.label)}>
             {open.has(n.label) ? "▾" : "▸"}
@@ -1564,7 +1760,7 @@ function LabelTree({ title, nodes, chosen, onPick }: { title: string; nodes: Lab
         ) : (
           <span className="twisty" />
         )}
-        <button className="link folder-name" title={n.label} onClick={() => onPick(n.label)}>
+        <button className="link folder-name" onClick={() => onPick(n.label)}>
           {n.name}
         </button>
         <span className="count">{n.count}</span>
@@ -1572,13 +1768,23 @@ function LabelTree({ title, nodes, chosen, onPick }: { title: string; nodes: Lab
       {n.children.length > 0 && open.has(n.label) && <ul role="group">{n.children.map((c) => node(c, depth + 1))}</ul>}
     </li>
   );
-  if (!nodes.length) return null;
   return (
     <div className="library-label-tree">
-      <h3 className="small">{title}</h3>
-      <ul className="library-tree" role="tree" aria-label={title}>
-        {nodes.map((n) => node(n, 0))}
-      </ul>
+      <div className={"label-tree-head" + (over === "" ? " drop-here" : "")} {...dropTarget(null)} title="Drop a label here to move it to the top level">
+        <h3 className="small">{title}</h3>
+        <button className="link small" onClick={() => manage.create(kind)} aria-label={`New ${title.toLowerCase()}`} title={`A new ${kind === "users" ? "user" : kind === "tags" ? "tag" : "project"}, kept even before a file has it`}>
+          + New
+        </button>
+      </div>
+      {nodes.length ? (
+        <ul className="library-tree" role="tree" aria-label={title}>
+          {nodes.map((n) => node(n, 0))}
+        </ul>
+      ) : (
+        <p className="muted small pad label-empty">
+          {empty}. <strong>+ New</strong>, or set one on a file.
+        </p>
+      )}
     </div>
   );
 }
@@ -1707,7 +1913,9 @@ function LabelsEditor({ rows, facets, login, onChange, compact = false }: { rows
 
 function LabelPicker({ nodes, first, placeholder, onPick, onClose }: { nodes: LabelNode[]; first?: string; placeholder: string; onPick: (label: string) => void; onClose: () => void }) {
   const [text, setText] = useState("");
+  const [under, setUnder] = useState(""); // a new label goes under this group ("" : the top level)
   const t = text.trim().toLowerCase();
+  const newLabel = () => (under ? `${under}/${text.trim()}` : text.trim());
   const items = flatten(nodes).filter(({ node }) => !t || node.label.toLowerCase().includes(t));
   const suggested = first && (!t || first.toLowerCase().includes(t)) && !items.some(({ node }) => node.label === first) ? first : null;
   return (
@@ -1719,7 +1927,7 @@ function LabelPicker({ nodes, first, placeholder, onPick, onClose }: { nodes: La
         aria-label="Label"
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && text.trim()) onPick(text.trim());
+          if (e.key === "Enter" && text.trim()) onPick(items.some(({ node }) => node.label === text.trim()) ? text.trim() : newLabel());
           if (e.key === "Escape") onClose();
         }}
       />
@@ -1739,10 +1947,23 @@ function LabelPicker({ nodes, first, placeholder, onPick, onClose }: { nodes: La
           </li>
         ))}
         {text.trim() && !items.some(({ node }) => node.label === text.trim()) && (
-          <li>
-            <button className="link" onClick={() => onPick(text.trim())}>
-              New: {text.trim()}
+          <li className="picker-new">
+            <button className="link" onClick={() => onPick(newLabel())}>
+              New: {newLabel()}
             </button>
+            {nodes.length > 0 && (
+              <label className="small muted">
+                {" "}put under{" "}
+                <select value={under} onChange={(e) => setUnder(e.target.value)} aria-label="Put the new label under">
+                  <option value="">(the top level)</option>
+                  {flatten(nodes).map(({ node }) => (
+                    <option key={node.label} value={node.label}>
+                      {node.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
           </li>
         )}
       </ul>
