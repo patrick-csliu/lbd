@@ -119,17 +119,21 @@ class ExploreSession:
     `render`, under the render lock."""
 
     def __init__(self, path: Path, version: str, spec: Dict[str, Any], style: Style,
-                 width: int, height: int, dpr: float, saved_view: bool = True, summarise: bool = True):
+                 width: int, height: int, dpr: float, saved_view: bool = True, summarise: bool = True,
+                 bare: bool = False):
         """`saved_view` False: the file's saved figure view (/plot) is not used at all (the
         Library's automatic previews, plan 8c, depend on the data only). `summarise` False: a
         map bigger than memory is refused instead of summarised (previews, drawn in the
-        background, never start reading a whole large file)."""
+        background, never start reading a whole large file). `bare` True: only the data, filling
+        the picture: no axes, tick labels, axis labels, colour bar, legend or second axis (the
+        Library's previews: a thumbnail of the data, small and the same for every file)."""
         if width < 50 or height < 50:
             raise ExploreError(f"the plot area is too small ({width}×{height} px); make the window larger")
         self.id = secrets.token_urlsafe(9)
         self.path, self.version, self.style = path, version, style
         self.saved_view = saved_view
         self.summarise = summarise
+        self.bare = bare
         self.last_used = time.monotonic()
         self.header = self._read(lbd.info(path))
         self.data = self._read(lbd.load(path, values=[]))
@@ -254,6 +258,9 @@ class ExploreSession:
         layout (that would cost a second drawing). Call under the render lock."""
         from matplotlib.ticker import FuncFormatter
 
+        if self.bare:
+            self._bare_out()
+            return
         kept = [(a, a.get_major_formatter()) for a in (self.ax.xaxis, self.ax.yaxis)]
         for a, _ in kept:
             wide = FuncFormatter(lambda v, pos: WIDEST_TICK)
@@ -278,6 +285,21 @@ class ExploreSession:
             x0, x1 = pos.x0 + max(left, 0) / width, pos.x1 - max(right, 0) / width
             if x1 - x0 > 0.2:
                 self.ax.set_position([x0, pos.y0, x1 - x0, pos.height])
+
+    def _bare_out(self) -> None:
+        """Only the data, over the whole picture (`bare`). Call under the render lock."""
+        image = getattr(self, "image", None) if self.kind == "heatmap" else None
+        if image is not None and image.colorbar is not None:
+            image.colorbar.remove()
+        legend = self.ax.get_legend()
+        if legend is not None:
+            legend.remove()
+        for child in list(self.ax.child_axes):            # a second y axis (values of two units)
+            child.remove()
+        self.ax.set_title("")
+        self.ax.set_axis_off()
+        self.fig.set_layout_engine("none")
+        self.ax.set_position([0, 0, 1, 1])
 
     # -- setup
 

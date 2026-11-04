@@ -89,3 +89,49 @@ def test_an_unreadable_file_says_why(data_dir, style):
     with pytest.raises(PreviewError) as e:
         draw_automatic(data_dir / "broken.lbd", style)
     assert str(e.value)
+
+
+def test_a_preview_is_the_data_only(data_dir, style):
+    """No axes, tick labels, colour bar or legend: a map's preview is the map up to its edges."""
+    d = lbd.Dataset(title="map")
+    d.add_axis("y", np.linspace(0, 1, 30), unit="V", label="Gate")
+    d.add_axis("x", np.linspace(0, 1, 40), unit="Hz", label="Frequency")
+    d.add_value("z", np.add.outer(np.linspace(0, 1, 30), np.linspace(0, 1, 40)), axes=["y", "x"], unit="dB")
+    path = data_dir / "map.lbd"
+    d.save(path)
+    im = np.asarray(picture(draw_automatic(path, style)).convert("RGB")).astype(int)
+    h, w, _ = im.shape
+    white = (im > 245).all(axis=2)
+    # the corners and the middle of each edge are data, not the white margin a plot's axes need
+    for y, x in ((2, 2), (2, w - 3), (h - 3, 2), (h - 3, w - 3), (h // 2, 2), (h // 2, w - 3), (2, w // 2), (h - 3, w // 2)):
+        assert not white[y, x], (y, x)
+
+
+def test_a_bare_session_has_no_axes_colour_bar_legend_or_second_axis(data_dir, style):
+    from lbd_viewer.explore import ExploreSession
+
+    x = np.linspace(0, 1, 50)
+    d = lbd.Dataset(title="two units")
+    d.add_axis("t", x, unit="s")
+    d.add_value("v", np.sin(x * 5), axes=["t"], unit="V")
+    d.add_value("i", np.cos(x * 5), axes=["t"], unit="A")
+    path = data_dir / "two units.lbd"
+    d.save(path)
+    import warnings
+
+    from lbd.plot.render import RenderWarning
+
+    with warnings.catch_warnings():                       # (two units: told when the file is opened)
+        warnings.simplefilter("ignore", RenderWarning)
+        s = ExploreSession(path, "", {"values": ["v", "i"]}, style, 320, 240, 1.0, bare=True)
+    try:
+        assert not s.ax.axison and s.ax.get_legend() is None and not s.ax.child_axes
+        assert tuple(round(v, 3) for v in s.ax.get_position().bounds) == (0, 0, 1, 1)
+        s.render(None, None)
+    finally:
+        s.close()
+    s = ExploreSession(data_dir / "sub" / "sweep.lbd", "", {}, style, 320, 240, 1.0, bare=True)
+    try:
+        assert s.kind == "heatmap" and s.image.colorbar is None and not s.ax.axison
+    finally:
+        s.close()

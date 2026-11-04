@@ -7,6 +7,9 @@
   is kept (catalog.py), never how it was made.
 - Every preview has one size (4:3, PREVIEW_SIZE CSS pixels at PREVIEW_DPR) and is a WebP
   picture: a fraction of a PNG's size, so thousands of them stay small.
+- A preview shows only the data (ExploreSession `bare`): no axes, tick labels, axis labels,
+  colour bar or legend; the plot fills its panel. It is a thumbnail of the data, the same for
+  every file; the numbers are in the file's details next to it.
 - Drawing a panel is an ExploreSession (explore.py) at its share of the picture, so a preview
   uses Explore's reduction (a large map draws in about a second) and looks like Explore.
 - Automatic pictures are a cache (`previews.sqlite`, next to the Library index): current while
@@ -42,11 +45,11 @@ from lbd.plot.render import RenderWarning, flat
 from lbd.plot.style import Style
 
 PREVIEW_SIZE = (640, 480)           # drawn as a 640×480 Explore panel (text in proportion), 4:3
-PREVIEW_DPR = 1.5                   # 960×720 pixels: sharp when shown 480×360 on a high-resolution screen
+PREVIEW_DPR = 2.0                   # 1280×960 pixels: sharp up to 640×480 on a high-density (2×, e.g. 4K) screen
 PREVIEW_QUALITY = 80                # WebP quality (0-100); lines and text stay readable
 FIRST_PANELS = 4                    # as Explore (ExploreTab.tsx FIRST_PANELS)
 BACKGROUND = (255, 255, 255, 255)   # around the panels
-CACHE_FILE, CACHE_SCHEMA = "previews.sqlite", 1
+CACHE_FILE, CACHE_SCHEMA = "previews.sqlite", 2   # 2: data only (no axes, labels, colour bar), at 2×
 REDRAW_EVERY = 30.0                 # a file that keeps changing (being written) is redrawn in the background at most this often
 NOW, NEAR, ALL = 0, 1, 2            # priorities: what the user looks at, the rows near it, every file
 log = logging.getLogger("lbd_viewer")
@@ -108,7 +111,8 @@ def draw(path: Path, panels: Sequence[Panel], grid: Tuple[int, int], style: Styl
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", RenderWarning)
                 s = ExploreSession(Path(path), version, dict(panel.get("spec") or {}), style,
-                                   x1 - x0, y1 - y0, PREVIEW_DPR, saved_view=saved_view, summarise=False)
+                                   x1 - x0, y1 - y0, PREVIEW_DPR, saved_view=saved_view, summarise=False,
+                                   bare=True)
                 try:
                     s.apply(panel.get("settings") or {})
                     view = panel.get("view") or {}
