@@ -3,8 +3,9 @@ import { MemorySettings } from "./MemorySettings";
 import { MeasurementSettings } from "./MeasurementSettings";
 import { DEFAULT_MEASUREMENTS, MeasurementsContext, notifyInBackground } from "./MeasuringStatus";
 import { onFinished } from "./watch";
-import { api, ApiError, AppState, baseName, fileKind, LibraryQuery, OpenDataIn, OpenFilesIn, PageCommand, PageEntry, TabState, Theme, viewerUrl, Workspace } from "./api";
-import FolderPanel from "./FolderPanel";
+import { api, ApiError, AppState, baseName, fileKind, LibraryQuery, OpenDataIn, SidebarScope, OpenFilesIn, PageCommand, PageEntry, TabState, Theme, viewerUrl, Workspace } from "./api";
+import FilesSidebar, { SidebarScopeSettings } from "./FilesSidebar";
+import { DRAWER_MEDIA, useMedia } from "./useMedia";
 import { loadLibraryQuery, saveLibraryQuery } from "./libraryQuery";
 import FileView from "./FileView";
 import LibraryPage, { PreviewSettings } from "./LibraryPage";
@@ -23,11 +24,11 @@ import { fileEntries, renameRequest } from "./fileActions";
 // The three workspaces (find files, explore data, make figures), and two pages of settings.
 type Page = Workspace | "styles" | "sdk";
 
-// Width of the Folders panel: dragged by the user, remembered in this browser.
+// Width of the Files sidebar: dragged by the user, remembered in this browser.
 const SIDEBAR_KEY = "lbd-sidebar-width";
 const SIDEBAR_DEFAULT = 300;
 const SIDEBAR_MIN = 180;
-// Whether this browser tab shows the Folders panel (per tab: hide it in one of two windows).
+// Whether this browser tab shows the Files sidebar (per tab: hide it in one of two windows).
 const FOLDERS_SHOWN_KEY = "lbd-folders-shown";
 // The workspace this browser tab shows, so reloading the page stays there (per tab).
 const WORKSPACE_KEY = "lbd-workspace";
@@ -59,6 +60,36 @@ function saveSidebarWidth(w: number) {
     localStorage.setItem(SIDEBAR_KEY, String(w));
   } catch {
     /* storage unavailable: the width just isn't remembered */
+  }
+}
+
+// The Files sidebar's list, and the data files opened lately (per browser tab).
+const SCOPE_KEY = "lbd-sidebar-scope";
+const RECENT_KEY = "lbd-recent";
+const RECENT_MAX = 30;
+
+function loadSession(key: string, fallback: string): string {
+  try {
+    return sessionStorage.getItem(key) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function saveSession(key: string, value: string) {
+  try {
+    sessionStorage.setItem(key, value);
+  } catch {
+    /* storage unavailable: just not kept over a reload */
+  }
+}
+
+function parseList(text: string): string[] {
+  try {
+    const v = JSON.parse(text);
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
   }
 }
 
@@ -151,6 +182,15 @@ function Shell() {
   // this browser tab's Library filters: the Library page and the Files sidebar share them
   const [libraryQuery, setLibraryQuery] = useState<LibraryQuery>(loadLibraryQuery);
   useEffect(() => saveLibraryQuery(libraryQuery), [libraryQuery]);
+  // the Files sidebar's list (shared by Explore and Figure), and the data files opened lately
+  const [sidebarScope, setSidebarScope] = useState<SidebarScope>(() => loadSession(SCOPE_KEY, "library") as SidebarScope);
+  useEffect(() => saveSession(SCOPE_KEY, sidebarScope), [sidebarScope]);
+  const [recent, setRecent] = useState<string[]>(() => parseList(loadSession(RECENT_KEY, "[]")));
+  useEffect(() => saveSession(RECENT_KEY, JSON.stringify(recent)), [recent]);
+  useEffect(() => {
+    for (const p of [active, exploreActive])
+      if (p && fileKind(p) === "lbd") setRecent((r) => (r[0] === p ? r : [p, ...r.filter((x) => x !== p)].slice(0, RECENT_MAX)));
+  }, [active, exploreActive]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const pageRef = useRef<HTMLDivElement>(null);
   const sidebarRef = useRef<HTMLElement>(null);
@@ -573,6 +613,7 @@ function Shell() {
       url.searchParams.delete("open");
       url.searchParams.delete("claim");
       url.searchParams.delete("in");
+      url.searchParams.delete("library"); // the Library filters it came with: already taken (loadLibraryQuery)
       window.history.replaceState(null, "", url.toString());
       if (claim) await receiveTransfer(page, claim);
       if (open) {
@@ -680,7 +721,24 @@ function Shell() {
     return { x: tabMenu.x, y: tabMenu.y, items };
   }, [tabMenu, otherPages, tabs, selected, locks, closeTabs, moveTabs, state?.platform, toast, askRenameTab]);
 
+  // In a narrower window the sidebar slides over the content when asked for (and closes again:
+  // Esc, a click beside it, a file kept open); the choice made in a wide window is kept for it.
+  const drawerMode = useMedia(DRAWER_MEDIA);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  useEffect(() => setDrawerOpen(false), [drawerMode, page]);
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const onKey = (e: globalThis.KeyboardEvent) => e.key === "Escape" && setDrawerOpen(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [drawerOpen]);
+  const sidebarShown = drawerMode ? drawerOpen : foldersShown;
+
   const toggleFolders = () => {
+    if (drawerMode) {
+      setDrawerOpen((o) => !o);
+      return;
+    }
     setFoldersShown((shown) => {
       try {
         sessionStorage.setItem(FOLDERS_SHOWN_KEY, shown ? "no" : "yes");
@@ -760,7 +818,7 @@ function Shell() {
     return { x: exploreMenu.x, y: exploreMenu.y, items };
   }, [exploreMenu, exploreTabs, closeExplore, openIn, state?.platform, toast, fileRenamed]);
 
-  // ---- Folders panel width: drag the handle, double-click to fit the longest name
+  // ---- Files sidebar width: drag the handle, double-click to fit the longest name
 
   const setWidth = (w: number) => {
     const c = clampSidebar(w);
@@ -901,6 +959,7 @@ function Shell() {
                   online: opening a file there downloads all of it.
                 </p>
                 <PreviewSettings settings={state.library} onSettings={setState} />
+                <SidebarScopeSettings state={state} onSettings={setState} />
                 <MemorySettings settings={state.memory} onSettings={setState} />
                 <MeasurementSettings settings={state.measurements ?? DEFAULT_MEASUREMENTS} onSettings={setState} />
                 <div className="settings-title">Theme</div>
@@ -947,20 +1006,29 @@ function Shell() {
       )}
 
       <div
-        className={"page" + (foldersShown ? "" : " no-folders")}
+        className={"page" + (drawerMode ? " drawer-mode" : foldersShown ? "" : " no-folders")}
         hidden={page !== "explore" && page !== "figure"}
         ref={pageRef}
         style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}
       >
-        <aside className="sidebar" ref={sidebarRef} hidden={!foldersShown}>
+        {drawerMode && drawerOpen && <div className="drawer-backdrop" onClick={() => setDrawerOpen(false)} aria-hidden="true" />}
+        <aside className="sidebar" ref={sidebarRef} hidden={!sidebarShown}>
           {state && (
-            <FolderPanel
-              roots={state.roots}
+            <FilesSidebar
+              workspace={page === "explore" ? "explore" : "figure"}
+              state={state}
+              query={libraryQuery}
+              scope={sidebarScope}
+              onScope={setSidebarScope}
+              recent={recent}
               activePath={page === "explore" ? exploreActive : active}
-              platform={state.platform}
-              onRootsChanged={(roots) => setState({ ...state, roots })}
               onSelect={page === "explore" ? (path) => openExplore([path], false) : selectFile}
-              onOpen={page === "explore" ? (path) => openExplore([path], true) : openFile}
+              onOpen={(path) => {
+                if (page === "explore") openExplore([path], true);
+                else openFile(path);
+                setDrawerOpen(false); // kept open as a tab: the drawer has done its job
+              }}
+              onEditInLibrary={() => setPage("library")}
               onOpenInNewBrowserTab={openInNewBrowserTab}
               onRenamed={fileRenamed}
               onDeleted={(path) => {
@@ -971,12 +1039,12 @@ function Shell() {
             />
           )}
         </aside>
-        {foldersShown && (
+        {foldersShown && !drawerMode && (
           <div
             className="sidebar-handle"
             role="separator"
             aria-orientation="vertical"
-            aria-label="Width of the folder panel"
+            aria-label="Width of the Files sidebar"
             aria-valuenow={sidebarWidth}
             aria-valuemin={SIDEBAR_MIN}
             tabIndex={0}
@@ -993,11 +1061,11 @@ function Shell() {
           <div className="tabbar">
             <button
               className="folders-toggle"
-              aria-pressed={foldersShown}
-              title={foldersShown ? "Hide the Folders panel (more room for plots)" : "Show the Folders panel"}
+              aria-pressed={sidebarShown}
+              title={sidebarShown ? "Hide the Files sidebar (more room for plots)" : "Show the Files sidebar"}
               onClick={toggleFolders}
             >
-              ◧ Folders
+              <SidebarIcon /> Files
             </button>
             <div className="tabs" role="tablist" aria-label="Files in Explore">
               {exploreTabs.map((t) => (
@@ -1049,11 +1117,11 @@ function Shell() {
           <div className="tabbar" onContextMenu={(e) => tabs.length > 0 && openTabMenu(e, null)}>
             <button
               className="folders-toggle"
-              aria-pressed={foldersShown}
-              title={foldersShown ? "Hide the Folders panel (more room for plots)" : "Show the Folders panel"}
+              aria-pressed={sidebarShown}
+              title={sidebarShown ? "Hide the Files sidebar (more room for plots)" : "Show the Files sidebar"}
               onClick={toggleFolders}
             >
-              ◧ Folders
+              <SidebarIcon /> Files
             </button>
             <div className="tabs" role="tablist">
               {tabs.map((t) => {
@@ -1166,19 +1234,29 @@ function Shell() {
   );
 }
 
+/** The Files sidebar's button: a window with a panel on its left (not ◧, the data files' icon). */
+function SidebarIcon() {
+  return (
+    <svg className="sidebar-icon" width="14" height="12" viewBox="0 0 14 12" aria-hidden="true">
+      <rect x="0.5" y="0.5" width="13" height="11" rx="1.5" fill="none" stroke="currentColor" />
+      <rect x="0.5" y="0.5" width="4.5" height="11" rx="1.5" fill="currentColor" />
+    </svg>
+  );
+}
+
 function EmptyMain({ hasRoots, where }: { hasRoots: boolean; where: "explore" | "figure" }) {
   return (
     <div className="empty">
       <h2>No file open</h2>
       {hasRoots ? (
         where === "explore" ? (
-          <p>Click a file in the folder panel to look at it, and double-click it to keep it open. Zoom with the wheel; click a point to read its value.</p>
+          <p>Click a file in the Files sidebar to look at it, and double-click it to keep it open. Zoom with the wheel; click a point to read its value.</p>
         ) : (
-          <p>Click a file in the folder panel to see what is inside it, and double-click it to plot it.</p>
+          <p>Click a file in the Files sidebar to see what is inside it, and double-click it to plot it.</p>
         )
       ) : (
         <p>
-          Add a folder that contains <code>.lbd</code> files using <strong>Add folder</strong> on the left. You can also
+          Add a folder that contains <code>.lbd</code> files in the <strong>Library</strong> (<strong>+ Add folder</strong>). You can also
           double-click an <code>.lbd</code> file on your computer to open it here.
         </p>
       )}

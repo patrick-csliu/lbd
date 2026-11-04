@@ -64,6 +64,10 @@ class Viewer:
         # These tests are about files opened as figures (tabs that own their file, moving between
         # pages); Explore has tests of its own (test_explore_e2e.py), which choose it.
         cfg.set_open_data_in("figure")
+        # Most tests find files in the folder tree: the Files sidebar offers it ("folders"), and
+        # every page starts on it (`context`). The sidebar's other lists have tests of their own
+        # (test_files_sidebar_e2e.py), which choose them.
+        cfg.set_library({"sidebar_scopes": ["library", "folders", "starred", "recent"]})
         config = uvicorn.Config(create_app(self.state), host="127.0.0.1", port=self.port,
                                 log_level="warning", timeout_graceful_shutdown=1)
         self.server = uvicorn.Server(config)
@@ -102,6 +106,8 @@ def context(browser, viewer):
     """One browser window: its pages share pop-ups (a "new browser tab" opens in it).
     Closed before the viewer stops (it uses `viewer`), so no page is still waiting on it."""
     c = browser.new_context(viewport={"width": 1280, "height": 800})
+    # each browser tab starts with the Files sidebar on the folder tree (see Viewer)
+    c.add_init_script("try { if (!sessionStorage.getItem('lbd-sidebar-scope')) sessionStorage.setItem('lbd-sidebar-scope', 'folders') } catch (e) {}")
     c.set_default_timeout(TIMEOUT_MS)
     sync_api.expect.set_options(timeout=TIMEOUT_MS)
     yield c

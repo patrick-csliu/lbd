@@ -121,7 +121,13 @@ export interface LibrarySettings {
   previews: PreviewMode;
   /** the list as rows or as pictures */
   list_view: "list" | "pictures";
+  /** the lists the Files sidebar of Explore and Figure offers ("library" always) */
+  sidebar_scopes: SidebarScope[];
 }
+
+/** What the Files sidebar lists: the Library's list with this tab's filters, the folder tree,
+ * the starred files, or the files opened lately. */
+export type SidebarScope = "library" | "folders" | "starred" | "recent";
 
 export type PreviewMode = "all" | "nearby" | "off";
 
@@ -1002,7 +1008,6 @@ async function download(url: string, method: string, body: unknown, fallbackName
   return name;
 }
 
-/** The address of a new viewer browser tab: with a file to open, or a move to claim. */
 /** The viewer's address in a new browser tab: opening a file (in Explore or Figure), or taking
  *  tabs moved from another page. */
 export function viewerUrl(params: { open?: string; claim?: string; in?: Workspace } = {}): string {
@@ -1010,8 +1015,18 @@ export function viewerUrl(params: { open?: string; claim?: string; in?: Workspac
   if (params.open) q.set("open", params.open);
   if (params.in) q.set("in", params.in);
   if (params.claim) q.set("claim", params.claim);
+  // a new browser page starts with this page's Library filters (its Files sidebar lists the same files)
+  try {
+    const filters = sessionStorage.getItem(LIBRARY_QUERY_KEY);
+    if (filters) q.set("library", filters);
+  } catch {
+    /* storage unavailable: the new page starts without filters */
+  }
   return `${window.location.origin}/?${q}`;
 }
+
+/** Where this browser tab keeps its Library filters (libraryQuery.ts). */
+export const LIBRARY_QUERY_KEY = "lbd-library-query";
 
 export function baseName(p: string): string {
   const parts = p.split(/[\\/]/);

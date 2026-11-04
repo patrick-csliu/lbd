@@ -37,8 +37,12 @@ LIBRARY_COLUMNS = ("name", "date", "sweep", "values", "folder", "size", "file", 
                    "star", "project", "users", "tags", "comment", "copies")
 PREVIEW_MODES = ("all", "nearby", "off")
 LIST_VIEWS = ("list", "pictures")
+# The Files sidebar of Explore and Figure: which lists it offers. "library": the Library's list
+# with the browser tab's filters (always offered); "folders": the folder tree (in Figure with
+# images and style files); "starred": the starred files; "recent": the files opened lately.
+SIDEBAR_SCOPES = ("library", "folders", "starred", "recent")
 LIBRARY_DEFAULTS: Dict[str, Any] = {"read_headers": True, "notice_seen": False, "columns": ["name", "date", "sweep"],
-                                    "previews": "all", "list_view": "list"}
+                                    "previews": "all", "list_view": "list", "sidebar_scopes": ["library"]}
 # Memory for data (plan 6d, memory.py): what to leave free for the rest of the computer (None:
 # automatic, max(2 GB, 10% of RAM)), the most LBD may use (None: no maximum), and the disk cache
 # of large maps' and curves' summaries. In GB.
@@ -201,7 +205,8 @@ class Config:
             self._save_settings(s)
 
     def set_library(self, changes: Dict[str, Any]) -> Dict[str, Any]:
-        """Change Library settings (read_headers, notice_seen, columns); returns them all."""
+        """Change Library settings (read_headers, notice_seen, columns, previews, list_view,
+        sidebar_scopes); returns them all."""
         unknown = sorted(set(changes) - set(LIBRARY_DEFAULTS))
         if unknown:
             raise ConfigError(f"unknown Library setting(s) {unknown}; known: {sorted(LIBRARY_DEFAULTS)}")
@@ -318,6 +323,11 @@ def _check_library(library: Dict[str, Any]) -> Dict[str, Any]:
     cols = library.get("columns")
     if not isinstance(cols, list) or not cols or any(c not in LIBRARY_COLUMNS for c in cols):
         raise ConfigError(f"Library 'columns' must be a list of {', '.join(LIBRARY_COLUMNS)}, not {cols!r}")
+    scopes = library.get("sidebar_scopes")
+    if not isinstance(scopes, list) or "library" not in scopes or any(x not in SIDEBAR_SCOPES for x in scopes):
+        raise ConfigError(f"Library 'sidebar_scopes' must be a list of {', '.join(SIDEBAR_SCOPES)} with library in it, "
+                          f"not {scopes!r}")
+    library = {**library, "sidebar_scopes": [x for x in SIDEBAR_SCOPES if x in scopes]}   # in this order, once each
     for key, allowed in (("previews", PREVIEW_MODES), ("list_view", LIST_VIEWS)):
         if library.get(key) not in allowed:
             raise ConfigError(f"Library setting '{key}' must be one of {', '.join(allowed)}, not {library.get(key)!r}")

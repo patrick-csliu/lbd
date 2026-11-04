@@ -1,5 +1,5 @@
-import { FormEvent, KeyboardEvent, MouseEvent, useCallback, useEffect, useState } from "react";
-import { api, ApiError, baseName, DirListing, FileKind, fileKind, joinPath, SearchResult } from "./api";
+import { createContext, KeyboardEvent, MouseEvent, useCallback, useContext, useEffect, useState } from "react";
+import { api, baseName, DirListing, FileKind, fileKind, joinPath, SearchResult } from "./api";
 import { ConfirmDialog, ConfirmRequest, ContextMenu, isMenuKey, MenuAt, menuAt, MenuEntry, systemNames } from "./menu";
 import { useToast } from "./toast";
 import { useDiskVersion } from "./watch";
@@ -9,7 +9,8 @@ interface Props {
   roots: string[];
   activePath: string | null;
   platform: string;
-  onRootsChanged: (roots: string[]) => void;
+  /** go to where folders are added and removed (the Library) */
+  onManageFolders: () => void;
   onSelect: (path: string) => void;
   onOpen: (path: string) => void;
   /** Open the file in a new browser tab (menu, Ctrl/⌘+click, middle-click). */
@@ -18,7 +19,12 @@ interface Props {
   onDeleted: (path: string) => void;
   /** Open a data file in a chosen workspace (its right-click menu). */
   onOpenIn?: (path: string, where: "explore" | "figure") => void;
+  /** the kinds of file listed (default: all; Explore lists data files only) */
+  kinds?: FileKind[];
 }
+
+/** The kinds of file the tree lists (Props.kinds), for the folders deep inside it. */
+const KindsContext = createContext<FileKind[] | null>(null);
 
 /** What a row is, for its right-click menu: only files can be renamed or moved to the trash. */
 type RowKind = "root" | "dir" | "file";
@@ -43,7 +49,8 @@ function saveExpanded(s: Set<string>) {
 }
 
 export default function FolderPanel(props: Props) {
-  const { roots, activePath, platform, onRootsChanged, onSelect, onOpen, onOpenInNewBrowserTab, onRenamed, onDeleted, onOpenIn } = props;
+  const { roots, activePath, platform, onManageFolders, onSelect, onOpen, onOpenInNewBrowserTab, onRenamed, onDeleted, onOpenIn, kinds } = props;
+  const shown = (k: FileKind) => !kinds || kinds.includes(k);
   const toast = useToast();
   const names = systemNames(platform);
   const [expanded, setExpanded] = useState<Set<string>>(() => {
@@ -52,8 +59,14 @@ export default function FolderPanel(props: Props) {
     return s;
   });
   const [refreshKey, setRefreshKey] = useState(0);
-  const [adding, setAdding] = useState(roots.length === 0);
-  const [typedPath, setTypedPath] = useState("");
+  // a folder added since (in the Library) starts unfolded, as the ones there were at first
+  const [known, setKnown] = useState(roots);
+  useEffect(() => {
+    const added = roots.filter((r) => !known.includes(r));
+    if (added.length) setExpanded((prev) => new Set([...prev, ...added]));
+    setKnown(roots);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roots]);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[] | null>(null);
   const [menu, setMenu] = useState<MenuAt | null>(null);
@@ -77,36 +90,6 @@ export default function FolderPanel(props: Props) {
   };
 
   const refresh = () => setRefreshKey((k) => k + 1);
-
-  const addRoot = async (path: string) => {
-    try {
-      const r = await api.addRoot(path);
-      onRootsChanged(r.roots);
-      setExpanded((prev) => new Set(prev).add(r.roots[r.roots.length - 1]));
-      setTypedPath("");
-      setAdding(false);
-    } catch (e) {
-      toast((e as Error).message, "error");
-    }
-  };
-
-  const browse = async () => {
-    try {
-      const r = await api.pickFolder();
-      if (r.path) await addRoot(r.path);
-    } catch (e) {
-      // 501: no native dialog here (e.g. Linux without tkinter) — the path box still works.
-      toast((e as Error).message, e instanceof ApiError && e.status === 501 ? "info" : "error");
-    }
-  };
-
-  const removeRoot = async (path: string) => {
-    try {
-      onRootsChanged((await api.removeRoot(path)).roots);
-    } catch (e) {
-      toast((e as Error).message, "error");
-    }
-  };
 
   // ---- right-click menu
 
@@ -142,7 +125,7 @@ export default function FolderPanel(props: Props) {
     e.preventDefault();
     e.stopPropagation();
     const items: MenuEntry[] = fileEntries(path, platform, toast);
-    if (kind === "root") items.push("-", { label: "Remove from list", onClick: () => removeRoot(path) });
+    if (kind === "root") items.push("-", { label: "Manage folders in Library", onClick: onManageFolders });
     if (kind === "file" && onOpenIn && fileKind(path) === "lbd")
       items.unshift(
         { label: "Open in Explore", onClick: () => onOpenIn(path, "explore") },
@@ -192,52 +175,36 @@ export default function FolderPanel(props: Props) {
     };
   }, [query, roots, refreshKey]);
 
-  const submitTyped = (e: FormEvent) => {
-    e.preventDefault();
-    if (typedPath.trim()) addRoot(typedPath.trim().replace(/^"(.*)"$/, "$1"));
-  };
+  /** ⋯: what is done to the whole tree */
+  const treeMenu = (e: MouseEvent) =>
+    setMenu(
+      menuAt(e, [
+        { label: "Fold all folders", onClick: collapseAll, disabled: roots.length === 0 },
+        { label: "Read the folders again", onClick: refresh },
+        "-",
+        { label: "Manage folders in Library", onClick: onManageFolders },
+      ]),
+    );
 
   return (
     <div className="folders">
-      <div className="panel-head">
-        <h2>Folders</h2>
-        <div className="actions">
-          <button className="icon" title="Collapse all folders" aria-label="Collapse all folders" onClick={collapseAll} disabled={roots.length === 0}>
-            ⊟
-          </button>
-          <button className="icon" title="Refresh" aria-label="Refresh" onClick={refresh}>
-            ⟳
-          </button>
-          <button onClick={() => setAdding((a) => !a)} aria-expanded={adding}>
-            + Add folder
+      {roots.length > 0 ? (
+        <div className="filter-row">
+          <input className="filter" type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter files in all folders…" aria-label="Filter files" />
+          <button className="icon subtle" title="Fold all, read again, manage folders" aria-label="Folder tree menu" onClick={treeMenu}>
+            ⋯
           </button>
         </div>
-      </div>
-
-      {adding && (
-        <form className="add-folder" onSubmit={submitTyped}>
-          <button type="button" onClick={browse}>
-            Browse…
+      ) : (
+        <p className="muted small pad">
+          No folders yet.{" "}
+          <button className="link" onClick={onManageFolders}>
+            Add one in the Library
           </button>
-          <span className="muted">or paste a path</span>
-          <div className="row">
-            <input
-              value={typedPath}
-              onChange={(e) => setTypedPath(e.target.value)}
-              placeholder="C:\Data\measurements  or  /home/me/data"
-              aria-label="Folder path"
-            />
-            <button type="submit" className="primary" disabled={!typedPath.trim()}>
-              Add
-            </button>
-          </div>
-        </form>
+        </p>
       )}
 
-      {roots.length > 0 && (
-        <input className="filter" type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter files in all folders…" aria-label="Filter files" />
-      )}
-
+      <KindsContext.Provider value={kinds ?? null}>
       <div className="tree" role="tree">
         {results
           ? results.map((r) => (
@@ -245,8 +212,8 @@ export default function FolderPanel(props: Props) {
                 <div className="search-root" title={r.root}>
                   {baseName(r.root)}
                 </div>
-                {r.results.length === 0 && <div className="muted small pad">No matches</div>}
-                {r.results.map((f) => (
+                {r.results.filter((f) => shown(f.type)).length === 0 && <div className="muted small pad">No matches</div>}
+                {r.results.filter((f) => shown(f.type)).map((f) => (
                   <FileRow key={f.path} path={f.path} label={f.rel} kind={f.type} active={f.path === activePath} onSelect={onSelect} onOpen={onOpen} onOpenNew={onOpenInNewBrowserTab} onMenu={openMenu} depth={0} />
                 ))}
                 {r.truncated && <div className="muted small pad">More matches not shown; refine the filter.</div>}
@@ -261,9 +228,6 @@ export default function FolderPanel(props: Props) {
                   <span className="root-name row-label" title={root} onClick={() => toggle(root)}>
                     {baseName(root)}
                   </span>
-                  <button className="icon subtle" title="Remove from the list (files are not deleted)" aria-label={`Remove ${baseName(root)} from the list`} onClick={() => removeRoot(root)}>
-                    ×
-                  </button>
                 </div>
                 {expanded.has(root) && (
                   <DirNode path={root} depth={1} expanded={expanded} toggle={toggle} refreshKey={refreshKey} activePath={activePath} onSelect={onSelect} onOpen={onOpen} onOpenNew={onOpenInNewBrowserTab} onMenu={openMenu} />
@@ -271,6 +235,7 @@ export default function FolderPanel(props: Props) {
               </div>
             ))}
       </div>
+      </KindsContext.Provider>
       {menu && <ContextMenu menu={menu} onClose={closeMenu} />}
       {confirm && <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />}
     </div>
@@ -293,6 +258,7 @@ interface DirProps {
 function DirNode({ path, depth, expanded, toggle, refreshKey, activePath, onSelect, onOpen, onOpenNew, onMenu }: DirProps) {
   const [listing, setListing] = useState<DirListing | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const kinds = useContext(KindsContext);
   // Files that another program adds, removes or rewrites show up by themselves: the folder is
   // listed again when its signature on disk differs from the listing shown.
   const disk = useDiskVersion("dir", path);
@@ -315,8 +281,9 @@ function DirNode({ path, depth, expanded, toggle, refreshKey, activePath, onSele
 
   if (error) return <div className="muted small" style={{ paddingLeft: depth * 14 + 8 }}>{error}</div>;
   if (!listing) return <div className="muted small" style={{ paddingLeft: depth * 14 + 8 }}>Loading…</div>;
-  if (!listing.dirs.length && !listing.files.length && !listing.errors.length)
-    return <div className="muted small" style={{ paddingLeft: depth * 14 + 8 }}>No data, style or image files here</div>;
+  const files = kinds ? listing.files.filter((f) => kinds.includes(f.type)) : listing.files;
+  if (!listing.dirs.length && !files.length && !listing.errors.length)
+    return <div className="muted small" style={{ paddingLeft: depth * 14 + 8 }}>{kinds?.length === 1 && kinds[0] === "lbd" ? "No data files here" : "No data, style or image files here"}</div>;
 
   return (
     <>
@@ -349,7 +316,7 @@ function DirNode({ path, depth, expanded, toggle, refreshKey, activePath, onSele
           </div>
         );
       })}
-      {listing.files.map((f) => {
+      {files.map((f) => {
         const p = joinPath(path, f.name);
         return <FileRow key={p} path={p} label={f.name} kind={f.type} active={p === activePath} onSelect={onSelect} onOpen={onOpen} onOpenNew={onOpenNew} onMenu={onMenu} depth={depth} />;
       })}

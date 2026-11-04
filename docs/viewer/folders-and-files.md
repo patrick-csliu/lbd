@@ -1,40 +1,73 @@
 # Folders and files
 
+## The Files sidebar
+
+Explore and Figure have a **Files** sidebar on the left: a quick way to the next file without
+going back to the [Library](library.md).
+
+- **Library selection** (always there): the Library's list with this browser tab's filters
+  (folder, date, search, labels) and sort. The filters show above the list, read-only;
+  **Edit ↗** goes to the Library to change them. So: narrow the files down once in the Library,
+  then go through them in Explore or Figure.
+- **Search in these files…** narrows the sidebar's list only; it never changes the Library's
+  filters.
+- **Click** a file to look at it, **double-click** (or Enter) to keep it open. **↑ ↓** step
+  through the list, showing each file in turn. **Space** stars it; **right-click** gives the
+  same menu as in the Library (star, tags, project, open, show in folder, rename, …).
+- **Files** at the left of the tab row hides or shows the sidebar (each browser tab remembers
+  its own choice). Drag its right edge to make it wider; double-click the edge to fit the
+  longest name.
+
+**⚙ Settings → Files sidebar** adds other lists, chosen with a menu at the top of the sidebar
+(Explore and Figure show the same one):
+
+| List | Shows |
+|---|---|
+| **Library selection** | the Library's list with this browser tab's filters (always offered) |
+| **Folders** | the folders you added, as a tree ([below](#folders)); in Figure also images and style files |
+| **Starred** | the starred data files |
+| **Recent** | the data files you opened lately in this browser tab, newest first |
+
+A new browser tab made from this one (a file's **Open in new browser tab**, or a tab's **Move
+to a new browser tab**) starts with the same Library filters; after that each tab has its own.
+**Move to Page N** leaves that page's filters as they are.
+
+In a window narrower than about 1280 pixels the sidebar slides over the plot when you click
+**Files**, and closes when you keep a file open (double-click), press Esc or click beside it.
+
 ## Folders
 
-The folder panel lists folders you choose, and inside them every subfolder and these files.
+The **Folders** list of the Files sidebar (switch it on in ⚙ Settings → Files sidebar) shows the
+folders you added in the Library, and inside them every subfolder and these files. It is a way
+in by place, apart from the Library's filters.
 
-![The folder panel with a file's right-click menu](img/folders.png){ width="560" }
+![The folder tree with a file's right-click menu](img/folders.png){ width="560" }
 
 1. **Filter files in all folders…:** type part of a file name to find it in every listed folder.
-2. **⊟** closes all folders, **⟳** rereads them, **+ Add folder** adds one.
-3. **A folder you added.** Its **×** removes it from the list (no files are deleted).
+2. **⋯** folds all folders, reads them again, or goes to the Library to add or remove folders.
+3. **A folder you added.**
 4. **A subfolder:** click to open or close it.
 5. **A file.** The icon shows its kind (below). Click to look at it, double-click to keep it
    open: in Explore to explore it, in Figure to plot it.
 6. **The right-click menu** of a file: show it in Explorer, copy its path, open it in a new
    browser tab, rename it, move it to the Recycle Bin.
 
-
 | Icon | Files | Clicking opens |
 |---|---|---|
 | ◧ | `.lbd` data files | the file's details and plot |
-| ✎ | `.lbd.json` style files | a preview of the style; see [Style files](images-and-style-files.md#style-files) |
-| ▣ | images: `.png .jpg .jpeg .gif .bmp .tif .tiff .webp .svg` | the image and its metadata, view only; see [Images](images-and-style-files.md#images) |
+| ✎ | `.lbd.json` style files (Figure only) | a preview of the style; see [Style files](images-and-style-files.md#style-files) |
+| ▣ | images: `.png .jpg .jpeg .gif .bmp .tif .tiff .webp .svg` (Figure only) | the image and its metadata, view only; see [Images](images-and-style-files.md#images) |
 
-Other files are not shown.
+Other files are not shown. In Explore the tree lists data files only.
 
 | To | Do this |
 |---|---|
-| Add a folder | **+ Add folder**, then **Browse…** to pick one, or paste a path (for example copied from the Explorer address bar) and press **Add**. Quotes around a pasted path are removed. |
-| Remove a folder | The **×** next to its name. It is only removed from the list; no files are deleted. |
+| Add or remove a folder | In the [Library](library.md): **Filters → + Add folder**, then **Browse…** to pick one, or paste a path (for example copied from the Explorer address bar) and press **Add**; the **×** next to a folder removes it from the list (no files are deleted). |
 | Open or close a folder | Click it, or select it and press Enter. Open folders are remembered in this browser. |
-| Close all folders | The **⊟** (collapse all) button. |
-| Make the panel wider | Drag its right edge. Double-click the edge to fit the longest name shown. The width is remembered in this browser. With the keyboard: focus the edge (Tab), then ← / →; Home resets it. |
+| Close all folders | **⋯ → Fold all folders**. |
 | Find a file | Type in **Filter files in all folders…**. It searches every subfolder of every listed folder for file paths containing the text, ignoring case. At most 500 matches are shown per folder. |
-| See new files | Nothing to do: new, rewritten and deleted files show up within a few seconds (see [Files that change](#files-that-change)). **⟳** rereads the folders at once. |
+| See new files | Nothing to do: new, rewritten and deleted files show up within a few seconds (see [Files that change](#files-that-change)). **⋯ → Read the folders again** does it at once. |
 | Open a file in a new browser tab | Ctrl+click it (⌘+click on macOS), middle-click it, or right-click → **Open in new browser tab**. |
-| Hide the panel | **◧ Folders** at the left of the tab row, for more room for plots; click it again to show the panel. Each browser tab remembers its own choice. |
 
 Hidden and system folders are skipped:
 - names starting with `.`,
@@ -48,7 +81,7 @@ Right-click an item in the panel (or select it and press the Menu key or Shift+F
 
 | Item | Menu |
 |---|---|
-| A listed folder | **Show in Explorer**, **Copy path**, **Remove from list** |
+| A listed folder | **Show in Explorer**, **Copy path**, **Manage folders in Library** |
 | A subfolder | **Show in Explorer**, **Copy path** |
 | A data, style or image file | **Show in Explorer**, **Copy path**, **Open in new browser tab**, **Rename…**, **Move to Recycle Bin…** |
 
@@ -101,7 +134,7 @@ panel.
 ## Several browser tabs
 
 You can open the viewer in several browser tabs or windows, for example to compare two files
-side by side: put two browser windows next to each other, and hide the Folders panel in each.
+side by side: put two browser windows next to each other, and hide the Files sidebar in each.
 
 Each browser tab showing the viewer is a numbered **page**: its title and the badge at the top
 say **Page 1**, **Page 2**, …. A new page takes the lowest free number, so after you close
@@ -162,7 +195,7 @@ seconds. You don't need to close and open the file.
 - **Unsaved plot settings are dropped**, with a message, because they were made for the data
   before. To keep a view across runs, save it into the file (**Save this view to the file**) or
   have your program write it, then every new version opens like that.
-- **The Folders panel** shows new files, and removes deleted ones, in the folders that are open.
+- **The Files sidebar** shows new files, and removes deleted ones (in its folder tree: in the folders that are open).
 - **A file that is gone** (deleted, or being written again) stays on screen as it was, with a
   note, and updates when it is back.
 - **A file that can't be read yet** (still being written) keeps showing the previous version

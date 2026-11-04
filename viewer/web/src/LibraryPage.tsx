@@ -25,6 +25,8 @@ import { ConfirmDialog, ConfirmRequest, ContextMenu, isMenuKey, MenuAt, menuAt }
 import { copyPath } from "./fileActions";
 import { useToast } from "./toast";
 import { useFileActions } from "./libraryActions";
+import { DRAWER_MEDIA, ONE_PANE_MEDIA, useMedia } from "./useMedia";
+import { NO_FILTERS } from "./libraryQuery";
 import { MeasuringStatus } from "./MeasuringStatus";
 import { PAGE, useLibraryRows, useLibraryStatus } from "./libraryRows";
 
@@ -71,9 +73,11 @@ const CARD_W = 220, CARD_H = 206; // px: a picture of the picture view, with its
 const NEAR = 5; // rows above and below the selection whose previews are drawn ahead
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 export const NOTICE =
-  "To list date, sweep size and values and to search inside files, LBD opens each data file and reads its header (not its data). " +
-  "In a folder kept in cloud storage with files only in the cloud (Synology Drive on-demand sync, OneDrive Files On-Demand, " +
-  "Dropbox online-only …), opening a file downloads all of it. Switch this off in ⚙ to list such folders by name only.";
+  "LBD opens each data file's header (not its data) to list dates, sweep sizes and values, and to search inside files. " +
+  "In a cloud folder whose files are kept only online, that downloads every file.";
+export const NOTICE_MORE =
+  "This happens with Synology Drive on-demand sync, OneDrive Files On-Demand, Dropbox online-only and the like. " +
+  "Switch it off in ⚙ Settings → Library to list such folders by name only.";
 
 // `min`: the column's smallest width (px). Fixed-format columns (dates, sizes) get the width
 // their text needs; Name and the free-text columns share what is left.
@@ -107,6 +111,8 @@ function fittingColumns(chosen: typeof COLUMNS, width: number): typeof COLUMNS {
   }
   return shown;
 }
+// Whether this browser tab shows the Library's filters in a wide window.
+const FILTERS_KEY = "lbd-library-filters-shown";
 const HELP_COPIES = docsUrl("viewer/library.html", "copies-and-the-same-measurement");
 const CONFLICT_TIP = "Looks like a copy of another file, but the two differ — click for details";
 
@@ -190,6 +196,44 @@ export default function LibraryPage(props: Props) {
   const { state, query, onQuery, selected, onSelect, onRootsChanged, onLibrarySettings, onOpenIn, onOpenInNewBrowserTab, onRenamed, onDeleted, onOpenSettings } = props;
   const toast = useToast();
   const settings: LibrarySettings = state.library;
+  // the filters on the left: a column of their own in a wide window (it can be hidden, per
+  // browser tab), else a drawer over the list; in a narrow window, one pane at a time
+  const drawerMode = useMedia(DRAWER_MEDIA);
+  const onePane = useMedia(ONE_PANE_MEDIA);
+  const [filtersDocked, setFiltersDocked] = useState(() => {
+    try {
+      return sessionStorage.getItem(FILTERS_KEY) !== "no";
+    } catch {
+      return true;
+    }
+  });
+  const [filtersOpen, setFiltersOpen] = useState(false); // the drawer
+  useEffect(() => setFiltersOpen(false), [drawerMode]);
+  const filtersShown = drawerMode ? filtersOpen : filtersDocked;
+  const toggleFilters = () => {
+    if (drawerMode) setFiltersOpen((o) => !o);
+    else
+      setFiltersDocked((d) => {
+        try {
+          sessionStorage.setItem(FILTERS_KEY, d ? "no" : "yes");
+        } catch {
+          /* storage unavailable: not remembered */
+        }
+        return !d;
+      });
+  };
+  // one pane at a time: the selected file shows over the list until ← Back (or Esc)
+  const [detailOpen, setDetailOpen] = useState(false);
+  useEffect(() => {
+    if (!filtersOpen && !(onePane && detailOpen)) return;
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (filtersOpen) setFiltersOpen(false);
+      else setDetailOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [filtersOpen, onePane, detailOpen]);
   const chosenColumns = COLUMNS.filter((c) => settings.columns.includes(c.id));
 
   // ---- what is listed
@@ -204,6 +248,11 @@ export default function LibraryPage(props: Props) {
   const setUsers = (v: string[]) => patch({ users: v });
   const setStarred = (v: boolean) => patch({ starred: v });
   const setConflicts = (v: boolean) => patch({ conflicts: v });
+  /** every filter off (the sort stays) */
+  const clearAll = () => {
+    setTyped("");
+    onQuery((old) => ({ ...NO_FILTERS, sort: old.sort, order: old.order }));
+  };
   const [typed, setTyped] = useState(q); // the search box; `q` follows it a moment after typing stops
   useEffect(() => {
     const id = window.setTimeout(() => typed.trim() !== q && setQ(typed.trim()), 200);
@@ -285,6 +334,7 @@ export default function LibraryPage(props: Props) {
     } else {
       setChosen([r.path]);
       onSelect(r.path);
+      setDetailOpen(true); // one pane at a time: the file over the list
     }
   };
 
@@ -378,14 +428,14 @@ export default function LibraryPage(props: Props) {
     setMenu(
       menuAt(
         e,
-        COLUMNS.map((c) => {
+        [{ label: "Columns shown", onClick: () => undefined, disabled: true }, "-" as const, ...COLUMNS.map((c) => {
           const on = settings.columns.includes(c.id);
           return {
-            label: `${on ? "✓" : "\u2003"} ${c.title}`,
+            label: `${on ? "✓" : "\u2003"} ${c.id === "star" ? "★ Star" : c.title}`,
             disabled: on && settings.columns.length === 1, // at least one column
             onClick: () => setColumns(on ? settings.columns.filter((x) => x !== c.id) : COLUMNS.map((x) => x.id).filter((x) => x === c.id || settings.columns.includes(x))),
           };
-        }),
+        })],
       ),
     );
   };
@@ -420,21 +470,38 @@ export default function LibraryPage(props: Props) {
   const shownFolder = folder && facets ? findFolder(facets.folders, folder) : null;
   const all = folder ? shownFolder?.count : facets?.folders.reduce((n, f) => n + f.count, 0);
   const filtered = !!(q || date || project || tags.length || users.length || starred || conflicts);
+  // the filters chosen on the left (not the search: it is in view), on the Filters button
+  const filterCount = (folder ? 1 : 0) + (date ? 1 : 0) + (project ? 1 : 0) + tags.length + users.length + (starred ? 1 : 0) + (conflicts ? 1 : 0);
   const gridColumns = columns.map((c) => c.width).join(" ");
 
   return (
-    <div className="page library">
-      <aside className="library-left" aria-label="Folders and dates">
+    <div
+      className={
+        "page library" +
+        (drawerMode ? " drawer-mode" : filtersDocked ? "" : " no-filters") +
+        (onePane ? " one-pane" + (detailOpen && (selected || chosen.length > 1 || showMissing) ? " detail-open" : "") : "")
+      }
+    >
+      {drawerMode && filtersOpen && <div className="drawer-backdrop" onClick={() => setFiltersOpen(false)} aria-hidden="true" />}
+      <aside className="library-left" aria-label="Filters: folders, dates and labels" hidden={!filtersShown}>
         <LibraryFolders
           roots={state.roots}
           facets={facets}
           folder={folder}
           onFolder={(f) => {
             patch({ folder: f, date: "" });
+            setFiltersOpen(false);
           }}
           onRootsChanged={onRootsChanged}
         />
-        <DateTree dates={facets?.dates ?? {}} date={date} onDate={setDate} />
+        <DateTree
+          dates={facets?.dates ?? {}}
+          date={date}
+          onDate={(d) => {
+            setDate(d);
+            setFiltersOpen(false);
+          }}
+        />
         <LabelFilters
           facets={facets}
           project={project}
@@ -454,7 +521,13 @@ export default function LibraryPage(props: Props) {
       <section className="library-middle" aria-label="Files">
         {settings.read_headers && !settings.notice_seen && (
           <div className="library-notice" role="note">
-            <p>{NOTICE}</p>
+            <div className="notice-text">
+              {NOTICE}
+              <details className="notice-more">
+                <summary>More…</summary>
+                {NOTICE_MORE}
+              </details>
+            </div>
             <div className="row-controls">
               <button
                 className="primary"
@@ -471,21 +544,32 @@ export default function LibraryPage(props: Props) {
             </div>
           </div>
         )}
-        <input
-          className="library-search"
-          type="search"
-          value={typed}
-          onChange={(e) => setTyped(e.target.value)}
-          placeholder={settings.read_headers ? "Search names, descriptions, values, units, metadata…" : "Search file names…"}
-          aria-label="Search the files"
-        />
+        <div className="library-search-row">
+          <button
+            className="filters-toggle"
+            aria-pressed={filtersShown}
+            aria-expanded={filtersShown}
+            title={filtersShown ? "Hide the filters (folders, dates, labels)" : "Show the filters (folders, dates, labels)"}
+            onClick={toggleFilters}
+          >
+            Filters{filterCount ? <span className="count"> {filterCount}</span> : null}
+          </button>
+          <input
+            className="library-search"
+            type="search"
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            placeholder={settings.read_headers ? "Search names, descriptions, values, units, metadata…" : "Search file names…"}
+            aria-label="Search the files"
+          />
+        </div>
         <div className="library-status small" role="status">
           <span>
             {total === null ? "…" : filtered && all !== undefined ? `${total} of ${all} files` : `${total} file${total === 1 ? "" : "s"}`}
           </span>
           {folder && (
             <span className="chip">
-              {shownFolder?.name ?? baseName(folder)}
+              Folder: {shownFolder?.name ?? baseName(folder)}
               <button className="link" aria-label="Show all folders" onClick={() => setFolder(null)}>
                 ×
               </button>
@@ -493,7 +577,7 @@ export default function LibraryPage(props: Props) {
           )}
           {date && (
             <span className="chip">
-              {dateLabel(date)}
+              Date: {dateLabel(date)}
               <button className="link" aria-label="Any date" onClick={() => setDate("")}>
                 ×
               </button>
@@ -501,7 +585,7 @@ export default function LibraryPage(props: Props) {
           )}
           {q && (
             <span className="chip">
-              "{q}"
+              Search: "{q}"
               <button
                 className="link"
                 aria-label="Clear the search"
@@ -553,6 +637,11 @@ export default function LibraryPage(props: Props) {
                 ×
               </button>
             </span>
+          )}
+          {(filtered || folder) && (
+            <button className="link small" onClick={clearAll}>
+              Clear all
+            </button>
           )}
           {chosen.length > 1 && <span className="muted">{chosen.length} selected</span>}
           {!settings.read_headers && <span className="muted">names only: reading files' details is off in ⚙</span>}
@@ -697,7 +786,17 @@ export default function LibraryPage(props: Props) {
                   onContextMenu={(e) => rowMenu(e, r)}
                 >
                   {columns.map((c) => (
-                    <div key={c.id} role="gridcell" className={`cell-${c.id}`}>
+                    <div
+                      key={c.id}
+                      role="gridcell"
+                      className={`cell-${c.id}` + (c.id === "date" && r.date_from_file ? " muted" : "")}
+                      title={c.id === "date" && r.date_from_file ? "The file's own date (the file has no date of its own)" : undefined}
+                    >
+                      {c.id === "name" && r.error ? (
+                        <span className="mark-conflict" aria-label="can't be read">
+                          ⚠{" "}
+                        </span>
+                      ) : null}
                       {c.id === "name" && r.conflict ? (
                         <span className="mark-conflict" title={CONFLICT_TIP} aria-label="differs from its copy">
                           ⚠{" "}
@@ -712,7 +811,6 @@ export default function LibraryPage(props: Props) {
                           {r.copies + 1} copies
                         </span>
                       ) : null}
-                      {c.id === "date" && r.date_from_file ? <span className="muted small"> (file date)</span> : null}
                     </div>
                   ))}
                 </div>
@@ -724,9 +822,27 @@ export default function LibraryPage(props: Props) {
           {total === 0 && (
             <div className="library-empty muted">
               {state.roots.length === 0
-                ? "No folders yet: add one on the left (+ Add folder)."
+                ? "No folders yet: add one under Filters (+ Add folder)."
                 : filtered
-                  ? "No file matches. Remove a filter above to see more."
+                  ? (
+                      <>
+                        No file matches{q ? <> "{q}"</> : null}.{" "}
+                        {q && (
+                          <button
+                            className="link"
+                            onClick={() => {
+                              setTyped("");
+                              setQ("");
+                            }}
+                          >
+                            Clear the search
+                          </button>
+                        )}{" "}
+                        <button className="link" onClick={clearAll}>
+                          Clear all filters
+                        </button>
+                      </>
+                    )
                   : status?.indexing || !status?.scans
                     ? "Looking for data files…"
                     : "No data files (.lbd) in this folder."}
@@ -736,6 +852,11 @@ export default function LibraryPage(props: Props) {
       </section>
 
       <section className="library-detail" aria-label="The selected file">
+        {onePane && (
+          <button className="link back" onClick={() => setDetailOpen(false)}>
+            ← Back to the list
+          </button>
+        )}
         {showMissing ? (
           <MissingPanel
             generation={generation}
@@ -767,6 +888,7 @@ export default function LibraryPage(props: Props) {
             row={selectedRow}
             generation={generation}
             onOpenIn={onOpenIn}
+            preview={!pictures}
             status={
               selectedRow?.writing && (
                 <WritingBox
@@ -970,7 +1092,7 @@ function DateTree({ dates, date, onDate }: { dates: LibraryFacets["dates"]; date
         )}
       </div>
       {years.length === 0 ? (
-        <p className="muted small pad">No dates yet.</p>
+        <p className="muted small pad">No dates here.</p>
       ) : (
         <ul className="library-tree" role="tree" aria-label="Dates">
           {years.map((y) => (
@@ -1090,6 +1212,7 @@ function SelectedFile({
   row,
   generation,
   onOpenIn,
+  preview = true,
   status,
   children,
 }: {
@@ -1097,6 +1220,8 @@ function SelectedFile({
   row: LibraryRow | null;
   generation: number;
   onOpenIn: (path: string, where: "explore" | "figure") => void;
+  /** show its preview (not in the picture view: the list shows the pictures) */
+  preview?: boolean;
   /** what is happening to the file (a measurement writing it): shown above its preview */
   status?: ReactNode;
   children?: ReactNode;
@@ -1146,16 +1271,29 @@ function SelectedFile({
       </div>
       {(error || row?.error) && (
         <div className="error-box">
-          <strong>This file can't be read.</strong> {error ?? row?.error}
+          <strong>This file can't be read.</strong> {plainReadError(error ?? row?.error ?? "")}
+          <details className="small">
+            <summary>Details</summary>
+            <code className="path">{error ?? row?.error}</code>
+          </details>
         </div>
       )}
       {status}
-      {!row?.error && <PreviewBox path={path} version={`${version}-${generation}`} />}
+      {preview && !row?.error && <PreviewBox path={path} version={`${version}-${generation}`} />}
       {children}
       {!shown && !error && <p className="muted">Reading…</p>}
       {shown && <FileDetails info={shown} metaFilter />}
     </div>
   );
+}
+
+/** What a read error means, in plain words (the technical message stays under Details). */
+function plainReadError(e: string): string {
+  if (/truncated|eof|end of file|unable to (synchronously )?open file/i.test(e)) return "It is damaged or incomplete (it ends early, e.g. a copy that didn't finish).";
+  if (/not inside one of your folders/i.test(e)) return "It is no longer inside one of your folders.";
+  if (/no such file|not found|doesn't exist/i.test(e)) return "It isn't there any more.";
+  if (/permission|access is denied/i.test(e)) return "This computer's user may not read it.";
+  return "It isn't an .lbd file this version of LBD can read.";
 }
 
 /** A path on one line: the folder is cut in the middle when it is too long ("C:\Data\…"),
@@ -1319,7 +1457,7 @@ function PictureCard({
         {url ? (
           <img src={url} alt="" />
         ) : (
-          <span className="muted small">
+          <span className="muted small" title={row.error ?? (preview && !preview.picture ? preview.reason ?? undefined : undefined)}>
             {row.error ? "Can't be read" : !preview || (!preview.picture && preview.state === "drawing") ? "Drawing…" : !preview.picture && preview.state === "off" ? "Previews are off" : "No preview"}
           </span>
         )}
@@ -1328,6 +1466,7 @@ function PictureCard({
         {row.conflict ? <span className="mark-conflict" aria-label="differs from its copy">⚠ </span> : null}
         {row.star ? <span className="mark-star" aria-label="starred">★ </span> : null}
         {name}
+        {row.writing ? <WritingMark writing={row.writing} /> : null}
       </div>
       <div className="card-date muted small">{createdText(row)}</div>
     </div>

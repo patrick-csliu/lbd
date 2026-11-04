@@ -8,38 +8,49 @@ select described on the right.
 
 1. **Folders:** the folders you opened in the viewer, with the number of data files below each.
    **All folders** lists everything in all of them as one list; a folder lists everything below
-   it, at any depth. **+ Add folder** and **×** add and remove folders (no file is touched).
+   it, at any depth. **+ Add folder** and **×** add and remove folders (no file is touched); this
+   is the one place to do it.
 2. **Dates:** year → month → day, with the number of files on each. Click one to see only those
    files; click it again to see all dates.
 3. **Search:** type words to find files that contain all of them, in their name, description,
    value and axis names and units, or metadata (keys and values). The line below says what is
-   shown, e.g. "37 of 412 files · 2026 › 03 · "resonator"", with an **×** for each filter.
+   shown, e.g. "37 of 412 files · Date: 2026 › Mar · Search: "resonator"", with an **×** for each
+   filter and **Clear all**.
 4. **The list:** one row per data file, newest first. Click a column title to sort by it; click
    again to reverse. Right-click the titles to choose the columns.
-5. **The selected file:** title, date, folder, **Open in Explore** and **Open in Figure**, a
-   [preview](#previews) of its data, then its axes (points and range), values, description and
-   metadata (with a filter box for long lists).
+
+The folders, dates and labels on the left are the **Filters**: the **Filters** button left of
+the search box hides or shows them (the number on it counts the filters in use). The filters
+belong to the browser tab: they stay while you go to Explore or Figure and back, and the
+[Files sidebar](folders-and-files.md#the-files-sidebar) there lists the same files.
+5. **The selected file:** its title, its path on one line (⧉ copies it; point at it for the
+   whole path) and date, **Open in Explore** and **Open in Figure**, a [preview](#previews) of
+   its data, then its axes (points and range), values, description and metadata (with a filter
+   box for long lists).
 
 ## Columns
 
 | Column | Shows |
 |---|---|
 | **Name** (shown) | the file's title; the file name when it has none |
-| **Date** (shown) | when the data was created, as written in the file, with its time zone |
+| **Date** (shown) | when the data was created, as written in the file; its time zone is shown short (`+08`) when it isn't your computer's |
 | **Sweep size** (shown) | the swept axes' points, e.g. `401×31`; empty for a file of single numbers |
 | **Values** | the names of the values in the file |
 | **Folder** | where the file is, below its open folder |
 | **File size**, **File name**, **Modified** | from the disk |
 
-The columns you choose are remembered.
+The columns you choose are remembered. When the list is too narrow for them all, the ones least
+needed to tell files apart are left out (Modified first, then File name, Folder, …; Name always
+stays), and a **+N** at the end of the titles says how many: point at it for which, click it to
+choose. A wider window shows them again.
 
 ## Dates
 
 The date of a file is its `created` time: when its data was created, written into the file by
 the program that made it, in the time zone it was made in. A measurement at 23:30 in Taipei is
 on that day wherever you browse it from, and copying, syncing or renaming the file doesn't change
-it. A file whose date can't be read is dated by its file's modification time, shown with
-"(file date)".
+it. A file whose date can't be read is dated by its file's modification time, shown greyed
+(point at it to see why).
 
 ## Keys and mouse
 
@@ -56,8 +67,15 @@ it. A file whose date can't be read is dated by its file's modification time, sh
 
 The list keeps itself up to date: a new data file appears, a removed one disappears and a changed
 one is read again within a few seconds, while your selection stays. A file that can't be read
-(damaged, not an LBD file, or from a newer LBD) stays in the list, greyed; point at it, or select
-it, to see why.
+(damaged, not an LBD file, or from a newer LBD) stays in the list, greyed and marked ⚠; select it
+to see why in plain words (the technical message is under **Details**).
+
+## Narrow windows
+
+In a window narrower than about 1280 pixels (half a screen, a laptop), the **Filters** slide over
+the list when you click the button, and close when you choose a folder or a date, press Esc or
+click beside them. Below about 900 pixels the Library shows one thing at a time: the list, or
+the file you clicked, with **← Back to the list** (or Esc).
 
 ## Files being written
 
@@ -88,7 +106,9 @@ per value (up to four), curves for a value over one swept axis, a heat map over 
 the list with ↑ ↓ and the pictures follow at once: the files near the selection are drawn ahead.
 
 - **Pictures** (above the list, next to **List**) shows the files as a grid of pictures, with
-  their name and date; click, select several, right-click and the keys work as in the list.
+  their name, date and state (*measuring…*, *stopped*); click, select several, right-click and
+  the keys work as in the list. The selected file on the right then leaves out its preview (the
+  grid shows it). Point at "No preview" on a card to see why.
 
     ![The picture view](img/library-pictures.png)
 
@@ -204,6 +224,6 @@ is safe: the files are read again. **The Library never writes into data files.**
 previews are a cache next to it (`previews.sqlite`), safe to delete in the same way; pictures
 chosen in Explore are kept with the remembered Explore views (`catalog.sqlite`).
 
-Explore and Figure keep their own folder panel on the left (the same folders, with images and
-style files too), so you can open the next file without leaving them: see
-[Folders and files](folders-and-files.md).
+Explore and Figure have the Files sidebar on the left, listing the same files as the Library
+(with this browser tab's filters), so you can open the next file without leaving them: see
+[The Files sidebar](folders-and-files.md#the-files-sidebar).

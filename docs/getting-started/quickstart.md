@@ -84,8 +84,9 @@ Figure** at the top:
 
 ![sweep.lbd open in LBD Viewer](img/quickstart-open.png)
 
-1. **The file**, in the folder panel. To see all the files of a project, use **+ Add folder**
-   ([Folders and files](../viewer/folders-and-files.md)).
+1. **The file**, in the Files sidebar. To see all the files of a project, add their folder in the
+   Library (**Filters → + Add folder**; see [Library](../viewer/library.md) and
+   [The Files sidebar](../viewer/folders-and-files.md#the-files-sidebar)).
 2. **The plot controls:** what to plot and how.
 3. **The figure:** `S21` has two swept axes, so the viewer starts with a heat map, |S21| over
    power and frequency. The dark line is the resonance, moving left at high power.

@@ -25,10 +25,11 @@ It has three workspaces, switched at the top left:
 3. **⚙ Settings:** where files opened from Explorer go, and the light or dark theme. See
    [Settings](#settings).
 4. **Help** opens this documentation. It is part of the viewer, so it works without internet.
-5. **Folder panel:** the folders you added, with their data files, style files and images.
-   Click a file to look at it, double-click to keep it open (here, in Figure: to plot it). See
-   [Folders and files](folders-and-files.md).
-6. **Tabs:** the files open in this page. **◧ Folders** at the left hides the folder panel for
+5. **Files sidebar:** the Library's list with this browser tab's filters (or, as chosen in ⚙, the
+   folder tree, the starred or the recent files). Click a file to look at it, double-click to keep
+   it open (here, in Figure: to plot it); ↑ ↓ step through the list. See
+   [The Files sidebar](folders-and-files.md#the-files-sidebar).
+6. **Tabs:** the files open in this page. **Files** at the left hides the Files sidebar for
    more room. Right-click a tab to close it or move it to another page. See
    [Tabs](folders-and-files.md#tabs).
 7. **File header:** the file's title and path, and **Show in folder**.

@@ -439,6 +439,6 @@ file with the same panels, zoom and cursors, and a message says so. See
   figure's own settings and style ([Plotting](plotting.md)). Panels and the right-hand axis are
   Explore's: a figure shows one plot.
 - In Figure, **Open in Explore** goes the other way.
-- In the folder panel, right-click a data file: **Open in Explore** or **Open in Figure**.
+- In the Files sidebar or the Library, right-click a data file: **Open in Explore** or **Open in Figure**.
 - Data files double-clicked in File Explorer or Finder open in Explore, or in Figure: choose in
   **⚙** (see [Settings](index.md#settings)).

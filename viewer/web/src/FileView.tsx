@@ -1002,7 +1002,7 @@ export function FileDetails({ info, metaFilter = false }: { info: FileInfo; meta
       {info.description && <p>{info.description}</p>}
       <dl className="props">
         <dt>Created</dt>
-        <dd>{info.created ?? "—"}</dd>
+        <dd>{info.created ? readableDate(info.created) : "—"}</dd>
         <dt>Written by</dt>
         <dd>{info.writer ?? "—"}</dd>
         <dt>Size</dt>
@@ -1156,4 +1156,11 @@ function metaText(v: Json): string {
     return `array ${(o.shape as number[]).join(" × ")} (${o.dtype}): ${JSON.stringify(o.preview)} …`;
   }
   return typeof v === "string" ? v : JSON.stringify(v);
+}
+
+/** "2026-10-15T20:02:28+08:00" → "2026-10-15 20:02:28 +08:00" (the Library's date format). */
+function readableDate(iso: string): string {
+  const m = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}(?::\d{2})?)(?:\.\d+)?(Z|[+-]\d{2}:?\d{2})?$/i.exec(iso);
+  if (!m) return iso;
+  return `${m[1]} ${m[2]}${m[3] ? ` ${m[3] === "Z" || m[3] === "z" ? "UTC" : m[3]}` : ""}`;
 }

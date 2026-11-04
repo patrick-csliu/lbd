@@ -46,7 +46,31 @@ are still written as 1.2).
   **⚙ → Data files … open in → Figure** is chosen. **Styles** and **Language modules** moved to
   the right of the header. Each browser tab keeps the workspace it shows across a reload.
 
+- **The Folders panel of Explore and Figure is now the Files sidebar.** It lists the Library's
+  files with this browser tab's filters (folder, date, search, labels): narrow them down in the
+  Library, then step through them with ↑ ↓ in Explore or Figure. Its search narrows only the
+  sidebar; **Edit ↗** goes to the Library. The folder tree is still there as a list to switch on
+  (**⚙ → Files sidebar → Folders**; in Figure with images and style files, in Explore with data
+  files only), with **Starred** and **Recent**. Folders are added and removed in the Library
+  only (**Filters → + Add folder**). The button at the left of the tab row is now **Files**.
+
 **Viewer**
+
+- **The Library in narrower windows and its filters.** The filters on the left (folders, dates,
+  labels) can be hidden (**Filters**, left of the search), and stay while you go to Explore or
+  Figure and back; a new browser tab made from a page (Open in new browser tab, Move to a new
+  browser tab) starts with its filters. Below about 1280 pixels the filters (and Explore's and
+  Figure's Files sidebar) slide over the content when asked for; below about 900 pixels the
+  Library shows the list or the selected file, with ← Back. No more sideways scrolling: columns
+  that don't fit are left out (a **+N** says which), and the date's time zone is shortened
+  (`+08`, none when it is the computer's own).
+- **Library: the selected file.** The title, the path (one line, cut in the middle; ⧉ copies it)
+  and the date use the whole width, with the buttons below; a stopped or measuring file shows
+  its state and **Recover…** above its preview; a preview with nothing to show takes one line.
+  The preview no longer stays pinned over the labels when the right side scrolls. Shift-click no
+  longer selects page text; the selected row is easier to see. An unreadable file says why in
+  plain words (⚠ in its row; the technical message under Details). No matches: **Clear the
+  search**, **Clear all filters**; filter chips say what they are ("Date: 2026").
 
 - **Files being measured: a status line, and the finished file takes over.** A file being
   written (`name.lbd.writing`, ● on its tab) shows where it is measured and how far: *Measuring

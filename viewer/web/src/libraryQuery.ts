@@ -1,4 +1,4 @@
-import { LibraryQuery } from "./api";
+import { LIBRARY_QUERY_KEY, LibraryQuery } from "./api";
 
 /**
  * The Library's filters (folder, date, search, labels, sort) of this browser tab. They live in
@@ -20,7 +20,7 @@ export const NO_FILTERS: LibraryQuery = {
   conflicts: false,
 };
 
-const KEY = "lbd-library-query";
+const KEY = LIBRARY_QUERY_KEY;
 
 /** A stored or handed-over query, checked field by field: anything unexpected is left at its default. */
 export function parseLibraryQuery(text: string | null): LibraryQuery | null {
@@ -46,7 +46,14 @@ export function parseLibraryQuery(text: string | null): LibraryQuery | null {
   }
 }
 
+/** This tab's filters: handed over in the address (a new browser page made from another one,
+ * see viewerUrl), else as kept for this tab. */
 export function loadLibraryQuery(): LibraryQuery {
+  const given = parseLibraryQuery(new URL(window.location.href).searchParams.get("library"));
+  if (given) {
+    saveLibraryQuery(given);
+    return given;
+  }
   try {
     return parseLibraryQuery(sessionStorage.getItem(KEY)) ?? NO_FILTERS;
   } catch {

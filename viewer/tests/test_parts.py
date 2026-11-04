@@ -23,7 +23,7 @@ def test_config_settings_roundtrip(tmp_path):
     assert cfg.settings() == {"roots": [], "default_style": "default", "open_files_in": "viewer",
                               "open_data_in": "explore", "theme": "system",
                               "library": {"read_headers": True, "notice_seen": False, "columns": ["name", "date", "sweep"],
-                                          "previews": "all", "list_view": "list"},
+                                          "previews": "all", "list_view": "list", "sidebar_scopes": ["library"]},
                               "memory": {"reserve_gb": None, "maximum_gb": None, "summary_cache_gb": 20.0},
                               "measurements": {"progress": True, "time": True, "percent": True, "points": True,
                                                "axes": True, "notify": False}}
@@ -35,6 +35,13 @@ def test_config_settings_roundtrip(tmp_path):
         cfg.set_library({"columns": ["colour"]})
     with pytest.raises(ConfigError, match="unknown Library setting"):
         cfg.set_library({"thumbnails": True})
+    # the Files sidebar's lists: the Library's always, in a fixed order, each once
+    assert cfg.set_library({"sidebar_scopes": ["recent", "library", "folders", "recent"]})["sidebar_scopes"] == \
+        ["library", "folders", "recent"]
+    with pytest.raises(ConfigError, match="sidebar_scopes"):
+        cfg.set_library({"sidebar_scopes": ["folders"]})                 # without the Library's list
+    with pytest.raises(ConfigError, match="sidebar_scopes"):
+        cfg.set_library({"sidebar_scopes": ["library", "history"]})
     folder = tmp_path / "data"
     folder.mkdir()
     assert cfg.add_root(str(folder)) == [str(folder.resolve())]
