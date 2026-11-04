@@ -113,3 +113,46 @@ def test_folders_list_images_and_style_files_in_figure_only(viewer, new_page):
     page.get_by_role("tab", name="Figure", exact=True).click()
     expect(tree.locator(".row-label", has_text="photo.png")).to_be_visible()
     expect(tree.locator(".row-label", has_text="paper.lbd.json")).to_be_visible()
+
+
+def put_library(viewer, **changes):
+    httpx.put(f"http://127.0.0.1:{viewer.port}/api/settings", headers={"X-LBD-Token": viewer.state.token},
+              json={"library": changes}, timeout=15).raise_for_status()
+
+
+def test_the_layouts_two_lines_one_line_and_columns(viewer, library_files, new_page):
+    """Two lines by default (the chosen fields on the second); one line with the file name; columns
+    that sort the sidebar only (the Library keeps its order), with column widths kept."""
+    page = new_page("Explore")
+    choose(page, "library")
+    first = sidebar(page).locator(".files-row:not(.loading)").first
+    expect(first.locator(".files-line2")).to_be_visible(timeout=20_000)       # two lines
+    # one line, the file name as the name
+    put_library(viewer, sidebar_layout="one", sidebar_main="file")
+    page.reload()
+    page.get_by_role("tab", name="Explore", exact=True).click()
+    expect(sidebar(page).locator(".files-row .files-name").first).to_contain_text(".lbd")
+    expect(sidebar(page).locator(".files-line2")).to_have_count(0)
+    # columns: sorting by a column sorts the sidebar, not the Library
+    put_library(viewer, sidebar_layout="columns", sidebar_main="title", sidebar_fields=["date", "sweep"])
+    page.reload()
+    page.get_by_role("tab", name="Explore", exact=True).click()
+    head = sidebar(page).locator(".files-colhead")
+    head.get_by_role("button", name="Name").click()
+    expect(head.locator("[aria-sort='ascending']")).to_contain_text("Name")
+    names = [n.removeprefix("⚠ ").removeprefix("★ ") for n in sidebar(page).locator(".files-row .files-name").all_inner_texts()[:5]]
+    assert names == sorted(names, key=str.lower)
+    page.get_by_role("tab", name="Library", exact=True).click()
+    expect(page.locator(".library-head [aria-sort='descending']")).to_contain_text("Date")  # the Library's own sort
+    # a column's width is dragged at its title's edge, and kept
+    page.get_by_role("tab", name="Explore", exact=True).click()
+    cell = head.locator(".files-colcell").nth(1)
+    w0 = cell.bounding_box()["width"]
+    grip = cell.locator(".col-resize").bounding_box()
+    page.mouse.move(grip["x"] + 2, grip["y"] + 5)
+    page.mouse.down()
+    page.mouse.move(grip["x"] + 42, grip["y"] + 5, steps=5)
+    page.mouse.up()
+    page.reload()
+    page.get_by_role("tab", name="Explore", exact=True).click()
+    assert sidebar(page).locator(".files-colhead .files-colcell").nth(1).bounding_box()["width"] > w0 + 30

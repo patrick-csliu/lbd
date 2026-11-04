@@ -23,7 +23,9 @@ def test_config_settings_roundtrip(tmp_path):
     assert cfg.settings() == {"roots": [], "default_style": "default", "open_files_in": "viewer",
                               "open_data_in": "explore", "theme": "system",
                               "library": {"read_headers": True, "notice_seen": False, "columns": ["name", "date", "sweep"],
-                                          "previews": "all", "list_view": "list", "sidebar_scopes": ["library"]},
+                                          "previews": "all", "list_view": "list", "sidebar_scopes": ["library"],
+                                          "sidebar_layout": "two", "sidebar_main": "title",
+                                          "sidebar_fields": ["date", "sweep", "project", "tags"]},
                               "memory": {"reserve_gb": None, "maximum_gb": None, "summary_cache_gb": 20.0},
                               "measurements": {"progress": True, "time": True, "percent": True, "points": True,
                                                "axes": True, "notify": False}}
@@ -42,6 +44,12 @@ def test_config_settings_roundtrip(tmp_path):
         cfg.set_library({"sidebar_scopes": ["folders"]})                 # without the Library's list
     with pytest.raises(ConfigError, match="sidebar_scopes"):
         cfg.set_library({"sidebar_scopes": ["library", "history"]})
+    # how the sidebar shows a file: the layout, the main field and the fields
+    lib = cfg.set_library({"sidebar_layout": "columns", "sidebar_main": "file", "sidebar_fields": ["tags", "date", "tags"]})
+    assert (lib["sidebar_layout"], lib["sidebar_main"], lib["sidebar_fields"]) == ("columns", "file", ["tags", "date"])
+    for bad in ({"sidebar_layout": "grid"}, {"sidebar_main": "path"}, {"sidebar_fields": ["name"]}):
+        with pytest.raises(ConfigError, match="sidebar_"):
+            cfg.set_library(bad)
     folder = tmp_path / "data"
     folder.mkdir()
     assert cfg.add_root(str(folder)) == [str(folder.resolve())]

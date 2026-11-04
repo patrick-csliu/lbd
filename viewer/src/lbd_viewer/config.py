@@ -41,8 +41,16 @@ LIST_VIEWS = ("list", "pictures")
 # with the browser tab's filters (always offered); "folders": the folder tree (in Figure with
 # images and style files); "starred": the starred files; "recent": the files opened lately.
 SIDEBAR_SCOPES = ("library", "folders", "starred", "recent")
+# How the sidebar shows a file: one line (the main field and a small one on the right), two lines
+# (the second one with the chosen fields), or columns (a small Library list that can be sorted).
+# The main field is the title or the file name; the fields are Library columns other than Name.
+SIDEBAR_LAYOUTS = ("one", "two", "columns")
+SIDEBAR_MAIN = ("title", "file")
+SIDEBAR_FIELDS = tuple(c for c in LIBRARY_COLUMNS if c != "name")
 LIBRARY_DEFAULTS: Dict[str, Any] = {"read_headers": True, "notice_seen": False, "columns": ["name", "date", "sweep"],
-                                    "previews": "all", "list_view": "list", "sidebar_scopes": ["library"]}
+                                    "previews": "all", "list_view": "list", "sidebar_scopes": ["library"],
+                                    "sidebar_layout": "two", "sidebar_main": "title",
+                                    "sidebar_fields": ["date", "sweep", "project", "tags"]}
 # Memory for data (plan 6d, memory.py): what to leave free for the rest of the computer (None:
 # automatic, max(2 GB, 10% of RAM)), the most LBD may use (None: no maximum), and the disk cache
 # of large maps' and curves' summaries. In GB.
@@ -328,7 +336,12 @@ def _check_library(library: Dict[str, Any]) -> Dict[str, Any]:
         raise ConfigError(f"Library 'sidebar_scopes' must be a list of {', '.join(SIDEBAR_SCOPES)} with library in it, "
                           f"not {scopes!r}")
     library = {**library, "sidebar_scopes": [x for x in SIDEBAR_SCOPES if x in scopes]}   # in this order, once each
-    for key, allowed in (("previews", PREVIEW_MODES), ("list_view", LIST_VIEWS)):
+    fields = library.get("sidebar_fields")
+    if not isinstance(fields, list) or any(f not in SIDEBAR_FIELDS for f in fields):
+        raise ConfigError(f"Library 'sidebar_fields' must be a list of {', '.join(SIDEBAR_FIELDS)}, not {fields!r}")
+    library = {**library, "sidebar_fields": list(dict.fromkeys(fields))}             # once each, in the order chosen
+    for key, allowed in (("previews", PREVIEW_MODES), ("list_view", LIST_VIEWS), ("sidebar_layout", SIDEBAR_LAYOUTS),
+                         ("sidebar_main", SIDEBAR_MAIN)):
         if library.get(key) not in allowed:
             raise ConfigError(f"Library setting '{key}' must be one of {', '.join(allowed)}, not {library.get(key)!r}")
     return {k: library[k] for k in LIBRARY_DEFAULTS}

@@ -1,5 +1,7 @@
-import { KeyboardEvent, MouseEvent, ReactNode, useCallback, useEffect, useRef, useState } from "react";
-import { api, AppState, baseName, LibraryQuery, LibraryRow, SidebarScope } from "./api";
+import { CSSProperties, KeyboardEvent, MouseEvent, ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import type React from "react";
+import { api, AppState, baseName, LibraryColumn, LibraryQuery, LibraryRow, LibrarySettings, SidebarScope } from "./api";
+import { cellText, COLUMNS } from "./libraryColumns";
 import { ConfirmDialog, ConfirmRequest, ContextMenu, isMenuKey, MenuAt, menuAt, MenuEntry } from "./menu";
 import { fileEntries } from "./fileActions";
 import { useToast } from "./toast";
@@ -20,7 +22,6 @@ import FolderPanel from "./FolderPanel";
  * Its search box narrows the list shown; it never changes the Library's filters.
  */
 
-const ROW_H = 26; // px: a row of the compact list
 export const SCOPE_TITLES: Record<SidebarScope, string> = {
   library: "Library selection",
   folders: "Folders",
@@ -29,6 +30,8 @@ export const SCOPE_TITLES: Record<SidebarScope, string> = {
 };
 
 interface Props {
+  /** the viewer's settings changed (the sidebar's layout and fields are settings) */
+  onSettings: (s: AppState) => void;
   /** the button that hides the sidebar (in its heading) */
   hideButton?: ReactNode;
   workspace: "explore" | "figure";
@@ -130,9 +133,22 @@ function useNarrowing(): [string, string, (v: string) => void] {
 /** A list of Library rows (the Library selection, or the starred files), windowed like the Library's. */
 function LibraryList(props: Props & { showFilters: boolean }) {
   const { query, state, activePath, onSelect, onOpen } = props;
+  const toast = useToast();
   const [typed, words, setTyped] = useNarrowing();
+  const { sidebar_layout: layout, sidebar_main: main, sidebar_fields: fields } = state.library;
+  const ROW_H = layout === "two" ? 40 : 26;
+  // the columns layout sorts the sidebar only (per browser tab), never the Library
+  const [ownSort, setOwnSort] = useState<{ sort: LibraryColumn; order: "asc" | "desc" } | null>(() => loadSort());
+  useEffect(() => saveSort(ownSort), [ownSort]);
+  const sorted = layout === "columns" && ownSort ? { sort: ownSort.sort, order: ownSort.order } : {};
   // the sidebar's words narrow the Library's search (all words must match)
-  const shownQuery: LibraryQuery = words ? { ...query, q: [query.q, words].filter(Boolean).join(" ") } : query;
+  const shownQuery: LibraryQuery = { ...(words ? { ...query, q: [query.q, words].filter(Boolean).join(" ") } : query), ...sorted };
+  const [widths, setWidths] = useState<Record<string, number>>(() => loadWidths());
+  const setSetting = (changes: Partial<LibrarySettings>) =>
+    api
+      .setLibrary(changes)
+      .then(props.onSettings)
+      .catch((e) => toast((e as Error).message, "error"));
   const { generation, refresh } = useLibraryStatus(false);
 
   const scroller = useRef<HTMLDivElement>(null);
@@ -171,6 +187,27 @@ function LibraryList(props: Props & { showFilters: boolean }) {
     e.preventDefault();
     setMenu(menuAt(e, menuEntries([r], r)));
   };
+  /** ⋯: how the sidebar shows a file (a setting: the same in every browser tab) */
+  const layoutMenu = (e: MouseEvent) => {
+    const tick = (on: boolean, label: string) => `${on ? "✓" : "\u2003"} ${label}`;
+    const items: MenuEntry[] = [
+      { label: "Show each file as", onClick: () => undefined, disabled: true },
+      ...(["one", "two", "columns"] as const).map((l) => ({
+        label: tick(layout === l, { one: "One line", two: "Two lines", columns: "Columns (sort by any)" }[l]),
+        onClick: () => setSetting({ sidebar_layout: l }),
+      })),
+      "-",
+      { label: tick(main === "title", "Name: the title"), onClick: () => setSetting({ sidebar_main: "title" }) },
+      { label: tick(main === "file", "Name: the file name"), onClick: () => setSetting({ sidebar_main: "file" }) },
+      "-",
+      { label: layout === "one" ? "On the right (the first one ticked)" : "Fields", onClick: () => undefined, disabled: true },
+      ...SIDEBAR_FIELDS.map((f) => ({
+        label: tick(fields.includes(f), FIELD_TITLES[f]),
+        onClick: () => setSetting({ sidebar_fields: fields.includes(f) ? fields.filter((x) => x !== f) : [...fields, f] }),
+      })),
+    ];
+    setMenu(menuAt(e, items));
+  };
 
   /** Show row i (the keys): scrolled into view. */
   const step = (i: number) => {
@@ -202,6 +239,33 @@ function LibraryList(props: Props & { showFilters: boolean }) {
     e.preventDefault();
   };
 
+  // columns: the chosen fields after Name; widths dragged at the titles' edges (this browser)
+  const colFields = fields.filter((f) => f !== "name");
+  const colWidth = (c: string) => widths[c] ?? DEFAULT_COL_WIDTH[c] ?? 90;
+  const grid = ["name", ...colFields].map((c) => `${colWidth(c)}px`).join(" ");
+  const gridWidth = ["name", ...colFields].reduce((n, c) => n + colWidth(c), 0) + 8 * colFields.length + 24;
+  const shownSort = { sort: shownQuery.sort, order: shownQuery.order };
+  const sortBy = (c: LibraryColumn) =>
+    setOwnSort(shownSort.sort === c ? { sort: c, order: shownSort.order === "asc" ? "desc" : "asc" } : { sort: c, order: c === "date" || c === "size" || c === "modified" || c === "sweep" ? "desc" : "asc" });
+  const startColDrag = (e: React.PointerEvent<HTMLElement>, c: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const x0 = e.clientX, w0 = colWidth(c);
+    const move = (ev: PointerEvent) => setWidths((w) => ({ ...w, [c]: Math.max(40, Math.round(w0 + ev.clientX - x0)) }));
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      document.body.classList.remove("resizing");
+      setWidths((w) => {
+        saveWidths(w);
+        return w;
+      });
+    };
+    document.body.classList.add("resizing");
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
   let empty: ReactNode = null;
   if (total === 0)
     empty = words ? (
@@ -220,29 +284,58 @@ function LibraryList(props: Props & { showFilters: boolean }) {
   return (
     <>
       {props.showFilters && <FilterChips query={query} onEdit={props.onEditInLibrary} />}
-      <input className="filter" type="search" value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="Search in these files…" aria-label="Search in these files" />
+      <div className="filter-row">
+        <input className="filter" type="search" value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="Search in these files…" aria-label="Search in these files" />
+        <button className="icon subtle" title="How each file is shown: one line, two lines or columns; which fields" aria-label="How the files are shown" onClick={layoutMenu}>
+          ⋯
+        </button>
+      </div>
       {listError && <div className="error-box small">{listError}</div>}
       <div
-        className="files-list"
+        className={"files-list layout-" + layout}
         ref={scroller}
         onScroll={() => scroller.current && measure(scroller.current)}
         onKeyDown={onKey}
         tabIndex={0}
         role="listbox"
         aria-label={props.showFilters ? "Files of the Library selection" : "Starred files"}
+        style={layout === "columns" ? ({ "--files-grid": grid } as CSSProperties) : undefined}
       >
-        <div className="files-rows" style={{ height: (total ?? 0) * ROW_H }}>
+        {layout === "columns" && (
+          <div className="files-colhead" style={{ width: gridWidth }}>
+            {["name", ...colFields].map((c) => (
+              <div key={c} className={"files-colcell" + (c === "name" ? " sticky" : "")} aria-sort={shownSort.sort === c ? (shownSort.order === "asc" ? "ascending" : "descending") : "none"}>
+                <button className="link" onClick={() => sortBy(c as LibraryColumn)} title="Sort the sidebar by this (the Library keeps its own order)">
+                  {c === "name" ? (main === "file" ? "File name" : "Name") : FIELD_TITLES[c as LibraryColumn]}
+                  {shownSort.sort === c ? (shownSort.order === "asc" ? " ▴" : " ▾") : ""}
+                </button>
+                <span className="col-resize" title="Drag to change the width" onPointerDown={(e) => startColDrag(e, c)} />
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="files-rows" style={{ height: (total ?? 0) * ROW_H, width: layout === "columns" ? gridWidth : undefined }}>
           {Array.from({ length: Math.max(0, Math.min(total ?? 0, (lastPage + 1) * PAGE) - firstPage * PAGE) }, (_, k) => {
             const i = firstPage * PAGE + k;
             const top = i * ROW_H;
             if (top + ROW_H < view.top - ROW_H * 5 || top > view.top + view.height + ROW_H * 5) return null;
             const r = rowAt(i);
-            if (!r) return <div key={`empty-${i}`} className="files-row loading" style={{ top }} />;
+            if (!r) return <div key={`empty-${i}`} className="files-row loading" style={{ top, height: ROW_H }} />;
+            const name = (
+              <span className={"files-name" + (layout === "columns" ? " files-colcell sticky" : "")}>
+                {r.star ? <span className="mark-star">★ </span> : null}
+                {r.conflict || r.error ? <span className="mark-conflict">⚠ </span> : null}
+                {main === "file" ? r.name : r.title || r.name}
+                {r.writing === "measuring" ? <span className="files-mark measuring"> measuring…</span> : null}
+                {r.writing === "stopped" ? <span className="files-mark stopped"> stopped</span> : null}
+              </span>
+            );
+            const second = fields.filter((f) => f !== "date").map((f) => fieldText(r, f)).filter(Boolean).join(" · ");
             return (
               <div
                 key={r.path}
                 className={"files-row" + (r.path === activePath ? " active" : "") + (r.error ? " unreadable" : "")}
-                style={{ top }}
+                style={{ top, height: ROW_H }}
                 role="option"
                 aria-selected={r.path === activePath}
                 title={`${r.path}${r.sweep ? `\nSweep: ${r.sweep}` : ""}${r.error ? `\nCan't be read: ${r.error}` : ""}`}
@@ -255,14 +348,29 @@ function LibraryList(props: Props & { showFilters: boolean }) {
                 onDoubleClick={() => onOpen(r.path)}
                 onContextMenu={(e) => rowMenu(e, r)}
               >
-                <span className="files-name">
-                  {r.star ? <span className="mark-star">★ </span> : null}
-                  {r.conflict ? <span className="mark-conflict">⚠ </span> : null}
-                  {r.title || r.name}
-                  {r.writing === "measuring" ? <span className="files-mark measuring"> measuring…</span> : null}
-                  {r.writing === "stopped" ? <span className="files-mark stopped"> stopped</span> : null}
-                </span>
-                <span className="files-date muted">{shortDate(r)}</span>
+                {layout === "columns" ? (
+                  <>
+                    {name}
+                    {colFields.map((f) => (
+                      <span key={f} className="files-colcell muted" title={cellText(r, f)}>
+                        {fieldText(r, f)}
+                      </span>
+                    ))}
+                  </>
+                ) : layout === "two" ? (
+                  <>
+                    <span className="files-line1">
+                      {name}
+                      {fields.includes("date") && <span className="files-date muted">{shortDate(r)}</span>}
+                    </span>
+                    <span className="files-line2 muted">{second || "\u00a0"}</span>
+                  </>
+                ) : (
+                  <>
+                    {name}
+                    {fields[0] && <span className="files-date muted">{fields[0] === "date" ? shortDate(r) : fieldText(r, fields[0])}</span>}
+                  </>
+                )}
               </div>
             );
           })}
@@ -273,6 +381,55 @@ function LibraryList(props: Props & { showFilters: boolean }) {
       {confirm && <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />}
     </>
   );
+}
+
+const SORT_KEY = "lbd-sidebar-sort";
+const WIDTHS_KEY = "lbd-sidebar-column-widths";
+const SIDEBAR_FIELDS: LibraryColumn[] = ["date", "sweep", "values", "project", "tags", "users", "folder", "file", "size", "modified", "comment", "star", "copies"];
+const FIELD_TITLES = Object.fromEntries(COLUMNS.map((c) => [c.id, c.id === "star" ? "★ Star" : c.title])) as Record<LibraryColumn, string>;
+const DEFAULT_COL_WIDTH: Record<string, number> = { name: 190, date: 74, sweep: 70, size: 70, modified: 128, star: 28, copies: 56 };
+
+function loadSort(): { sort: LibraryColumn; order: "asc" | "desc" } | null {
+  try {
+    const v = JSON.parse(sessionStorage.getItem(SORT_KEY) ?? "null");
+    return v && typeof v.sort === "string" && (v.order === "asc" || v.order === "desc") ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveSort(v: { sort: LibraryColumn; order: "asc" | "desc" } | null) {
+  try {
+    if (v) sessionStorage.setItem(SORT_KEY, JSON.stringify(v));
+    else sessionStorage.removeItem(SORT_KEY);
+  } catch {
+    /* storage unavailable: not kept over a reload */
+  }
+}
+
+function loadWidths(): Record<string, number> {
+  try {
+    const v = JSON.parse(localStorage.getItem(WIDTHS_KEY) ?? "{}");
+    return v && typeof v === "object" ? v : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveWidths(w: Record<string, number>) {
+  try {
+    localStorage.setItem(WIDTHS_KEY, JSON.stringify(w));
+  } catch {
+    /* storage unavailable: not remembered */
+  }
+}
+
+/** A field in the one- or two-line rows: short (the date without the year this year). */
+function fieldText(r: LibraryRow, f: LibraryColumn): string {
+  if (f === "date") return shortDate(r);
+  if (f === "folder") return r.folder || "";
+  if (f === "star") return r.star ? "★" : "";
+  return cellText(r, f);
 }
 
 /** "03-14" this year, "2025-03-14" before: the file's own date, short. */

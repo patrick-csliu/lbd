@@ -123,6 +123,12 @@ export interface LibrarySettings {
   list_view: "list" | "pictures";
   /** the lists the Files sidebar of Explore and Figure offers ("library" always) */
   sidebar_scopes: SidebarScope[];
+  /** how the Files sidebar shows a file: one line, two lines, or columns (that can be sorted) */
+  sidebar_layout: "one" | "two" | "columns";
+  /** the sidebar's main field: the file's title, or its file name */
+  sidebar_main: "title" | "file";
+  /** the sidebar's other fields (two lines: the second line; one line: the first on the right; columns) */
+  sidebar_fields: LibraryColumn[];
 }
 
 /** What the Files sidebar lists: the Library's list with this tab's filters, the folder tree,

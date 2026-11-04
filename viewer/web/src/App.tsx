@@ -957,6 +957,7 @@ function Shell() {
           {state && (
             <FilesSidebar
               hideButton={<SidebarToggle open onToggle={toggleFolders} what="Files" />}
+              onSettings={setState}
               workspace={page === "explore" ? "explore" : "figure"}
               state={state}
               query={libraryQuery}

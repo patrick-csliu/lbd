@@ -686,3 +686,21 @@ details.group fieldset > .group-fields { margin-top: -4px; }
 .details.library > .meta > li { break-inside: avoid; }
 .details.library .file-written { margin-top: 14px; font-size: 13px; }
 .details.library .file-written summary { cursor: pointer; color: var(--muted); }
+
+/* ---- the Files sidebar's layouts (⋯): one line, two lines, columns ---- */
+.files-list.layout-two .files-row { flex-direction: column; align-items: stretch; justify-content: center; gap: 0; }
+.files-list.layout-two .files-line1 { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.files-list.layout-two .files-line1 .files-name { flex: 1; }
+.files-list.layout-two .files-line2 { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* columns: a small Library list; the titles stay on top, the names on the left while it scrolls */
+.files-list.layout-columns .files-colhead { position: sticky; top: 0; z-index: 2; display: grid; grid-template-columns: var(--files-grid); gap: 8px;
+  padding: 0 8px 0 0; height: 26px; align-items: center; background: var(--panel-2); border-bottom: 1px solid var(--border); font-size: 12px; font-weight: 600; }
+.files-list.layout-columns .files-row { display: grid; grid-template-columns: var(--files-grid); gap: 8px; right: auto; padding: 0 8px 0 0; }
+.files-list.layout-columns .files-colcell { position: relative; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
+.files-list.layout-columns .files-row .files-colcell.files-name { font-size: 13px; }
+.files-list.layout-columns .files-colcell.sticky { position: sticky; left: 0; z-index: 1; background: var(--panel); padding-left: 12px; }
+.files-list.layout-columns .files-colhead .files-colcell.sticky { background: var(--panel-2); }
+.files-list.layout-columns .files-row.active .files-colcell.sticky { background: var(--accent-selected); }
+.files-list.layout-columns .files-colhead button { color: var(--text); font-weight: 600; }
+.files-colcell .col-resize { position: absolute; top: 0; right: 0; width: 6px; height: 100%; cursor: col-resize; }
+.files-colcell .col-resize:hover { background: var(--accent); opacity: 0.4; }
