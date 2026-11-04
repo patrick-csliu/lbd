@@ -20,7 +20,7 @@ import {
   SameId,
 } from "./api";
 import { docsUrl } from "./help";
-import { FileDetails } from "./FileView";
+import { FileDetails, FileFacts } from "./FileView";
 import { ConfirmDialog, ConfirmRequest, ContextMenu, isMenuKey, MenuAt, menuAt } from "./menu";
 import { copyPath } from "./fileActions";
 import { useToast } from "./toast";
@@ -225,7 +225,7 @@ export default function LibraryPage(props: Props) {
   });
   const detailWidth = useResizable({
     key: "lbd-library-detail-width",
-    initial: Math.round(window.innerWidth * 0.38),
+    initial: () => Math.round(window.innerWidth * 0.38),
     min: 300,
     maxShare: 0.7,
     side: "right",
@@ -911,6 +911,12 @@ export default function LibraryPage(props: Props) {
             generation={generation}
             onOpenIn={onOpenIn}
             preview={!pictures}
+            star={selectedRow && !selectedRow.error ? { on: selectedRow.star, toggle: () => label([selectedRow.path], { star: !selectedRow.star }) } : undefined}
+            labels={
+              selectedRow && !selectedRow.error ? (
+                <LabelsEditor compact rows={[selectedRow]} facets={facets} login={state.login} onChange={(c) => label([selectedRow.path], c)} />
+              ) : undefined
+            }
             status={
               selectedRow?.writing && (
                 <WritingBox
@@ -925,7 +931,6 @@ export default function LibraryPage(props: Props) {
           >
             {selectedRow && !selectedRow.error && (
               <>
-                <LabelsEditor rows={[selectedRow]} facets={facets} login={state.login} onChange={(c) => label([selectedRow.path], c)} />
                 {(selectedRow.copies > 0 || !!selectedRow.conflict) && (
                   <SameIdBox
                     row={selectedRow}
@@ -1239,6 +1244,8 @@ function SelectedFile({
   generation,
   onOpenIn,
   preview = true,
+  star,
+  labels,
   status,
   children,
 }: {
@@ -1248,6 +1255,10 @@ function SelectedFile({
   onOpenIn: (path: string, where: "explore" | "figure") => void;
   /** show its preview (not in the picture view: the list shows the pictures) */
   preview?: boolean;
+  /** its star, as a button in front of the title */
+  star?: { on: boolean; toggle: () => void };
+  /** its labels, beside the preview (under the description, date and size) */
+  labels?: ReactNode;
   /** what is happening to the file (a measurement writing it): shown above its preview */
   status?: ReactNode;
   children?: ReactNode;
@@ -1278,21 +1289,28 @@ function SelectedFile({
   const shown = info && info.path === path ? info : null;
   const date = row ? createdText(row, true) : shown?.created ?? "";
   return (
-    <div className="file-view">
+    <div className="file-view library-file">
       <div className="library-file-head">
-        <h1>{shown?.title || row?.title || baseName(path)}</h1>
-        <PathLine path={path} />
-        {date && (
-          <div className="small">
-            {date}
-            {row?.date_from_file ? <span className="muted"> (file date: the file has no date of its own{row.read ? "" : " read yet"})</span> : null}
-          </div>
+        {star && (
+          <button className={"star-icon" + (star.on ? " on" : "")} aria-pressed={star.on} aria-label={star.on ? "Starred (click: unstar)" : "Star"} title="Star (Space in the list)" onClick={star.toggle}>
+            {star.on ? "★" : "☆"}
+          </button>
         )}
+        <h1>{shown?.title || row?.title || baseName(path)}</h1>
         <div className="actions">
           <button className="primary" onClick={() => onOpenIn(path, "explore")}>
             Open in Explore
           </button>
           <button onClick={() => onOpenIn(path, "figure")}>Open in Figure</button>
+        </div>
+        <div className="file-sub small">
+          {date && (
+            <span className="file-date" title={row?.date_from_file ? `The file's own date: the file has no date of its own${row.read ? "" : " read yet"}` : undefined}>
+              {date}
+              {row?.date_from_file ? <span className="muted"> (file date)</span> : null}
+            </span>
+          )}
+          <PathLine path={path} />
         </div>
       </div>
       {(error || row?.error) && (
@@ -1305,10 +1323,16 @@ function SelectedFile({
         </div>
       )}
       {status}
-      {preview && !row?.error && <PreviewBox path={path} version={`${version}-${generation}`} />}
+      <div className="file-top">
+        {preview && !row?.error && <PreviewBox path={path} version={`${version}-${generation}`} />}
+        <div className="file-facts">
+          {shown && <FileFacts info={shown} />}
+          {labels}
+        </div>
+      </div>
       {children}
       {!shown && !error && <p className="muted">Reading…</p>}
-      {shown && <FileDetails info={shown} metaFilter />}
+      {shown && <FileDetails info={shown} metaFilter layout="library" />}
     </div>
   );
 }
@@ -1657,7 +1681,10 @@ function flatten(nodes: LabelNode[], depth = 0): { node: LabelNode; depth: numbe
   return nodes.flatMap((n) => [{ node: n, depth }, ...flatten(n.children, depth + 1)]);
 }
 
-function LabelsEditor({ rows, facets, login, onChange }: { rows: LibraryRow[]; facets: LibraryFacets | null; login: string; onChange: (c: LabelChanges) => Promise<void> | void }) {
+/** The labels of one or several files. `compact` (the selected file, beside its preview): one row
+ * per kind without a box, the star being in front of the title, the comment one line until it is
+ * clicked. */
+function LabelsEditor({ rows, facets, login, onChange, compact = false }: { rows: LibraryRow[]; facets: LibraryFacets | null; login: string; onChange: (c: LabelChanges) => Promise<void> | void; compact?: boolean }) {
   const n = rows.length;
   const [picking, setPicking] = useState<"project" | "users" | "tags" | null>(null);
   const comments = [...new Set(rows.map((r) => r.comment))];
@@ -1704,13 +1731,15 @@ function LabelsEditor({ rows, facets, login, onChange }: { rows: LibraryRow[]; f
     </div>
   );
   return (
-    <div className="library-labels-editor" aria-label="Labels">
-      <h3>Labels{n > 1 ? ` of ${n} files` : ""}</h3>
-      <div className="label-row">
-        <button className={"star-button" + (allStarred ? " on" : "")} aria-pressed={allStarred} onClick={() => onChange({ star: !allStarred })} title="Star (Space in the list)">
-          {allStarred ? "★ Starred" : "☆ Star"}
-        </button>
-      </div>
+    <div className={compact ? "library-labels-rows" : "library-labels-editor"} aria-label="Labels">
+      {!compact && <h3>Labels{n > 1 ? ` of ${n} files` : ""}</h3>}
+      {!compact && (
+        <div className="label-row">
+          <button className={"star-button" + (allStarred ? " on" : "")} aria-pressed={allStarred} onClick={() => onChange({ star: !allStarred })} title="Star (Space in the list)">
+            {allStarred ? "★ Starred" : "☆ Star"}
+          </button>
+        </div>
+      )}
       <div className="label-row">
         <span className="label-name">Project</span>
         <div className="label-chips" aria-label="Project">
@@ -1753,13 +1782,14 @@ function LabelsEditor({ rows, facets, login, onChange }: { rows: LibraryRow[]; f
         <textarea
           aria-label="Comment"
           value={comment}
-          placeholder={comments.length > 1 ? "(different comments; typing here replaces them all)" : "Notes about this data (saved when you leave the box)"}
+          placeholder={comments.length > 1 ? "(different comments; typing here replaces them all)" : compact ? "Add a comment…" : "Notes about this data (saved when you leave the box)"}
+          title="Saved when you leave the box (Ctrl+Enter)"
           onChange={(e) => setComment(e.target.value)}
           onBlur={saveComment}
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) (e.target as HTMLTextAreaElement).blur();
           }}
-          rows={3}
+          rows={compact ? 1 : 3}
         />
       </div>
     </div>

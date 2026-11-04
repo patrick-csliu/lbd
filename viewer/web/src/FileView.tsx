@@ -993,14 +993,21 @@ export function SliceControl({ path, version, slice: s, onIndex }: { path: strin
 }
 
 /** What is inside a data file. `metaFilter`: the metadata tree folds (nested groups) and has a
- * filter box (the Library's right column, where metadata can be long). */
-export function FileDetails({ info, metaFilter = false }: { info: FileInfo; metaFilter?: boolean }) {
+ * filter box (the Library's right column, where metadata can be long). `layout` "library": the
+ * Library's selected file, whose description, date and size are shown beside the preview
+ * (FileFacts): here only the tables (without columns empty in every row), the metadata in
+ * columns, and at the end, folded, what wrote the file. */
+export function FileDetails({ info, metaFilter = false, layout = "explore" }: { info: FileInfo; metaFilter?: boolean; layout?: "explore" | "library" }) {
   const [filter, setFilter] = useState("");
   const meta = metaFilter && filter.trim() ? filterMeta(info.meta, filter.trim().toLowerCase()) : info.meta;
+  const library = layout === "library";
+  // the Library leaves out a column that is empty in every row (a file without units, labels …)
+  const vCols = { label: !library || info.values.some((v) => v.label), unit: !library || info.values.some((v) => v.unit) };
+  const aCols = { label: !library || info.axes.some((a) => a.label || a.role === "point" || a.group), unit: !library || info.axes.some((a) => a.unit) };
   return (
-    <div className="details">
-      {info.description && <p>{info.description}</p>}
-      <dl className="props">
+    <div className={"details" + (library ? " library" : "")}>
+      {!library && info.description && <p>{info.description}</p>}
+      {!library && <dl className="props">
         <dt>Created</dt>
         <dd>{info.created ? readableDate(info.created) : "—"}</dd>
         <dt>Written by</dt>
@@ -1015,15 +1022,15 @@ export function FileDetails({ info, metaFilter = false }: { info: FileInfo; meta
             <dd>matplotlib {info.matplotlib}</dd>
           </>
         )}
-      </dl>
+      </dl>}
 
       <h3>Values</h3>
       <table>
         <thead>
           <tr>
             <th>Name</th>
-            <th>Label</th>
-            <th>Unit</th>
+            {vCols.label && <th>Label</th>}
+            {vCols.unit && <th>Unit</th>}
             <th>Axes</th>
             <th>Shape</th>
             <th>Type</th>
@@ -1033,8 +1040,8 @@ export function FileDetails({ info, metaFilter = false }: { info: FileInfo; meta
           {info.values.map((v) => (
             <tr key={v.name}>
               <td><code>{v.name}</code></td>
-              <td>{v.label}</td>
-              <td>{v.unit}</td>
+              {vCols.label && <td>{v.label}</td>}
+              {vCols.unit && <td>{v.unit}</td>}
               <td>{v.axes.join(", ") || "—"}</td>
               <td className="num">{v.shape.length ? v.shape.join(" × ") : `single number: ${v.text ?? "?"}`}</td>
               <td>{v.dtype}</td>
@@ -1048,8 +1055,8 @@ export function FileDetails({ info, metaFilter = false }: { info: FileInfo; meta
         <thead>
           <tr>
             <th>Name</th>
-            <th>Label</th>
-            <th>Unit</th>
+            {aCols.label && <th>Label</th>}
+            {aCols.unit && <th>Unit</th>}
             <th>Points</th>
             <th>From</th>
             <th>To</th>
@@ -1059,14 +1066,14 @@ export function FileDetails({ info, metaFilter = false }: { info: FileInfo; meta
           {info.axes.map((a) => (
             <tr key={a.name}>
               <td><code>{a.name}</code></td>
-              <td>
+              {aCols.label && <td>
                 {a.label}
                 {a.role === "point" && <span className="muted small"> (inside each data point)</span>}
                 {a.group && info.groups?.[a.group] && (
                   <span className="muted small"> (variable sweep {info.groups[a.group].join(" → ")}: points, numbered)</span>
                 )}
-              </td>
-              <td>{a.unit}</td>
+              </td>}
+              {aCols.unit && <td>{a.unit}</td>}
               <td className="num">{a.length}</td>
               {a.elements ? (
                 <td colSpan={2} title={a.elements.join(", ")}>
@@ -1095,7 +1102,40 @@ export function FileDetails({ info, metaFilter = false }: { info: FileInfo; meta
       ) : (
         <MetaTree value={meta} fold={metaFilter} />
       )}
+      {library && (
+        <details className="file-written">
+          <summary>File (written by, format)</summary>
+          <dl className="props">
+            <dt>Written by</dt>
+            <dd>{info.writer ?? "—"}</dd>
+            <dt>Format</dt>
+            <dd>LBD {info.lbd_version}</dd>
+            {info.matplotlib && (
+              <>
+                <dt>View saved with</dt>
+                <dd>matplotlib {info.matplotlib}</dd>
+              </>
+            )}
+          </dl>
+        </details>
+      )}
     </div>
+  );
+}
+
+/** The Library's selected file beside its preview: its description, when it was created and its
+ * size (what the "explore" layout of FileDetails shows above its tables). */
+export function FileFacts({ info }: { info: FileInfo }) {
+  return (
+    <>
+      {info.description && <p className="file-description">{info.description}</p>}
+      <dl className="props">
+        <dt>Created</dt>
+        <dd>{info.created ? readableDate(info.created) : "—"}</dd>
+        <dt>Size</dt>
+        <dd>{formatBytes(info.size)}</dd>
+      </dl>
+    </>
   );
 }
 

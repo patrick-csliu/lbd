@@ -1,4 +1,4 @@
-import { KeyboardEvent, PointerEvent, RefObject, useRef, useState } from "react";
+import { KeyboardEvent, PointerEvent, RefObject, useEffect, useRef, useState } from "react";
 
 /**
  * A pane whose width is dragged at its edge (the Files sidebar, the Library's filters, the
@@ -30,7 +30,8 @@ export interface Resizable {
 
 export interface ResizableOptions {
   key: string;
-  initial: number;
+  /** the width until one is dragged; a function follows the window as it is resized */
+  initial: number | (() => number);
   min: number;
   /** the widest it may be, as a share of the window's width */
   maxShare?: number;
@@ -41,12 +42,12 @@ export interface ResizableOptions {
   fit?: () => number | null;
 }
 
-function load(key: string, fallback: number): number {
+function load(key: string): number | null {
   try {
     const w = Number(localStorage.getItem(key));
-    return w > 0 ? w : fallback;
+    return w > 0 ? w : null;
   } catch {
-    return fallback;
+    return null;
   }
 }
 
@@ -60,11 +61,23 @@ function save(key: string, w: number) {
 
 export function useResizable(o: ResizableOptions): Resizable {
   const clamp = (w: number) => Math.round(Math.max(o.min, Math.min(w, window.innerWidth * (o.maxShare ?? 0.6))));
-  const [width, setRaw] = useState(() => clamp(load(o.key, o.initial)));
+  const initial = () => (typeof o.initial === "function" ? o.initial() : o.initial);
+  // a width dragged (and remembered) stays; until then the initial one, following the window
+  const [chosen, setChosen] = useState<number | null>(() => load(o.key));
+  // the width is worked out again when the window changes (the initial one and the maximum follow it)
+  const [, setWindowWidth] = useState(window.innerWidth);
+  useEffect(() => {
+    const on = () => setWindowWidth(window.innerWidth);
+    window.addEventListener("resize", on);
+    return () => window.removeEventListener("resize", on);
+  }, []);
+  const [dragged, setDragged] = useState<number | null>(null); // while dragging
+  const width = clamp(dragged ?? chosen ?? initial());
   const dragging = useRef(false);
   const setWidth = (w: number) => {
     const c = clamp(w);
-    setRaw(c);
+    setDragged(null);
+    setChosen(c);
     save(o.key, c);
   };
   return {
@@ -80,20 +93,18 @@ export function useResizable(o: ResizableOptions): Resizable {
       onPointerMove: (e) => {
         const box = o.container.current?.getBoundingClientRect();
         if (!dragging.current || !box) return;
-        setRaw(clamp(o.side === "right" ? box.right - e.clientX : e.clientX - box.left));
+        setDragged(clamp(o.side === "right" ? box.right - e.clientX : e.clientX - box.left));
       },
       onPointerUp: () => {
         if (!dragging.current) return;
         dragging.current = false;
         document.body.classList.remove("resizing");
-        setRaw((w) => {
-          save(o.key, w);
-          return w;
-        });
+        if (dragged !== null) setWidth(dragged);
       },
       onPointerCancel: () => {
         dragging.current = false;
         document.body.classList.remove("resizing");
+        setDragged(null);
       },
       onDoubleClick: () => {
         const w = o.fit?.();
@@ -103,7 +114,15 @@ export function useResizable(o: ResizableOptions): Resizable {
         const step = o.side === "right" ? -20 : 20; // ← narrows a left pane, widens a right one
         if (e.key === "ArrowLeft") setWidth(width - step);
         else if (e.key === "ArrowRight") setWidth(width + step);
-        else if (e.key === "Home") setWidth(o.initial);
+        else if (e.key === "Home") {
+          setDragged(null);
+          setChosen(null);
+          try {
+            localStorage.removeItem(o.key);
+          } catch {
+            /* not remembered anyway */
+          }
+        }
         else return;
         e.preventDefault();
       },

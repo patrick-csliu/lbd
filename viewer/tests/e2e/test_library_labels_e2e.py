@@ -50,8 +50,9 @@ def test_labels_on_one_and_several_files_filter_and_search(viewer, library_files
     page = new_page("Library")
     shows(page, every_file(viewer), 20_000)
     find(page, "Late resonator sweep")
-    detail(page).get_by_role("button", name="☆ Star").click()
+    detail(page).get_by_role("button", name="Star", exact=True).click()      # the ☆ in front of the title
     expect(rows(page).first).to_contain_text("★")
+    expect(detail(page).get_by_role("button", name="Starred (click: unstar)")).to_be_visible()
     pick(page, "Add a tag", "flux/bias")
     expect(detail(page).get_by_label("Tags", exact=True)).to_contain_text("flux/bias")
     pick(page, "Set the project", "Qubit A/Device 3")

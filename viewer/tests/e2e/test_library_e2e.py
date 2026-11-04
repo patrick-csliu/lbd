@@ -177,3 +177,24 @@ def test_the_panes_are_dragged_wider_and_the_sidebar_hidden(viewer, new_page):
     expect(page.locator(".sidebar")).to_be_hidden()
     page.locator("main:not([hidden]) .tabbar").get_by_role("button", name="Show the sidebar").click()
     expect(page.locator(".sidebar")).to_be_visible()
+
+
+def test_the_selected_file_fits_its_pane(viewer, new_page):
+    """The selected file's pane chooses its layout by its own width: the preview and the file's
+    facts side by side when wide, one column when narrow; what wrote the file is folded at the
+    end; columns empty in every row are left out of the tables."""
+    page = new_page("Library")
+    page.set_viewport_size({"width": 1920, "height": 1080})
+    rows(page).filter(has_text="sweep").first.click(timeout=20_000)
+    top = page.locator(".library-detail .file-top")
+    expect(page.locator(".library-detail .file-facts")).to_contain_text("Created")
+    assert top.evaluate("e => getComputedStyle(e).flexDirection") == "row"
+    preview, facts = page.locator(".library-detail .file-top > .preview"), page.locator(".library-detail .file-facts")
+    assert facts.bounding_box()["x"] > preview.bounding_box()["x"] + preview.bounding_box()["width"] - 1   # beside it
+    written = page.locator(".library-detail .file-written")
+    expect(written).to_contain_text("File (written by, format)")
+    assert written.evaluate("e => e.open") is False                    # folded
+    page.set_viewport_size({"width": 960, "height": 1080})
+    page.wait_for_timeout(300)
+    assert top.evaluate("e => getComputedStyle(e).flexDirection") == "column"
+    assert page.evaluate("document.documentElement.scrollWidth - innerWidth") <= 0
