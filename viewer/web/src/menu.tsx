@@ -1,4 +1,5 @@
-import { FormEvent, KeyboardEvent, MouseEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
+import type React from "react";
+import { FormEvent, KeyboardEvent, MouseEvent, RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 /** One entry of a right-click menu; "-" is a separator line. */
 export type MenuEntry = { label: string; onClick: () => void; danger?: boolean; disabled?: boolean } | "-";
@@ -19,6 +20,47 @@ export function menuAt(e: MouseEvent | KeyboardEvent, items: MenuEntry[]): MenuA
 /** True for the keys that open a context menu from the keyboard. */
 export function isMenuKey(e: KeyboardEvent): boolean {
   return e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey);
+}
+
+/** A popover that closes like a menu: on a mouse press outside it (except on `opener`, the button
+ * that toggles it) and on Escape anywhere inside it, giving the focus back to what had it when it
+ * opened. The Escape doesn't go on to the page (e.g. to clear the Library's selection). */
+export function useOutsideClose(ref: RefObject<HTMLElement | null>, onClose: () => void, opener?: RefObject<HTMLElement | null>) {
+  const close = useRef(onClose);
+  close.current = onClose;
+  useEffect(() => {
+    const before = document.activeElement as HTMLElement | null;
+    const away = (e: Event) => {
+      const t = e.target as Node;
+      if (ref.current?.contains(t) || opener?.current?.contains(t)) return;
+      close.current();
+    };
+    document.addEventListener("mousedown", away, true);
+    return () => {
+      document.removeEventListener("mousedown", away, true);
+      // back to the opener when the focus was inside (or nowhere); not when the user clicked elsewhere
+      const now = document.activeElement;
+      const target = opener?.current ?? before;
+      if (target?.isConnected && (!now || now === document.body)) target.focus();
+    };
+  }, [ref, opener]);
+  return (e: KeyboardEvent) => {
+    if (e.key !== "Escape") return;
+    e.stopPropagation();
+    e.preventDefault();
+    close.current();
+  };
+}
+
+/** A small floating box (help, a picker) that closes as `useOutsideClose` says. */
+export function Popover({ onClose, opener, className, label, children }: { onClose: () => void; opener?: RefObject<HTMLElement | null>; className: string; label: string; children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const onKeyDown = useOutsideClose(ref, onClose, opener);
+  return (
+    <div ref={ref} className={className} role="dialog" aria-label={label} onKeyDown={onKeyDown}>
+      {children}
+    </div>
+  );
 }
 
 /** A right-click menu. Closes on a choice, Escape, a click or mouse-wheel scroll elsewhere, or resizing. */

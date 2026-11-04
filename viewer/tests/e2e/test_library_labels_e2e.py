@@ -208,3 +208,26 @@ def test_labels_are_made_given_by_dragging_moved_and_renamed(viewer, library_fil
     expect(tags.locator(".library-folder", has_text="cooldown-7")).to_be_visible()
     page.get_by_label("Search the files").fill("fridge 2/cooldown-7")            # labels are searched
     expect(status(page)).not_to_contain_text("0 of")
+
+
+def test_a_label_picker_closes_on_a_click_elsewhere_and_on_escape(viewer, library_files, new_page):
+    page = new_page("Library")
+    shows(page, every_file(viewer), 20_000)
+    find(page, "Late resonator sweep")
+    picker = page.get_by_role("dialog", name="Pick a label")
+    add_tag = detail(page).get_by_role("button", name="Add a tag")
+    add_tag.click()
+    expect(picker).to_be_visible()
+    page.locator(".library-list").click(position={"x": 5, "y": 5})                  # elsewhere
+    expect(picker).to_have_count(0)
+    detail(page).get_by_role("button", name="Set the project").click()
+    expect(picker).to_be_visible()
+    picker.get_by_role("button", name="Close").focus()                               # the focus off the text box
+    page.keyboard.press("Escape")
+    expect(picker).to_have_count(0)
+    expect(detail(page).get_by_role("button", name="Set the project")).to_be_focused()
+    expect(page.locator(".library-row[aria-selected=true]")).not_to_have_count(0)        # the file stays selected
+    add_tag.click()
+    expect(picker).to_be_visible()
+    add_tag.click()                                                                  # the button toggles it
+    expect(picker).to_have_count(0)

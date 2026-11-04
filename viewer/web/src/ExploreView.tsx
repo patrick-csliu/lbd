@@ -28,7 +28,7 @@ import {
   SyncKeys,
 } from "./api";
 import { between, CursorsState, HELP, item, readText, si } from "./cursors";
-import { ConfirmDialog, ConfirmRequest, ContextMenu, MenuAt, MenuEntry } from "./menu";
+import { ConfirmDialog, ConfirmRequest, ContextMenu, MenuAt, MenuEntry, Popover } from "./menu";
 import type { ExportSource } from "./ExportDialog";
 import type { PictureWhat } from "./clipboard";
 import { SummaryProgress } from "./SummaryProgress";
@@ -246,6 +246,7 @@ export default function ExploreView({
   const [reading, setReading] = useState<CursorsAnswer | null>(null);
   const [mouse, setMouse] = useState<[number, number] | null>(null);
   const [help, setHelp] = useState(false);
+  const helpButton = useRef<HTMLButtonElement>(null);
   const [menu, setMenu] = useState<MenuAt | null>(null);
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -1172,7 +1173,7 @@ export default function ExploreView({
           aria-label="Plot: click for a cursor, drag to zoom, ? for all mouse actions and keys"
         />
         {help && (
-          <div className="explore-help" role="dialog" aria-label="Mouse and keys">
+          <Popover className="explore-help" label="Mouse and keys" onClose={() => setHelp(false)} opener={helpButton}>
             <button className="link" onClick={() => setHelp(false)} aria-label="Close">
               ×
             </button>
@@ -1186,7 +1187,7 @@ export default function ExploreView({
                 ))}
               </tbody>
             </table>
-          </div>
+          </Popover>
         )}
       </div>
         {showCuts && (
@@ -1204,7 +1205,7 @@ export default function ExploreView({
         <div className="muted small">
           {compact ? "" : cursors.on ? "Click: cursor · Shift+click: second cursor · " : ""}
           {compact ? "" : "drag: zoom · right-drag: pan · "}
-          <button className="link" onClick={() => setHelp((h) => !h)}>
+          <button ref={helpButton} className="link" onClick={() => setHelp((h) => !h)} aria-expanded={help}>
             ? all mouse actions and keys
           </button>
           {mouse && (

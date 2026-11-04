@@ -1,5 +1,5 @@
 import type React from "react";
-import { CSSProperties, Dispatch, FormEvent, KeyboardEvent, MouseEvent, ReactNode, SetStateAction, useCallback, useEffect, useRef, useState } from "react";
+import { CSSProperties, Dispatch, FormEvent, KeyboardEvent, MouseEvent, ReactNode, RefObject, SetStateAction, useCallback, useEffect, useRef, useState } from "react";
 import {
   api,
   ApiError,
@@ -23,7 +23,7 @@ import {
 } from "./api";
 import { docsUrl } from "./help";
 import { FileDetails, FileFacts } from "./FileView";
-import { ConfirmDialog, ConfirmRequest, ContextMenu, isMenuKey, MenuAt, menuAt } from "./menu";
+import { ConfirmDialog, ConfirmRequest, ContextMenu, isMenuKey, MenuAt, menuAt, useOutsideClose } from "./menu";
 import { copyPath } from "./fileActions";
 import { useToast } from "./toast";
 import { useFileActions } from "./libraryActions";
@@ -1802,6 +1802,11 @@ function flatten(nodes: LabelNode[], depth = 0): { node: LabelNode; depth: numbe
 function LabelsEditor({ rows, facets, login, onChange, compact = false }: { rows: LibraryRow[]; facets: LibraryFacets | null; login: string; onChange: (c: LabelChanges) => Promise<void> | void; compact?: boolean }) {
   const n = rows.length;
   const [picking, setPicking] = useState<"project" | "users" | "tags" | null>(null);
+  const opener = useRef<HTMLElement | null>(null); // the Set / + Add button of the open picker
+  const togglePicker = (which: "project" | "users" | "tags", e: React.MouseEvent<HTMLElement>) => {
+    opener.current = e.currentTarget;
+    setPicking(picking === which ? null : which);
+  };
   const comments = [...new Set(rows.map((r) => r.comment))];
   const [comment, setComment] = useState(comments.length === 1 ? comments[0] : "");
   const key = rows.map((r) => r.path).join("|") + "|" + comments.join("|");
@@ -1828,7 +1833,7 @@ function LabelsEditor({ rows, facets, login, onChange, compact = false }: { rows
           </button>
         </span>
       ))}
-      <button className="link" onClick={() => setPicking(picking === key ? null : key)} aria-label={key === "users" ? "Add a user" : "Add a tag"}>
+      <button className="link" onClick={(e) => togglePicker(key, e)} aria-expanded={picking === key} aria-label={key === "users" ? "Add a user" : "Add a tag"}>
         + Add
       </button>
       {picking === key && (
@@ -1841,6 +1846,7 @@ function LabelsEditor({ rows, facets, login, onChange, compact = false }: { rows
             onChange(key === "users" ? { add_users: [l] } : { add_tags: [l] });
           }}
           onClose={() => setPicking(null)}
+          opener={opener}
         />
       )}
     </div>
@@ -1868,7 +1874,7 @@ function LabelsEditor({ rows, facets, login, onChange, compact = false }: { rows
           ) : projects.length > 1 ? (
             <span className="muted small">several projects</span>
           ) : null}
-          <button className="link" onClick={() => setPicking(picking === "project" ? null : "project")} aria-label="Set the project">
+          <button className="link" onClick={(e) => togglePicker("project", e)} aria-expanded={picking === "project"} aria-label="Set the project">
             {projects.length === 1 && projects[0] ? "Change" : "Set"}
           </button>
           {picking === "project" && (
@@ -1880,6 +1886,7 @@ function LabelsEditor({ rows, facets, login, onChange, compact = false }: { rows
                 onChange({ project: l });
               }}
               onClose={() => setPicking(null)}
+              opener={opener}
             />
           )}
         </div>
@@ -1911,7 +1918,9 @@ function LabelsEditor({ rows, facets, login, onChange, compact = false }: { rows
   );
 }
 
-function LabelPicker({ nodes, first, placeholder, onPick, onClose }: { nodes: LabelNode[]; first?: string; placeholder: string; onPick: (label: string) => void; onClose: () => void }) {
+function LabelPicker({ nodes, first, placeholder, onPick, onClose, opener }: { nodes: LabelNode[]; first?: string; placeholder: string; onPick: (label: string) => void; onClose: () => void; opener?: RefObject<HTMLElement | null> }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const onKeyDown = useOutsideClose(ref, onClose, opener);
   const [text, setText] = useState("");
   const [under, setUnder] = useState(""); // a new label goes under this group ("" : the top level)
   const t = text.trim().toLowerCase();
@@ -1919,7 +1928,7 @@ function LabelPicker({ nodes, first, placeholder, onPick, onClose }: { nodes: La
   const items = flatten(nodes).filter(({ node }) => !t || node.label.toLowerCase().includes(t));
   const suggested = first && (!t || first.toLowerCase().includes(t)) && !items.some(({ node }) => node.label === first) ? first : null;
   return (
-    <div className="label-picker" role="dialog" aria-label="Pick a label">
+    <div ref={ref} className="label-picker" role="dialog" aria-label="Pick a label" onKeyDown={onKeyDown}>
       <input
         autoFocus
         value={text}
@@ -1927,8 +1936,8 @@ function LabelPicker({ nodes, first, placeholder, onPick, onClose }: { nodes: La
         aria-label="Label"
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
+          if (e.key === "Enter") e.preventDefault(); // no keypress: it would click the button the focus goes back to
           if (e.key === "Enter" && text.trim()) onPick(items.some(({ node }) => node.label === text.trim()) ? text.trim() : newLabel());
-          if (e.key === "Escape") onClose();
         }}
       />
       <ul>
