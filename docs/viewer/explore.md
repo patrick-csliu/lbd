@@ -8,20 +8,40 @@ opens it here. For a figure to export, use **Figure** (one click away, see below
 
 1. **Workspaces:** **Library** (find files), **Explore** (look at data) and **Figure** (make
    figures). Each has its own tabs; a file can be open in Explore and in Figure at once.
-2. **Tabs** of the files open in Explore. A single click on a file shows it in a *preview* tab
-   (in italics), which the next single click replaces; a double-click keeps it open. Right-click
-   a tab to close it, open it in Figure or in a new browser tab.
-3. **What to plot:** curves or a map, the values, the horizontal axis, one curve per … (or the
-   map's vertical axis), complex values, and a slider for each other dimension.
-4. **Which traces, scales and colours:** see [Choosing traces](#choosing-traces) and
-   [Scales, colours and limits](#scales-colours-and-limits).
-5. **How the data fits the screen:** for example "max of 6×8 cells per pixel" (see
-   [Large data](#large-data)).
+2. **Tabs** of the files open in Explore, by title (the file name is in the tooltip). A single
+   click on a file shows it in a *preview* tab (in italics), which the next single click
+   replaces; a double-click keeps it open. Right-click a tab to close it, open it in Figure or in
+   a new browser tab; **⋯** at the end lists every tab; ← → move between them.
+3. **The controls**, in three folding sections: **Data** (curves or a map, the values, the axes,
+   one curve per …, complex values, a slider for each other dimension, which traces),
+   **Display** (scales, colours, what a pixel shows when it stands for several cells) and
+   **Processing** (operations and equations).
+4. **The panel's toolbar**: its name, then **⟲** reset the view, **⇔** type the limits,
+   **✂** cuts (maps), **⤓** data (save as CSV, copy the picture) and **⋯** (mouse and keys,
+   duplicate or remove the panel). Each icon says what it does when you point at it.
+5. **The cursors' values**, on one line under the panel's title (see [Reading values](#reading-values)).
 6. **The plot.** Zoom, pan and click on it, see [Moving around](#moving-around).
-7. **The cursors' values**, as stored in the file, see [Reading values](#reading-values).
+7. **The inspector:** **Cursors** (all the numbers, typed positions, Max / Min / Peak),
+   **Values & axes** (the file's tables) and **Metadata** (with a filter). **ⓘ** at the top
+   opens it on the file's values and axes.
 
-Below the side panel's colours is the **Cursors** section (see [Reading values](#reading-values)).
-Click **?** under the plot (or press **?** on it) for every mouse action and key.
+The header holds the title, the path (**⧉** copies it), **Open in Figure**, **📂** show in folder,
+**ⓘ** file info and **⋯** (**Use as Library picture**, **Forget this view**). Click **?** above
+the panels (or press **?** on a plot) for every mouse action and key.
+
+**Any window size.** Explore fills the window and the page itself never scrolls: the controls,
+the panels and the inspector each scroll on their own, so changing a setting or reading a value
+never moves the plot.
+
+| Explore's width | Controls | Panels | Inspector |
+|---|---|---|---|
+| 1500 px or more | a column on the left | the middle | a column on the right |
+| 1100–1500 px | a column | the middle | a strip under the panels |
+| 900–1100 px | a column | the middle | a tab row under the panels; click a tab to open it |
+| below 900 px | a drawer: **⚙** above the panels | the whole width | a tab row; opens as a sheet |
+
+Panels side by side that would be narrower than 450 px are stacked instead, for that size only
+(the panel bar says "stacked: too narrow side by side"); a wider window puts them back.
 
 ## Moving around
 
@@ -30,10 +50,11 @@ Click **?** under the plot (or press **?** on it) for every mouse action and key
 | Turn the mouse wheel | Zooms in or out around the mouse. **Shift**: only horizontally; **Alt**: only vertically. |
 | Drag with the left button | Zooms to the box you drew. A flat box zooms one axis only. |
 | Drag with the right or middle button | Moves the view. |
-| Double-click | Shows all the data again (also **Reset view**). |
+| Double-click | Shows all the data again (also **⟲ Reset view**). |
 | Click | Puts cursor 1 on the nearest stored point (curves) or on the cell (maps), see [Reading values](#reading-values). |
 | Right-click | A menu: cursors, Max, Min, Peak, cuts, show everything. |
-| Type in **Horizontal** / **Vertical** *from … to* | Shows exactly that range. Empty boxes mean "to the end of the data". |
+| **⇔ Limits**, then type in **Horizontal** / **Vertical** *from … to* | Shows exactly that range. Empty boxes mean "to the end of the data". |
+| **Esc** | Closes what is open (help, limits); with nothing open, removes the cursors (**Undo** in the message). |
 
 Every picture is complete: its axes always match its data. While you zoom or pan, the data is
 drawn at half resolution, which is faster; as soon as the mouse rests, the sharp picture follows.
@@ -62,18 +83,18 @@ was swept, Labber's *step channels*, are the **axes**.) A file with several valu
 Explore with **one panel per value**, side by side: up to four at first, up to six in all. A file
 with one value shows one plot, as always. Single numbers never get a panel.
 
-1. **+ Panel ▾** adds a panel for a value. **Side by side** / **stacked** arranges the panels;
-   their grid follows from how many there are.
+1. **+ Panel ▾** adds a panel for a value. The two layout icons arrange the panels **side by
+   side** or **stacked**; their grid follows from how many there are.
 2. **The active panel** is outlined: click anywhere in a panel (or press **1** … **6**). The side
    panel shows its controls ("Panel 2: Q"): what you change there changes that panel only. Each
    panel has its own plot type, values, operations, equations, scales and colours.
-3. **A panel's title bar**: drag it to move the panel; **×** removes it; right-click to
+3. **A panel's title bar**: drag it to move the panel; **×** removes it; right-click it (or **⋯**) to
    **Duplicate** it (the same value twice, for example with and without an operation, or at two
    slider positions).
 4. **Values** in the side panel: tick one to add it to the active panel, drag one onto a panel
    to add it there (or onto the bar above the panels for a new panel), right-click one for
    **Show in a new panel** or **Show only this value here**.
-5. **Sync** above the panels:
+5. **Sync** above the panels, three toggles (**x**, **y**, **sliders**):
     - **x** (on): zooming or panning in one panel does the same in every panel with the same
       horizontal axis; showing everything shows all their data. A panel on another axis says so
       in its title bar ("x not synced: Power (dBm), not Frequency (GHz)"); so does one whose x
@@ -85,7 +106,8 @@ with one value shows one plot, as always. Single numbers never get a panel.
 
 **One cursor for all:** while x is synchronized, a click in a panel puts the cursor at that x in
 every panel with the same horizontal axis; each panel puts it on its own data (its own trace, or
-in a map its own row). The panel you click in leads. The **Cursors** section lists the other
+in a map its own row; maps with the same vertical axis too, such as two values of one file, use
+the same row). The panel you click in leads. The inspector's **Cursors** tab lists the other
 panels' values at the cursor ("The other panels at the same x"), with the difference between
 two cursors. **Max**, **Min** and **Peak** search the active panel and move every cursor.
 
@@ -129,14 +151,14 @@ dB for a complex value shown in dB.
 | **Alt** + click or drag | A free position, not on the data; the read-out then gives the nearest stored value. |
 | **Esc** | Removes the cursors. |
 
-**Cursor types**, in the Cursors section:
+**Cursor types**, in the inspector's Cursors tab:
 
 - **Crosshair** (the default): a point of one trace, or a cell.
 - **Vertical:** a line at one x; the section lists **every visible trace's value there**, the
   cursor's own trace first.
 - **Horizontal:** a line at one height, for example to compare peaks with a level.
 
-**The Cursors section** shows each cursor's numbers. Positions can be typed (with a prefix if you
+**The Cursors tab** of the inspector shows each cursor's numbers (the line under each panel's title shows them too, shortened). Positions can be typed (with a prefix if you
 like: `5.12 GHz`); the cursor then moves to the nearest stored point. **Max**, **Min** and
 **Peak** move cursor 1 to the highest, the lowest, or the point farthest from the median (a dip
 or a spike, whichever stands out more): between the two cursors when there are two, otherwise in
@@ -302,7 +324,7 @@ A screen has far fewer pixels than a large file has numbers: a map of 4001 × 40
 in 700 × 500 pixels puts about 50 cells into each pixel. The viewer chooses on purpose what a
 pixel shows, and says so in the note above the plot:
 
-- **Maps:** **Several cells per pixel** sets whether a pixel shows the **max** of its cells
+- **Maps:** **Several cells per pixel** (in **Display**) sets whether a pixel shows the **max** of its cells
   (peaks and single hot cells stay visible), the **min** (dips stay visible) or the **mean**
   (the overall look; a single odd cell fades).
 - **Curves:** each pixel column keeps the lowest and highest point in it, so a spike of one point
@@ -321,7 +343,7 @@ such data and **⚙ → Memory** in the settings.
 
 ## Getting data out
 
-Each panel has a **Data ▾** menu (next to **Reset view**); the same entries are in the plot's
+Each panel has a **⤓ Data** menu (in its toolbar); the same entries are in the plot's
 right-click menu.
 
 ### Save as CSV
@@ -407,12 +429,12 @@ synchronized. Opening the file again shows the same.
   file holds the data, its description and the figure's saved view (see
   [Saving views](saving-and-exporting.md)).
 - Without a remembered view, Explore starts from what the file's saved figure view plots.
-- **Forget this view** (at the top) starts afresh. If a file changed so that a panel no longer
+- **Forget this view** (**⋯** at the top) starts afresh; **Undo** in the message brings the view back. If a file changed so that a panel no longer
   fits (a value or axis it used is gone), that panel is left out and a note names it; if none
   fits, Explore starts afresh.
 - Views remembered by an earlier version (one plot, before panels) open as one panel.
 - Renaming a file in the viewer keeps its remembered view.
-- **Library preview** (above the panels, on the right) makes the panels as they are now the file's picture in
+- **Use as Library picture** (**⋯** at the top) makes the panels as they are now the file's picture in
   the [Library](library.md#previews). Only the picture is kept: changing Explore afterwards
   doesn't change it.
 

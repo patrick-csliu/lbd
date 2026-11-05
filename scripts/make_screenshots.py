@@ -265,21 +265,21 @@ def explore(page: Page, url: str, ctx) -> None:
     fresh(page, url, "Explore")
     page.locator(".row-label", has_text="sweep.lbd").first.dblclick()
     host = page.locator("main:not([hidden]) .explore-overlay")
-    page.locator("main:not([hidden]) .explore-readout .mono").wait_for()
+    page.locator("main:not([hidden]) .explore-note").first.wait_for()
     page.wait_for_timeout(800)
     box = host.bounding_box()
     page.mouse.click(box["x"] + box["width"] * 0.45, box["y"] + box["height"] * 0.5)   # read a cell
     page.locator("main:not([hidden]) .explore-pick").wait_for()
     page.keyboard.press("c")                    # without the cuts (shown in reading.png): all fits
     page.wait_for_timeout(1500)
-    mark(page, [
+    mark(page, [                                # the numbers of the list in explore.md
         (1, ".pages", 0, "b"),
         (2, "main:not([hidden]) .tabs .tab", 0, "b"),
-        (3, "main:not([hidden]) .controls .field", 0, "r"),
-        (4, "main:not([hidden]) .axis-select", 0, "r"),
-        (5, "main:not([hidden]) .explore-note", 0, "b"),
+        (3, "main:not([hidden]) .controls-section", 0, "r"),
+        (4, "main:not([hidden]) .explore-toolbar .ib", 0, "b"),
+        (5, "main:not([hidden]) .explore-readout", 0, "b"),
         (6, "main:not([hidden]) .explore-host", 0, "tr"),
-        (7, "main:not([hidden]) .explore-pick", 0, "b"),
+        (7, "main:not([hidden]) .inspector-tabs", 0, "l"),
     ])
     save(page, VIEWER_IMG / "explore.png")
 
@@ -289,7 +289,7 @@ def explore_reading(page: Page, url: str, ctx) -> None:
     fresh(page, url, "Explore")
     page.locator(".row-label", has_text="sweep.lbd").first.dblclick()
     host = page.locator("main:not([hidden]) .explore-overlay")
-    page.locator("main:not([hidden]) .explore-readout .mono").wait_for()
+    page.locator("main:not([hidden]) .explore-note").first.wait_for()
     explore_area = page.locator("main:not([hidden])")
     explore_area.get_by_label("Plot type").select_option("heatmap")               # the sweep as a map
     page.wait_for_timeout(1200)
@@ -316,11 +316,14 @@ def explore_operations(page: Page, url: str, ctx) -> None:
     fresh(page, url, "Explore")
     page.locator(".row-label", has_text="sweep.lbd").first.dblclick()
     area = page.locator("main:not([hidden])")
-    page.locator("main:not([hidden]) .explore-readout .mono").wait_for()
+    page.locator("main:not([hidden]) .explore-note").first.wait_for()
     area.get_by_label("Plot type").select_option("heatmap")
     page.wait_for_timeout(1200)
     area.get_by_label("Complex values").select_option("db")
     page.wait_for_timeout(1200)
+    summary = area.locator(".controls-section > summary", has_text="Processing")
+    if summary.locator("xpath=..").get_attribute("open") is None:
+        summary.click()
     area.locator(".operations").get_by_role("button", name="+ Add operation ▾").click()
     page.locator(".context-menu").get_by_role("menuitem", name="Subtract the mean", exact=True).click()
     page.wait_for_timeout(1000)
@@ -338,9 +341,15 @@ def explore_equations(page: Page, url: str, ctx) -> None:
     fresh(page, url, "Explore")
     page.locator(".row-label", has_text="sweep.lbd").first.dblclick()
     area = page.locator("main:not([hidden])")
-    page.locator("main:not([hidden]) .explore-readout .mono").wait_for()
+    page.locator("main:not([hidden]) .explore-note").first.wait_for()
     area.get_by_label("Complex values").select_option("db")
     page.wait_for_timeout(1200)
+    for section in ("Processing",):             # folded at first
+        summary = area.locator(".controls-section > summary", has_text=section)
+        if summary.locator("xpath=..").get_attribute("open") is None:
+            summary.click()
+    area.locator(".equations > summary").click()
+    area.locator(".eq-names > summary").click()
     box = area.get_by_label("Equation for z")
     box.fill("z - max(z)")                      # each power's row against its own maximum
     box.press("Enter")
@@ -366,15 +375,17 @@ def explore_panels(page: Page, url: str, ctx) -> None:
     page.wait_for_timeout(1500)
     box = area.locator(".panel .explore-overlay").nth(0).bounding_box()
     page.mouse.click(box["x"] + box["width"] * 0.42, box["y"] + box["height"] * 0.5)   # one cursor in every panel
+    if not area.locator(".inspector-body").is_visible():
+        area.get_by_role("tab", name="Cursors").click()       # the inspector folded at this width
     area.locator(".cursor-others").wait_for()
-    page.mouse.move(5, 400)                     # no "mouse at" line: the panels keep their size
+    page.mouse.move(5, 400)                     # no mouse position over the plots
     page.wait_for_timeout(1500)
     mark(page, [                                # the numbers of the list in explore.md
         (1, "main:not([hidden]) .panel-bar button", 0, "L"),
         (2, "main:not([hidden]) .panel.active", 0, "L"),
         (3, "main:not([hidden]) .panel-title", 1, "t"),
         (4, "main:not([hidden]) .controls fieldset", 0, "r"),
-        (5, "main:not([hidden]) .panel-sync", 0, "r"),
+        (5, "main:not([hidden]) .panel-sync", 0, "b"),
     ])
     save(page, VIEWER_IMG / "panels.png")
     page.set_viewport_size(SIZE)

@@ -69,6 +69,23 @@ are still written as 1.2).
   leave the Library, how many have labels, the labels only they have, and open tabs showing
   them. Nothing on disk changes. The same menu shows the folder in Explorer / Finder and copies
   its path.
+- **Explore is a workbench that fills the window.** The controls, the plots and a new
+  inspector each scroll on their own, so the page never scrolls and changing a control or reading
+  a cursor never moves the plot. The controls fold into **Data**, **Display** and **Processing**;
+  the inspector has **Cursors**, **Values & axes** (the file's tables and facts) and **Metadata**
+  (with its filter). Every panel has a one-line read-out of its cursors under its title. In
+  narrower windows the inspector becomes a strip under the plots and the controls a drawer
+  (**⚙** in the panel bar); panels too narrow side by side are stacked for that size only.
+- **Explore: icon buttons.** A panel's toolbar is one row: ⟲ Reset view, ⇔ Limits (a popover),
+  ✂ Cuts, ⤓ Data, ⋯; the layout is ▥ ▤, the syncs are toggle chips. Each has its name and key in
+  its tooltip. The header is one line: the path (shortened in the middle, with ⧉ copy),
+  **Open in Figure**, Show in folder, File info and ⋯ (Use as Library picture, Forget this view,
+  with Undo).
+- **Explore: plainer messages.** Esc closes the help or a popover first; it removes the cursors
+  only when nothing is open, with Undo. A saved scatter view offers **Open in Figure** or **Show
+  as curves**; a damaged file says so, with Show in folder; a variable sweep's note shows in the
+  panel, not as a red message. Tabs show the file's title, the active tab is scrolled into view,
+  ⋯ lists all Explore tabs, and ← → move along them.
 - **Library: columns in any order and any width.** Drag a column title to move the column (★
   first, say), drag its edge to resize it; right-click → Move left / right / to the start, and
   Reset columns. The Files sidebar's columns move the same way.
