@@ -13,7 +13,8 @@ opens it here. For a figure to export, use **Figure** (one click away, see below
    replaces; a double-click keeps it open. Right-click a tab to close it, open it in Figure or in
    a new browser tab; **⋯** at the end lists every tab; ← → move between them.
 3. **The controls**, in three folding sections: **Data** (curves or a map, the values, the axes,
-   one curve per …, complex values, a slider for each other dimension, which traces),
+   one curve per …, complex values, a [slider](#sync-panels-that-follow-each-other) for each
+   other dimension, which traces),
    **Display** (scales, colours, what a pixel shows when it stands for several cells) and
    **Processing** (operations and equations).
 4. **The panel's toolbar**: its name, then **⟲** reset the view, **⇔** type the limits,
@@ -100,20 +101,46 @@ with one value shows one plot, as always. Single numbers never get a panel.
 4. **Values** in the side panel: tick one to add it to the active panel, drag one onto a panel
    to add it there (or onto the bar above the panels for a new panel), right-click one for
    **Show in a new panel** or **Show only this value here**.
-5. **Sync** above the panels, four toggles (**x**, **y**, **sliders**, **cursors**). Turning one
-   on lines the other panels up with the active one at once:
-    - **x** (on): zooming or panning in one panel does the same in every panel with the same
-      horizontal axis; showing everything shows all their data. A panel on another axis says so
-      in its title bar ("x not synced: Power (dBm), not Frequency (GHz)"); so does one whose x
-      an equation or an FFT changed.
-    - **y** (off): the same for the vertical axis, between panels with the same unit (maps: the
-      same vertical axis).
-    - **sliders** (on): moving a slider moves that axis' slider in every panel. Switch it off to
-      show, say, ground and excited state side by side in two panels of the same value.
-    - **cursors** (on): the panels with the same horizontal axis share the cursors (below). Apart
-      from **x**: zoom four temperatures to one time range but put a cursor on each one's own
-      drop (x on, cursors off), or read every panel at one time while each keeps its own zoom
-      (x off, cursors on).
+5. **Sync** above the panels, four toggles (**x**, **y**, **sliders**, **cursors**): which panels
+   follow each other, explained [below](#sync-panels-that-follow-each-other).
+
+### Sync: panels that follow each other
+
+Each toggle links one thing between the panels that have it in common, and turning one on lines
+the other panels up with the active one at once:
+
+| Toggle | Links | Between panels with |
+|---|---|---|
+| **x** (on) | zoom and pan along the horizontal axis | the same horizontal axis (label and unit) |
+| **y** (off) | zoom and pan along the vertical axis | the same vertical unit (curves) or the same vertical axis (maps) |
+| **sliders** (on) | which step of an axis that isn't drawn is shown | a slider of the same axis |
+| **cursors** (on) | the cursors' positions (each panel reads its own value there) | the same horizontal axis |
+
+**x and y**, for example four panels against time, two pressures (mbar) and two temperatures
+(K):
+
+- With **x** on, a zoom or pan in any panel moves all four horizontally (they share Time); each
+  keeps its own vertical range. Showing everything shows the time range of all four.
+- With **y** on, the two pressure panels zoom together vertically, and so do the two temperature
+  panels; a pressure panel never takes a temperature range. With only y on, nothing follows
+  horizontally.
+- Panels are matched by the axis as drawn, unit prefix included: a panel in kPa and one in Pa
+  don't follow each other, nor does one whose x an equation or an FFT changed. Its title bar says
+  so ("x not synced: Power (dBm), not Frequency (GHz)").
+- On curves, y matches by unit only: two different quantities in the same unit (a sample and a
+  fridge temperature, both K) zoom together.
+
+**sliders.** A slider chooses the step of an axis that isn't drawn: a measurement over power,
+flux and frequency shown as a flux × frequency map has a **power** slider, and the plot shows
+one power at a time. With **sliders** on, panels with a slider of the same axis show the same
+step: with S21 in one panel and S11 in another, moving the power slider of either moves both, so
+the two are always compared at the same power. They follow by **stored step** (the 5th power is
+the 5th power in the others); a panel without that slider isn't touched. Switch it off to show,
+say, the ground and the excited state side by side in two panels of the same value.
+
+**cursors** are apart from **x**: zoom four temperatures to one time range but put a cursor on
+each one's own drop (x on, cursors off), or read every panel at one time while each keeps its
+own zoom (x off, cursors on).
 
 **One cursor for all:** while the cursors are synchronized, a click in a panel puts the cursor at that x in
 every panel with the same horizontal axis; each panel puts it on its own data (its own trace, or
