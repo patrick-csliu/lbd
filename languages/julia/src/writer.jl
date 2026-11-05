@@ -648,7 +648,10 @@ function try_guard(io::IOStream)
                    h, 0x2 | 0x1, 0, 1, 0, Ref(GUARD_OVERLAPPED))       # exclusive | fail immediately
         return ok != 0
     end
-    r = ccall(:fcntl, Cint, (Cint, Cint, Ref{Flock}), fd(io), F_SETLK, Ref(flock_of(F_WRLCK)))
+    # fcntl is variadic: its third argument must be passed as one (on Apple silicon it goes on the
+    # stack, not in a register, and a plain ccall made every lock fail there).
+    l = Ref(flock_of(F_WRLCK))
+    r = GC.@preserve l @ccall fcntl(fd(io)::Cint, F_SETLK::Cint; Base.unsafe_convert(Ptr{Flock}, l)::Ptr{Flock})::Cint
     return r == 0
 end
 
@@ -700,7 +703,8 @@ function writing_status(path::AbstractString)
             return "stopped"
         end
         l = Ref(flock_of(F_WRLCK))
-        ccall(:fcntl, Cint, (Cint, Cint, Ref{Flock}), fd(io), F_GETLK, l) == 0 || throw(Base.SystemError("fcntl"))
+        GC.@preserve l (@ccall fcntl(fd(io)::Cint, F_GETLK::Cint; Base.unsafe_convert(Ptr{Flock}, l)::Ptr{Flock})::Cint) == 0 ||
+            throw(Base.SystemError("fcntl"))
         return flock_type(l[]) == F_UNLCK ? "stopped" : "measuring"
     finally
         close(io)
