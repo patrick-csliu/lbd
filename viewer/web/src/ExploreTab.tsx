@@ -8,7 +8,7 @@ import CursorPanel, { OtherPanel } from "./CursorPanel";
 import { CursorsState, NO_CURSORS } from "./cursors";
 import ExploreView, { ExploreActions, Follow, View, ViewSettings } from "./ExploreView";
 import ExportDialog, { ExportSource } from "./ExportDialog";
-import { around, compose, copyPng, downloadPng, pageBackground, pictureChoice, rememberPictureChoice } from "./clipboard";
+import { around, compose, copyPng, pageBackground, pictureChoice, rememberPictureChoice, savePng } from "./clipboard";
 import type { MenuEntry } from "./menu";
 import AxisSelect from "./AxisSelect";
 import { COMPLEX_MODES, FileDetails, SliceControl } from "./FileView";
@@ -216,7 +216,11 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
         label: "Save as CSV…",
         onClick: () => {
           const ids = [id, ...(rec?.panels ?? []).filter((q) => q.id !== id).map((q) => q.id)];
-          const sources = ids.map((i) => actionsOf(i).current?.exportSource() ?? null);
+          const number = (i: string) => (rec?.panels ?? []).findIndex((q) => q.id === i) + 1;
+          const sources = ids.map((i): ExportSource | null => {
+            const s = actionsOf(i).current?.exportSource() ?? null;
+            return s && { ...s, name: `Panel ${number(i)}` };
+          });
           if (!sources[0]) return onError("The plot isn't open yet.");
           setExporting(sources.filter((x): x is ExportSource => !!x));
         },
@@ -228,7 +232,10 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
         onClick: () => {
           const c = pictureOf(id);
           if (!c) return onError("The plot isn't drawn yet.");
-          downloadPng(c, `${infoRef.current?.name.replace(/\.lbd$/i, "") ?? "picture"}.png`).catch((e) => onError((e as Error).message));
+          const name = `${infoRef.current?.name.replace(/\.lbd$/i, "") ?? "picture"}.png`;
+          savePng(c, path, name)
+            .then((saved) => saved && toast(`Saved ${saved}`, "info"))
+            .catch((e) => onError((e as Error).message));
         },
       },
       { label: mark(picture.what === "screen") + "Picture as on screen (cursors, cuts)", onClick: () => setPictureChoice({ ...picture, what: "screen" }) },

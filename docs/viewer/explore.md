@@ -418,17 +418,21 @@ right-click menu.
 | **Numbers** | **as shown** (complex mode, operations and equations applied) · **as shown + stored** (each shown column followed by the file's own numbers) · **stored** |
 | **How much** | **everything** (all chosen traces, every point) · **the zoomed range** |
 | **Layout** | **one data point per row** · **table (matrix)**, for 2-D data: a map, or curves of a series |
-| **Panels** | **this panel** · **all panels**: one file when they share their axes (a column per panel), else one file each |
+| **Panels** | **this panel** · **all panels with the same axes**: one file, a column per panel; panels on other axes are left out, and the next step names them |
 
 Numbers are always in the units stored in the file (Hz, not GHz: nothing rounded); the header
 names each column's unit. Pointing at a choice says what it does. Some choices can't be made for
 every panel; they are greyed, and pointing at one says why (for
 example the stored numbers after an FFT, whose points aren't stored ones).
 
-Under the choices, the dialog says how big the file will be (*About 48 MB, 1 010 101 rows ×
-3 columns*). Above 100 MB it warns, and **Save** becomes **Save anyway**; it also says when
-Excel would open only part of the file (more than 1 048 576 rows or 16 384 columns). A large
-file is written part by part, with a progress bar and **Cancel saving** (which leaves no file).
+**Next** shows what will be written: the size (*About 48 MB: 1 010 101 rows × 3 columns*), the
+columns, and warnings: above 100 MB, and when Excel would open only part of the file (more than
+1 048 576 rows or 16 384 columns). **Back** returns to the choices. **Save…** opens the system's
+Save dialog, starting in the data file's folder with a name filled in; it asks before replacing
+a file. Every save writes one file. A large file is written part by part, with a progress bar and
+**Cancel saving**; a file being replaced stays as it was until the new one is complete. On a
+computer without a Save dialog, the name is typed in the dialog and the file goes next to the
+data file.
 
 The comments name the data file and its **id** (the measurement's identity, which stays the same
 when the file is moved or copied; also `made from:` when the file was made from another), so a
@@ -475,7 +479,7 @@ another decimal sign, use **Data → From Text/CSV**). The same table comes from
 ### Copy picture
 
 **Copy picture** puts a PNG of the panel on the clipboard, to paste into slides, a chat or your
-notes. Two choices in the same menu decide what it holds (the ones used last are kept):
+notes; **Save picture as PNG…** saves it, asking where with the system's Save dialog. Two choices in the same menu decide what it holds (the ones used last are kept):
 
 - **Picture as on screen (cursors, cuts)** or **Picture of the plot only**;
 - **Picture of this panel** or **Picture of all panels**, as laid out side by side or stacked.

@@ -1,11 +1,14 @@
 """Getting data out in a real browser (plan 5): Save as CSV from a panel's Data menu (choices,
 the size line) gives a file numpy reads back; Copy picture puts a PNG on the clipboard."""
 
+import re
+
 import lbd
 import numpy as np
 import pytest
 from pageui import open_file, row
 from playwright.sync_api import Page, expect
+from lbd_viewer import server
 from test_explore_e2e import explore, frames
 
 
@@ -28,14 +31,50 @@ def open_dialog(page: Page):
     return dialog
 
 
-def test_save_as_csv_from_the_data_menu(sweep, viewer, new_page):
+def test_save_as_csv_from_the_data_menu(sweep, viewer, new_page, monkeypatch, tmp_path):
+    """Plan 12: the choices, Next, what will be written with its size, Save…: the system's dialog
+    says where; cancelled, nothing is written."""
+    asked = []
+
+    def dialog_says(folder, name, fmt, title, fallback):
+        asked.append((str(folder), name, fmt, title))
+        return answer[0]
+
+    answer = [None]
+    monkeypatch.setattr(server, "native_save_dialog", dialog_says)
     page = new_page("Explore")
     frames(page, lambda: row(page, "sweep.lbd").dblclick())
     dialog = open_dialog(page)
-    expect(dialog.get_by_role("status").first).to_contain_text("153 rows × 3 columns")
-    expect(dialog.get_by_label("File name")).to_have_value("sweep_T.csv")
+    expect(dialog.get_by_label("as shown", exact=True).locator("xpath=..")).to_have_attribute("title", re.compile("complex mode"))
     dialog.get_by_label("table (matrix)").check()
+    dialog.get_by_role("button", name="Next").click()
     expect(dialog.get_by_role("status").first).to_contain_text("4 rows × 52 columns")
+    dialog.get_by_role("button", name="Back").click()
+    dialog.get_by_label("one data point per row").check()
+    dialog.get_by_role("button", name="Next").click()
+    expect(dialog.get_by_role("status").first).to_contain_text("153 rows × 3 columns")
+    dialog.get_by_role("button", name="Save…").click()                 # cancelled: the dialog stays
+    page.wait_for_timeout(500)
+    assert asked == [(str(viewer.data), "sweep_T.csv", "csv", "Save as CSV")]
+    expect(dialog).to_be_visible()
+    assert not list(viewer.data.glob("*.csv"))
+    answer[0] = str(tmp_path / "chosen.csv")                           # any folder: chosen in the dialog
+    dialog.get_by_role("button", name="Save…").click()
+    expect(dialog).to_be_hidden()
+    expect(page.get_by_text("Saved ")).to_be_visible()
+    a = np.loadtxt(tmp_path / "chosen.csv", delimiter=",", encoding="utf-8")
+    assert a.shape == (153, 3)
+
+
+def test_without_a_save_dialog_the_name_is_typed(sweep, viewer, new_page):
+    """Where the system has no dialog (501): the file goes next to the data, named here."""
+    page = new_page("Explore")
+    frames(page, lambda: row(page, "sweep.lbd").dblclick())
+    dialog = open_dialog(page)
+    dialog.get_by_label("table (matrix)").check()
+    dialog.get_by_role("button", name="Next").click()
+    dialog.get_by_role("button", name="Save…").click()
+    expect(dialog.get_by_label("File name")).to_have_value("sweep_T.csv")
     dialog.get_by_label("File name").fill("sweep table.csv")
     dialog.get_by_role("button", name="Save", exact=True).click()
     expect(dialog).to_be_hidden()
@@ -45,6 +84,8 @@ def test_save_as_csv_from_the_data_menu(sweep, viewer, new_page):
 
     dialog = open_dialog(page)                               # the choice is remembered
     expect(dialog.get_by_label("table (matrix)")).to_be_checked()
+    dialog.get_by_role("button", name="Next").click()
+    dialog.get_by_role("button", name="Save…").click()
     dialog.get_by_label("File name").fill("sweep table.csv")
     dialog.get_by_role("button", name="Save", exact=True).click()
     expect(dialog.locator(".dialog-error")).to_contain_text("exists already")
@@ -123,3 +164,14 @@ def test_copy_picture_of_all_panels(viewer, context, new_page):
     left = min(b["x"] for b in boxes)
     right = max(b["x"] + b["width"] for b in boxes)
     assert abs(w - (right - left)) <= 2                    # both panels, as laid out
+
+
+def test_save_picture_uses_the_save_dialog(sweep, viewer, new_page, monkeypatch, tmp_path):
+    """Plan 12: the picture goes where the system's dialog says (not to the browser's Downloads)."""
+    monkeypatch.setattr(server, "native_save_dialog", lambda *a: str(tmp_path / "plot.png"))
+    page = new_page("Explore")
+    frames(page, lambda: row(page, "sweep.lbd").dblclick())
+    explore(page).get_by_role("button", name="Data", exact=True).click()
+    page.get_by_role("menuitem", name="Save picture as PNG…").click()
+    expect(page.get_by_text("Saved ")).to_be_visible()
+    assert (tmp_path / "plot.png").read_bytes()[:4] == b"\x89PNG"

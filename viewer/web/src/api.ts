@@ -83,6 +83,8 @@ export interface ExportPlan {
   options: { stored: string | null; both: string | null; zoomed: string | null };
   error: string | null;
   estimate: { bytes: number; rows: number; columns: number; files: number; warnings: string[]; big: boolean } | null;
+  left_out: string[]; // panels on other axes: a save writes one file
+  columns: string[]; // the file's columns, one data point per row
 }
 
 /** A CSV file being written (or just finished). */
@@ -817,11 +819,21 @@ export const api = {
   exploreSaveCut: (session: string, which: "row" | "column" | "trace", index: Record<string, number>, trace?: number, path?: string) =>
     call<{ path: string }>("POST", `/api/explore/${encodeURIComponent(session)}/save-cut`, { which, index, trace, path: path ?? null }),
   /** Save what panels show as CSV: without `path` the plan (name, size, options); with it, a job. */
-  exportCsv: (sessions: string[], choice: ExportChoice, views: { xlim: number[]; ylim: number[] }[] | null, path?: string) =>
+  /** The system's Save dialog, in the data file's folder with `name` filled in; `path` null: cancelled.
+   *  501: no dialog on this computer. */
+  pickSave: (path: string, name: string, fmt: "csv" | "png" | "lbd", title: string) =>
+    call<{ path: string | null }>("POST", "/api/pick-save", { path, name, fmt, title }),
+  /** Write a picture to a path chosen with pickSave. */
+  async savePicture(path: string, png: Blob) {
+    const r = await fetch(`/api/save-picture?${new URLSearchParams({ path })}`, { method: "POST", headers: { "X-LBD-Token": token }, body: png });
+    if (!r.ok) throw new ApiError(r.status, await errorText(r));
+  },
+  exportCsv: (sessions: string[], choice: ExportChoice, views: { xlim: number[]; ylim: number[] }[] | null, path?: string, names?: string[]) =>
     call<ExportPlan & { job: string; paths: string[] }>("POST", "/api/explore/export-csv", {
       sessions,
       ...choice,
       views,
+      names,
       path: path ?? null,
     }),
   exports: () => call<{ jobs: ExportJob[] }>("GET", "/api/exports"),

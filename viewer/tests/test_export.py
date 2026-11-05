@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 import lbd
-from lbd_viewer import export, summaries
+from lbd_viewer import export, server, summaries
 from test_large_view import MAP, big, little_room  # noqa: F401  (fixture)
 
 
@@ -129,11 +129,13 @@ def test_panels_sharing_axes_go_into_one_file(client, sweep):
     a = open_view(client, path, CURVES)
     b = open_view(client, path, {**CURVES, "values": ["T"], "complex": None})
     c = open_view(client, path, {"kind": "curve", "values": ["T"], "x": "power", "series": "f"})   # other axes
-    assert ask(client, [a, b])["estimate"]["files"] == 1
+    plan = ask(client, [a, b])
+    assert plan["estimate"]["files"] == 1 and plan["left_out"] == [] and plan["columns"] == ["power", "f", "S21", "T"]
     (out,) = save(client, [a, b], path.with_name("p.csv"))
     assert np.genfromtxt(out, delimiter=",", names=True, encoding="utf-8").dtype.names == ("power", "f", "S21", "T")
-    paths = save(client, [a, c], path.with_name("q.csv"))
-    assert len(paths) == 2 and paths[1].endswith("q – part 2.csv")
+    assert ask(client, [a, c], names=["Panel 1", "Panel 3"])["left_out"] == ["Panel 3"]   # a save writes one file
+    assert len(save(client, [a, c], path.with_name("q.csv"))) == 1
+    assert not list(path.parent.glob("q*part*"))
 
 
 def test_an_existing_file_is_never_replaced(client, sweep):
@@ -187,3 +189,50 @@ def test_the_csv_names_the_files_id(client, sweep, big, monkeypatch):
         sid = open_view(client, path, spec)
         (out,) = save(client, [sid], path.with_name(name))
         assert f"# id: {lbd.info(path).id}" in open(out, encoding="utf-8").read()
+
+
+def pick(client, path, name, fmt="csv"):
+    return client.post("/api/pick-save", json={"path": str(path), "name": name, "fmt": fmt, "title": "Save"})
+
+
+def test_the_save_dialog_chooses_where(client, sweep, tmp_path, monkeypatch):
+    """Plan 12: a path chosen in the system's dialog may be written, wherever it is, and it may
+    replace a file (the dialog asked); the file stays whole until the new one is complete."""
+    path, _ = sweep
+    sid = open_view(client, path, CURVES)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    target = elsewhere / "mine.csv"
+    outside = client.post("/api/explore/export-csv", json={"sessions": [sid], "path": str(target)})
+    assert outside.status_code == 403                                  # not chosen: refused
+    monkeypatch.setattr(server, "native_save_dialog", lambda folder, name, fmt, title, fallback: str(target))
+    assert pick(client, path, "x.csv").json() == {"path": str(target)}
+    save(client, [sid], target)
+    assert target.read_text(encoding="utf-8").startswith("# power")
+    target.write_text("old")
+    save(client, [sid], target)                                        # replaced, as agreed in the dialog
+    assert target.read_text(encoding="utf-8").startswith("# power")
+    assert sorted(p.name for p in elsewhere.iterdir()) == ["mine.csv"]  # no part left behind
+
+
+def test_the_save_dialog_cancelled_or_missing_or_wrong(client, sweep, monkeypatch):
+    path, _ = sweep
+    monkeypatch.setattr(server, "native_save_dialog", lambda *a: None)
+    assert pick(client, path, "x.csv").json() == {"path": None}
+    monkeypatch.setattr(server, "native_save_dialog", lambda *a: str(path.with_name("x.txt")))
+    assert "must end in .csv" in pick(client, path, "x.csv").json()["detail"]
+    monkeypatch.setattr(server, "native_save_dialog", lambda *a: str(path))
+    r = pick(client, path, "x.lbd", "lbd")
+    assert r.status_code == 400 and "isn't replaced" in r.json()["detail"]
+    assert pick(client, path, "x.txt", "txt").status_code == 400
+
+
+def test_a_picture_goes_where_the_dialog_chose(client, sweep, tmp_path, monkeypatch):
+    path, _ = sweep
+    target = tmp_path / "plot.png"
+    r = client.post("/api/save-picture", params={"path": str(target)}, content=b"png bytes")
+    assert r.status_code == 403 and not target.exists()                # only a path chosen in the dialog
+    monkeypatch.setattr(server, "native_save_dialog", lambda *a: str(target))
+    pick(client, path, "plot.png", "png").raise_for_status()
+    client.post("/api/save-picture", params={"path": str(target)}, content=b"png bytes").raise_for_status()
+    assert target.read_bytes() == b"png bytes"

@@ -1,3 +1,4 @@
+import { api, ApiError } from "./api";
 // Copy picture (plan 5, E2): canvases on the page put together into one picture, as laid out on
 // screen, and that picture put on the clipboard as PNG (or saved, where the browser can't).
 
@@ -52,6 +53,21 @@ export async function copyPng(picture: HTMLCanvasElement | Promise<Blob>): Promi
     await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
   } catch (e) {
     throw new Error(`the picture couldn't be put on the clipboard (${e instanceof Error ? e.message : String(e)}); save it as PNG instead`);
+  }
+}
+
+/** Save the picture as a PNG file with the system's Save dialog, starting in the data file's
+ *  folder. Returns where, or null when cancelled or (no dialog on this computer) downloaded. */
+export async function savePng(canvas: HTMLCanvasElement, dataFile: string, name: string): Promise<string | null> {
+  try {
+    const { path } = await api.pickSave(dataFile, name, "png", "Save picture");
+    if (path === null) return null;
+    await api.savePicture(path, await blob(canvas));
+    return path;
+  } catch (e) {
+    if (!(e instanceof ApiError && e.status === 501)) throw e;
+    await downloadPng(canvas, name);
+    return null;
   }
 }
 

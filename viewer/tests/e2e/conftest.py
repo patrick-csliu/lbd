@@ -117,6 +117,11 @@ class Viewer:
 def viewer(cfg, data_dir, monkeypatch):
     # "Move to the Recycle Bin" deletes the file at once: tests never fill the real trash.
     monkeypatch.setattr(server.files.send2trash, "send2trash", lambda p: Path(p).unlink())
+
+    def no_dialog(*a):                                 # tests never open a real window; a test may set its own
+        raise server.HTTPException(501, "no save dialog in the tests")
+
+    monkeypatch.setattr(server, "native_save_dialog", no_dialog)
     v = Viewer(cfg, data_dir)
     yield v
     v.stop()

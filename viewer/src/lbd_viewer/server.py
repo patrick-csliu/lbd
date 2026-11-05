@@ -113,6 +113,7 @@ class AppState:
         self.port = port
         self.check_host = check_host
         self.opened: Set[str] = set()
+        self.chosen: Set[str] = set()     # files the user chose in the system's Save dialog: may be written
         self.explore = Sessions()           # the Explore views' sessions (explore.py)
         self.exports = csv_export.Exports()  # CSV files being written (export.py)
         self.live = live.shared()           # files being measured: state and progress (live.py)
@@ -490,11 +491,19 @@ class ExportBody(_Body):
     views: Optional[List[Dict[str, List[float]]]] = None   # per session {"xlim", "ylim"} in plot units
     layout: str = "rows"                  # "rows" or "matrix"
     rows_are: str = "t"                   # matrix: "t" (series / map rows) or "x"
+    names: Optional[List[str]] = None     # per session the panel's name, for "left out: ..."
     path: Optional[str] = None            # None: only the size, the options and a file name
 
 
 class JobBody(_Body):
     job: str
+
+
+class PickSaveBody(_Body):
+    path: str                             # the data file: the dialog starts in its folder
+    name: str                             # the file name proposed
+    fmt: str                              # "csv", "png" or "lbd"
+    title: str = "Save"
 
 
 class SaveCutBody(_Body):
@@ -696,22 +705,22 @@ def native_folder_dialog() -> Optional[str]:
         "folder", fallback)
 
 
-def native_save_dialog(folder: Path, name: str, fmt: str) -> Optional[str]:
+def native_save_dialog(folder: Path, name: str, fmt: str, title: str = "Export figure",
+                       fallback: str = "the figure is saved to your browser's download folder instead") -> Optional[str]:
     """Native "Save as" dialog in `folder` with `name` filled in. Returns None if cancelled.
 
     The system dialog asks before replacing an existing file.
     """
-    fallback = "the figure is saved to your browser's download folder instead"
     if _dialog_backend() == "osascript":
         return _mac_dialog(
-            f'POSIX path of (choose file name with prompt "Export figure" '
+            f'POSIX path of (choose file name with prompt {_applescript_string(title)} '
             f'default name {_applescript_string(name)} '
             f'default location (POSIX file {_applescript_string(str(folder))}))',
             "save", fallback)
     ext = f".{fmt}"
     return _tk_dialog(
         lambda fd, root: fd.asksaveasfilename(
-            parent=root, title="Export figure", initialdir=str(folder), initialfile=name,
+            parent=root, title=title, initialdir=str(folder), initialfile=name,
             defaultextension=ext, filetypes=[(f"{fmt.upper()} file", f"*{ext}")], confirmoverwrite=True),
         "save", fallback)
 
@@ -1397,14 +1406,16 @@ def create_app(state: AppState) -> FastAPI:
         if body.path is None:
             return {"path": str(reading.suggest_cut_path(s, body.which, body.index, body.trace))}
         target = Path(body.path).expanduser().resolve()
-        if target.parent != s.path.resolve().parent:          # next to its file is always allowed
+        if target.parent != s.path.resolve().parent and _key(target) not in state.chosen:   # next to its file: allowed
             state.check_allowed(str(target.parent))
         saved = reading.save_cut(s, body.which, body.index, target, body.trace)
         if _key(s.path.resolve()) in state.opened:              # a file opened by double-click: so is its cut
             state.opened.add(_key(saved))
         return {"path": str(saved)}
 
-    def _export_tables(body: ExportBody) -> Tuple[List[ExploreSession], list]:
+    def _export_tables(body: ExportBody) -> Tuple[List[ExploreSession], Any, List[str]]:
+        """The panels' sessions, the one table of the file (the first panel and those sharing
+        its axes), and the panels left out."""
         sessions = [_session(sid) for sid in body.sessions]
         if not sessions:
             raise HTTPException(400, "no panel to save")
@@ -1415,33 +1426,35 @@ def create_app(state: AppState) -> FastAPI:
             s.last_used = time.monotonic()
             view = body.views[k] if body.zoomed else None
             tables.append(csv_export.session_table(s, body.numbers, view))
-        return sessions, csv_export.join(tables)
+        table, kept = csv_export.one_table(tables)
+        names = body.names or [f"Panel {k + 1}" for k in range(len(sessions))]
+        left = [names[k] for k in range(len(sessions)) if k not in kept]
+        return sessions, table, left
 
     @app.post("/api/explore/export-csv")
     def explore_export_csv(body: ExportBody):
         """Save what panels show as CSV. Without a path: a file name next to the data, the size
         and warnings, and the choices that aren't possible (with why). With a path: start
         writing in the background ({job}; progress from /api/exports)."""
-        sessions, tables = _export_tables(body)
+        sessions, table, left_out = _export_tables(body)
         s = sessions[0]
         if body.path is None:
-            out = {"path": str(csv_export.suggest_path(s)), "options": csv_export.options(s), "error": None}
+            out = {"path": str(csv_export.suggest_path(s)), "options": csv_export.options(s), "error": None,
+                   "left_out": left_out, "columns": csv_export.column_names(table)}
             try:
-                out["estimate"] = csv_export.plan(tables, body.layout, body.rows_are)
+                out["estimate"] = csv_export.plan([table], body.layout, body.rows_are)
             except ValueError as e:
                 out["estimate"], out["error"] = None, str(e)
             return out
         target = Path(body.path).expanduser().resolve()
-        paths = csv_export.files_for(target, len(tables))
-        for p in paths:
-            if p.parent != s.path.resolve().parent:            # next to its file is always allowed
-                state.check_allowed(str(p.parent))
-            csv_export.check_target(p)
+        chosen = _key(target) in state.chosen             # in the system's dialog, which asked before replacing
+        if target.parent != s.path.resolve().parent and not chosen:     # next to its file is always allowed
+            state.check_allowed(str(target.parent))
+        csv_export.check_target(target, replace=chosen)
         if body.layout == "matrix":
-            for t in tables:
-                t.check_matrix()
-        job = state.exports.start(list(zip(tables, paths)), body.layout, body.rows_are)
-        return {"job": job, "paths": [str(p) for p in paths]}
+            table.check_matrix()
+        job = state.exports.start([(table, target)], body.layout, body.rows_are)
+        return {"job": job, "paths": [str(target)]}
 
     @app.get("/api/exports")
     def exports_now():
@@ -1458,6 +1471,41 @@ def create_app(state: AppState) -> FastAPI:
     def explore_close(session_id: str):
         state.explore.close(session_id)
         return {"ok": True}
+
+    @app.post("/api/pick-save")
+    def pick_save(body: PickSaveBody):
+        """The system's Save dialog, in the data file's folder with a name filled in: {"path"}, None
+        if cancelled; 501 where there is no dialog. The path chosen may then be written (the
+        dialog asked before replacing a file), except over a data file."""
+        p = state.check_allowed(body.path)
+        if body.fmt not in ("csv", "png", "lbd"):
+            raise HTTPException(400, f"unknown file type {body.fmt!r}")
+        chosen = native_save_dialog(p.parent, body.name, body.fmt, body.title, "choose a name here instead")
+        if chosen is None:
+            return {"path": None}
+        target = Path(chosen).expanduser().resolve()
+        if not target.suffix:                           # macOS's dialog doesn't add the extension itself
+            target = target.with_name(f"{target.name}.{body.fmt}")
+        if target.suffix.lower() != f".{body.fmt}":
+            raise HTTPException(400, f"{target.name}: the name must end in .{body.fmt}; nothing was saved")
+        if target == p or (body.fmt == "lbd" and target.exists()):
+            raise HTTPException(400, f"{target.name} is a data file and isn't replaced; choose another name")
+        state.chosen.add(_key(target))
+        return {"path": str(target)}
+
+    @app.post("/api/save-picture")
+    async def save_picture(request: Request, path: str = Query(...)):
+        """Write a picture made in the page (the request's body, PNG) to a path chosen with
+        /api/pick-save."""
+        target = Path(path).expanduser().resolve()
+        if _key(target) not in state.chosen:
+            raise HTTPException(403, "this file wasn't chosen in the Save dialog")
+        data = await request.body()
+        try:
+            target.write_bytes(data)
+        except OSError as e:
+            raise HTTPException(400, f"{target.name} couldn't be written ({e}); nothing was saved") from None
+        return {"path": str(target)}
 
     def _export(body: RenderBody) -> Tuple[Path, str, bytes, str, List[str]]:
         """Render a figure for export: (data file, format, bytes, default file name, warnings)."""

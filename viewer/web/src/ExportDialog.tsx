@@ -4,7 +4,7 @@
 // (server: export.py, lbd.plot.tables).
 
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { api, ExportChoice, ExportJob, ExportPlan } from "./api";
+import { api, ApiError, ExportChoice, ExportJob, ExportPlan } from "./api";
 import { HelpLink } from "./help";
 
 /** One panel the dialog can save: its session and its view now (plot units). */
@@ -12,6 +12,8 @@ export interface ExportSource {
   session: string;
   view: { xlim: number[]; ylim: number[] } | null;
   kind: "curve" | "heatmap";
+  file: string; // the data file: the Save dialog starts in its folder
+  name?: string; // the panel's name, for "left out: ..."
 }
 
 interface Props {
@@ -66,8 +68,11 @@ export default function ExportDialog({ sources, onClose, onSaved }: Props) {
   const [folder, setFolder] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [job, setJob] = useState<ExportJob | null>(null);
+  const [step, setStep] = useState<1 | 2>(1); // the choices, then what will be written and Save
+  const [noDialog, setNoDialog] = useState(false); // no system Save dialog here: the name is typed
   const several = sources.length > 1;
   const used = all ? sources : sources.slice(0, 1);
+  const names = used.map((s, k) => s.name ?? `Panel ${k + 1}`);
 
   useEffect(() => ref.current?.showModal(), []);
 
@@ -76,7 +81,7 @@ export default function ExportDialog({ sources, onClose, onSaved }: Props) {
     let live = true;
     const timer = window.setTimeout(() => {
       api
-        .exportCsv(used.map((s) => s.session), choice, choice.zoomed ? used.map((s) => s.view ?? { xlim: [], ylim: [] }) : null)
+        .exportCsv(used.map((s) => s.session), choice, choice.zoomed ? used.map((s) => s.view ?? { xlim: [], ylim: [] }) : null, undefined, names)
         .then((p) => {
           if (!live) return;
           setPlan(p);
@@ -134,13 +139,31 @@ export default function ExportDialog({ sources, onClose, onSaved }: Props) {
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    if (nameProblem || !plan || plan.error || writing || name === null) return;
+    if (!plan || plan.error || writing || name === null) return;
+    if (step === 1) return setStep(2);
+    if (noDialog && nameProblem) return;
     try {
+      let target = folder + name.trim();
+      if (!noDialog) {
+        try {
+          const picked = await api.pickSave(used[0].file, name.trim(), "csv", "Save as CSV");
+          if (picked.path === null) return; // cancelled: nothing written, the dialog stays
+          target = picked.path;
+        } catch (err) {
+          if (err instanceof ApiError && err.status === 501) {
+            setNoDialog(true); // this computer has no Save dialog: the name is typed here
+            setError(null);
+            return;
+          }
+          throw err;
+        }
+      }
       const out = await api.exportCsv(
         used.map((s) => s.session),
         choice,
         choice.zoomed ? used.map((s) => s.view ?? { xlim: [], ylim: [] }) : null,
-        folder + name.trim(),
+        target,
+        names,
       );
       setError(null);
       setJob({ id: out.job, paths: out.paths, state: "writing", error: null, path: out.paths[0], what: "", fraction: 0, seconds: 0 });
@@ -165,6 +188,8 @@ export default function ExportDialog({ sources, onClose, onSaved }: Props) {
           A table of numbers that Excel, Origin and <code>numpy.loadtxt</code> read, in the units stored in the file. The data file is
           not changed. Point at a choice for what it does. <HelpLink page="viewer/explore.html" anchor="save-as-csv" topic="Save as CSV" />
         </p>
+        {step === 1 && (
+          <>
         <fieldset>
           <legend>Numbers</legend>
           {radio("numbers", "shown", "as shown")}
@@ -196,26 +221,50 @@ export default function ExportDialog({ sources, onClose, onSaved }: Props) {
             </label>
             <label className="check" title={TIPS["panels:all"]}>
               <input type="radio" name="export-panels" checked={all} disabled={writing} onChange={() => setAll(true)} />
-              all panels (one file when they share their axes)
+              all panels with the same axes
             </label>
           </fieldset>
         )}
-        <label className="export-name">
-          File name
-          <input value={name ?? ""} disabled={name === null || writing} onChange={(e) => setName(e.target.value)} aria-invalid={!!nameProblem} />
-        </label>
-        <div className="export-size small" role="status">
-          {plan?.error
-            ? plan.error
-            : est
-              ? `About ${size(est.bytes)}, ${est.rows.toLocaleString()} rows × ${est.columns.toLocaleString()} columns${est.files > 1 ? `, in ${est.files} files` : ""}`
-              : "Working out the size…"}
-        </div>
-        {est?.warnings.map((w) => (
-          <p key={w} className="export-warning small">
-            {w}
-          </p>
-        ))}
+          </>
+        )}
+        {step === 1 && plan?.error && (
+          <div className="export-size small" role="status">
+            {plan.error}
+          </div>
+        )}
+        {step === 2 && (
+          <>
+            <div className="export-summary small" role="status">
+              {est ? (
+                <>
+                  <strong>
+                    About {size(est.bytes)}: {est.rows.toLocaleString()} rows × {est.columns.toLocaleString()} columns
+                  </strong>
+                  {est.bytes > 200e6 && <>, about {Math.max(1, Math.round(est.bytes / 20e6 / 60))} min to write</>}
+                  {plan && plan.columns.length > 0 && <div className="muted">Columns: {plan.columns.join(", ")}</div>}
+                </>
+              ) : (
+                "Working out the size…"
+              )}
+            </div>
+            {plan && plan.left_out.length > 0 && (
+              <p className="export-warning small">
+                Left out (other axes; a save writes one file): {plan.left_out.join(", ")}.
+              </p>
+            )}
+            {est?.warnings.map((w) => (
+              <p key={w} className="export-warning small">
+                {w}
+              </p>
+            ))}
+            {noDialog && (
+              <label className="export-name">
+                File name (this computer has no Save dialog: it is saved next to the data file)
+                <input value={name ?? ""} disabled={name === null || writing} onChange={(e) => setName(e.target.value)} aria-invalid={!!nameProblem} />
+              </label>
+            )}
+          </>
+        )}
         {writing && job && (
           <div role="status">
             <progress max={1} value={job.fraction} aria-label="Written so far" />
@@ -225,19 +274,26 @@ export default function ExportDialog({ sources, onClose, onSaved }: Props) {
             </span>
           </div>
         )}
-        {(nameProblem || error) && <p className="dialog-error">{error ?? nameProblem}</p>}
+        {((noDialog && nameProblem) || error) && <p className="dialog-error">{error ?? nameProblem}</p>}
         <div className="dialog-buttons">
           {writing && job ? (
             <button type="button" onClick={() => api.cancelExport(job.id).catch((e) => setError(e instanceof Error ? e.message : String(e)))}>
               Cancel saving
             </button>
           ) : (
-            <button type="button" onClick={onClose}>
-              Cancel
-            </button>
+            <>
+              <button type="button" onClick={onClose}>
+                Cancel
+              </button>
+              {step === 2 && (
+                <button type="button" onClick={() => setStep(1)}>
+                  Back
+                </button>
+              )}
+            </>
           )}
-          <button type="submit" className="primary" disabled={!!nameProblem || !plan || !!plan.error || writing || name === null}>
-            {est?.big ? "Save anyway" : "Save"}
+          <button type="submit" className="primary" disabled={(noDialog && !!nameProblem) || !plan || !!plan.error || writing || name === null}>
+            {step === 1 ? "Next" : noDialog ? "Save" : "Save…"}
           </button>
         </div>
       </form>

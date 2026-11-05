@@ -4,6 +4,7 @@ cancel). Several panels go into one file when they share their axes, else one fi
 
 from __future__ import annotations
 
+import os
 import re
 import secrets
 import threading
@@ -162,6 +163,23 @@ def _same(a: Any, b: Any) -> bool:
     return a.shape == b.shape and bool(np.array_equal(a, b, equal_nan=True))
 
 
+def _same_axes(h: Table, t: Table) -> bool:
+    return (_same(h.x, t.x) and _same(h.t, t.t) and _same(h.points, t.points) and _same(h.traces, t.traces)
+            and h.x_col.unit == t.x_col.unit)
+
+
+def one_table(ts: Sequence[Table]) -> Tuple[Table, List[int]]:
+    """A save writes one file: the first panel's table with the columns of the panels sharing its
+    axes. Returns it and which panels it holds."""
+    kept = [k for k, t in enumerate(ts) if _same_axes(ts[0], t)]
+    return join([ts[k] for k in kept])[0], kept
+
+
+def column_names(t: Table) -> List[str]:
+    """The columns of a table written one data point per row."""
+    return [c.name for c in ([t.t_col] if t.t_col is not None else []) + [t.x_col]] + [c.name for c, _ in t.values]
+
+
 def join(ts: Sequence[Table]) -> List[Table]:
     """Panels' tables in as few files as possible: those sharing their axes (same coordinates,
     the same points and traces kept) become one table with each panel's columns; others stay apart."""
@@ -169,8 +187,7 @@ def join(ts: Sequence[Table]) -> List[Table]:
     for t in ts:
         for g in groups:
             h = g[0]
-            if (_same(h.x, t.x) and _same(h.t, t.t) and _same(h.points, t.points) and _same(h.traces, t.traces)
-                    and h.x_col.unit == t.x_col.unit):
+            if _same_axes(h, t):
                 g.append(t)
                 break
         else:
@@ -208,18 +225,14 @@ def suggest_path(s: "ExploreSession", extra: str = "") -> Path:
     return path
 
 
-def check_target(path: Path) -> None:
+def check_target(path: Path, replace: bool = False) -> None:
+    """`replace`: the user agreed to replace an existing file (in the system's Save dialog)."""
     if path.suffix.lower() != ".csv":
         raise ExploreError(f"the numbers are saved as a .csv file, not '{path.name}'")
-    if path.exists():
+    if path.exists() and not replace:
         raise ExploreError(f"'{path.name}' exists already; choose another name")
     if not path.parent.is_dir():
         raise ExploreError(f"the folder '{path.parent}' doesn't exist")
-
-
-def files_for(path: Path, n: int) -> List[Path]:
-    """The file names for n tables: the name chosen, then '<name> – panel k.csv'."""
-    return [path if k == 0 else path.with_name(f"{path.stem} – part {k + 1}{path.suffix}") for k in range(n)]
 
 
 def plan(ts: Sequence[Table], layout: str, rows_are: str) -> Dict[str, Any]:
@@ -269,21 +282,33 @@ class Exports:
             self._forget_old()
             self._jobs[job_id] = rec
 
+        parts: List[Path] = []
+
+        def remove_parts() -> None:
+            for part in parts:
+                try:
+                    part.unlink()
+                except OSError:
+                    pass
+
         def run() -> None:
             try:
+                # under another name, renamed when complete: a file being replaced stays whole
+                # until then, and Cancel or an error leaves it as it was
                 for k, (t, path) in enumerate(work):
-                    t.to_csv(path, layout, rows_are, progress=lambda f, k=k: job.step((k + f) / len(work)))
+                    part = path.with_name(f"{path.stem}.part{path.suffix}")
+                    parts.append(part)
+                    t.to_csv(part, layout, rows_are, progress=lambda f, k=k: job.step((k + f) / len(work)))
+                for part, (_, path) in zip(parts, work):
+                    os.replace(part, path)
                 rec["state"] = "done"
             except Cancelled:
                 rec["state"] = "cancelled"
-                for _, path in work:                   # the files already complete are removed too
-                    try:
-                        path.unlink()
-                    except OSError:
-                        pass
+                remove_parts()
             except Exception as e:                     # shown to the user: nothing fails silently
                 known = isinstance(e, (ValueError, OSError))      # ExploreError is a ValueError
                 rec["state"], rec["error"] = "failed", str(e) if known else f"{type(e).__name__}: {e}"
+                remove_parts()
             rec["ended"] = time.monotonic()
 
         threading.Thread(target=run, name=f"export-{job_id}", daemon=True).start()

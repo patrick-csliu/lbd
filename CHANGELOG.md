@@ -8,6 +8,12 @@ are still written as 1.2).
 
 **Changes to how things behave** (read these when upgrading)
 
+- **Saving asks where, with the system's Save dialog** (Explore's Save as CSV and Save picture as
+  PNG; before: always next to the data file, or the browser's Downloads). Save as CSV has two
+  steps: the choices, then **Next** shows the size, the columns and any warnings before **Save…**.
+  **Every save writes one file**: "all panels" holds the panels with the same axes, the others are
+  left out and named (before: one file per set of axes).
+
 - **CSV files always have the units stored in the file** (Hz, not GHz). Save as CSV no longer
   has a Units choice, and `lbd.plot.table` no longer takes `units=`: a script still passing it
   gets an error saying to remove it. Each choice of the Save as CSV dialog says what it does when

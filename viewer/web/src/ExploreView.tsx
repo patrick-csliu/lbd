@@ -1068,7 +1068,7 @@ export default function ExploreView({
     },
     exportSource: () => {
       const sid = session.current, m = frame.current?.meta, kind = kindRef.current;
-      return sid && kind ? { session: sid, view: m ? { xlim: [...m.xlim], ylim: [...m.ylim] } : null, kind } : null;
+      return sid && kind ? { session: sid, view: m ? { xlim: [...m.xlim], ylim: [...m.ylim] } : null, kind, file: info.path } : null;
     },
     snapshot: (what) => {
       const pic = picture.current;
