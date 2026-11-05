@@ -492,6 +492,7 @@ class ExportBody(_Body):
     layout: str = "rows"                  # "rows" or "matrix"
     rows_are: str = "t"                   # matrix: "t" (series / map rows) or "x"
     names: Optional[List[str]] = None     # per session the panel's name, for "left out: ..."
+    cuts: Optional[List[Dict[str, Any]]] = None   # per session a cut {which, index, trace}: saved instead of the panel
     path: Optional[str] = None            # None: only the size, the options and a file name
 
 
@@ -1421,13 +1422,28 @@ def create_app(state: AppState) -> FastAPI:
             raise HTTPException(400, "no panel to save")
         if body.zoomed and (not body.views or len(body.views) != len(sessions)):
             raise HTTPException(400, "the zoomed range needs each panel's view")
+        names = body.names or [f"Panel {k + 1}" for k in range(len(sessions))]
+        if body.cuts is not None:
+            if len(body.cuts) != len(sessions):
+                raise HTTPException(400, "a cut is needed for each panel")
+            parts, held = [], []
+            for k, (s, c) in enumerate(zip(sessions, body.cuts)):
+                s.last_used = time.monotonic()
+                try:
+                    parts.append(csv_export.cut_table(s, c.get("which"), c.get("index") or {}, c.get("trace"), body.numbers))
+                    held.append(k)
+                except (ExploreError, KeyError):         # another panel without this cut: left out, and said
+                    if k == 0:
+                        raise
+            table, kept = csv_export.one_cut(parts)
+            kept = [held[k] for k in kept]
+            return sessions, table, [names[k] for k in range(len(sessions)) if k not in kept]
         tables = []
         for k, s in enumerate(sessions):
             s.last_used = time.monotonic()
             view = body.views[k] if body.zoomed else None
             tables.append(csv_export.session_table(s, body.numbers, view))
         table, kept = csv_export.one_table(tables)
-        names = body.names or [f"Panel {k + 1}" for k in range(len(sessions))]
         left = [names[k] for k in range(len(sessions)) if k not in kept]
         return sessions, table, left
 
@@ -1439,7 +1455,10 @@ def create_app(state: AppState) -> FastAPI:
         sessions, table, left_out = _export_tables(body)
         s = sessions[0]
         if body.path is None:
-            out = {"path": str(csv_export.suggest_path(s)), "options": csv_export.options(s), "error": None,
+            c = body.cuts[0] if body.cuts else None
+            out = {"path": str(csv_export.suggest_cut_csv(s, c.get("which"), c.get("index") or {}, c.get("trace")) if c
+                               else csv_export.suggest_path(s)),
+                   "options": csv_export.cut_options(s) if c else csv_export.options(s), "error": None,
                    "left_out": left_out, "columns": csv_export.column_names(table)}
             try:
                 out["estimate"] = csv_export.plan([table], body.layout, body.rows_are)

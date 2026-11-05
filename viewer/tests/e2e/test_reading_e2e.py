@@ -5,6 +5,8 @@ remembered, a row is saved as its own file or shown as a curve, the contrast set
 range, and a vertical cursor lists every trace."""
 
 import lbd
+import numpy as np
+from lbd_viewer import server
 from pageui import row
 from playwright.sync_api import Page, expect
 from test_explore_e2e import at, explore, frames, small_map, sweep  # noqa: F401  (fixtures)
@@ -68,8 +70,9 @@ def test_a_row_is_saved_as_a_file_and_shown_as_a_curve(small_map, viewer, new_pa
     page = new_page("Explore")
     meta = frames(page, lambda: row(page, "small_map.lbd").dblclick())
     cursor_answer(page, lambda: page.mouse.click(*at(page, meta, 8, 30)))
-    explore(page).get_by_role("button", name="Save row…").click()
-    dialog = page.locator("dialog.confirm-dialog")
+    explore(page).locator(".explore-overlay").click(button="right", position={"x": 60, "y": 60})
+    page.locator(".context-menu").get_by_role("menuitem", name="Save row as .lbd…").click()
+    dialog = page.locator("dialog.confirm-dialog")                     # no system dialog in the tests: the name typed
     expect(dialog.locator("input")).to_have_value("small_map – y = 30.lbd")
     dialog.get_by_role("button", name="Save").click()
     expect(explore(page).locator(".explore-readout")).to_contain_text("Saved")
@@ -181,3 +184,21 @@ def test_a_maps_colours_come_from_every_slice(values_files, new_page):
     frames(page, lambda: choice.get_by_label("This slice").check())
     expect(hist).not_to_contain_text("The values of all")
     assert full() != every
+
+
+def test_a_row_is_saved_as_csv(small_map, viewer, new_page, monkeypatch, tmp_path):
+    """Plan 12: the Cursors tab saves the row through the cursor as CSV, through the same steps
+    as Save as CSV."""
+    monkeypatch.setattr(server, "native_save_dialog", lambda *a: str(tmp_path / "row.csv"))
+    page = new_page("Explore")
+    meta = frames(page, lambda: row(page, "small_map.lbd").dblclick())
+    cursor_answer(page, lambda: page.mouse.click(*at(page, meta, 8, 30)))
+    explore(page).get_by_role("button", name="Save row as CSV…").click()
+    dialog = page.get_by_role("dialog", name="Save this row as CSV")
+    dialog.get_by_role("button", name="Next").click()
+    expect(dialog.get_by_role("status").first).to_contain_text("5 rows × 2 columns")
+    dialog.get_by_role("button", name="Save…").click()
+    expect(dialog).to_be_hidden()
+    text = (tmp_path / "row.csv").read_text(encoding="utf-8")
+    assert "cut: row at" in text and "# id: " in text
+    assert np.loadtxt(tmp_path / "row.csv", delimiter=",", encoding="utf-8")[:, 1].tolist() == [10, 11, 12, 13, 14]

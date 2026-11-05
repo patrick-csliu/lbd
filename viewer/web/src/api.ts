@@ -77,10 +77,17 @@ export interface ExportChoice {
   rows_are: "t" | "x";
 }
 
+/** A cut through the cursor, saved instead of the panel: a map's row or column, or a trace. */
+export interface ExportCut {
+  which: "row" | "column" | "trace";
+  index: Record<string, number>;
+  trace?: number;
+}
+
 /** Without a path: a file name, the size, and the choices that can't be made (with why). */
 export interface ExportPlan {
   path: string;
-  options: { stored: string | null; both: string | null; zoomed: string | null };
+  options: { stored: string | null; both: string | null; zoomed: string | null; shown?: string | null };
   error: string | null;
   estimate: { bytes: number; rows: number; columns: number; files: number; warnings: string[]; big: boolean } | null;
   left_out: string[]; // panels on other axes: a save writes one file
@@ -828,12 +835,13 @@ export const api = {
     const r = await fetch(`/api/save-picture?${new URLSearchParams({ path })}`, { method: "POST", headers: { "X-LBD-Token": token }, body: png });
     if (!r.ok) throw new ApiError(r.status, await errorText(r));
   },
-  exportCsv: (sessions: string[], choice: ExportChoice, views: { xlim: number[]; ylim: number[] }[] | null, path?: string, names?: string[]) =>
+  exportCsv: (sessions: string[], choice: ExportChoice, views: { xlim: number[]; ylim: number[] }[] | null, path?: string, names?: string[], cuts?: ExportCut[] | null) =>
     call<ExportPlan & { job: string; paths: string[] }>("POST", "/api/explore/export-csv", {
       sessions,
       ...choice,
       views,
       names,
+      cuts,
       path: path ?? null,
     }),
   exports: () => call<{ jobs: ExportJob[] }>("GET", "/api/exports"),

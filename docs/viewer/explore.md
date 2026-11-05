@@ -218,12 +218,17 @@ type (or press **K**) and the same cursors come back.
 
 - **Row as curve** / **Column as curve** shows that row or column as a curve in the same tab;
   **◂ Back to the map** returns.
-- **Save row…**, **Save column…** (maps) and **Save trace…** (curves) write a new `.lbd` file in
-  the same folder, with a suggested name you can change. It holds the stored data (complex
-  values stay complex), its axis and units, and in its metadata where it came from: the source
-  file, and the index and value of each fixed axis (`cut_from`, `cut_index`, `cut_at`; the
-  source's own metadata under `source_meta`). The source file is not changed, and an existing
-  file is never overwritten.
+- **Save row as CSV…**, **Save column as CSV…** (maps) and **Save trace as CSV…** (curves) save the
+  line through cursor 1 as CSV, through the same steps as [Save as CSV](#save-as-csv); its
+  comments say where it lies. With several panels, **all panels with the same cut** puts the
+  panels with a cut along the same axis at the same place in one file, a column each (with the
+  cursors synchronized, S21 and S11 along the same row).
+- **Save row as .lbd…**, **Save column as .lbd…**, **Save trace as .lbd…** in the plot's
+  right-click menu write a new `.lbd` file instead, asking where with the system's Save dialog.
+  It holds the stored data (complex values stay complex), its axis and units, and in its metadata
+  where it came from: the source file, and the index and value of each fixed axis (`cut_from`,
+  `cut_index`, `cut_at`; the source's own metadata under `source_meta`). The source file is not
+  changed, and an existing `.lbd` file is never replaced.
 
 **Keys**, after clicking the plot:
 

@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from lbd.plot import tables
+from lbd.plot import render as rnd, tables
 from lbd.plot.tables import Column, Rows, Table, ValueRows
 
 from .explore import ExploreError
@@ -79,6 +79,57 @@ def session_table(s: "ExploreSession", numbers: str = "shown", view: Optional[Di
     if s.summarised:
         t.comments.append("read from the file part by part (too big for memory)")
     return t
+
+
+def cut_options(s: "ExploreSession") -> Dict[str, Optional[str]]:
+    """What can't be chosen for a cut (a row, column or trace): with operations on, a cut holds
+    the stored numbers only."""
+    why = "with operations on, a cut holds the stored numbers: choose stored" if _operated(s) else None
+    return {"shown": why, "both": why, "stored": None, "zoomed": None}
+
+
+def cut_table(s: "ExploreSession", which: str, index: Dict[str, int], trace: Optional[int],
+              numbers: str) -> Tuple[Table, Dict[str, int]]:
+    """A cut as a table: the kept axis, then the value along it (complex mode applied, or as
+    stored), read from the file. Returns it and where it lies ({fixed axis: position})."""
+    from . import reading                          # (reading imports what this module imports)
+
+    keep, fixed, names = reading.cut_plan(s, which, index, trace)
+    why = cut_options(s).get(numbers)
+    if why:
+        raise ExploreError(why)
+    axis, mode = s.data.axes[keep], s.spec["complex"]
+    columns: List[Tuple[Column, Rows]] = []
+    for name in names:
+        v = s.data.values[name]
+        _, label, unit = rnd.apply_complex(np.ones(1, dtype=v.dtype), v.label, v.unit, mode)
+        columns += tables._value_columns(name, label, unit, ValueRows(v, keep, None, fixed, mode=mode), v, numbers,
+                                         lambda part, v=v: ValueRows(v, keep, None, fixed, part))
+    t = Table(x=np.asarray(axis.data, dtype=float), x_col=Column(keep, axis.label, axis.unit), values=columns, kind="curve")
+    t.comments = tables._comments(s.data, {**s.spec, "values": names, "slices": []}, numbers, False)
+    t.comments.append(f"cut: {which} at {reading._fixed_text(s, fixed)}")
+    return t, fixed
+
+
+def one_cut(parts: Sequence[Tuple[Table, Dict[str, int]]]) -> Tuple[Table, List[int]]:
+    """One file of the panels' cuts: those along the same axis, lying at the same place as the
+    first. Returns it and which panels it holds."""
+    t0, f0 = parts[0]
+    kept = [k for k, (t, f) in enumerate(parts)
+            if _same_axes(t0, t) and t.x_col.name == t0.x_col.name and all(f0[a] == f[a] for a in set(f0) & set(f))]
+    return join([parts[k][0] for k in kept])[0], kept
+
+
+def suggest_cut_csv(s: "ExploreSession", which: str, index: Dict[str, int], trace: Optional[int]) -> Path:
+    """A new file name for a cut next to the data, as its .lbd name."""
+    from . import reading
+
+    base = reading.suggest_cut_path(s, which, index, trace).with_suffix("")
+    path, n = base.with_name(base.name + ".csv"), 2
+    while path.exists():
+        path = base.with_name(f"{base.name} ({n}).csv")
+        n += 1
+    return path
 
 
 def _slug(text: str) -> str:

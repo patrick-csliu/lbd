@@ -19,6 +19,8 @@ interface Props {
   onBack: (() => void) | null;
   /** Several panels with the cursor shared: the other panels' read-outs at the same x. */
   others?: OtherPanel[];
+  /** Save the row, column or trace through cursor 1 as CSV. */
+  onSaveCut: (which: "row" | "column" | "trace") => void;
 }
 
 /** Another panel's read-out at the shared cursor. */
@@ -175,7 +177,7 @@ function CursorNumbers({ n, c, kind, type, actions }: { n: number; c: CursorRead
   );
 }
 
-export default function CursorPanel({ kind, cursors, onCursors, reading, actions, onBack, others = [] }: Props) {
+export default function CursorPanel({ kind, cursors, onCursors, reading, actions, onBack, others = [], onSaveCut }: Props) {
   const list = reading?.cursors ?? [];
   const [c1, c2] = [list[0] ?? null, list[1] ?? null];
   const act = (fn: (a: ExploreActions) => void) => () => actions.current && fn(actions.current);
@@ -285,18 +287,18 @@ export default function CursorPanel({ kind, cursors, onCursors, reading, actions
             </button>
           </div>
           <div className="row-controls">
-            <button disabled={!c1} onClick={act((a) => a.saveCut("row"))}>
-              Save row…
+            <button disabled={!c1} onClick={() => onSaveCut("row")} title="The row through the cursor as a CSV file">
+              Save row as CSV…
             </button>
-            <button disabled={!c1} onClick={act((a) => a.saveCut("column"))}>
-              Save column…
+            <button disabled={!c1} onClick={() => onSaveCut("column")} title="The column through the cursor as a CSV file">
+              Save column as CSV…
             </button>
           </div>
         </>
       )}
       {kind === "curve" && (
-        <button disabled={!c1} onClick={act((a) => a.saveCut("trace"))} title="The cursor's trace as a new .lbd file">
-          Save trace…
+        <button disabled={!c1} onClick={() => onSaveCut("trace")} title="The cursor's trace as a CSV file">
+          Save trace as CSV…
         </button>
       )}
     </fieldset>

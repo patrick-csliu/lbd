@@ -217,6 +217,8 @@ export interface ExploreActions {
   calculate: (what: "delay" | "rotation", index: number) => Promise<number>;
   /** What Save as CSV needs from this panel: its session, its view now and its kind. */
   exportSource: () => ExportSource | null;
+  /** The same for a cut through cursor 1 (null: no cursor here, or another kind of plot). */
+  cutSource: (which: "row" | "column" | "trace") => ExportSource | null;
   /** What Copy picture takes from this panel: its canvases and the area they fill on the page
    *  ("screen": the plot with cursors and cuts; "plot": the plot alone). */
   snapshot: (what: PictureWhat) => { canvases: HTMLCanvasElement[]; area: Element } | null;
@@ -1003,10 +1005,20 @@ export default function ExploreView({
       if (!sid || !c) return;
       api
         .exploreSaveCut(sid, which, c.index, c.trace)
-        .then(({ path }) => {
+        .then(async ({ path }) => {
           const cut = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1;
           const dir = path.slice(0, cut), name = path.slice(cut);
           const what = which === "trace" ? "this trace" : `this ${which}`;
+          try {
+            // the system's Save dialog says where; only without one (501) the name is typed below
+            const picked = await api.pickSave(info.path, name, "lbd", `Save ${what} as a new file`);
+            if (picked.path === null) return;
+            const saved = await api.exploreSaveCut(sid, which, c.index, c.trace, picked.path);
+            setNote(`Saved ${saved.path}`);
+            return;
+          } catch (e) {
+            if (!(e instanceof ApiError && e.status === 501)) throw e;
+          }
           setConfirm({
             title: `Save ${what} as a new file`,
             text: `The stored data of ${what}, in a new .lbd file in the same folder, with notes on where it came from. ${info.name} is not changed.`,
@@ -1024,7 +1036,7 @@ export default function ExploreView({
         })
         .catch((e) => setNote(e instanceof Error ? e.message : String(e)));
     },
-    [info.name],
+    [info.name, info.path],
   );
 
   actions.current = {
@@ -1065,6 +1077,11 @@ export default function ExploreView({
       const xlim = c1 && c2 ? [Math.min(c1.x, c2.x), Math.max(c1.x, c2.x)] : [...m.view.xlim];
       const res = await api.exploreCalculate(sid, what, index, xlim, kindRef.current === "curve" ? c1?.trace : undefined);
       return res.value;
+    },
+    cutSource: (which) => {
+      const c = readingRef.current?.cursors[0], s = actions.current?.exportSource();
+      if (!c || !s || (which === "trace") !== (s.kind === "curve")) return null;
+      return { ...s, cut: { which, index: c.index ?? {}, ...(c.trace !== undefined ? { trace: c.trace } : {}) } };
     },
     exportSource: () => {
       const sid = session.current, m = frame.current?.meta, kind = kindRef.current;

@@ -105,6 +105,9 @@ are still written as 1.2).
   to its width, and a mean that is zero up to rounding reads 0 (not 2.8e−17).
 - **CSV files name the measurement's id** (Save as CSV, `lbd.plot.table`): `# id: …` (and
   `# made from: …`) in the comments, so a CSV found later can be traced back to its `.lbd` file.
+- **Explore: a row, column or trace as CSV.** The Cursors tab's buttons save the line through
+  cursor 1 as CSV, for this panel or all panels with the same cut (one file, a column each). The
+  `.lbd` cut is in the plot's right-click menu, and asks where with the Save dialog too.
 - **Explore: the sync toggles are explained**: their tooltips say what each links and between
   which panels (sliders: what a slider is), and *Explore → Sync* in the Help has examples.
 - **Explore: the preview tab's name** (one click, in italics) is at the same height as the other

@@ -771,6 +771,16 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
       actions={actActions}
       onBack={act.back ? actApi.onBack : null}
       others={rec.sync.cursors ? othersAtX : []}
+      onSaveCut={(which) => {
+        // the active panel's cut first, then the other panels' (the dialog says which can join)
+        const ids = [act.id, ...rec.panels.filter((q) => q.id !== act.id).map((q) => q.id)];
+        const sources = ids.map((i): ExportSource | null => {
+          const s = actionsOf(i).current?.cutSource(which) ?? null;
+          return s && { ...s, name: `Panel ${rec.panels.findIndex((q) => q.id === i) + 1}` };
+        });
+        if (!sources[0]) return onError("Place cursor 1 first.");
+        setExporting(sources.filter((x): x is ExportSource => !!x));
+      }}
     />
   );
   const showInspector = (t: InspectorTab) => {

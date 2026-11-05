@@ -4,7 +4,7 @@
 // (server: export.py, lbd.plot.tables).
 
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { api, ApiError, ExportChoice, ExportJob, ExportPlan } from "./api";
+import { api, ApiError, ExportChoice, ExportCut, ExportJob, ExportPlan } from "./api";
 import { HelpLink } from "./help";
 
 /** One panel the dialog can save: its session and its view now (plot units). */
@@ -14,6 +14,7 @@ export interface ExportSource {
   kind: "curve" | "heatmap";
   file: string; // the data file: the Save dialog starts in its folder
   name?: string; // the panel's name, for "left out: ..."
+  cut?: ExportCut; // a row, column or trace through the cursor, instead of what the panel shows
 }
 
 interface Props {
@@ -73,6 +74,11 @@ export default function ExportDialog({ sources, onClose, onSaved }: Props) {
   const several = sources.length > 1;
   const used = all ? sources : sources.slice(0, 1);
   const names = used.map((s, k) => s.name ?? `Panel ${k + 1}`);
+  const cut = sources[0].cut ?? null;
+  const cuts = cut ? used.map((s) => s.cut!) : null;
+  // a cut is one line: all of it, one point per row
+  const asked: ExportChoice = cut ? { ...choice, zoomed: false, layout: "rows" } : choice;
+  const views = asked.zoomed ? used.map((s) => s.view ?? { xlim: [], ylim: [] }) : null;
 
   useEffect(() => ref.current?.showModal(), []);
 
@@ -81,7 +87,7 @@ export default function ExportDialog({ sources, onClose, onSaved }: Props) {
     let live = true;
     const timer = window.setTimeout(() => {
       api
-        .exportCsv(used.map((s) => s.session), choice, choice.zoomed ? used.map((s) => s.view ?? { xlim: [], ylim: [] }) : null, undefined, names)
+        .exportCsv(used.map((s) => s.session), asked, views, undefined, names, cuts)
         .then((p) => {
           if (!live) return;
           setPlan(p);
@@ -158,13 +164,7 @@ export default function ExportDialog({ sources, onClose, onSaved }: Props) {
           throw err;
         }
       }
-      const out = await api.exportCsv(
-        used.map((s) => s.session),
-        choice,
-        choice.zoomed ? used.map((s) => s.view ?? { xlim: [], ylim: [] }) : null,
-        target,
-        names,
-      );
+      const out = await api.exportCsv(used.map((s) => s.session), asked, views, target, names, cuts);
       setError(null);
       setJob({ id: out.job, paths: out.paths, state: "writing", error: null, path: out.paths[0], what: "", fraction: 0, seconds: 0 });
     } catch (err) {
@@ -183,7 +183,7 @@ export default function ExportDialog({ sources, onClose, onSaved }: Props) {
   return (
     <dialog ref={ref} className="confirm-dialog export-dialog" onCancel={(e) => (writing ? e.preventDefault() : onClose())} aria-labelledby="export-title">
       <form onSubmit={submit}>
-        <h3 id="export-title">Save as CSV</h3>
+        <h3 id="export-title">{cut ? `Save this ${cut.which} as CSV` : "Save as CSV"}</h3>
         <p className="muted small">
           A table of numbers that Excel, Origin and <code>numpy.loadtxt</code> read, in the units stored in the file. The data file is
           not changed. Point at a choice for what it does. <HelpLink page="viewer/explore.html" anchor="save-as-csv" topic="Save as CSV" />
@@ -192,10 +192,12 @@ export default function ExportDialog({ sources, onClose, onSaved }: Props) {
           <>
         <fieldset>
           <legend>Numbers</legend>
-          {radio("numbers", "shown", "as shown")}
+          {radio("numbers", "shown", "as shown", plan?.options.shown ?? null)}
           {radio("numbers", "both", "as shown + stored", plan?.options.both ?? null)}
           {radio("numbers", "stored", "stored", plan?.options.stored ?? null)}
         </fieldset>
+        {!cut && (
+          <>
         <fieldset>
           <legend>How much</legend>
           {radio("zoomed", false, "everything")}
@@ -212,6 +214,8 @@ export default function ExportDialog({ sources, onClose, onSaved }: Props) {
             </span>
           )}
         </fieldset>
+          </>
+        )}
         {several && (
           <fieldset>
             <legend>Panels</legend>
@@ -221,7 +225,7 @@ export default function ExportDialog({ sources, onClose, onSaved }: Props) {
             </label>
             <label className="check" title={TIPS["panels:all"]}>
               <input type="radio" name="export-panels" checked={all} disabled={writing} onChange={() => setAll(true)} />
-              all panels with the same axes
+              {cut ? "all panels with the same cut" : "all panels with the same axes"}
             </label>
           </fieldset>
         )}
@@ -249,7 +253,7 @@ export default function ExportDialog({ sources, onClose, onSaved }: Props) {
             </div>
             {plan && plan.left_out.length > 0 && (
               <p className="export-warning small">
-                Left out (other axes; a save writes one file): {plan.left_out.join(", ")}.
+                Left out ({cut ? "no cut along this axis at this place" : "other axes"}; a save writes one file): {plan.left_out.join(", ")}.
               </p>
             )}
             {est?.warnings.map((w) => (

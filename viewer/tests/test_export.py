@@ -236,3 +236,54 @@ def test_a_picture_goes_where_the_dialog_chose(client, sweep, tmp_path, monkeypa
     pick(client, path, "plot.png", "png").raise_for_status()
     client.post("/api/save-picture", params={"path": str(target)}, content=b"png bytes").raise_for_status()
     assert target.read_bytes() == b"png bytes"
+
+
+MAP_T = {"kind": "heatmap", "values": ["T"], "x": "f", "y": "power"}
+
+
+def cut(which="row", power=1, f=0):
+    return {"which": which, "index": {"power": power, "f": f}}
+
+
+def test_a_cut_as_csv(client, sweep):
+    """Plan 12: a row of a map, the file's numbers along its axis, saying where it lies."""
+    path, d = sweep
+    sid = open_view(client, path, MAP_T)
+    plan = ask(client, [sid], cuts=[cut()])
+    assert plan["path"].endswith(".csv") and "Power" in plan["path"] and plan["columns"] == ["f", "T"]
+    (out,) = save(client, [sid], path.with_name("row.csv"), cuts=[cut()])
+    a = read(out)
+    np.testing.assert_array_equal(a[:, 0], F)
+    np.testing.assert_array_equal(a[:, 1], d.values["T"].data[1])
+    text = open(out, encoding="utf-8").read()
+    assert "cut: row at Power = -20" in text and f"# id: {lbd.info(path).id}" in text
+
+
+def test_a_cut_of_a_complex_value_as_stored(client, sweep):
+    path, d = sweep
+    sid = open_view(client, path, {"kind": "heatmap", "values": ["S21"], "x": "f", "y": "power", "complex": "db"})
+    (out,) = save(client, [sid], path.with_name("c.csv"), cuts=[cut(power=2)], numbers="stored")
+    a = read(out)
+    np.testing.assert_array_equal(a[:, 1] + 1j * a[:, 2], d.values["S21"].data[2])
+
+
+def test_panels_with_the_same_cut_go_into_one_file(client, sweep):
+    """All panels: those with a cut along the same axis at the same place; the others are named."""
+    path, d = sweep
+    a = open_view(client, path, MAP_T)
+    b = open_view(client, path, {"kind": "heatmap", "values": ["S21"], "x": "f", "y": "power", "complex": "abs"})
+    c = open_view(client, path, MAP_T)
+    plan = ask(client, [a, b, c], cuts=[cut(power=1), cut(power=1), cut(power=2)], names=["Panel 1", "Panel 2", "Panel 3"])
+    assert plan["columns"] == ["f", "T", "S21"] and plan["left_out"] == ["Panel 3"]
+    (out,) = save(client, [a, b], path.with_name("two.csv"), cuts=[cut(), cut()])
+    np.testing.assert_array_equal(read(out)[:, 2], np.abs(d.values["S21"].data[1]))
+
+
+def test_with_operations_a_cut_holds_the_stored_numbers(client, sweep):
+    path, d = sweep
+    sid = open_view(client, path, MAP_T)
+    render(client, sid, {"ops": [{"op": "subtract_mean", "along": "x"}]})
+    r = client.post("/api/explore/export-csv", json={"sessions": [sid], "cuts": [cut()]})
+    assert r.status_code == 400 and "choose stored" in r.text
+    plan = ask(client, [sid], cuts=[cut()], numbers="stored")
+    assert plan["options"]["shown"] and plan["options"]["stored"] is None

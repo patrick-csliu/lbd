@@ -506,6 +506,8 @@ def histogram(s: "ExploreSession", bins: int = HIST_BINS) -> Dict[str, Any]:
     log = s.settings.get("cscale") == "log"
     # the colour range from every slider position (crange "all"): the numbers of every slice
     whole = crange.get(s, s.settings)[0] if s.settings.get("crange") == "all" else None
+    if whole is not None and (whole.lo, whole.hi) != getattr(s, "zspan", None):
+        whole = None                                  # ready just now: the map isn't drawn for it yet (units)
     key = (tuple(sorted(_selected_rows(s) or [])), _selected_rows(s) is None, log, bins, whole is not None)
     cache = getattr(s, "_hist", None)
     if cache and cache[0] == key and cache[2] is s.model:
