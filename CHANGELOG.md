@@ -92,6 +92,8 @@ are still written as 1.2).
   a panel's title has a row per cursor (nothing cut off in a usual panel; the whole text when you
   point at it), "Click the plot …" shows only in the active panel, the inspector's numbers wrap
   to its width, and a mean that is zero up to rounding reads 0 (not 2.8e−17).
+- **CSV files name the measurement's id** (Save as CSV, `lbd.plot.table`): `# id: …` (and
+  `# made from: …`) in the comments, so a CSV found later can be traced back to its `.lbd` file.
 - **Explore: the sync toggles are explained**: their tooltips say what each links and between
   which panels (sliders: what a slider is), and *Explore → Sync* in the Help has examples.
 - **Explore: the preview tab's name** (one click, in italics) is at the same height as the other

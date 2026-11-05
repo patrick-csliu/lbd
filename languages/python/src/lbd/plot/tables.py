@@ -504,10 +504,21 @@ def _inside(coords: np.ndarray, lim: Optional[Tuple[float, float]]) -> Optional[
         return np.flatnonzero((coords >= lo) & (coords <= hi))
 
 
+def identity(d) -> List[str]:
+    """The measurement's id (format 1.1), so a CSV found later can be traced back to its file
+    wherever it was moved (LBD Viewer's Library finds a file by its id), and the id of the file
+    it was made from."""
+    ident, parent = getattr(d, "id", None), getattr(d, "parent_id", None)
+    if not ident:
+        return ["id: none (the file has no id; LBD gives it one when it next saves the file)"]
+    return [f"id: {ident}"] + ([f"made from: {parent}"] if parent else [])
+
+
 def _comments(d, spec: Dict[str, Any], numbers: str, shown_units: bool) -> List[str]:
     path = getattr(d, "path", None)
     name = Path(path).name if path else (d.title or "dataset in memory")
     out = [f"LBD export: {name}, {_dt.datetime.now().strftime('%Y-%m-%d %H:%M')}, LBD {lbd.__version__}"]
+    out += identity(d)
     if path and str(path).lower().endswith(".writing"):
         out.append("still being measured: these are the points written so far")
     cx = [n for n in spec["values"] if np.issubdtype(d.values[n].dtype, np.complexfloating)]

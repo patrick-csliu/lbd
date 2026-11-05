@@ -157,3 +157,20 @@ def test_one_trace_has_no_matrix(tmp_path):
         lp.table(d, "curve", "y").to_csv(tmp_path / "x.csv", layout="matrix")
     a = np.loadtxt(lp.table(d).to_csv(tmp_path / "y.csv"), delimiter=",", encoding="utf-8")
     np.testing.assert_array_equal(a, np.column_stack([np.arange(5.0), np.arange(5.0) ** 2]))
+
+
+def test_the_comments_hold_the_files_id(d, tmp_path):
+    """A CSV found later can be traced back to its measurement: the file's id (and the id of the
+    file it was made from) are in its comments."""
+    d.save(tmp_path / "s.lbd")
+    saved = lbd.load(tmp_path / "s.lbd")
+    text = lp.table(tmp_path / "s.lbd", "curve", "S21", x="freq", series="power").to_csv(tmp_path / "s.csv").read_text(encoding="utf-8")
+    first = saved.id
+    assert f"# id: {first}" in text and "made from" not in text
+    saved.save(tmp_path / "copy.lbd")                                  # another file: a new id, made from the first
+    copy = lbd.load(tmp_path / "copy.lbd")
+    text = lp.table(copy, "curve", "S21", x="freq", series="power").to_csv(tmp_path / "c.csv").read_text(encoding="utf-8")
+    assert f"# id: {copy.id}" in text and f"# made from: {first}" in text
+    fresh = lp.table(d, "curve", "S21", x="freq", series="power").to_csv(tmp_path / "m.csv").read_text(encoding="utf-8")
+    if d.id is None:
+        assert "# id: none (the file has no id" in fresh

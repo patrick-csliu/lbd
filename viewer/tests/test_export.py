@@ -177,3 +177,13 @@ def test_writing_can_be_cancelled(client, sweep, monkeypatch):
     assert client.post("/api/exports/cancel", json={"job": job}).json() == {"ok": True}
     assert client.app.state.lbd.exports.wait(job)["state"] == "cancelled"
     assert not path.with_name("c.csv").exists() and not path.with_name("c.csv.part").exists()
+
+
+
+def test_the_csv_names_the_files_id(client, sweep, big, monkeypatch):
+    """Plan 12: the comments give the measurement's id, also for a map read part by part."""
+    little_room(monkeypatch)
+    for path, spec, name in ((sweep[0], CURVES, "a.csv"), (big[0], MAP, "b.csv")):
+        sid = open_view(client, path, spec)
+        (out,) = save(client, [sid], path.with_name(name))
+        assert f"# id: {lbd.info(path).id}" in open(out, encoding="utf-8").read()

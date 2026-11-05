@@ -429,11 +429,16 @@ Under the choices, the dialog says how big the file will be (*About 48 MB, 1 010
 Excel would open only part of the file (more than 1 048 576 rows or 16 384 columns). A large
 file is written part by part, with a progress bar and **Cancel saving** (which leaves no file).
 
+The comments name the data file and its **id** (the measurement's identity, which stays the same
+when the file is moved or copied; also `made from:` when the file was made from another), so a
+CSV found later can be traced back to its `.lbd` file.
+
 One data point per row (the coordinates, then the values):
 
 ```text
 # power,freq,S21
 # LBD export: power_sweep.lbd, 2026-11-01 14:03, LBD 1.3.0
+# id: 0192d4e2-7b3a-7c1e-9f2a-1c2b3d4e5f60
 # complex mode: db (for S21)
 # numbers as shown; stored units
 # after: subtract mean (along x)

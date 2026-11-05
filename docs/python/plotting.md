@@ -233,7 +233,8 @@ print(cols["freq"][:3], cols["S21"][:3])
 | `to_csv(layout=)` | `"rows"` or `"matrix"`; `rows_are="x"` turns the matrix the other way |
 
 The file starts with comment lines (`#`): the column names, where the numbers come from (file,
-complex mode, fixed parameters), and each column's unit. Numbers are written at full precision,
+the file's `id` and the `parent_id` it was made from, complex mode, fixed parameters), and each
+column's unit. Numbers are written at full precision,
 with `.` as decimal point and `,` between columns. Give `encoding="utf-8"` when reading: units
 like µ and ° are in the comments. `t.estimate()` says how big the file will be before writing it.
 

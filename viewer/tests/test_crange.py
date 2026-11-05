@@ -45,7 +45,7 @@ def norm_of(s):
 
 
 def wait(s, settings):
-    for _ in range(200):
+    for _ in range(1200):                                            # up to 60 s (a busy computer)
         s.apply(settings)
         if not (s.crange_state() or {}).get("state"):
             return
