@@ -240,6 +240,22 @@ column's unit. Numbers are written at full precision,
 with `.` as decimal point and `,` between columns. Give `encoding="utf-8"` when reading: units
 like µ and ° are in the comments. `t.estimate()` says how big the file will be before writing it.
 
+### The whole file as CSV
+
+A file can hold values on different axes, for example `u(A)`, `v(A, B)` and `t(C)`. A table holds
+one **group**, the values on the same axes (mixed, most of its cells would be empty).
+[`lp.groups`][lbd.plot.groups] lists them; `lp.table(..., group=)` makes a group's table, as
+stored, for any number of axes: a column per axis, then per value, a row per data point. A
+complex value is two columns (`S21_re`, `S21_im`), a data point of several numbers a column each,
+and a variable sweep gives each point its coordinates. Single numbers and the metadata are in the
+comments. A file is read block by block, so it may be bigger than memory.
+
+```python
+for g in lp.groups("sweep.lbd"):
+    print(g.label, g.rows)                         # S21, ... (power, freq) 1234
+lp.table("sweep.lbd", group="S21").to_csv("sweep_all.csv")
+```
+
 ## Recipes
 
 ### Make every figure of a paper consistent

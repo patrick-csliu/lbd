@@ -344,7 +344,7 @@ def prefixed(unit: str, factor: float) -> str:
 
 def table(data, kind: Optional[str] = None, values: Any = None, *, numbers: str = "shown",
           xlim: Optional[Tuple[float, float]] = None, ylim: Optional[Tuple[float, float]] = None,
-          style: Any = None, file_style: bool = True, **spec: Any) -> Table:
+          style: Any = None, file_style: bool = True, group: Any = None, **spec: Any) -> Table:
     """The numbers a curve plot or heat map shows, as a table (write it with `Table.to_csv`).
 
     **Use it when** you want the numbers of the viewer's plot (complex mode applied, the series
@@ -369,6 +369,10 @@ def table(data, kind: Optional[str] = None, values: Any = None, *, numbers: str 
     style, file_style, **spec
         As for `plot`. Numbers are always in the units stored in the file (Hz, not GHz: nothing
         rounded); the header names each column's unit.
+    group : str or Group, optional
+        Instead of a plot: all of one group of the file's values (those on the same axes, see
+        [`groups`][lbd.plot.groups]), as stored, a row per data point, for any number of axes;
+        the name of one of its values is enough. The other arguments don't apply.
 
     Returns
     -------
@@ -382,6 +386,10 @@ def table(data, kind: Optional[str] = None, values: Any = None, *, numbers: str 
     """
     from . import api
 
+    if group is not None:
+        from .whole import file_table
+
+        return file_table(data, group)
     if "units" in spec:
         raise TypeError("units: a CSV always has the units stored in the file since LBD 1.3 (Hz, not GHz); "
                         "remove the units= argument")

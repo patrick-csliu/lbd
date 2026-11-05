@@ -99,8 +99,13 @@ For figures you draw with matplotlib yourself.
 | You want… | Use |
 |---|---|
 | what a curve plot or heat map shows, as a table or CSV file | [`table`][lbd.plot.table], then [`Table.to_csv`][lbd.plot.Table.to_csv] |
+| all of a file's values, any number of axes, as CSV | [`groups`][lbd.plot.groups], then [`table`][lbd.plot.table] with `group=` |
 
 ::: lbd.plot.table
+    options:
+      heading_level: 3
+
+::: lbd.plot.groups
     options:
       heading_level: 3
 

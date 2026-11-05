@@ -18,8 +18,10 @@ export interface ExportSource {
 }
 
 interface Props {
-  /** The panel asked from first, then the others (for "all panels"). */
+  /** The panel asked from first, then the others (for "all panels"); none: only the whole file. */
   sources: ExportSource[];
+  /** No panel: the file to save whole (the Library, the file's menu). */
+  file?: string;
   onClose: () => void;
   onSaved: (paths: string[]) => void;
 }
@@ -32,7 +34,8 @@ const TIPS: Record<string, string> = {
   "numbers:shown": "The numbers drawn in the panel: complex mode, operations and equations applied",
   "numbers:both": "Each column as drawn, followed by the file's own numbers (a complex value: its real and imaginary part)",
   "numbers:stored": "The file's own numbers, unchanged (a complex value: its real and imaginary part)",
-  "zoomed:false": "All the chosen traces, every point, also outside the zoom",
+  "zoomed:false": "All the chosen traces, every point, also outside the zoom; the slider where it is",
+  whole: "Every point of every slider position as stored, like converting the file: the values on the same axes, one table",
   "zoomed:true": "Only the points inside the panel's zoom",
   "layout:rows": "A column for each axis, then for each value; a row per data point. Good for Origin, pandas, Excel filters",
   "layout:matrix": "A 2-D grid (a map, or curves of a series): the first row and the first column hold the axes",
@@ -60,7 +63,7 @@ export function size(bytes: number): string {
   return `${bytes} bytes`;
 }
 
-export default function ExportDialog({ sources, onClose, onSaved }: Props) {
+export default function ExportDialog({ sources, file, onClose, onSaved }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const [choice, setChoice] = useState<ExportChoice>(remembered);
   const [all, setAll] = useState(false);
@@ -71,10 +74,14 @@ export default function ExportDialog({ sources, onClose, onSaved }: Props) {
   const [job, setJob] = useState<ExportJob | null>(null);
   const [step, setStep] = useState<1 | 2>(1); // the choices, then what will be written and Save
   const [noDialog, setNoDialog] = useState(false); // no system Save dialog here: the name is typed
+  const panelless = sources.length === 0;
+  const [whole, setWhole] = useState(panelless); // the whole file, not what the panel shows
+  const [group, setGroup] = useState<string | null>(null); // the whole file: which values
+  const dataFile = file ?? sources[0]?.file ?? "";
   const several = sources.length > 1;
   const used = all ? sources : sources.slice(0, 1);
   const names = used.map((s, k) => s.name ?? `Panel ${k + 1}`);
-  const cut = sources[0].cut ?? null;
+  const cut = sources[0]?.cut ?? null;
   const cuts = cut ? used.map((s) => s.cut!) : null;
   // a cut is one line: all of it, one point per row
   const asked: ExportChoice = cut ? { ...choice, zoomed: false, layout: "rows" } : choice;
@@ -86,13 +93,12 @@ export default function ExportDialog({ sources, onClose, onSaved }: Props) {
   useEffect(() => {
     let live = true;
     const timer = window.setTimeout(() => {
-      api
-        .exportCsv(used.map((s) => s.session), asked, views, undefined, names, cuts)
+      (whole ? api.fileCsv(dataFile, group, asked) : api.exportCsv(used.map((s) => s.session), asked, views, undefined, names, cuts))
         .then((p) => {
           if (!live) return;
           setPlan(p);
           setError(null);
-          if (name === null) {
+          if (name === null || !noDialog) {
             const cut = Math.max(p.path.lastIndexOf("/"), p.path.lastIndexOf("\\")) + 1;
             setFolder(p.path.slice(0, cut));
             setName(p.path.slice(cut));
@@ -105,7 +111,7 @@ export default function ExportDialog({ sources, onClose, onSaved }: Props) {
       window.clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(choice), all]);
+  }, [JSON.stringify(choice), all, whole, group]);
 
   // While writing: how far it is, then "Saved" (or what went wrong).
   useEffect(() => {
@@ -152,7 +158,7 @@ export default function ExportDialog({ sources, onClose, onSaved }: Props) {
       let target = folder + name.trim();
       if (!noDialog) {
         try {
-          const picked = await api.pickSave(used[0].file, name.trim(), "csv", "Save as CSV");
+          const picked = await api.pickSave(dataFile, name.trim(), "csv", "Save as CSV");
           if (picked.path === null) return; // cancelled: nothing written, the dialog stays
           target = picked.path;
         } catch (err) {
@@ -164,7 +170,7 @@ export default function ExportDialog({ sources, onClose, onSaved }: Props) {
           throw err;
         }
       }
-      const out = await api.exportCsv(used.map((s) => s.session), asked, views, target, names, cuts);
+      const out = whole ? await api.fileCsv(dataFile, group, asked, target) : await api.exportCsv(used.map((s) => s.session), asked, views, target, names, cuts);
       setError(null);
       setJob({ id: out.job, paths: out.paths, state: "writing", error: null, path: out.paths[0], what: "", fraction: 0, seconds: 0 });
     } catch (err) {
@@ -183,26 +189,51 @@ export default function ExportDialog({ sources, onClose, onSaved }: Props) {
   return (
     <dialog ref={ref} className="confirm-dialog export-dialog" onCancel={(e) => (writing ? e.preventDefault() : onClose())} aria-labelledby="export-title">
       <form onSubmit={submit}>
-        <h3 id="export-title">{cut ? `Save this ${cut.which} as CSV` : "Save as CSV"}</h3>
+        <h3 id="export-title">{cut ? `Save this ${cut.which} as CSV` : panelless ? "Save the whole file as CSV" : "Save as CSV"}</h3>
         <p className="muted small">
           A table of numbers that Excel, Origin and <code>numpy.loadtxt</code> read, in the units stored in the file. The data file is
           not changed. Point at a choice for what it does. <HelpLink page="viewer/explore.html" anchor="save-as-csv" topic="Save as CSV" />
         </p>
         {step === 1 && (
           <>
+        {!whole && (
         <fieldset>
           <legend>Numbers</legend>
           {radio("numbers", "shown", "as shown", plan?.options.shown ?? null)}
           {radio("numbers", "both", "as shown + stored", plan?.options.both ?? null)}
           {radio("numbers", "stored", "stored", plan?.options.stored ?? null)}
         </fieldset>
+        )}
         {!cut && (
           <>
+        {!panelless && (
         <fieldset>
           <legend>How much</legend>
-          {radio("zoomed", false, "everything")}
-          {radio("zoomed", true, "the zoomed range", plan?.options.zoomed ?? null)}
+          <label className="check" title={TIPS["zoomed:false"]}>
+            <input type="radio" name="export-much" checked={!whole && !choice.zoomed} disabled={writing} onChange={() => { setWhole(false); set({ zoomed: false }); }} />
+            what the panel shows
+          </label>
+          <label className={"check" + (plan?.options.zoomed && !whole ? " muted" : "")} title={!whole && plan?.options.zoomed ? `Not available: ${plan.options.zoomed}` : TIPS["zoomed:true"]}>
+            <input type="radio" name="export-much" checked={!whole && choice.zoomed} disabled={writing || (!whole && !!plan?.options.zoomed)} onChange={() => { setWhole(false); set({ zoomed: true }); }} />
+            the zoomed range
+          </label>
+          <label className="check" title={TIPS["whole"]}>
+            <input type="radio" name="export-much" checked={whole} disabled={writing} onChange={() => setWhole(true)} />
+            the whole file
+          </label>
         </fieldset>
+        )}
+        {whole && plan?.groups && plan.groups.length > 1 && (
+          <fieldset>
+            <legend>Values</legend>
+            {plan.groups.map((g) => (
+              <label key={g.key} className="check" title="Values on the same axes: a table holds one such group. For another, save again">
+                <input type="radio" name="export-group" checked={(group ?? plan.group) === g.key} disabled={writing} onChange={() => setGroup(g.key)} />
+                {g.label}: {g.rows.toLocaleString()} rows
+              </label>
+            ))}
+          </fieldset>
+        )}
         <fieldset>
           <legend>Layout</legend>
           {radio("layout", "rows", "one data point per row")}
@@ -216,7 +247,7 @@ export default function ExportDialog({ sources, onClose, onSaved }: Props) {
         </fieldset>
           </>
         )}
-        {several && (
+        {several && !whole && (
           <fieldset>
             <legend>Panels</legend>
             <label className="check" title={TIPS["panels:this"]}>

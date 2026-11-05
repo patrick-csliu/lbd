@@ -287,3 +287,66 @@ def test_with_operations_a_cut_holds_the_stored_numbers(client, sweep):
     assert r.status_code == 400 and "choose stored" in r.text
     plan = ask(client, [sid], cuts=[cut()], numbers="stored")
     assert plan["options"]["shown"] and plan["options"]["stored"] is None
+
+
+@pytest.fixture()
+def mixed(data_dir):
+    """Values on different axes: u(A), v(A, B), t(C); and a number."""
+    d = lbd.Dataset(title="Mixed")
+    d.add_axis("A", [1.0, 2.0, 3.0], unit="V")
+    d.add_axis("B", [10.0, 20.0])
+    d.add_axis("C", np.arange(4.0))
+    d.add_value("u", [0.1, 0.2, 0.3], axes="A")
+    d.add_value("v", np.arange(6.0).reshape(3, 2) * (1 + 1j), axes=["A", "B"])
+    d.add_value("t", np.arange(4.0) ** 2, axes="C")
+    d.add_value("fidelity", 0.93)
+    path = data_dir / "mixed.lbd"
+    d.save(path)
+    return path
+
+
+def ask_file(client, datafile, **kw):
+    r = client.post("/api/file-csv", json={"file": str(datafile), **kw})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_the_whole_file_group_by_group(client, mixed):
+    """Plan 12: the file's groups, one chosen; a CSV holds that group, as stored."""
+    plan = ask_file(client, mixed)
+    assert sorted(g["label"] for g in plan["groups"]) == ["t (C)", "u (A)", "v (A, B)"]
+    plan = ask_file(client, mixed, group="v")
+    assert plan["group"] == "v" and plan["columns"] == ["A", "B", "v_re", "v_im"]
+    assert plan["path"].endswith("mixed - v.csv") and plan["estimate"]["rows"] == 6
+    out = ask_file(client, mixed, group="v", path=plan["path"])
+    info = client.app.state.lbd.exports.wait(out["job"])
+    assert info["state"] == "done", info
+    a = read(plan["path"])
+    np.testing.assert_array_equal(a[:, 2], np.arange(6.0))
+    text = open(plan["path"], encoding="utf-8").read()
+    assert "fidelity = 0.93" in text and f"# id: {lbd.info(mixed).id}" in text
+
+
+def test_the_whole_file_as_a_matrix_says_when_it_cant(client, mixed):
+    plan = ask_file(client, mixed, group="v", layout="matrix")
+    assert plan["estimate"] is None and "one number per cell" in plan["error"]
+
+
+def test_a_file_of_single_numbers_has_no_table(client, data_dir):
+    d = lbd.Dataset()
+    d.add_value("x", 1.0)
+    d.save(data_dir / "one.lbd")
+    r = client.post("/api/file-csv", json={"file": str(data_dir / "one.lbd")})
+    assert r.status_code == 400 and "only single numbers" in r.text
+
+
+def test_every_mock_file_converts(client, values_files):
+    """Every group of every kind of file: variable sweeps, data points with a shape, complex …"""
+    for path in values_files:
+        for g in ask_file(client, path)["groups"]:
+            plan = ask_file(client, path, group=g["key"])
+            assert plan["error"] is None, (path.name, g)
+            out = ask_file(client, path, group=g["key"], path=plan["path"])
+            assert client.app.state.lbd.exports.wait(out["job"])["state"] == "done", (path.name, g)
+            lines = [x for x in open(plan["path"], encoding="utf-8") if not x.startswith("#")]
+            assert lines and len(lines) <= g["rows"], (path.name, g)

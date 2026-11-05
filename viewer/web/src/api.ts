@@ -92,6 +92,8 @@ export interface ExportPlan {
   estimate: { bytes: number; rows: number; columns: number; files: number; warnings: string[]; big: boolean } | null;
   left_out: string[]; // panels on other axes: a save writes one file
   columns: string[]; // the file's columns, one data point per row
+  groups?: { key: string; label: string; rows: number }[]; // the whole file: its groups of values
+  group?: string; // the group this plan is of
 }
 
 /** A CSV file being written (or just finished). */
@@ -835,6 +837,15 @@ export const api = {
     const r = await fetch(`/api/save-picture?${new URLSearchParams({ path })}`, { method: "POST", headers: { "X-LBD-Token": token }, body: png });
     if (!r.ok) throw new ApiError(r.status, await errorText(r));
   },
+  /** The whole file as CSV: one group of values (without `path`: its groups, the size, a name). */
+  fileCsv: (file: string, group: string | null, choice: ExportChoice, path?: string) =>
+    call<ExportPlan & { job: string; paths: string[] }>("POST", "/api/file-csv", {
+      file,
+      group,
+      layout: choice.layout,
+      rows_are: choice.rows_are,
+      path,
+    }),
   exportCsv: (sessions: string[], choice: ExportChoice, views: { xlim: number[]; ylim: number[] }[] | null, path?: string, names?: string[], cuts?: ExportCut[] | null) =>
     call<ExportPlan & { job: string; paths: string[] }>("POST", "/api/explore/export-csv", {
       sessions,

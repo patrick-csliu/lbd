@@ -6,6 +6,7 @@ import { reorder, startResize, useColumnMove } from "./columnDrag";
 import { ConfirmDialog, ConfirmRequest, ContextMenu, isMenuKey, MenuAt, menuAt, MenuEntry } from "./menu";
 import { fileEntries } from "./fileActions";
 import { useToast } from "./toast";
+import ExportDialog from "./ExportDialog";
 import { useFileActions } from "./libraryActions";
 import { PAGE, useLibraryRows, useLibraryStatus } from "./libraryRows";
 import { NO_FILTERS } from "./libraryQuery";
@@ -173,6 +174,7 @@ function LibraryList(props: Props & { showFilters: boolean }) {
 
   const [menu, setMenu] = useState<MenuAt | null>(null);
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
+  const [savingCsv, setSavingCsv] = useState<string | null>(null); // Save as CSV open for this file
   const closeMenu = useCallback(() => setMenu(null), []);
   const { toggleStar, menuEntries } = useFileActions({
     platform: state.platform,
@@ -180,6 +182,7 @@ function LibraryList(props: Props & { showFilters: boolean }) {
     refresh,
     setConfirm,
     onOpenIn: props.onOpenIn,
+    onSaveCsv: setSavingCsv,
     onOpenInNewBrowserTab: props.onOpenInNewBrowserTab,
     onRenamed: props.onRenamed,
     onDeleted: props.onDeleted,
@@ -385,6 +388,7 @@ function LibraryList(props: Props & { showFilters: boolean }) {
       </div>
       {menu && <ContextMenu menu={menu} onClose={closeMenu} />}
       {confirm && <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />}
+      {savingCsv && <ExportDialog sources={[]} file={savingCsv} onClose={() => setSavingCsv(null)} onSaved={(paths) => toast(`Saved ${paths.join(", ")}`)} />}
     </>
   );
 }

@@ -421,7 +421,7 @@ right-click menu.
 | Choice | Options |
 |---|---|
 | **Numbers** | **as shown** (complex mode, operations and equations applied) · **as shown + stored** (each shown column followed by the file's own numbers) · **stored** |
-| **How much** | **everything** (all chosen traces, every point) · **the zoomed range** |
+| **How much** | **what the panel shows** (all chosen traces, every point, at the slider's position) · **the zoomed range** · **the whole file** (below) |
 | **Layout** | **one data point per row** · **table (matrix)**, for 2-D data: a map, or curves of a series |
 | **Panels** | **this panel** · **all panels with the same axes**: one file, a column per panel; panels on other axes are left out, and the next step names them |
 
@@ -438,6 +438,15 @@ a file. Every save writes one file. A large file is written part by part, with a
 **Cancel saving**; a file being replaced stays as it was until the new one is complete. On a
 computer without a Save dialog, the name is typed in the dialog and the file goes next to the
 data file.
+
+**The whole file** saves every point of every slider position as stored, like converting the
+file to CSV, also from the panel-less **Save the whole file as CSV…** in the file's **⋯** menu, and
+**Save as CSV…** in the Library's right-click menu. A file can hold values on different axes, for
+example `u(A)`, `v(A, B)` and `t(C)`: a table holds one group of values on the same axes, so the
+dialog lists the groups (*v (A, B): 10 100 rows*) and you choose one; for another, save again. Its
+columns are the axes, then the values (a complex value: `S21_re`, `S21_im`; a data point of
+several numbers: a column each); a variable sweep gives each point its coordinates. Single numbers
+and the file's metadata are in the comments. A file bigger than memory is read part by part.
 
 The comments name the data file and its **id** (the measurement's identity, which stays the same
 when the file is moved or copied; also `made from:` when the file was made from another), so a

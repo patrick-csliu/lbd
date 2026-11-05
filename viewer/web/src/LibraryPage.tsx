@@ -28,6 +28,7 @@ import { ConfirmDialog, ConfirmRequest, ContextMenu, isMenuKey, MenuAt, menuAt, 
 import { copyPath, fileEntries } from "./fileActions";
 import { useToast } from "./toast";
 import { useFileActions } from "./libraryActions";
+import ExportDialog from "./ExportDialog";
 import { Chip, LabelChip } from "./LabelChip";
 import { Setting } from "./settingsUi";
 import { labelPath, shortLabel } from "./labelText";
@@ -336,6 +337,7 @@ export default function LibraryPage(props: Props) {
   const [menu, setMenu] = useState<MenuAt | null>(null);
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
+  const [savingCsv, setSavingCsv] = useState<string | null>(null); // Save as CSV open for this file
 
   const { run, label, toggleStar, askTrash, askNewMeasurement, menuEntries } = useFileActions({
     platform: state.platform,
@@ -343,6 +345,7 @@ export default function LibraryPage(props: Props) {
     refresh,
     setConfirm,
     onOpenIn,
+    onSaveCsv: setSavingCsv,
     onOpenInNewBrowserTab,
     onRenamed,
     onDeleted,
@@ -1059,6 +1062,7 @@ export default function LibraryPage(props: Props) {
       </section>
       {menu && <ContextMenu menu={menu} onClose={closeMenu} />}
       {confirm && <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />}
+      {savingCsv && <ExportDialog sources={[]} file={savingCsv} onClose={() => setSavingCsv(null)} onSaved={(paths) => toast(`Saved ${paths.join(", ")}`)} />}
     </div>
   );
 }

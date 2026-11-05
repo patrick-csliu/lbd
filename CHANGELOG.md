@@ -105,6 +105,10 @@ are still written as 1.2).
   to its width, and a mean that is zero up to rounding reads 0 (not 2.8e−17).
 - **CSV files name the measurement's id** (Save as CSV, `lbd.plot.table`): `# id: …` (and
   `# made from: …`) in the comments, so a CSV found later can be traced back to its `.lbd` file.
+- **The whole file as CSV.** Save as CSV's **How much → the whole file** (also in the file's **⋯**
+  menu and the Library's right-click menu) saves every point as stored, for any number of axes:
+  you choose one group of values on the same axes, a file bigger than memory is read part by
+  part. For scripts: `lbd.plot.groups(d)` and `lbd.plot.table(d, group="S21")`.
 - **Explore: a row, column or trace as CSV.** The Cursors tab's buttons save the line through
   cursor 1 as CSV, for this panel or all panels with the same cut (one file, a column each). The
   `.lbd` cut is in the plot's right-click menu, and asks where with the Save dialog too.

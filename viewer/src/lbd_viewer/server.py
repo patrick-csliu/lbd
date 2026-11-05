@@ -39,6 +39,7 @@ from pydantic import BaseModel, ConfigDict  # noqa: E402
 import lbd  # noqa: E402
 from lbd.plot import render as rnd  # noqa: E402
 from lbd.plot.style import STYLE_SUFFIX, read_style_file  # noqa: E402
+from lbd.plot import whole as whole_file  # noqa: E402
 from lbd.plot.units import prefix_scale  # noqa: E402
 
 from . import VERSION  # noqa: E402
@@ -498,6 +499,14 @@ class ExportBody(_Body):
 
 class JobBody(_Body):
     job: str
+
+
+class FileCsvBody(_Body):
+    file: str                             # the data file
+    group: Optional[str] = None           # a value of the group to save (None: the first group)
+    layout: str = "rows"                  # "rows" or "matrix"
+    rows_are: str = "t"
+    path: Optional[str] = None            # None: only the groups, the size and a file name
 
 
 class PickSaveBody(_Body):
@@ -1472,6 +1481,42 @@ def create_app(state: AppState) -> FastAPI:
         csv_export.check_target(target, replace=chosen)
         if body.layout == "matrix":
             table.check_matrix()
+        job = state.exports.start([(table, target)], body.layout, body.rows_are)
+        return {"job": job, "paths": [str(target)]}
+
+    @app.post("/api/file-csv")
+    def file_csv(body: FileCsvBody):
+        """The whole file as CSV: one group of values (those on the same axes), as stored. Without
+        a path: its groups, a file name and the size. With a path: start writing ({job})."""
+        p = state.check_allowed(body.file)
+        groups = whole_file.groups(p)
+        if not groups:
+            raise HTTPException(400, f"{p.name} has only single numbers: there is no table to save")
+        key = body.group or groups[0].key
+        if body.path is None:
+            out = {"path": str(csv_export.suggest_file_csv(p, key)), "error": None, "left_out": [], "group": key,
+                   "options": {"stored": None, "both": None, "zoomed": None},
+                   "groups": [{"key": g.key, "label": g.label, "rows": g.rows} for g in groups]}
+            with lbd.open(p) as d:
+                t = whole_file.FileTable(d, key)
+                out["columns"] = csv_export.column_names(t)
+                try:
+                    out["estimate"] = csv_export.plan([t], body.layout, body.rows_are)
+                except ValueError as e:
+                    out["estimate"], out["error"] = None, str(e)
+            return out
+        target = Path(body.path).expanduser().resolve()
+        chosen = _key(target) in state.chosen             # in the system's dialog, which asked before replacing
+        if target.parent != p.parent and not chosen:      # next to its file is always allowed
+            state.check_allowed(str(target.parent))
+        csv_export.check_target(target, replace=chosen)
+        table = whole_file.file_table(p, key)
+        if body.layout == "matrix":
+            try:
+                table.check_matrix()
+            except ValueError:
+                table.close()
+                raise
         job = state.exports.start([(table, target)], body.layout, body.rows_are)
         return {"job": job, "paths": [str(target)]}
 

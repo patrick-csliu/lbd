@@ -17,6 +17,7 @@ export interface FileActionsContext {
   /** shows a confirmation or text dialog (the caller renders ConfirmDialog) */
   setConfirm: Dispatch<SetStateAction<ConfirmRequest | null>>;
   onOpenIn: (path: string, where: "explore" | "figure") => void;
+  onSaveCsv: (path: string) => void;
   onOpenInNewBrowserTab: (path: string) => void;
   onRenamed: (oldPath: string, newPath: string) => void;
   onDeleted: (path: string) => void;
@@ -115,6 +116,7 @@ export function useFileActions(ctx: FileActionsContext) {
         "-",
         { label: "Open in Explore", onClick: () => ctx.onOpenIn(r.path, "explore") },
         { label: "Open in Figure", onClick: () => ctx.onOpenIn(r.path, "figure") },
+        { label: "Save as CSV…", onClick: () => ctx.onSaveCsv(r.path) },
         "-",
         ...fileEntries(r.path, ctx.platform, toast),
         { label: "Open in new browser tab", onClick: () => ctx.onOpenInNewBrowserTab(r.path) },

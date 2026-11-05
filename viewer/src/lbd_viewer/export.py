@@ -4,7 +4,6 @@ cancel). Several panels go into one file when they share their axes, else one fi
 
 from __future__ import annotations
 
-import os
 import re
 import secrets
 import threading
@@ -132,6 +131,16 @@ def suggest_cut_csv(s: "ExploreSession", which: str, index: Dict[str, int], trac
     return path
 
 
+def suggest_file_csv(path: Path, key: str) -> Path:
+    """A new file name for one group of a whole file, next to it: <file> - <value>.csv."""
+    base = f"{path.stem} - {key}"
+    out, n = path.with_name(base + ".csv"), 2
+    while out.exists():
+        out = path.with_name(f"{base} ({n}).csv")
+        n += 1
+    return out
+
+
 def _slug(text: str) -> str:
     """A column name from a label: letters, digits and _ only (what numpy's names keep)."""
     name = re.sub(r"[^0-9A-Za-z_]+", "_", text).strip("_")
@@ -228,7 +237,7 @@ def one_table(ts: Sequence[Table]) -> Tuple[Table, List[int]]:
 
 def column_names(t: Table) -> List[str]:
     """The columns of a table written one data point per row."""
-    return [c.name for c in ([t.t_col] if t.t_col is not None else []) + [t.x_col]] + [c.name for c, _ in t.values]
+    return [c.name for c in t.columns()]
 
 
 def join(ts: Sequence[Table]) -> List[Table]:
@@ -333,33 +342,18 @@ class Exports:
             self._forget_old()
             self._jobs[job_id] = rec
 
-        parts: List[Path] = []
-
-        def remove_parts() -> None:
-            for part in parts:
-                try:
-                    part.unlink()
-                except OSError:
-                    pass
-
         def run() -> None:
             try:
-                # under another name, renamed when complete: a file being replaced stays whole
-                # until then, and Cancel or an error leaves it as it was
+                # to_csv writes under another name and renames when complete: a file being
+                # replaced stays whole until then, and Cancel or an error leaves it as it was
                 for k, (t, path) in enumerate(work):
-                    part = path.with_name(f"{path.stem}.part{path.suffix}")
-                    parts.append(part)
-                    t.to_csv(part, layout, rows_are, progress=lambda f, k=k: job.step((k + f) / len(work)))
-                for part, (_, path) in zip(parts, work):
-                    os.replace(part, path)
+                    t.to_csv(path, layout, rows_are, progress=lambda f, k=k: job.step((k + f) / len(work)))
                 rec["state"] = "done"
             except Cancelled:
                 rec["state"] = "cancelled"
-                remove_parts()
             except Exception as e:                     # shown to the user: nothing fails silently
                 known = isinstance(e, (ValueError, OSError))      # ExploreError is a ValueError
                 rec["state"], rec["error"] = "failed", str(e) if known else f"{type(e).__name__}: {e}"
-                remove_parts()
             rec["ended"] = time.monotonic()
 
         threading.Thread(target=run, name=f"export-{job_id}", daemon=True).start()

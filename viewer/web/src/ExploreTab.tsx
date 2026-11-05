@@ -185,6 +185,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
   const actionRefs = useRef<Record<string, MutableRefObject<ExploreActions | null>>>({});
   const actionsOf = (id: string) => (actionRefs.current[id] ??= { current: null });
   const [exporting, setExporting] = useState<ExportSource[] | null>(null); // Save as CSV open: panel asked, then the others
+  const [wholeCsv, setWholeCsv] = useState(false); // Save the whole file as CSV open
   const [picture, setPicture] = useState(pictureChoice); // Copy picture: what, and which panels
   const setPictureChoice = (c: typeof picture) => {
     setPicture(c);
@@ -734,6 +735,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
       items: [
         { label: choosing ? "Drawing the Library picture…" : "Use as Library picture", disabled: choosing, onClick: () => void chooseAsPreview() },
         { label: "Copy path", onClick: () => void copyPath(info.path, toast) },
+        { label: "Save the whole file as CSV…", onClick: () => setWholeCsv(true) },
         "-",
         { label: "Forget this view…", onClick: () => void forget() },
       ],
@@ -1029,6 +1031,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
           onSaved={(paths) => toast(`Saved ${paths.join(", ")}`)}
         />
       )}
+      {wholeCsv && <ExportDialog sources={[]} file={path} onClose={() => setWholeCsv(false)} onSaved={(paths) => toast(`Saved ${paths.join(", ")}`)} />}
     </div>
   );
 }

@@ -226,7 +226,7 @@ REFUSED = {"/api/file/plot", "/api/file/rename", "/api/file/trash", "/api/librar
 ELSEWHERE = {   # write only beside the file (the labels file), into LBD's database, or a new file
     "/api/library/labels", "/api/library/labels/create", "/api/library/labels/rename", "/api/library/labels/remove",
     "/api/library/missing", "/api/library/preview/want", "/api/library/preview/choose",
-    "/api/library/preview/clear", "/api/file/recover",
+    "/api/library/preview/clear", "/api/file/recover", "/api/file-csv",
 }
 
 

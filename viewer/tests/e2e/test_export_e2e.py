@@ -24,7 +24,7 @@ def sweep(viewer):
 
 
 def open_dialog(page: Page):
-    explore(page).get_by_role("button", name="Data", exact=True).click()
+    explore(page).get_by_role("button", name="Data", exact=True).first.click()
     page.get_by_role("menuitem", name="Save as CSV…").click()
     dialog = page.get_by_role("dialog", name="Save as CSV")
     expect(dialog).to_be_visible()
@@ -171,7 +171,43 @@ def test_save_picture_uses_the_save_dialog(sweep, viewer, new_page, monkeypatch,
     monkeypatch.setattr(server, "native_save_dialog", lambda *a: str(tmp_path / "plot.png"))
     page = new_page("Explore")
     frames(page, lambda: row(page, "sweep.lbd").dblclick())
-    explore(page).get_by_role("button", name="Data", exact=True).click()
+    explore(page).get_by_role("button", name="Data", exact=True).first.click()
     page.get_by_role("menuitem", name="Save picture as PNG…").click()
     expect(page.get_by_text("Saved ")).to_be_visible()
     assert (tmp_path / "plot.png").read_bytes()[:4] == b"\x89PNG"
+
+
+def test_the_whole_file_as_csv_choosing_a_group(viewer, new_page, monkeypatch, tmp_path):
+    """Plan 12: from the panel's dialog, How much → the whole file: the groups of values, one chosen."""
+    d = lbd.Dataset(title="Mixed")
+    d.add_axis("A", [1.0, 2.0, 3.0])
+    d.add_axis("B", [10.0, 20.0])
+    d.add_value("u", [0.1, 0.2, 0.3], axes="A")
+    d.add_value("v", np.arange(6.0).reshape(3, 2), axes=["A", "B"])
+    d.save(viewer.data / "mixed.lbd")
+    monkeypatch.setattr(server, "native_save_dialog", lambda folder, name, fmt, title, fallback: str(tmp_path / name))
+    page = new_page("Explore")
+    frames(page, lambda: row(page, "mixed.lbd").dblclick())
+    dialog = open_dialog(page)
+    dialog.get_by_label("the whole file").check()
+    dialog.get_by_label("v (A, B): 6 rows").check()
+    expect(dialog.get_by_label("v (A, B): 6 rows")).to_be_checked()
+    dialog.get_by_role("button", name="Next").click()
+    expect(dialog.get_by_role("status").first).to_contain_text("6 rows × 3 columns")
+    dialog.get_by_role("button", name="Save…").click()
+    expect(dialog).to_be_hidden()
+    a = np.loadtxt(tmp_path / "mixed - v.csv", delimiter=",", encoding="utf-8")
+    np.testing.assert_array_equal(a[:, 2], np.arange(6.0))
+
+
+def test_the_file_menu_saves_the_whole_file(sweep, viewer, new_page, monkeypatch, tmp_path):
+    monkeypatch.setattr(server, "native_save_dialog", lambda *a: str(tmp_path / "all.csv"))
+    page = new_page("Explore")
+    frames(page, lambda: row(page, "sweep.lbd").dblclick())
+    explore(page).get_by_role("button", name="More", exact=True).first.click()
+    page.get_by_role("menuitem", name="Save the whole file as CSV…").click()
+    dialog = page.get_by_role("dialog", name="Save the whole file as CSV")
+    dialog.get_by_role("button", name="Next").click()
+    dialog.get_by_role("button", name="Save…").click()
+    expect(dialog).to_be_hidden()
+    assert (tmp_path / "all.csv").read_text(encoding="utf-8").startswith("# ")
