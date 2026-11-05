@@ -69,6 +69,11 @@ are still written as 1.2).
   leave the Library, how many have labels, the labels only they have, and open tabs showing
   them. Nothing on disk changes. The same menu shows the folder in Explorer / Finder and copies
   its path.
+- **Explore: files open on a computer short of memory.** With little memory free (other
+  programs open), small files were refused ("small enough to show without a summary", "show one
+  value at a time"), and the equations' list of names was empty. Now a value under 64 MB is
+  always read whole, **Leave free** is 0 unless set (the automatic 2 GB / 10 % reserve is gone; a
+  number you set is kept), and a plot summarised only for lack of free memory says so once.
 - **Explore is a workbench that fills the window.** The controls, the plots and a new
   inspector each scroll on their own, so the page never scrolls and changing a control or reading
   a cursor never moves the plot. The controls fold into **Data**, **Display** and **Processing**;

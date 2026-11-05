@@ -363,6 +363,7 @@ function Equations({ kind, equations, info, on, onChange }: {
       <details className="eq-names">
         <summary className="small">Names and functions</summary>
       <div className="eq-legend small" aria-label="What the names stand for">
+        {info?.names_note && <div className="muted">{info.names_note}</div>}
         {main.map((n) => (
           <div key={n.name}>
             <code>{n.name}</code> = {n.means}

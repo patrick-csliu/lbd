@@ -134,6 +134,8 @@ class ExploreSession:
         self.saved_view = saved_view
         self.summarise = summarise
         self.bare = bare
+        self._memory_said = False                     # the low-memory note: told once per session
+        self._notes: List[str] = []
         self.last_used = time.monotonic()
         self.header = self._read(lbd.info(path))
         self.data = self._read(lbd.load(path, values=[]))
@@ -163,17 +165,24 @@ class ExploreSession:
         # from its summary, made once (and kept on disk) by reading the file part by part
         # (summaries.py, plan 6d).
         big = None
-        if self.base_kind == "curve":
-            big = self._big_curves(new)
-        elif self.base_kind == "heatmap":
-            v = self.data.values[new["values"][0]]
-            shape = (len(self.data.axes[new["y"]].data), len(self.data.axes[new["x"]].data))
-            if new["y"] in v.axes and new["x"] in v.axes and summaries.too_big(shape):
-                if not self.summarise:
-                    raise ExploreError(f"this map has {shape[0]:,} × {shape[1]:,} cells, too many for a preview; "
-                                       "open it in Explore (it is summarised once, then kept)")
-                big = summaries.shared().summarise(
-                    self.path, self.version, summaries.BigMap(v, new["x"], new["y"], new["index"], new["complex"]))
+        try:
+            if self.base_kind == "curve":
+                big = self._big_curves(new)
+            elif self.base_kind == "heatmap":
+                v = self.data.values[new["values"][0]]
+                shape = (len(self.data.axes[new["y"]].data), len(self.data.axes[new["x"]].data))
+                if new["y"] in v.axes and new["x"] in v.axes and summaries.too_big(shape):
+                    if not self.summarise:
+                        raise ExploreError(f"this map has {shape[0]:,} × {shape[1]:,} cells, too many for a preview; "
+                                           "open it in Explore (it is summarised once, then kept)")
+                    big = summaries.shared().summarise(
+                        self.path, self.version, summaries.BigMap(v, new["x"], new["y"], new["index"], new["complex"]))
+        except summaries.NothingToShrink:
+            # a summary would be as large as the data: draw the data itself, read whole
+            big = None
+            self.data = self._read(lbd.load(self.path, values=sorted(set(needed) | set(loaded))))
+        if big is not None:
+            self._note_memory(big)
         # The plot as prepared from the data; operations (view setting "ops") draw a model made
         # from it (operations.py), the base model stays for the stored values.
         with rnd.RENDER_LOCK, matplotlib.rc_context(self.style.to_rcparams()):
@@ -196,6 +205,30 @@ class ExploreSession:
         self.eq_state: Dict[str, Dict[str, str]] = {}
         self.settings: Dict[str, Any] = {}               # view settings (apply), reset with the plot
         self._build()
+
+    def _note_memory(self, big: Any) -> None:
+        """Data shown from its summary only because the computer's memory is short now (it would
+        fit in what the computer has): say so once, with what to do."""
+        if self._memory_said:
+            return
+        m = memory.shared().memory
+        try:
+            total, available = m._system()
+        except Exception:                               # psutil missing or failing: nothing to tell
+            return
+        is_map = isinstance(big, summaries.BigMap)
+        cells = int(np.prod(big.shape)) if is_map else big.traces * big.points
+        if cells * summaries.BYTES_PER_CELL > total - m.reserve():
+            return                                      # larger than the computer: summarised anyway
+        self._memory_said = True
+        what, each = ("map", "cell") if is_map else ("curves", "point")
+        self._notes.append(f"This computer has little free memory ({available / memory.GB:.1f} GB free): this {what} "
+                           f"is shown from a summary. Close other programs and open the file again to see every {each}.")
+
+    def take_notes(self) -> List[str]:
+        """Notes for the user not told yet (each once)."""
+        out, self._notes = self._notes, []
+        return out
 
     def _big_curves(self, spec: Dict[str, Any]) -> Optional[summaries.BigCurves]:
         """The curves of `spec` from their summary when their points don't fit in the memory
@@ -685,6 +718,9 @@ class ExploreSession:
             self.eq_legend = equations.names_of(self, ops_mod.grid_of(self, None), arrays=False)[1]
         info: Dict[str, Any] = {"notes": r.notes if r else ["off"] * len(self.ops_list), "applied": r.applied if r else 0,
                                 "equations": getattr(self, "eq_state", {}), "names": self.eq_legend}
+        if self.summarised:                              # no legend: equations aren't used on a summary
+            info["names_note"] = ("Equations need the full data, and this plot is shown from a summary "
+                                  "(the data is larger than the memory free now).")
         if r is not None and r.applied and self.ops_shown is not None:
             info["shows"] = r.grid.value.label
             info["unit"] = self.ops_shown.value_unit

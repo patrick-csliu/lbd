@@ -114,7 +114,8 @@ without loading it:
 
 The viewer decides by itself, by the memory the computer has free **now**:
 
-- **A value that fits** is read whole, as for any file.
+- **A value that fits** is read whole, as for any file. A value of less than 64 MB is always
+  read whole, however little memory is free, so ordinary files open on a busy computer too.
 - **A bigger value** is read by part: only the map or the curves on screen. Parts already read
   are kept while memory is free (moving a slider back is instant) and the next slider positions
   are read ahead; when other programs need the memory, the oldest parts are dropped.
@@ -135,14 +136,17 @@ What works on summarised data:
 | Curves of several values, an unwrapped phase | refused, with a message |
 | Library previews | not drawn: open the file in Explore |
 
-The viewer always leaves some memory for the rest of the computer. **⚙ Settings → Memory for
-data** sets:
+**⚙ Settings → Memory for data** sets:
 
-- **Leave free**: memory never used by LBD (automatic: 2 GB or 10 % of the memory, whichever
-  is more);
+- **Leave free**: memory never used by LBD (empty: 0; the viewer uses what the computer reports
+  as available, and the system makes room by moving idle programs to disk);
 - **Use at most**: an optional limit for LBD's data;
 - **Summaries of large data on disk**: how much disk the summaries may take (20 GB; the least
   recently used are removed first), and **Empty** to remove them now. Summaries are made again
   when needed; a changed file gets a new one.
+
+When a plot is summarised only because little memory is free now (it would fit in the
+computer's memory), the viewer says so once, with how much is free: close other programs and
+open the file again to see every cell.
 
 A data file is never changed by viewing it, summarised or not.

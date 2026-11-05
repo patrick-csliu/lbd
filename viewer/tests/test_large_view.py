@@ -18,18 +18,18 @@ class FakeMemory:
     """The operating system's (total, available), set by the test."""
 
     def __init__(self, room: int):
-        self.total = 4 * GB                       # automatic reserve: max(2 GB, 10%) = 2 GB
+        self.total = 4 * GB                       # no reserve: the room is what is available
         self.room = room
 
     def __call__(self):
-        return self.total, 2 * GB + self.room
+        return self.total, self.room
 
 
 @pytest.fixture()
 def fake(monkeypatch):
     """The viewer's memory with little room: 100 kB (a map of the cube, 19 kB, fits; the cube doesn't)."""
     system = FakeMemory(room=100_000)
-    cache = PartCache(Memory(system=system))
+    cache = PartCache(Memory(always_whole=0, system=system))
     monkeypatch.setitem(memory._shared, "cache", cache)
     return system, cache
 
@@ -78,7 +78,7 @@ SPEC = {"kind": "heatmap", "x": "x", "y": "y", "index": {"t": 5}, "complex": "db
 def test_a_value_that_fits_is_loaded_whole(client, cube, monkeypatch):
     path, _ = cube
     system = FakeMemory(room=10 * GB)
-    monkeypatch.setitem(memory._shared, "cache", PartCache(Memory(system=system)))
+    monkeypatch.setitem(memory._shared, "cache", PartCache(Memory(always_whole=0, system=system)))
     d = memory.load_values(path, ["z"], "v")
     assert isinstance(d["z"].data, np.ndarray)
 
@@ -89,7 +89,7 @@ def test_a_big_value_draws_the_same_picture_reading_only_its_slice(client, cube,
     _, meta, by_part = picture(client, path, SPEC)
     assert seen and all(where == "values/z" for where, _ in seen)
     assert max(n for _, n in seen) <= z[5].nbytes            # one map, never the whole cube
-    monkeypatch.setitem(memory._shared, "cache", PartCache(Memory(system=FakeMemory(room=10 * GB))))
+    monkeypatch.setitem(memory._shared, "cache", PartCache(Memory(always_whole=0, system=FakeMemory(room=10 * GB))))
     _, meta2, whole = picture(client, path, SPEC)
     assert meta["xlim"] == meta2["xlim"] and by_part == whole
 
@@ -125,14 +125,22 @@ def test_parts_are_dropped_oldest_first_when_memory_runs_low(cube, fake):
 
 def test_memory_rule_reserve_and_maximum():
     system = FakeMemory(room=3 * GB)
-    m = Memory(system=system)
-    assert m.reserve() == 2 * GB and m.room() == 3 * GB
-    system.total = 64 * GB                            # 10% of RAM is more than 2 GB
-    assert m.reserve() == int(6.4 * GB) and m.room() == 0
+    m = Memory(always_whole=0, system=system)
+    assert m.reserve() == 0 and m.room() == 3 * GB    # no reserve unless set (plan 10)
+    system.total = 64 * GB                            # the size of the RAM doesn't matter
+    assert m.reserve() == 0 and m.room() == 3 * GB
     m = Memory(reserve=1 * GB, maximum=2 * GB, system=system)
     assert m.room() == 2 * GB
     PartCache(m).bytes = int(1.5 * GB)
     assert m.room() == int(0.5 * GB)
+
+
+def test_small_data_always_fits():
+    """Plan 10: a computer reporting nothing available still reads small data whole."""
+    m = Memory(system=FakeMemory(room=0))
+    assert m.room() == 0
+    assert m.fits(memory.ALWAYS_WHOLE) and not m.fits(memory.ALWAYS_WHOLE + 1)
+    assert not Memory(always_whole=0, system=FakeMemory(room=0)).fits(1)
 
 
 def test_the_file_is_not_held_while_a_session_shows_it(client, cube, fake):
@@ -194,7 +202,7 @@ def big(data_dir):
 
 def little_room(monkeypatch, room=10 << 20):
     """10 MB of room: a map of 1.2 million cells (29 MB drawn) is too big, its strips are not."""
-    cache = PartCache(Memory(system=FakeMemory(room=room)))
+    cache = PartCache(Memory(always_whole=0, system=FakeMemory(room=room)))
     monkeypatch.setitem(memory._shared, "cache", cache)
     return cache
 
@@ -206,7 +214,7 @@ def test_a_map_bigger_than_memory_is_drawn_from_its_summary(client, big, monkeyp
     s = client.app.state.lbd.explore.get(sid)
     assert s.summarised and len(summaries.shared().entries()) == 1
     assert "max of" in meta["note"]                                   # reduced, as any big map
-    monkeypatch.setitem(memory._shared, "cache", PartCache(Memory(system=FakeMemory(room=10 * GB))))
+    monkeypatch.setitem(memory._shared, "cache", PartCache(Memory(always_whole=0, system=FakeMemory(room=10 * GB))))
     sid2, meta2, whole = picture(client, path, MAP)
     assert not client.app.state.lbd.explore.get(sid2).summarised
     assert meta2["xlim"] == meta["xlim"] and meta2["note"] == meta["note"]
@@ -387,7 +395,7 @@ def test_curves_bigger_than_memory_are_drawn_from_their_summary(client, long_tra
     s = client.app.state.lbd.explore.get(sid)
     assert s.summarised and meta["note"] == "min and max per pixel column"
     assert s.full[1][0] < y.min() and s.full[1][1] > y.max()           # the range from the summary
-    monkeypatch.setitem(memory._shared, "cache", PartCache(Memory(system=FakeMemory(room=10 * GB))))
+    monkeypatch.setitem(memory._shared, "cache", PartCache(Memory(always_whole=0, system=FakeMemory(room=10 * GB))))
     sid2, meta2, whole = picture(client, path, CURVES)
     assert not client.app.state.lbd.explore.get(sid2).summarised
     assert meta2["xlim"] == meta["xlim"] and meta2["ylim"] == pytest.approx(meta["ylim"], rel=1e-6)

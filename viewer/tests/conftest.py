@@ -13,10 +13,10 @@ from lbd_viewer.server import AppState, create_app
 @pytest.fixture(autouse=True)
 def plenty_of_memory(monkeypatch):
     """10 GB of room for the viewer, whatever else runs on the computer: with the real memory, a
-    computer short of it (suites side by side) has no room left above the reserve, and the small
-    test files count as too big (read by part, summarised, operations refused). A test about
+    computer short of it (suites side by side) has almost none available, and test files above the
+    always-whole size would count as too big (read by part, summarised). A test about
     little room sets its own (test_large_view.py: `fake`, `little_room`)."""
-    total, available = 4 * memory.GB, 2 * memory.GB + 10 * memory.GB      # reserve: 2 GB
+    total, available = 4 * memory.GB, 10 * memory.GB
     cache = memory.PartCache(memory.Memory(system=lambda: (total, available)))
     monkeypatch.setitem(memory._shared, "cache", cache)
 

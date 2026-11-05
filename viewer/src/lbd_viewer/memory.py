@@ -2,11 +2,14 @@
 (plan 6d).
 
 The rule (decided with the user): no fixed share of RAM. The viewer uses what the operating
-system reports as available now, always leaving a **reserve** for the rest of the computer
-(max(2 GB, 10% of RAM) unless set), and never more than an optional fixed **maximum**.
+system reports as available now, minus an optional **reserve** left for the rest of the computer
+(none unless set, plan 10: the system makes room itself, dropping its file cache and paging out
+idle programs), and never more than an optional fixed **maximum**.
 
 - `Memory.room()`: the bytes the viewer may still take now.
-- A value whose data fits in the room is loaded whole, as before (no lag); a bigger one is read
+- `Memory.fits(n)`: data of at most `ALWAYS_WHOLE` bytes always fits (a busy computer can report
+  almost nothing available, and a small file must still open); larger data when it fits the room.
+- A value whose data fits is loaded whole, as before (no lag); a bigger one is read
   by part (`lbd.open(..., hold=False)`), and the parts read are kept in `PartCache`.
 - `PartCache` keeps parts while there is room and drops the oldest when there isn't (checked
   before each read and by `trim()`, called every few seconds), giving the memory back.
@@ -24,8 +27,7 @@ from typing import Any, Callable, Dict, Optional, Sequence, Tuple
 import numpy as np
 
 GB = 1 << 30
-RESERVE_MIN = 2 * GB          # the reserve is at least this …
-RESERVE_SHARE = 0.10          # … or this share of RAM, whichever is larger
+ALWAYS_WHOLE = 64 << 20       # data this small is always read whole, whatever the free memory
 TRIM_EVERY = 5.0              # seconds between checks that the parts kept still leave the reserve
 
 
@@ -38,19 +40,19 @@ def _system() -> Tuple[int, int]:
 
 
 class Memory:
-    """The viewer's memory rule. `reserve`, `maximum`: bytes, or None for automatic / no maximum."""
+    """The viewer's memory rule. `reserve`, `maximum`: bytes, or None for none / no maximum."""
 
     def __init__(self, reserve: Optional[int] = None, maximum: Optional[int] = None,
-                 system: Callable[[], Tuple[int, int]] = _system):
+                 system: Callable[[], Tuple[int, int]] = _system, always_whole: int = ALWAYS_WHOLE):
+        """`always_whole`: data up to this many bytes always fits (tests about little memory set 0,
+        so their small files count as large)."""
         self.reserve_setting, self.maximum = reserve, maximum
+        self.always_whole = always_whole
         self._system = system
         self.cache: Optional["PartCache"] = None
 
     def reserve(self) -> int:
-        if self.reserve_setting is not None:
-            return int(self.reserve_setting)
-        total, _ = self._system()
-        return max(RESERVE_MIN, int(RESERVE_SHARE * total))
+        return 0 if self.reserve_setting is None else int(self.reserve_setting)
 
     def room(self) -> int:
         """The bytes the viewer may still take now (0 when none)."""
@@ -62,7 +64,11 @@ class Memory:
         return max(0, int(room))
 
     def fits(self, nbytes: int) -> bool:
-        return nbytes <= self.room()
+        return nbytes <= self.always_whole or nbytes <= self.room()
+
+    def available(self) -> int:
+        """The bytes the operating system reports as available now."""
+        return int(self._system()[1])
 
 
 class PartCache:
@@ -231,7 +237,7 @@ def shared() -> PartCache:
 
 
 def configure(reserve: Optional[int], maximum: Optional[int]) -> None:
-    """Apply the settings (bytes, or None: automatic reserve / no maximum)."""
+    """Apply the settings (bytes, or None: no reserve / no maximum)."""
     c = shared()
     c.memory.reserve_setting, c.memory.maximum = reserve, maximum
     c.trim()

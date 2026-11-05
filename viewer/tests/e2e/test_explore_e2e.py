@@ -195,8 +195,8 @@ def test_a_value_bigger_than_memory_steps_through_its_slider(viewer, new_page, m
     shows its own map, and the stored value read back is that position's."""
     from lbd_viewer import memory
 
-    system = lambda: (4 * memory.GB, 2 * memory.GB + 500)          # 500 bytes of room: one map fits
-    monkeypatch.setitem(memory._shared, "cache", memory.PartCache(memory.Memory(system=system)))
+    system = lambda: (4 * memory.GB, 500)                          # 500 bytes of room: one map fits
+    monkeypatch.setitem(memory._shared, "cache", memory.PartCache(memory.Memory(always_whole=0, system=system)))
     d = lbd.Dataset(title="Cube")
     d.add_axis("t", np.arange(6.0))
     d.add_axis("y", [10.0, 20, 30, 40])
@@ -221,8 +221,8 @@ def test_a_map_and_curves_bigger_than_memory_are_shown_from_their_summary(viewer
     summarised once (kept on disk); a click still reads the exact stored number."""
     from lbd_viewer import memory, summaries
 
-    system = lambda: (4 * memory.GB, 2 * memory.GB + 100_000)      # 100 kB of room
-    monkeypatch.setitem(memory._shared, "cache", memory.PartCache(memory.Memory(system=system)))
+    system = lambda: (4 * memory.GB, 100_000)                      # 100 kB of room
+    monkeypatch.setitem(memory._shared, "cache", memory.PartCache(memory.Memory(always_whole=0, system=system)))
     d = lbd.Dataset(title="Big map")
     d.add_axis("y", np.linspace(10, 40, 300))
     d.add_axis("x", np.linspace(1, 16, 400))

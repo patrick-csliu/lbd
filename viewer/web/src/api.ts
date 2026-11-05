@@ -683,6 +683,7 @@ export interface OpsInfo {
   one_to_one?: boolean; // each shown point is still a stored point
   equations?: Record<string, { error?: string; note?: string }>; // per field (x, y, z)
   names?: { name: string; means: string }[]; // what each name in an equation stands for
+  names_note?: string; // why there is no legend (a summarised plot)
 }
 
 export interface ExploreFrame {

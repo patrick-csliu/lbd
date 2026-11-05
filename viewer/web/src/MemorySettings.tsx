@@ -83,8 +83,8 @@ export function MemorySettings({ settings, onSettings }: { settings: Settings; o
       </dl>
       <p className="settings-intro">A value that fits in the memory available is read whole; a bigger one is read by part, only what is shown.</p>
       <SettingsGroup title="Limits">
-        <Setting id="memory.reserve_gb" name="Leave free" help="For the rest of the computer; empty: automatic.">
-          {number("reserve_gb", reserve, setReserve, "Memory to leave free, in GB", `automatic: ${settings.reserve_now_gb ?? "2"}`, null)}
+        <Setting id="memory.reserve_gb" name="Leave free" help="For the rest of the computer. Empty: 0, the viewer uses what the computer reports as available (the system makes room by moving idle programs to disk). Data under 64 MB is always read whole.">
+          {number("reserve_gb", reserve, setReserve, "Memory to leave free, in GB", "0", null)}
         </Setting>
         <Setting id="memory.maximum_gb" name="Use at most" help="Empty: no limit.">
           {number("maximum_gb", maximum, setMaximum, "Most memory to use, in GB", "no limit", null)}

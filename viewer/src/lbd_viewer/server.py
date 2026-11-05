@@ -757,7 +757,7 @@ class _UiFiles(StaticFiles):
 
 
 def apply_memory(settings: Dict[str, Any]) -> None:
-    """The memory settings (GB, None: automatic / no maximum) in effect for every Explore tab."""
+    """The memory settings (GB, None: no reserve / no maximum) in effect for every Explore tab."""
     gb = lambda x: None if x is None else int(float(x) * memory.GB)   # noqa: E731
     memory.configure(gb(settings.get("reserve_gb")), gb(settings.get("maximum_gb")))
 
@@ -1299,7 +1299,7 @@ def create_app(state: AppState) -> FastAPI:
             s = ExploreSession(p, file_version(p), body.spec or {}, style, body.width, body.height, body.dpr)
         state.explore.add(s)
         return {"session": s.id, "spec": s.spec, "kind": s.kind, "preset": preset,
-                "full": [list(s.full[0]), list(s.full[1])], "warnings": notes + warns}
+                "full": [list(s.full[0]), list(s.full[1])], "warnings": notes + warns + s.take_notes()}
 
     @app.post("/api/explore/{session_id}/render")
     def explore_render(session_id: str, body: ExploreRenderBody):
@@ -1356,7 +1356,7 @@ def create_app(state: AppState) -> FastAPI:
         with collect_warnings() as warns:
             s.set_spec(body.spec)
         return {"session": s.id, "spec": s.spec, "kind": s.kind,
-                "full": [list(s.full[0]), list(s.full[1])], "warnings": warns}
+                "full": [list(s.full[0]), list(s.full[1])], "warnings": warns + s.take_notes()}
 
     @app.post("/api/explore/{session_id}/pick")
     def explore_pick(session_id: str, body: ExplorePickBody):

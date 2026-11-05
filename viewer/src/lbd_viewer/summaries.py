@@ -53,6 +53,11 @@ def _explore_error(message: str) -> Exception:
     return ExploreError(message)
 
 
+class NothingToShrink(Exception):
+    """The data has no more cells or points than a summary would hold: it is drawn whole instead
+    (the caller reads it whole; never shown to the user)."""
+
+
 class Cancelled(Exception):
     """Making a summary was cancelled (`Job.cancel`)."""
 
@@ -187,7 +192,7 @@ class BigMap:
         except ReduceError as e:
             raise _explore_error(str(e)) from None
         if top == 0:
-            raise _explore_error("this map is small enough to show without a summary")
+            raise NothingToShrink()
         g = f[f"L{top}"]
         vmax, vmin = g["max"][...], g["min"][...]
         if np.isfinite(vmax).any():
@@ -324,7 +329,7 @@ class BigCurves:
         except ReduceError as e:
             raise _explore_error(str(e)) from None
         if top == 0:
-            raise _explore_error("these curves are small enough to show without a summary")
+            raise NothingToShrink()
         g = f[f"C{top - 1}"]
         with warnings.catch_warnings():                  # a trace without numbers: NaN, as meant
             warnings.simplefilter("ignore", RuntimeWarning)
