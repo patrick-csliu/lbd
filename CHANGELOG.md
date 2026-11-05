@@ -92,6 +92,8 @@ are still written as 1.2).
   a panel's title has a row per cursor (nothing cut off in a usual panel; the whole text when you
   point at it), "Click the plot …" shows only in the active panel, the inspector's numbers wrap
   to its width, and a mean that is zero up to rounding reads 0 (not 2.8e−17).
+- **Explore: Max, Min and Peak on one line.** "Move cursor 1 to: Max Min Peak" fits the
+  inspector's default width; a narrower inspector puts the three buttons together on the next line.
 - **Explore: plainer pixel note**: "average of 5×8 cells per pixel" (was "mean of …"), "lowest
   and highest point per pixel column"; its tooltip says what it means and where to change it.
 - **Explore is a workbench that fills the window.** The controls, the plots and a new

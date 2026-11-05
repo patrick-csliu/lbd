@@ -173,8 +173,7 @@ dB for a complex value shown in dB.
 title show them too; point at one for the whole text). Positions can be typed (with a prefix if
 you like: `5.12 GHz`); the cursor then moves to the nearest stored point. The **×** beside cursor
 2 removes it alone; **Remove cursors** (beside the cursor types) removes both, with Undo.
-**Move cursor 1 to the Max**, **Min** or
-**Peak**: the highest, the lowest, or the point farthest from the median (a dip
+**Move cursor 1 to:** **Max**, **Min** or **Peak**: the highest, the lowest, or the point farthest from the median (a dip
 or a spike, whichever stands out more): between the two cursors when there are two, otherwise in
 what is in view; on curves, on cursor 1's trace if it is on one. They search the stored data,
 not the picture.

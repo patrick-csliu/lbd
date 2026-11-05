@@ -197,3 +197,32 @@ def test_two_cursors_are_read_without_cutting(values_files, new_page, size):
     assert cut["inspector"] <= 1, cut                                    # nothing in the inspector sticks out
     if size[0] >= 1366:                                                  # a usual panel: each cursor's line whole
         assert cut["rows"] == 0, cut
+
+
+def test_max_min_and_peak_are_on_one_line(values_files, new_page):
+    """Plan 11: at the inspector's default width the text and the three search buttons are one
+    line, with one cursor and with two; at the narrowest inspector the three buttons stay together."""
+    page = new_page("Explore")
+    page.set_viewport_size({"width": 1920, "height": 1080})
+    frames(page, lambda: row(page, "7 spectroscopy 3d.lbd").dblclick())
+    explore(page).get_by_role("tab", name="Cursors").click()
+    overlay = explore(page).locator(".panel .explore-overlay").first
+    b = overlay.bounding_box()
+    find = explore(page).locator(".cursor-find")
+
+    def tops():
+        return find.evaluate(
+            """(f) => [f.firstElementChild, ...f.querySelectorAll('button')].map((e) => Math.round(e.getBoundingClientRect().top + e.getBoundingClientRect().height / 2))""")
+
+    overlay.click(position={"x": b["width"] * 0.3, "y": b["height"] * 0.3})
+    page.wait_for_timeout(400)
+    assert max(tops()) - min(tops()) <= 2, tops()
+    page.keyboard.down("Shift")
+    overlay.click(position={"x": b["width"] * 0.6, "y": b["height"] * 0.7})
+    page.keyboard.up("Shift")
+    page.wait_for_timeout(400)
+    assert max(tops()) - min(tops()) <= 2, tops()
+    drag(page, explore(page).get_by_label("Width of the inspector"), 400, 0)    # the narrowest it may be
+    page.wait_for_timeout(300)
+    assert len(set(tops()[1:])) == 1, tops()                             # the buttons on one line
+    assert find.evaluate("(f) => f.scrollWidth - f.clientWidth") <= 1

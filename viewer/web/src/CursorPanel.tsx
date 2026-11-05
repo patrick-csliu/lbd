@@ -257,16 +257,18 @@ export default function CursorPanel({ kind, cursors, onCursors, reading, actions
         </div>
       )}
       <div className="cursor-find" role="group" aria-label="Move cursor 1 to the highest, lowest or farthest value">
-        <span className="small">Move cursor 1 to the</span>
-        <button onClick={act((a) => a.find("max"))} title="The highest stored value. Key M">
-          Max
-        </button>
-        <button onClick={act((a) => a.find("min"))} title="The lowest stored value. Key N">
-          Min
-        </button>
-        <button onClick={act((a) => a.find("peak"))} title="Farthest from the median, up or down (a dip or a spike). Key P">
-          Peak
-        </button>
+        <span className="small">Move cursor 1 to:</span>
+        <span className="cursor-find-buttons">
+          <button onClick={act((a) => a.find("max"))} title="The highest stored value. Key M">
+            Max
+          </button>
+          <button onClick={act((a) => a.find("min"))} title="The lowest stored value. Key N">
+            Min
+          </button>
+          <button onClick={act((a) => a.find("peak"))} title="Farthest from the median, up or down (a dip or a spike). Key P">
+            Peak
+          </button>
+        </span>
         <div className="muted small cursor-find-where">
           {c1 && c2 ? "Between the cursors" : "In what is in view"}
           {kind === "curve" && c1 ? `, on ${c1.label ?? "the cursor's trace"}` : ""}. Peak: farthest from the median, a dip or a spike.
