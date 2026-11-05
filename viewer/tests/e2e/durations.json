@@ -1,0 +1,22 @@
+{
+ "test_elements_e2e.py": 15.9,
+ "test_explore_e2e.py": 47.9,
+ "test_export_e2e.py": 20.7,
+ "test_files_sidebar_e2e.py": 24.4,
+ "test_groups_e2e.py": 7.3,
+ "test_library_e2e.py": 44.9,
+ "test_library_labels_e2e.py": 58.7,
+ "test_library_previews_e2e.py": 29.9,
+ "test_live_e2e.py": 18.2,
+ "test_live_update_e2e.py": 33.2,
+ "test_operations_e2e.py": 28.3,
+ "test_pages_e2e.py": 24.6,
+ "test_pages_robust_e2e.py": 69.8,
+ "test_panels_e2e.py": 68.4,
+ "test_plot_controls_e2e.py": 18.8,
+ "test_reading_e2e.py": 32.1,
+ "test_settings_e2e.py": 4.2,
+ "test_tab_bar_e2e.py": 16.4,
+ "test_theme_e2e.py": 3.6,
+ "test_writing_e2e.py": 6.1
+}

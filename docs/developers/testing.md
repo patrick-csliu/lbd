@@ -6,6 +6,8 @@ uv run python scripts/test_all.py --fast           # without the cross-language 
 uv run python scripts/test_all.py --changed        # only what the changes since the last commit can affect
 uv run python scripts/test_all.py --changed main   # ... since main
 uv run python scripts/test_all.py --only matlab crosslang   # these suites
+uv run python scripts/test_all.py --only e2e --shard 2/3    # one third of the browser tests (as a CI job does)
+uv run python scripts/test_all.py --workers 1      # the viewer's tests one by one (no parallel processes)
 ```
 
 `test_all.py` has these suites (their names for `--only` in brackets):
@@ -28,6 +30,33 @@ tests depend on timing: a test of theirs that fails while the other suites load 
 runs again alone at the end, and the summary names it ("failed side by side, passed alone"); a
 test that fails alone too fails the run.
 
+**Inside a suite, tests run in parallel too** ([pytest-xdist](https://pytest-xdist.readthedocs.io/)):
+- The browser tests run in several processes, each taking whole test files (`--dist loadfile`):
+  by default one per core but one, and no more than the memory holds (about 2 GB each, for a
+  Chromium, a viewer and its preview workers).
+- The viewer's other tests use 2 processes.
+- `--workers N` sets the number for the browser tests; `--workers 1` runs everything one by one,
+  as before.
+- Each test has its own viewer server (on a port already bound for it), settings folder, data
+  folder and browser window, so tests don't see each other.
+- A test that needs the computer to itself gets `@pytest.mark.serial`: it runs after the
+  parallel part, one by one.
+
+The same with plain pytest:
+
+```bash
+uv run pytest -n 3 --dist loadfile -m "not serial" viewer/tests/e2e
+uv run pytest -m serial viewer/tests/e2e
+```
+
+**Shards** split the browser tests between machines:
+- `--shard I/N` (or `LBD_SHARD=I/N` for plain pytest) runs part I of N.
+- Whole files are dealt out by their time in `viewer/tests/e2e/durations.json`, the longest
+  first, so the parts take about as long each (`viewer/tests/e2e/shards.py`).
+- A new test file counts as the median until the times are recorded again with `uv run python
+  scripts/test_all.py --only e2e --record-durations` (after adding or slowing down tests;
+  commit `durations.json`).
+
 `--changed` picks the suites from the files changed (committed since the given commit, or not
 committed yet): a language's folder runs its tests, the cross-language matrix and the doc
 examples; the Python module also runs everything built on it (viewer, browser tests, tools);
@@ -40,7 +69,15 @@ A suite whose program (e.g. `matlab`, or Playwright's Chromium) is missing is re
 skipped, not failed.
 
 **On GitHub** (`.github/workflows/tests.yml`), every push to `main` and every pull request runs
-`test_all.py` on Linux, Windows and macOS, the browser tests included. A failed suite shows on
+`test_all.py` on Linux, Windows and macOS, the browser tests included. It is split into jobs
+that run side by side, so the result comes in about the time of the slowest one:
+- **Web UI:** built and type-checked once; the other jobs download it.
+- **Suites** (per system): `--fast`.
+- **Browser tests:** in shards (3 on Linux and Windows, 2 on macOS), each in parallel inside.
+- **Cross-language** (per system).
+- **MATLAB.**
+
+Chromium and, on Linux, Arial are cached between runs. A failed suite shows on
 the run's page with pytest's list of failed tests, readable without signing in. MATLAB runs as a separate job with MathWorks' GitHub actions,
 because MATLAB isn't on `PATH` there; the cross-language matrix and the documentation's MATLAB
 examples run without MATLAB on GitHub, so run them locally before a release. The Linux machine

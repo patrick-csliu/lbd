@@ -44,10 +44,29 @@ def browser():
         b.close()
 
 
-def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+def _listening_socket() -> socket.socket:
+    """A socket already bound to a free port: tests running side by side (pytest -n) can't pick the
+    same port between choosing it and the server taking it."""
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    return s
+
+
+def pytest_collection_modifyitems(config, items):
+    """LBD_SHARD=i/N: only this shard's test files (shards.py), for CI jobs side by side."""
+    import os
+
+    import shards
+
+    shard = shards.parse(os.environ.get("LBD_SHARD"))
+    if not shard:
+        return
+    i, n = shard
+    files = sorted({Path(item.fspath).name for item in items})
+    mine = set(shards.assign(files, n)[i - 1])
+    keep = [item for item in items if Path(item.fspath).name in mine]
+    config.hook.pytest_deselected(items=[item for item in items if item not in keep])
+    items[:] = keep
 
 
 class Viewer:
@@ -57,7 +76,8 @@ class Viewer:
         self.data = data_dir
         for name in ("a", "b", "c"):
             shutil.copy(data_dir / "curve.lbd", data_dir / f"{name}.lbd")
-        self.port = _free_port()
+        self.socket = _listening_socket()
+        self.port = self.socket.getsockname()[1]
         pages = Pages(ack_timeout=1, transfer_timeout=2, new_tab_timeout=3, offline_grace=2)
         self.state = AppState(cfg, token=TOKEN, port=self.port, pages=pages)
         cfg.add_root(str(data_dir))
@@ -71,7 +91,7 @@ class Viewer:
         config = uvicorn.Config(create_app(self.state), host="127.0.0.1", port=self.port,
                                 log_level="warning", timeout_graceful_shutdown=1)
         self.server = uvicorn.Server(config)
-        self.thread = threading.Thread(target=self.server.run, daemon=True)
+        self.thread = threading.Thread(target=self.server.run, kwargs={"sockets": [self.socket]}, daemon=True)
         self.thread.start()
         deadline = time.monotonic() + 10
         while not self.server.started:
@@ -89,6 +109,7 @@ class Viewer:
     def stop(self):
         self.server.should_exit = True
         self.thread.join(timeout=5)
+        self.socket.close()
         self.state.close()                          # the Library's indexing thread, the databases
 
 

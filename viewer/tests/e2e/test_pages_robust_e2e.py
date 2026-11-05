@@ -15,6 +15,10 @@ import pytest
 from pageui import deliver, menu, open_file, plot_type, row, tab, tab_names, toast, use
 from playwright.sync_api import Page, expect
 
+# Pages that wait for each other within a second or two: run alone, not beside other tests (they
+# fail on a busy computer, not in the viewer).
+pytestmark = pytest.mark.serial
+
 LOCKED = re.compile(r"\blocked\b")
 
 

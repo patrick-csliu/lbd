@@ -1,6 +1,7 @@
 """Run the test suites and print a summary table.
 
     uv run python scripts/test_all.py [--fast] [--changed [REF] | --only SUITE ...] [--jobs N]
+                                      [--workers N] [--shard I/N] [--record-durations]
 
 The suites (names for --only in brackets):
   1. each language's unit tests ([test] in languages/<id>/language.toml) [python, matlab, julia …],
@@ -16,7 +17,15 @@ The suites (names for --only in brackets):
 The suites run side by side (--jobs, default 4; --jobs 1: one after the other), so the whole run
 takes about as long as its longest suite. The viewer's tests depend on timing; a test of theirs
 that fails while other suites load the computer runs again alone at the end, and the summary
-names it ("passed alone"). --changed runs only the suites that the files changed
+names it ("passed alone").
+
+Inside the viewer's suites the tests run in parallel too (pytest-xdist, whole test files per
+process): --workers N for the browser tests (default: as many as the computer has cores and
+memory for, one Chromium each; the viewer's other tests get 2). --workers 1 runs them one by one.
+Tests marked `serial` (they need the computer to themselves) run after the others, one by one.
+--shard I/N runs one part of the browser tests (shards.py: whole files, balanced by the times in
+viewer/tests/e2e/durations.json), as each CI job does; --record-durations rewrites that file from
+this run's times. --changed runs only the suites that the files changed
 since REF (default: the last commit, plus files not committed yet) can affect; --only names them.
 A suite whose required program (e.g. matlab, or Playwright's Chromium) is missing is reported as skipped.
 """
@@ -42,11 +51,66 @@ def _escape(text: str, title: bool = False) -> str:
     return text.replace(":", "%3A").replace(",", "%2C") if title else text
 
 
-def run(cmd, cwd: Path):
+def run(cmd, cwd: Path, env=None):
     exe = shutil.which(cmd[0])
     if exe:
         cmd = [exe, *cmd[1:]]
-    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
+
+
+E2E_JUNIT = Path(tempfile.gettempdir()) / "lbd-e2e-times.xml"
+
+
+def workers_for(asked: str):
+    """(processes for the browser tests, for the viewer's other tests). auto: one per core but one,
+    and no more than the memory holds (about 2 GB each: Chromium, a viewer, its preview workers)."""
+    try:
+        import xdist  # noqa: F401
+    except ImportError:
+        return 1, 1
+    cores = os.cpu_count() or 1
+    if asked != "auto":
+        n = max(1, int(asked))
+        return n, min(n, 2)
+    try:
+        import psutil
+
+        ram_gb = psutil.virtual_memory().total / 2**30
+    except Exception:
+        ram_gb = 8.0
+    n = max(1, min(cores - 1 if cores > 2 else cores, int(ram_gb // 2)))
+    return n, (2 if cores >= 4 else 1)
+
+
+def parallel_pytest(where: List[str], workers: int, env=None, junit: Optional[Path] = None):
+    """pytest in `workers` processes (whole files each), then the tests marked serial one by one."""
+    base = [sys.executable, "-m", "pytest", "-q", *where] + ([f"--junitxml={junit}"] if junit else [])
+    if workers <= 1:
+        r = run(base, REPO, env)
+        return ("passed" if r.returncode in (0, 5) else "FAILED", r.stdout + r.stderr)
+    a = run([*base, "-n", str(workers), "--dist", "loadfile", "-m", "not serial"], REPO, env)
+    b = run([*[x for x in base if not x.startswith("--junitxml")], "-m", "serial"], REPO, env)
+    ok = a.returncode in (0, 5) and b.returncode in (0, 5)      # 5: nothing collected (no serial tests)
+    out = a.stdout + a.stderr + ("" if b.returncode == 5 else "\n" + b.stdout + b.stderr)
+    return ("passed" if ok else "FAILED", out)
+
+
+def record_durations(junit: Path) -> Path:
+    """Each browser-test file's total time, from a JUnit report, into durations.json."""
+    import json
+    import xml.etree.ElementTree as ET
+
+    sys.path.insert(0, str(REPO / "viewer" / "tests" / "e2e"))
+    import shards
+
+    times: Dict[str, float] = {}
+    for case in ET.parse(junit).iter("testcase"):
+        name = case.get("classname", "").split(".")[-1] + ".py"
+        times[name] = times.get(name, 0.0) + float(case.get("time") or 0)
+    old = shards.durations()
+    old.update({k: round(v, 1) for k, v in times.items()})
+    shards.DURATIONS.write_text(json.dumps(dict(sorted(old.items())), indent=1) + "\n", encoding="utf-8")
+    return shards.DURATIONS
 
 
 def _e2e_missing() -> str:
@@ -126,9 +190,23 @@ def main(argv=None) -> int:
                     help="only the suites the files changed since REF (default HEAD) can affect")
     ap.add_argument("--only", nargs="+", metavar="SUITE", help="only these suites (names: see the top of this file)")
     ap.add_argument("--jobs", type=int, default=4, help="suites run side by side (default 4; 1: one after the other)")
+    ap.add_argument("--workers", default="auto",
+                    help="processes for the browser tests (default auto: cores and memory allow; 1: one by one)")
+    ap.add_argument("--shard", metavar="I/N", help="only part I of N of the browser tests (CI runs the parts side by side)")
+    ap.add_argument("--record-durations", action="store_true",
+                    help="write each browser-test file's time to viewer/tests/e2e/durations.json (for --shard)")
     args = ap.parse_args(argv)
+    sys.path.insert(0, str(REPO / "viewer" / "tests" / "e2e"))
+    import shards
+
+    try:
+        shard = shards.parse(args.shard)
+    except ValueError as e:
+        ap.error(str(e))
+    e2e_workers, viewer_workers = workers_for(args.workers)
 
     suites = []   # (name, title, fn), in the order the summary shows them
+    e2e_env = {**os.environ, "LBD_SHARD": f"{shard[0]}/{shard[1]}"} if shard else None
 
     for lang in discover():
         test = lang.section("test")
@@ -144,10 +222,9 @@ def main(argv=None) -> int:
 
         suites.append((lang.id, f"{lang.name} tests", lang_test))
 
-    def pytest_suite(*where):
+    def pytest_suite(*where, workers=1, env=None, junit=None):
         def go():
-            r = run([sys.executable, "-m", "pytest", "-q", *where], REPO)
-            return ("passed" if r.returncode == 0 else "FAILED", r.stdout + r.stderr)
+            return parallel_pytest(list(where), workers, env, junit)
         return go
 
     def web_typecheck():
@@ -180,11 +257,11 @@ def main(argv=None) -> int:
         if missing:
             return ("skipped", missing)
         # short tracebacks: a failure's reason fits in the lines shown below the summary
-        r = run([sys.executable, "-m", "pytest", "-q", "--tb=short", "viewer/tests/e2e"], REPO)
-        return ("passed" if r.returncode == 0 else "FAILED", r.stdout + r.stderr)
+        return parallel_pytest(["--tb=short", "viewer/tests/e2e"], e2e_workers, e2e_env,
+                               E2E_JUNIT if args.record_durations else None)
 
     suites += [
-        ("viewer", "Viewer tests", pytest_suite("viewer/tests", "--ignore=viewer/tests/e2e")),
+        ("viewer", "Viewer tests", pytest_suite("viewer/tests", "--ignore=viewer/tests/e2e", workers=viewer_workers)),
         ("tools", "Script and packaging tests", pytest_suite("tests/scripts", "tests/packaging")),
         ("web", "Web UI type check", web_typecheck),
         ("docs", "Docs build (strict)", docs_build),
@@ -239,7 +316,7 @@ def main(argv=None) -> int:
     rerun = {"Viewer tests": ["viewer/tests", "--ignore=viewer/tests/e2e"],
              "Viewer in a browser (e2e)": ["--tb=short", "viewer/tests/e2e"]}
     notes: Dict[str, str] = {}
-    if args.jobs > 1:
+    if args.jobs > 1 or e2e_workers > 1 or viewer_workers > 1:
         for title, where in rerun.items():
             if title not in results or results[title][0] != "FAILED":
                 continue
@@ -248,13 +325,16 @@ def main(argv=None) -> int:
                 continue
             print(f"... {title}: {len(failed_tests)} failed side by side; running them again alone", flush=True)
             t0 = time.time()
-            r = run([sys.executable, "-m", "pytest", "-q", "--lf", *where], REPO)
+            r = run([sys.executable, "-m", "pytest", "-q", "--lf", *where], REPO, e2e_env)
             secs = results[title][1] + time.time() - t0
             if r.returncode == 0:
                 results[title] = ("passed", secs, results[title][2])
                 notes[title] = f"{', '.join(t.split('::')[-1] for t in failed_tests)} failed side by side, passed alone"
             else:
                 results[title] = ("FAILED", secs, r.stdout + r.stderr)
+
+    if args.record_durations and E2E_JUNIT.is_file():
+        print(f"    wrote {record_durations(E2E_JUNIT)}", flush=True)
 
     def benchmark():
         import benchmark_explore

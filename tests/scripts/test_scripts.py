@@ -302,7 +302,7 @@ def test_test_all_summary(load_module, monkeypatch, capsys):
         def __init__(self, code):
             self.returncode, self.stdout, self.stderr = code, "out", ""
 
-    monkeypatch.setattr(ta, "run", lambda cmd, cwd: R(0))
+    monkeypatch.setattr(ta, "run", lambda cmd, cwd, env=None: R(0))
     monkeypatch.setattr(ta.shutil, "which", lambda name: None)
     langs = ta.discover()
     for lang in langs:
@@ -311,7 +311,7 @@ def test_test_all_summary(load_module, monkeypatch, capsys):
     assert ta.main(["--fast"]) == 0
     out = capsys.readouterr().out
     assert "skipped" in out and "PASSED, but" in out      # web type check skipped without npm
-    monkeypatch.setattr(ta, "run", lambda cmd, cwd: R(1))
+    monkeypatch.setattr(ta, "run", lambda cmd, cwd, env=None: R(1))
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     assert ta.main(["--fast"]) == 1
     out = capsys.readouterr().out
@@ -324,14 +324,14 @@ def test_test_all_annotates_failures_on_github(load_module, monkeypatch, capsys)
     class R:
         returncode, stdout, stderr = 1, "line 1\n50% done, a: b\n", ""
 
-    monkeypatch.setattr(ta, "run", lambda cmd, cwd: R())
+    monkeypatch.setattr(ta, "run", lambda cmd, cwd, env=None: R())
     monkeypatch.setattr(ta.shutil, "which", lambda name: None)
     langs = ta.discover()
     for lang in langs:
         monkeypatch.setattr(type(lang), "run", lambda self, cmd, **kw: R())
     monkeypatch.setattr(type(langs[0]), "missing_tool", lambda self, section: None)
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
-    assert ta.main(["--fast"]) == 1
+    assert ta.main(["--fast", "--workers", "1"]) == 1
     errors = [l for l in capsys.readouterr().out.splitlines() if l.startswith("::error")]
     assert errors and all("%0A" in e for e in errors)                  # one line per annotation
     assert "::error title=Viewer tests failed::line 1%0A50%25 done, a: b" in errors
@@ -345,7 +345,7 @@ def test_test_all_runs_the_benchmark_only_when_needed(load_module, monkeypatch, 
     class R:
         returncode, stdout, stderr = 0, "", ""
 
-    def run(cmd, cwd):
+    def run(cmd, cwd, env=None):
         ran.append(" ".join(map(str, cmd)))
         return R()
 
@@ -473,7 +473,7 @@ def test_test_all_only_and_side_by_side(load_module, monkeypatch, capsys):
     class R:
         returncode, stdout, stderr = 0, "", ""
 
-    def run(cmd, cwd):
+    def run(cmd, cwd, env=None):
         ran.append(" ".join(map(str, cmd)))
         return R()
 
@@ -481,14 +481,14 @@ def test_test_all_only_and_side_by_side(load_module, monkeypatch, capsys):
     monkeypatch.setattr(ta.shutil, "which", lambda name: None)
     monkeypatch.setattr(ta, "discover", lambda: [])
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
-    assert ta.main(["--only", "docs", "tools", "--jobs", "4"]) == 0
+    assert ta.main(["--only", "docs", "tools", "--jobs", "4", "--workers", "1"]) == 0
     out = capsys.readouterr().out
     assert "Docs build (strict)" in out and "Script and packaging tests" in out and "Viewer tests" not in out
     assert "PASSED (2 of" in out and len(ran) == 2
     with pytest.raises(SystemExit):
         ta.main(["--only", "nonsense"])
     ran.clear()
-    assert ta.main(["--fast", "--jobs", "1"]) == 0 and len(ran) == 4       # one after the other: the same suites
+    assert ta.main(["--fast", "--jobs", "1", "--workers", "1"]) == 0 and len(ran) == 4   # one after the other: the same suites
 
 
 def test_test_all_reruns_viewer_tests_that_failed_side_by_side(load_module, monkeypatch, capsys):
@@ -499,7 +499,7 @@ def test_test_all_reruns_viewer_tests_that_failed_side_by_side(load_module, monk
         def __init__(self, code, out=""):
             self.returncode, self.stdout, self.stderr = code, out, ""
 
-    def run(cmd, cwd):
+    def run(cmd, cwd, env=None):
         calls.append(cmd)
         if "--lf" in cmd:
             return R(0)                                    # alone: passes

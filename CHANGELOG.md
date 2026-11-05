@@ -353,6 +353,17 @@ are still written as 1.2).
 
 **For developers**
 
+- **Faster tests.**
+  - The viewer's tests and its browser tests run in parallel processes (pytest-xdist, whole files
+    each); `test_all.py --workers N` (`1`: one by one). Tests that need the computer to themselves
+    are marked `serial`.
+  - Browser tests split into shards balanced by `viewer/tests/e2e/durations.json`: `--shard I/N`,
+    `--record-durations`.
+  - On GitHub, the tests run as side-by-side jobs: the web UI is built once, the suites run per
+    system, the browser tests in shards (3 on Linux and Windows, 2 on macOS), cross-language per
+    system. Chromium and Arial are cached.
+  - Each e2e viewer server gets a port already bound for it.
+
 - Mock data with long lists: `--many-labels` (`make_mock_data.py`, `dev_viewer.py`,
   `mock_library.py`; 300 users, 800 tags, names over 80 characters) and the
   `many_labels_files` fixture. New endpoints: `GET /api/roots/summary`, `POST
