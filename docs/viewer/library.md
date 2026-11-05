@@ -32,6 +32,13 @@ name); the widths are remembered in this browser. The filters belong to the brow
 stay while you go to Explore or Figure and back, and the
 [Files sidebar](folders-and-files.md#the-files-sidebar) there lists the same files.
 
+**Finding a file by its id:** every `.lbd` file has an id, and a CSV saved from it names that id
+in its comments (`# id: 0192d4e2-…`). Paste the id, its first 8 characters or more, or the whole
+comment line into the search box: the Library lists the file with that id, its copies in other
+open folders, and the files made from it (marked *made from this file*). A file's details show
+its id with a copy button. Only open folders are searched: if nothing is found, add the folder
+that holds the file.
+
 ## The selected file
 
 The right side shows as much as it can without scrolling, and works out its layout from its own

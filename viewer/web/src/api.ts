@@ -412,6 +412,8 @@ export interface FileInfo {
   description: string;
   created: string | null;
   writer: string | null;
+  id?: string | null; // the measurement's identity (format 1.1)
+  parent_id?: string | null;
   lbd_version: string;
   size: number | null;
   axes: AxisInfo[];

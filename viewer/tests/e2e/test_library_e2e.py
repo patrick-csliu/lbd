@@ -288,3 +288,19 @@ def test_columns_are_moved_and_resized_by_dragging_their_titles(viewer, library_
     page.get_by_role("menuitem", name="Reset columns (order and widths)").click()
     expect(titles).to_have_text([re.compile("^Name"), re.compile("^Date"), re.compile("^Sweep size")])
     assert library_settings(viewer)["column_widths"] == {}
+
+
+def test_a_file_is_found_by_the_id_in_a_csv(viewer, new_page):
+    """Plan 12: a line copied from a CSV's comments, pasted into the Library's search."""
+    d = lbd.Dataset(title="Only one")
+    d.add_axis("x", [1.0, 2.0])
+    d.add_value("v", [1.0, 2.0], axes="x")
+    d.save(viewer.data / "only one.lbd")
+    page = new_page("Library")
+    box = page.get_by_role("searchbox").first
+    expect(page.locator(".library-row").filter(has_text="Only one")).to_have_count(1)
+    box.fill(f"# id: {lbd.info(viewer.data / 'only one.lbd').id}")
+    expect(page.locator(".library-row")).to_have_count(1)
+    expect(page.locator(".library-row")).to_contain_text("Only one")
+    box.fill("00000000-0000-7000-8000-000000000000")
+    expect(page.locator(".library-empty")).to_contain_text("No file with this id in the open folders")

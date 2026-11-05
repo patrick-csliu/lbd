@@ -247,3 +247,35 @@ def test_contents_are_read_only_for_same_id_pairs_of_one_size(tmp_path, monkeypa
     monkeypatch.setattr(LibraryIndex, "_hash", lambda self, m: calls.append(m) or real(self, m))
     ix.scan()
     assert calls == []                                              # same time and size: no reading
+
+
+def test_a_file_is_found_by_its_id(tmp_path):
+    """Plan 12: the whole id, its start, a line pasted from a CSV; the files made from it too."""
+    folder = tmp_path / "data"
+    folder.mkdir()
+    d = lbd.Dataset(title="Original")
+    d.add_axis("x", [1.0, 2.0])
+    d.add_value("v", [1.0, 2.0], axes="x")
+    d.save(folder / "original.lbd")
+    first = lbd.load(folder / "original.lbd")
+    ident = first.id
+    first.save(folder / "made from it.lbd")
+    other = lbd.Dataset(title="Other")
+    other.add_axis("x", [1.0])
+    other.add_value("v", [1.0], axes="x")
+    other.save(folder / "other.lbd")
+    shutil.copy(folder / "original.lbd", folder / "a copy.lbd")         # the same id
+    ix = index_of(tmp_path, [folder])
+    ix.scan()
+
+    def names(q):
+        return sorted(r["name"] for r in ix.list(q=q, limit=100)["rows"])
+
+    both = ["a copy.lbd", "made from it.lbd", "original.lbd"]
+    assert names(ident) == both
+    assert names(ident.upper()) == both
+    assert names(ident[:13]) == both                                    # its start
+    assert names(f"# id: {ident}") == both                              # a line of a CSV
+    assert names(f"# made from: {ident}") == both
+    assert names("00000000-0000-7000-8000-000000000000") == []
+    assert "other.lbd" not in names("original") and "original.lbd" in names("original")   # a plain word as ever

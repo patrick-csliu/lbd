@@ -28,6 +28,7 @@ import json
 import logging
 import math
 import os
+import re
 import sqlite3
 import threading
 import time
@@ -150,6 +151,11 @@ def outermost(roots: Iterable[str]) -> List[str]:
                    os.path.normcase(r) == os.path.normcase(o) for o in out):
             out.append(r)
     return out
+
+
+# A file's id in a search (format 1.1): a whole UUID, or its first 8 characters or more.
+_WHOLE_ID = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b")
+_ID_START = re.compile(r"[0-9a-f]{8}[0-9a-f-]*")
 
 
 def _like(word: str) -> str:
@@ -482,7 +488,18 @@ class LibraryIndex:
         if date:
             clauses.append("day LIKE ?")
             args.append(date + "%")
+        whole_id = _WHOLE_ID.search(q.lower())
+        if whole_id:
+            # an id, also inside a line pasted from a CSV ("# id: 0192…"): the file, its copies
+            # and the files made from it
+            clauses.append("(id = ? OR parent_id = ?)")
+            args += [whole_id.group(0)] * 2
+            q = ""
         for word in q.lower().split():
+            if _ID_START.fullmatch(word):                # the start of an id, or a plain word
+                clauses.append("((searchable || ' ' || label_text) LIKE ? ESCAPE '\\' OR id LIKE ? OR parent_id LIKE ?)")
+                args += [_like(word), word + "%", word + "%"]
+                continue
             clauses.append("(searchable || ' ' || label_text) LIKE ? ESCAPE '\\'")
             args.append(_like(word))
         return (" WHERE " + " AND ".join(clauses)) if clauses else "", args

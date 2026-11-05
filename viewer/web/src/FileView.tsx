@@ -4,6 +4,8 @@ import { deepMerge, isEmptyObject } from "./util";
 import { copyPng } from "./clipboard";
 import { ConfirmDialog, ConfirmRequest } from "./menu";
 import { useToast } from "./toast";
+import { copyPath } from "./fileActions";
+import { Icon } from "./icons";
 import { MeasuringStatus } from "./MeasuringStatus";
 import { HelpLink } from "./help";
 import { useDiskVersion } from "./watch";
@@ -1017,6 +1019,7 @@ export function FileDetails({ info, metaFilter = false, layout = "explore", part
         <dd>{formatBytes(info.size)}</dd>
         <dt>Format</dt>
         <dd>LBD {info.lbd_version}</dd>
+        <FileId info={info} />
         {info.matplotlib && (
           <>
             <dt>View saved with</dt>
@@ -1139,7 +1142,26 @@ export function FileFacts({ info }: { info: FileInfo }) {
         <dd>{info.created ? readableDate(info.created) : "—"}</dd>
         <dt>Size</dt>
         <dd>{formatBytes(info.size)}</dd>
+        <FileId info={info} />
       </dl>
+    </>
+  );
+}
+
+/** The measurement's id, to paste into a notebook or the Library's search (a CSV's comments
+ *  name it too). Nothing for a file without one. */
+function FileId({ info }: { info: FileInfo }) {
+  const toast = useToast();
+  if (!info.id) return null;
+  return (
+    <>
+      <dt title="The measurement's identity: the same wherever the file is moved or copied">Id</dt>
+      <dd className="file-id">
+        <code>{info.id}</code>
+        <button className="ib" aria-label="Copy the id" title="Copy the id" onClick={() => void copyPath(info.id!, toast)}>
+          <Icon name="copy" />
+        </button>
+      </dd>
     </>
   );
 }

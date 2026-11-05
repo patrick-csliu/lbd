@@ -112,6 +112,20 @@ function findFolder(trees: LibraryFolder[], path: string): LibraryFolder | null 
   return null;
 }
 
+/** The id in a search (a whole one, also inside a pasted line, or its start), lower case, or null. */
+function idInSearch(q: string): string | null {
+  const text = q.toLowerCase();
+  const whole = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/.exec(text);
+  if (whole) return whole[0];
+  return /^[0-9a-f]{8}[0-9a-f-]*$/.test(text.trim()) ? text.trim() : null;
+}
+
+/** Found through its parent's id: the file searched for is the one it was made from. */
+function madeFromSearched(r: LibraryRow, q: string): boolean {
+  const id = idInSearch(q);
+  return !!id && !!r.parent_id?.startsWith(id) && !r.id?.startsWith(id);
+}
+
 export default function LibraryPage(props: Props) {
   const { state, query, onQuery, selected, onSelect, onRootsChanged, onLibrarySettings, onOpenIn, onOpenInNewBrowserTab, onRenamed, onDeleted, onOpenSettings } = props;
   const toast = useToast();
@@ -930,6 +944,7 @@ export default function LibraryPage(props: Props) {
                         </span>
                       ) : null}
                       {c.id === "name" && r.star ? <span className="mark-star" aria-label="starred">★ </span> : null}
+                      {c.id === "name" && madeFromSearched(r, q) ? <span className="mark-made-from muted small" title="This file was made from the file with the id searched for">made from this file · </span> : null}
                       {c.id === "project" || c.id === "users" || c.id === "tags" ? <LabelCells labels={c.id === "project" ? (r.project ? [r.project] : []) : r[c.id]} /> : cellText(r, c.id)}
                       {c.id === "name" && r.writing ? <WritingMark writing={r.writing} /> : null}
                       {c.id === "name" && r.copies > 0 && !r.conflict ? (
@@ -953,7 +968,7 @@ export default function LibraryPage(props: Props) {
                 : filtered
                   ? (
                       <>
-                        No file matches{q ? <> "{q}"</> : null}.{" "}
+                        {idInSearch(q) ? "No file with this id in the open folders. Add the folder that holds it (+ Add folder)." : <>No file matches{q ? <> "{q}"</> : null}.</>}{" "}
                         {q && (
                           <button
                             className="link"

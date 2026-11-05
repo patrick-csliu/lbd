@@ -105,6 +105,9 @@ are still written as 1.2).
   to its width, and a mean that is zero up to rounding reads 0 (not 2.8e−17).
 - **CSV files name the measurement's id** (Save as CSV, `lbd.plot.table`): `# id: …` (and
   `# made from: …`) in the comments, so a CSV found later can be traced back to its `.lbd` file.
+- **Library: find a file by its id.** Paste an id, its start, or the `# id: …` line of a CSV into
+  the search box: the file, its copies and the files made from it. A file's details show its id
+  with a copy button.
 - **The whole file as CSV.** Save as CSV's **How much → the whole file** (also in the file's **⋯**
   menu and the Library's right-click menu) saves every point as stored, for any number of axes:
   you choose one group of values on the same axes, a file bigger than memory is read part by
