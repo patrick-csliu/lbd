@@ -93,7 +93,7 @@ def test_picking_returns_the_stored_value_not_the_picture(client, data_dir):
 def test_a_hot_cell_shows_at_the_full_view_with_max(client, big_map):
     o = open_view(client, big_map)
     meta, pixels = render(client, o["session"], stat="max")
-    assert meta["reduced"] and meta["note"].startswith("max of")
+    assert meta["reduced"] and meta["note"].startswith("highest of")
     yellow = (pixels[..., 0] > 200) & (pixels[..., 1] > 200) & (pixels[..., 2] < 100)   # viridis' top
     ys, xs = np.nonzero(yellow)
     left, top, w, h = meta["plot"]
@@ -102,7 +102,7 @@ def test_a_hot_cell_shows_at_the_full_view_with_max(client, big_map):
     px, py = to_px(meta, 300 / 1000, -1 + 2 * 700 / 1000)
     assert np.min(np.hypot(xs[inside] - px, ys[inside] - py)) < 3      # ... where it is
     mean_meta, mean_pixels = render(client, o["session"], stat="mean")
-    assert mean_meta["note"].startswith("mean of")
+    assert mean_meta["note"].startswith("average of")
 
 
 def test_picking_a_cell_reads_the_full_map(client, big_map):
@@ -176,7 +176,7 @@ def test_a_resized_panel_is_drawn_at_its_new_size_without_reopening(client, big_
     assert (meta["width"], meta["height"]) == (640, 420)
     meta, pixels = render(client, o["session"], width=500, height=380, dpr=1)
     assert (meta["width"], meta["height"]) == (500, 380) and pixels.shape[:2] == (380, 500)
-    assert meta["plot"][2] < 500 and meta["note"].startswith("max of")
+    assert meta["plot"][2] < 500 and meta["note"].startswith("highest of")
 
 
 def test_a_value_as_x_gives_each_trace_its_own_x(client, data_dir):
@@ -239,7 +239,7 @@ def test_a_map_from_chosen_rows_keeps_the_others_empty(client, big_map):
     h = img.shape[0]
     assert np.isnan(img[int(h * 0.75):]).all()                     # the upper half: rows left out
     assert np.isfinite(img[: int(h * 0.45)]).all()
-    assert meta["note"].startswith("max of")
+    assert meta["note"].startswith("highest of")
 
 
 def test_colour_map_scales_and_limits(client, big_map):

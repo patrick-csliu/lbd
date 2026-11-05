@@ -57,7 +57,10 @@ export function between(a: CursorRead, b: CursorRead): { role: string; label: st
     if (ia.role === "series") continue;
     const ib = b.items.find((i) => i.role === ia.role);
     if (!ib || ib.name !== ia.name || ib.unit !== ia.unit || ia.value === null || ib.value === null) continue;
-    out.push({ role: ia.role, label: ia.label, unit: ia.unit, delta: ib.value - ia.value, mean: (ia.value + ib.value) / 2 });
+    // zero up to rounding (−0.175 and 0.175 give 2.8e−17): shown as 0
+    const tiny = 1e-12 * Math.max(Math.abs(ia.value), Math.abs(ib.value));
+    const zero = (v: number) => (Math.abs(v) < tiny ? 0 : v);
+    out.push({ role: ia.role, label: ia.label, unit: ia.unit, delta: zero(ib.value - ia.value), mean: zero((ia.value + ib.value) / 2) });
   }
   return out;
 }

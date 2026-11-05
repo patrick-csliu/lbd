@@ -178,19 +178,19 @@ button.danger { background: var(--danger); border-color: var(--danger); color: #
 /* ---- main / tabs ---- */
 .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 /* The open-files bar: Folders toggle, the tabs (they scroll when there are many), the ⋯ menu. */
-.tabbar { display: flex; background: var(--panel-2); border-bottom: 1px solid var(--border); flex: none; }
+.tabbar { display: flex; align-items: stretch; height: 30px; box-sizing: border-box; background: var(--panel-2); border-bottom: 1px solid var(--border); flex: none; }
 .tabs { display: flex; gap: 0; overflow-x: auto; flex: 1; min-width: 0; }
-.tabs-more { border: none; border-left: 1px solid var(--border); border-radius: 0; background: none; padding: 4px 12px; color: var(--muted); font-size: 16px; line-height: 1; flex: none; }
+.tabs-more { border: none; border-left: 1px solid var(--border); border-radius: 0; background: none; padding: 0 12px; color: var(--muted); font-size: 16px; line-height: 1; flex: none; }
 .tabs-more:hover { color: var(--text); background: var(--bg); }
 .tab { display: flex; align-items: center; border-right: 1px solid var(--border); }
 .tab.active { background: var(--bg); }
 .tab button { border: none; background: none; border-radius: 0; }
-.tab-label { padding: 7px 4px 7px 12px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tab-label { padding: 4px 4px 4px 10px; font-size: 13px; line-height: 20px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tab.preview .tab-label { font-style: italic; }
-.tab-close { color: var(--muted); padding: 4px 8px; }
+.tab-close { color: var(--muted); padding: 0 8px; align-self: stretch; }
 .tab.selected { background: var(--accent-soft); box-shadow: inset 0 -2px 0 var(--accent); }
 .tab.locked .tab-label { color: var(--muted); }
-.folders-toggle { border: none; border-right: 1px solid var(--border); border-radius: 0; background: none; padding: 6px 10px; color: var(--muted); white-space: nowrap; }
+.folders-toggle { border: none; border-right: 1px solid var(--border); border-radius: 0; background: none; padding: 0 10px; color: var(--muted); white-space: nowrap; }
 .folders-toggle[aria-pressed="true"] { color: var(--accent); }
 .folders-toggle .sidebar-icon { vertical-align: -1px; margin-right: 3px; }
 .filter-row { display: flex; align-items: center; gap: 2px; padding-right: 8px; }
@@ -418,6 +418,12 @@ details.group fieldset > .group-fields { margin-top: -4px; }
 
 /* Explore controls: chosen traces, colours, scales, typed limits. */
 .row-controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+/* Explore: the horizontal and vertical axis, the same width, the swap button beside both */
+.axes-grid { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 4px 6px; }
+.axes-grid select { width: 100%; min-width: 0; }
+.axes-grid .axes-name { font-size: 12px; color: var(--muted); }
+.axes-field:not(.two) .axes-grid { grid-template-columns: auto minmax(0, 1fr) 30px; }
+.axes-grid .axes-swap { grid-column: 3; grid-row: 1 / span 2; align-self: stretch; padding: 0 6px; }
 .axis-values { list-style: none; margin: 4px 0 0; padding: 0; max-height: 180px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius); }
 .axis-values li { display: flex; align-items: center; gap: 6px; padding: 1px 6px; font-size: 12px; font-variant-numeric: tabular-nums; }
 .axis-values li span { cursor: pointer; flex: 1; user-select: none; }
@@ -451,6 +457,10 @@ details.group fieldset > .group-fields { margin-top: -4px; }
 .cursor-panel { display: flex; flex-direction: column; gap: 6px; }
 .cursor-numbers { display: flex; flex-direction: column; gap: 3px; padding: 6px 0; border-top: 1px solid var(--border); }
 .cursor-head { display: flex; gap: 8px; align-items: baseline; }
+.cursor-head .cursor-remove { margin-left: auto; width: 22px; height: 22px; color: var(--muted); align-self: center; }
+.cursor-types-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: space-between; }
+.cursor-find { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; padding: 6px 0 2px; border-top: 1px solid var(--border); }
+.cursor-find .cursor-find-where { flex-basis: 100%; }
 .cursor-field { display: grid; grid-template-columns: 1fr 1.3fr; align-items: center; gap: 2px 6px; font-size: 13px; }
 .cursor-field input { min-width: 0; }
 .cursor-field .field-error { grid-column: 1 / -1; }
@@ -487,7 +497,13 @@ details.group fieldset > .group-fields { margin-top: -4px; }
 .explore-empty { position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%); max-width: 70%; text-align: center; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 14px; z-index: 1; }
 .equations { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; border-top: 1px solid var(--border); padding-top: 6px; }
 .eq-title { font-weight: 600; font-size: 13px; }
-.eq-legend { display: flex; flex-direction: column; gap: 2px; }
+.eq-legend { display: flex; flex-direction: column; gap: 3px; padding: 4px 0 6px; }
+.eq-legend .eq-head { font-weight: 600; margin-top: 4px; }
+.eq-legend .eq-row { display: grid; grid-template-columns: 6.5em minmax(0, 1fr); gap: 2px 6px; align-items: baseline; }
+.eq-legend .eq-row > span:last-child { display: flex; flex-wrap: wrap; gap: 2px 4px; min-width: 0; overflow-wrap: anywhere; }
+.eq-legend .eq-word { border: none; background: none; padding: 0 2px; border-radius: 3px; cursor: pointer; color: var(--accent); }
+.eq-legend .eq-word:hover { background: var(--accent-soft); }
+.eq-legend .eq-wide { margin: 2px 0; }
 .eq-legend code, .eq-field code { font-size: 12px; }
 .eq-field label { display: grid; grid-template-columns: 2.4em 1fr; align-items: center; gap: 4px; }
 .eq-field input { font-family: ui-monospace, Consolas, monospace; min-width: 0; }
@@ -642,7 +658,7 @@ details.group fieldset > .group-fields { margin-top: -4px; }
 @keyframes measuring-pulse { 50% { opacity: 0.35; } }
 @media (prefers-reduced-motion: reduce) { .measuring-status .measuring-dot { animation: none; } }
 /* the sidebar's show button in Explore's and Figure's tab row: as tall as a tab */
-.tabbar .sidebar-toggle.folders-toggle { padding: 6px 10px; border: none; border-right: 1px solid var(--border); border-radius: 0; background: none; }
+.tabbar .sidebar-toggle.folders-toggle { padding: 0 10px; border: none; border-right: 1px solid var(--border); border-radius: 0; background: none; }
 
 /* ---- the Library's selected file: as little scrolling as possible, never squeezed ----
    The pane decides by its own width (container query), so it works with any screen, zoom and
@@ -881,12 +897,12 @@ button.ib:disabled { opacity: 0.4; cursor: default; }
 .explore-tab { height: 100%; display: flex; flex-direction: column; min-height: 0; container-type: inline-size; container-name: ex; }
 .explore-head { display: flex; align-items: center; gap: 6px; padding: 6px 10px 6px 14px; background: var(--panel); border-bottom: 1px solid var(--border); min-width: 0; flex: none; }
 .explore-head h1 { font-size: 15px; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; max-width: 45%; }
-.explore-path { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 40px; flex: 1 1 0; }
+.explore-path { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 40px; flex: 0 1 auto; }
 .explore-head .measuring-status { margin: 0; flex: none; flex-wrap: nowrap; white-space: nowrap; }
 .explore-head-actions { margin-left: auto; display: flex; gap: 2px; align-items: center; flex: none; }
 .explore-head-actions > button:not(.ib) { margin-right: 6px; }
 .explore-tab > .disk-note { margin: 0; padding: 4px 14px; }
-.explore-body { flex: 1; min-height: 0; position: relative; display: grid; grid-template-columns: 260px minmax(0, 1fr) 300px;
+.explore-body { flex: 1; min-height: 0; position: relative; display: grid; grid-template-columns: var(--ctl-w, 260px) minmax(0, 1fr) var(--insp-w, 300px);
   grid-template-rows: minmax(0, 1fr); grid-template-areas: "ctl main insp"; }
 .explore-body.numbers { display: block; overflow: auto; padding: 14px 18px; }
 .explore-controls { grid-area: ctl; min-height: 0; overflow: auto; background: var(--panel); border-right: 1px solid var(--border); }
@@ -933,9 +949,13 @@ button.ib:disabled { opacity: 0.4; cursor: default; }
   background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 6px 18px rgb(0 0 0 / 0.15); }
 /* the read-out line under the panel's toolbar: the cursors' values, always beside their plot */
 /* one line, always the same height (nothing under it moves); the whole numbers are in the inspector */
-.explore-tab .explore-readout { display: flex; flex-direction: row; flex-wrap: nowrap; align-items: baseline; gap: 0 16px; height: 22px; min-height: 0; padding: 1px 2px 0;
+.explore-tab .explore-readout { display: flex; flex-direction: column; height: 22px; min-height: 0; padding: 1px 2px 0;
   border-bottom: 1px dashed var(--border); font-size: 12.5px; overflow: hidden; white-space: nowrap; flex: none; }
-.explore-tab .explore-readout > * { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.explore-tab .explore-readout.two { height: 40px; }
+.explore-tab .readout-row { display: flex; align-items: baseline; gap: 0 16px; min-width: 0; height: 19px; }
+.explore-tab .readout-row > * { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.explore-tab .readout-row > .explore-pick:first-child { flex: 0 0 auto; max-width: 100%; }
+.explore-tab .readout-row > .delta { flex: 0 1 auto; }
 .explore-tab .explore-readout .explore-pick { font-size: 12.5px; }
 .explore-tab .mouse-at { position: absolute; right: 4px; bottom: 2px; z-index: 2; pointer-events: none; padding: 0 5px; border-radius: 3px;
   background: color-mix(in srgb, var(--panel) 85%, transparent); color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -950,15 +970,28 @@ button.ib:disabled { opacity: 0.4; cursor: default; }
 .inspector-body { min-height: 0; min-width: 0; overflow: auto; padding: 8px 10px 12px; }
 .inspector-body .details h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); margin: 6px 0 4px; }
 .inspector-body .details table { font-size: 12px; width: 100%; }
-.inspector-body .cursor-panel { border: none; padding: 0; background: none; }
+.inspector-body .cursor-panel { border: none; padding: 0; background: none; min-width: 0; }
+/* nothing in the inspector is wider than it (plan 10): numbers wrap instead of being cut */
+.inspector-body .cursor-panel * { min-width: 0; }
+.inspector-body .cursor-between, .inspector-body .cursor-others table { width: 100%; table-layout: fixed; }
+.inspector-body .cursor-between td, .inspector-body .cursor-others td, .inspector-body .cursor-between th, .inspector-body .cursor-others th { white-space: normal; overflow-wrap: anywhere; }
+.inspector-body .segmented { flex-wrap: wrap; }
 .inspector-body .cursor-panel > legend { display: none; }
 .controls-toggle, .explore-scrim { display: none !important; }
+/* resize handles on the inner edges (plan 10): each shares its pane's grid area, on its edge */
+.ex-handle { z-index: 4; touch-action: none; min-width: 0; min-height: 0; }
+.ex-handle:hover, .ex-handle:focus-visible, .ex-handle:active { background: var(--accent); opacity: 0.5; outline: none; }
+.ctl-handle { grid-area: ctl; justify-self: end; width: 6px; margin-right: -3px; cursor: col-resize; }
+.insp-w-handle { grid-area: insp; justify-self: start; width: 6px; margin-left: -3px; cursor: col-resize; }
+.insp-h-handle { grid-area: insp; align-self: start; height: 6px; margin-top: -3px; cursor: row-resize; display: none; }
 
 /* sizes: below 1500 px the inspector is a strip under the plots; below 1100 px the controls are a
    drawer (⚙) and the inspector folds to its tab row; below 700 px it opens as a taller sheet */
 @container ex (max-width: 1499px) {
-  .explore-body { grid-template-columns: 240px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; grid-template-areas: "ctl main" "ctl insp"; }
-  .explore-inspector { border-left: none; border-top: 1px solid var(--border); grid-template-columns: 130px minmax(0, 1fr); grid-template-rows: 190px; }
+  .explore-body { grid-template-columns: var(--ctl-w, 240px) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; grid-template-areas: "ctl main" "ctl insp"; }
+  .explore-inspector { border-left: none; border-top: 1px solid var(--border); grid-template-columns: 130px minmax(0, 1fr); grid-template-rows: var(--insp-h, 190px); }
+  .insp-w-handle { display: none; }
+  .insp-h-handle { display: block; }
   .inspector-tabs { flex-direction: column; border-bottom: none; border-right: 1px solid var(--border); }
   .inspector-tabs [role=tab] { flex: none; text-align: left; padding: 7px 12px; border-bottom: none; border-left: 2px solid transparent; }
   .inspector-tabs [role=tab].on { border-left-color: var(--accent); }
@@ -971,11 +1004,13 @@ button.ib:disabled { opacity: 0.4; cursor: default; }
   .explore-tab.controls-open .explore-scrim { display: block !important; position: absolute; inset: 0; z-index: 15; background: rgb(0 0 0 / 0.12); }
   .controls-toggle { display: inline-flex !important; }
   .explore-path { display: none; }
+  .ctl-handle { display: none; }
 }
 @container ex (max-width: 1099px) {
   .explore-inspector { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; }
-  .explore-tab.inspector-open .explore-inspector { grid-template-rows: auto 190px; }
+  .explore-tab.inspector-open .explore-inspector { grid-template-rows: auto var(--insp-h, 190px); }
   .explore-tab:not(.inspector-open) .inspector-body { display: none; }
+  .explore-tab:not(.inspector-open) .insp-h-handle { display: none; }
   .explore-tab:not(.inspector-open) .inspector-tabs [role=tab].on { color: var(--muted); background: none; border-bottom-color: transparent; font-weight: 400; }
   .inspector-tabs { flex-direction: row; border-right: none; border-bottom: none; }
   .explore-tab.inspector-open .inspector-tabs { border-bottom: 1px solid var(--border); }
@@ -985,16 +1020,16 @@ button.ib:disabled { opacity: 0.4; cursor: default; }
   .explore-path { display: none; }
 }
 @container ex (max-width: 699px) {
-  .explore-tab.inspector-open .explore-inspector { grid-template-rows: auto 260px; }
+  .explore-tab.inspector-open .explore-inspector { grid-template-rows: auto var(--insp-h, 260px); }
   .explore-head h1 { max-width: none; flex: 1 1 auto; }
   .explore-head .measuring-status > :not(.measuring-dot):not(:first-child) { display: none; }
   .panels .panel-sync .toggle-chip { padding: 0 6px; }
 }
 @container ex (min-width: 2400px) {
-  .explore-body { grid-template-columns: 320px minmax(0, 1fr) 380px; }
+  .explore-body { grid-template-columns: var(--ctl-w, 320px) minmax(0, 1fr) var(--insp-w, 380px); }
 }
 @media (max-height: 820px) {
-  @container ex (min-width: 1100px) and (max-width: 1499px) { .explore-inspector { grid-template-rows: 160px; } }
+  @container ex (min-width: 1100px) and (max-width: 1499px) { .explore-inspector { grid-template-rows: var(--insp-h, 160px); } }
 }
 .tab.preview { background: color-mix(in srgb, var(--accent-soft) 55%, transparent); }
 .equations > summary, .eq-names > summary { cursor: pointer; }

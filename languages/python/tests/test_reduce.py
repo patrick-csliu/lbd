@@ -31,7 +31,7 @@ def test_a_single_hot_cell_survives_max_at_the_full_view():
     assert np.nanmax(r.image) == 10
     j, i = np.unravel_index(np.nanargmax(r.image), r.image.shape)
     assert abs(i - 300 / 1001 * 200) <= 1.5 and abs(j - 700 / 1001 * 150) <= 1.5
-    assert "max of" in r.note()
+    assert "highest of" in r.note()
     # The mean is a different question ("what does it look like overall"): the cell is diluted.
     assert np.nanmax(pyr.raster(pixels(e[0], e[-1], 200), pixels(e[0], e[-1], 150), "mean").image) < 2
 

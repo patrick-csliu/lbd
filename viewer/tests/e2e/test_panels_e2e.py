@@ -169,6 +169,35 @@ def test_panels_with_the_same_axis_zoom_together(values_files, new_page):
     assert len(alone) == 1
 
 
+def test_turning_a_sync_on_lines_the_panels_up(values_files, new_page):
+    """Plan 10: x off, zoom one panel, x on: the others take its range at once."""
+    import pytest
+
+    page = new_page("Explore")
+    per_panel(page, lambda: row(page, "6 rabi.lbd").dblclick(), panels=4)
+    shown(page).get_by_label("Sync x").uncheck()
+    box = shown(page).locator(".panel .explore-overlay").nth(0).bounding_box()
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    alone = per_panel(page, lambda: page.mouse.wheel(0, -600))
+    assert len(alone) == 1
+    zoomed = next(iter(alone.values()))["xlim"]
+    lined = per_panel(page, lambda: shown(page).get_by_label("Sync x").check(), panels=3)
+    assert len(lined) >= 3 and all(m["xlim"] == pytest.approx(zoomed) for m in lined.values())
+
+
+def test_cursors_shared_without_the_zoom(values_files, new_page):
+    """Plan 10: cursors on, x off: a click puts the cursor in every panel, the zoom stays apart."""
+    page = new_page("Explore")
+    per_panel(page, lambda: row(page, "6 rabi.lbd").dblclick(), panels=4)
+    shown(page).get_by_label("Sync x").uncheck()
+    expect(shown(page).get_by_label("Sync cursors")).to_be_checked()
+    box = shown(page).locator(".panel .explore-overlay").nth(0).bounding_box()
+    answers = cursor_answers(page, lambda: page.mouse.click(box["x"] + box["width"] * 0.5, box["y"] + box["height"] * 0.5), panels=4)
+    assert len(answers) == 4
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    assert len(per_panel(page, lambda: page.mouse.wheel(0, -600))) == 1
+
+
 def test_a_panel_of_another_axis_says_it_does_not_follow(values_files, new_page):
     page = new_page("Explore")
     per_panel(page, lambda: row(page, "8 mixed axes.lbd").dblclick(), panels=4)     # Q_i (power), S21, S21_ref (freq), f0 (power)
@@ -247,11 +276,12 @@ def test_one_cursor_at_the_same_x_in_every_panel(values_files, new_page):
     answers = cursor_answers(page, lambda: shown(page).get_by_role("button", name="Max").click(), panels=4)
     xs3 = [a["cursors"][0]["x"] for a in answers.values()]
     assert all(x == pytest.approx(xs3[0]) for x in xs3)
-    # sync x off: each panel its own cursors
-    shown(page).get_by_label("Sync x").uncheck()
+    # cursors sync off: each panel its own cursors (plan 10: apart from the x sync)
+    shown(page).get_by_label("Sync cursors").uncheck()
     answers = cursor_answers(page, lambda: page.mouse.click(box2["x"] + box2["width"] * 0.7, box2["y"] + box2["height"] * 0.5))
     assert len(answers) == 1
     expect(shown(page).get_by_label("The other panels at the same x")).to_have_count(0)
+    expect(shown(page).get_by_label("Sync x")).to_be_checked()               # the zoom is still shared
 
 
 def test_a_map_and_a_curve_share_the_cursor_x(values_files, new_page):

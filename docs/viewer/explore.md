@@ -19,9 +19,10 @@ opens it here. For a figure to export, use **Figure** (one click away, see below
 4. **The panel's toolbar**: its name, then **⟲** reset the view, **⇔** type the limits,
    **✂** cuts (maps), **⤓** data (save as CSV, copy the picture) and **⋯** (mouse and keys,
    duplicate or remove the panel). Each icon says what it does when you point at it.
-5. **The cursors' values**, on one line under the panel's title (see [Reading values](#reading-values)).
+5. **The cursors' values**, under the panel's title: a line per cursor, with the differences on
+   cursor 2's line (see [Reading values](#reading-values)).
 6. **The plot.** Zoom, pan and click on it, see [Moving around](#moving-around).
-7. **The inspector:** **Cursors** (all the numbers, typed positions, Max / Min / Peak),
+7. **The inspector:** **Cursors** (all the numbers, typed positions, Max / Min / Peak, Remove cursors),
    **Values & axes** (the file's tables) and **Metadata** (with a filter). **ⓘ** at the top
    opens it on the file's values and axes.
 
@@ -42,6 +43,11 @@ never moves the plot.
 
 Panels side by side that would be narrower than 450 px are stacked instead, for that size only
 (the panel bar says "stacked: too narrow side by side"); a wider window puts them back.
+
+**Resizing:** drag the inner edge of the controls column, or of the inspector (its left edge when
+it is on the right, its top edge when it is a strip below), to make it wider or taller; the
+panels take the rest. **Double-click** the edge to go back to the default size. The sizes are
+remembered in this browser.
 
 ## Moving around
 
@@ -94,7 +100,8 @@ with one value shows one plot, as always. Single numbers never get a panel.
 4. **Values** in the side panel: tick one to add it to the active panel, drag one onto a panel
    to add it there (or onto the bar above the panels for a new panel), right-click one for
    **Show in a new panel** or **Show only this value here**.
-5. **Sync** above the panels, three toggles (**x**, **y**, **sliders**):
+5. **Sync** above the panels, four toggles (**x**, **y**, **sliders**, **cursors**). Turning one
+   on lines the other panels up with the active one at once:
     - **x** (on): zooming or panning in one panel does the same in every panel with the same
       horizontal axis; showing everything shows all their data. A panel on another axis says so
       in its title bar ("x not synced: Power (dBm), not Frequency (GHz)"); so does one whose x
@@ -103,8 +110,12 @@ with one value shows one plot, as always. Single numbers never get a panel.
       same vertical axis).
     - **sliders** (on): moving a slider moves that axis' slider in every panel. Switch it off to
       show, say, ground and excited state side by side in two panels of the same value.
+    - **cursors** (on): the panels with the same horizontal axis share the cursors (below). Apart
+      from **x**: zoom four temperatures to one time range but put a cursor on each one's own
+      drop (x on, cursors off), or read every panel at one time while each keeps its own zoom
+      (x off, cursors on).
 
-**One cursor for all:** while x is synchronized, a click in a panel puts the cursor at that x in
+**One cursor for all:** while the cursors are synchronized, a click in a panel puts the cursor at that x in
 every panel with the same horizontal axis; each panel puts it on its own data (its own trace, or
 in a map its own row; maps with the same vertical axis too, such as two values of one file, use
 the same row). The panel you click in leads. The inspector's **Cursors** tab lists the other
@@ -149,7 +160,7 @@ dB for a complex value shown in dB.
 | **Shift** + click | Cursor 2: a range, shaded, with the differences (Δ) and means between the two cursors. |
 | Drag a cursor | Moves it. A cursor on a trace stays on that trace and follows it. |
 | **Alt** + click or drag | A free position, not on the data; the read-out then gives the nearest stored value. |
-| **Esc** | Removes the cursors. |
+| **Esc** | Removes the cursors (with Undo). |
 
 **Cursor types**, in the inspector's Cursors tab:
 
@@ -158,9 +169,12 @@ dB for a complex value shown in dB.
   cursor's own trace first.
 - **Horizontal:** a line at one height, for example to compare peaks with a level.
 
-**The Cursors tab** of the inspector shows each cursor's numbers (the line under each panel's title shows them too, shortened). Positions can be typed (with a prefix if you
-like: `5.12 GHz`); the cursor then moves to the nearest stored point. **Max**, **Min** and
-**Peak** move cursor 1 to the highest, the lowest, or the point farthest from the median (a dip
+**The Cursors tab** of the inspector shows each cursor's numbers (the lines under each panel's
+title show them too; point at one for the whole text). Positions can be typed (with a prefix if
+you like: `5.12 GHz`); the cursor then moves to the nearest stored point. The **×** beside cursor
+2 removes it alone; **Remove cursors** (beside the cursor types) removes both, with Undo.
+**Move cursor 1 to the Max**, **Min** or
+**Peak**: the highest, the lowest, or the point farthest from the median (a dip
 or a spike, whichever stands out more): between the two cursors when there are two, otherwise in
 what is in view; on curves, on cursor 1's trace if it is on one. They search the stored data,
 not the picture.
@@ -268,8 +282,12 @@ Below the operations are **equation** fields, as in Labber: `x =` and `y =` (for
 `z =`). They work on the data after the operations; an empty field leaves that part as it is.
 Type a formula and press Enter (Esc puts the old one back).
 
-Above the fields, a **legend** says what each name stands for, and in which unit. The numbers
-are in **stored units**: Hz, not GHz, so `x * 1e-9` gives GHz.
+Above the fields, **Names and functions** says what each name stands for, and in which unit,
+then the functions in groups (trigonometry, hyperbolic, powers and logs, complex, rounding, per
+trace, constants) and a few examples. **Click** a name, a function or an example to put it into
+the equation field you used last, at its text cursor. The numbers are in **stored units**: Hz,
+not GHz, so `x * 1e-9` gives GHz. A plot shown from a summary (data larger than the memory free)
+has no names: equations need the full data.
 
 - `x`, `y` — the horizontal axis and the value as shown (after the complex mode and the
   operations); for a map `x`, `y` are its axes and `z` its value.
@@ -324,11 +342,13 @@ A screen has far fewer pixels than a large file has numbers: a map of 4001 × 40
 in 700 × 500 pixels puts about 50 cells into each pixel. The viewer chooses on purpose what a
 pixel shows, and says so in the note above the plot:
 
-- **Maps:** **Several cells per pixel** (in **Display**) sets whether a pixel shows the **max** of its cells
+- **Maps:** the note reads, for example, "average of 5×8 cells per pixel": each screen pixel
+  shows the average of a block of about 5 × 8 cells. **Several cells per pixel** (in **Display**)
+  sets whether a pixel shows the **max** of its cells
   (peaks and single hot cells stay visible), the **min** (dips stay visible) or the **mean**
   (the overall look; a single odd cell fades).
-- **Curves:** each pixel column keeps the lowest and highest point in it, so a spike of one point
-  still shows.
+- **Curves:** each pixel column keeps the lowest and highest point in it ("lowest and highest
+  point per pixel column"), so a spike of one point still shows.
 - **Many curves** (more than 30 on screen) are drawn together as one picture, which is much faster;
   their lines are then not smoothed (antialiased), so they look a little sharper-edged. Choose a
   few traces to see them drawn as in a figure.

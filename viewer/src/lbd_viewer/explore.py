@@ -951,7 +951,7 @@ class ExploreSession:
                 self.image.set_data(r.image)
                 note, reduced = r.note(), r.reduced
             elif self._fast_picture(pxe, dw, dh, draft):
-                note, reduced = "min and max per pixel column", True
+                note, reduced = "lowest and highest point per pixel column", True
             else:
                 self.spans = None
                 ys = [y for y, _ in self.model.lines]
@@ -990,7 +990,7 @@ class ExploreSession:
                 if as_picture:
                     self._raster(lines, shown, dw, dh, 0.5 if draft else 1.0)
                 self.last_lines = lines
-                note = "min and max per pixel column" if reduced else "every point shown"
+                note = "lowest and highest point per pixel column" if reduced else "every point shown"
                 if unsorted:
                     note += ("; x is not sorted: drawn in stored order, thinned to the lowest and highest "
                              "point of each stretch" if thinned else "; x is not sorted: drawn as stored")

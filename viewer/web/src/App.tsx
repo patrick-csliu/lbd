@@ -803,6 +803,22 @@ function Shell() {
     }
   };
 
+  /** The list of all Explore tabs (show one) and Close all: the ⋯ button and a right-click on
+   * the empty part of the tab bar. */
+  const showExploreList = (x: number, y: number) =>
+    setExploreList({
+      x,
+      y,
+      items: [
+        ...exploreTabs.map((t) => ({
+          label: `${t.path === exploreActive ? "✓ " : " "}${exploreTitles[t.path] || baseName(t.path)}`,
+          onClick: () => setExploreActive(t.path),
+        })),
+        "-" as const,
+        { label: "Close all", onClick: () => closeExplore(exploreTabs.map((t) => t.path)) },
+      ],
+    });
+
   // The Explore tab menu: this tab, all tabs, and its file.
   const exploreMenuShown = useMemo<MenuAt | null>(() => {
     if (!exploreMenu) return null;
@@ -971,7 +987,15 @@ function Shell() {
           />
         )}
         <main className="main" hidden={page !== "explore"}>
-          <div className="tabbar">
+          <div
+            className="tabbar"
+            onContextMenu={(e) => {
+              // the empty part of the bar (a tab has its own menu): all tabs, Close all
+              if (!exploreTabs.length || (e.target as HTMLElement).closest(".tab")) return;
+              e.preventDefault();
+              showExploreList(e.clientX, e.clientY);
+            }}
+          >
             {!sidebarShown && <SidebarToggle open={false} onToggle={toggleFolders} what="Files: the Library selection" className="folders-toggle" />}
             <div className="tabs" role="tablist" aria-label="Files in Explore" ref={exploreStrip}
                  onKeyDown={(e) => {
@@ -1020,18 +1044,7 @@ function Shell() {
                 aria-haspopup="menu"
                 onClick={(e) => {
                   const r = e.currentTarget.getBoundingClientRect();
-                  setExploreList({
-                    x: r.right - 260,
-                    y: r.bottom,
-                    items: [
-                      ...exploreTabs.map((t) => ({
-                        label: `${t.path === exploreActive ? "✓ " : "\u2003"}${exploreTitles[t.path] || baseName(t.path)}`,
-                        onClick: () => setExploreActive(t.path),
-                      })),
-                      "-" as const,
-                      { label: "Close all", onClick: () => closeExplore(exploreTabs.map((t) => t.path)) },
-                    ],
-                  });
+                  showExploreList(r.right - 260, r.bottom);
                 }}
               >
                 ⋯

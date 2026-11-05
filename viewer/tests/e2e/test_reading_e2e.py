@@ -36,7 +36,16 @@ def test_a_click_reads_a_cell_with_its_cuts_and_keys_move_it(small_map, new_page
     page.keyboard.up("Shift")
     expect(readout(page).nth(1)).to_contain_text("value = 1 at x = 2, y = 10")
     expect(readout(page).nth(2)).to_contain_text("Δx = −14")
-    page.keyboard.press("Escape")
+    # the cursors panel (plan 10): × removes cursor 2 only; Remove cursors both, with Undo
+    insp = explore(page).locator(".explore-inspector")
+    insp.get_by_role("button", name="Remove cursor 2").click()
+    expect(readout(page)).to_have_count(1)
+    expect(readout(page).first).to_contain_text("value = 14 at x = 16, y = 30")
+    insp.get_by_role("button", name="Remove cursors").click()
+    expect(readout(page)).to_have_count(0)
+    page.get_by_role("button", name="Undo").click()
+    expect(readout(page).first).to_contain_text("value = 14 at x = 16, y = 30")
+    insp.get_by_role("button", name="Remove cursors").click()
     expect(explore(page).locator(".explore-readout")).to_contain_text("Click the plot to read a stored value")
 
 

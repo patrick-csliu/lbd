@@ -133,6 +133,11 @@ function CursorNumbers({ n, c, kind, type, actions }: { n: number; c: CursorRead
         <span className={`cursor-tag c${n}`}>{n}</span>
         {c.label && kind === "curve" && <span className="small">{c.label}</span>}
         {c.free && <span className="muted small">free position</span>}
+        {n === 2 && (
+          <button className="ib cursor-remove" aria-label="Remove cursor 2" title="Remove cursor 2 (cursor 1 stays)" onClick={() => actions.current?.removeSecond()}>
+            ×
+          </button>
+        )}
       </div>
       {x && type !== "horizontal" && <PositionBox it={x} onSet={(v) => actions.current?.typed(n - 1, "x", v)} />}
       {y && yEditable && <PositionBox it={y} onSet={(v) => actions.current?.typed(n - 1, "y", v)} />}
@@ -213,7 +218,12 @@ export default function CursorPanel({ kind, cursors, onCursors, reading, actions
     <fieldset className="field cursor-panel">
       <legend>Cursors</legend>
       {back}
-      {types}
+      <div className="cursor-types-row">
+        {types}
+        <button onClick={act((a) => a.remove())} disabled={!c1} title="Remove both cursors (key Esc); Undo in the message">
+          Remove cursors
+        </button>
+      </div>
       {!c1 && <p className="muted small">Click the plot for cursor 1, Shift+click for cursor 2.</p>}
       {c1 && <CursorNumbers n={1} c={c1} kind={kind} type={cursors.type} actions={actions} />}
       {c2 && <CursorNumbers n={2} c={c2} kind={kind} type={cursors.type} actions={actions} />}
@@ -246,23 +256,21 @@ export default function CursorPanel({ kind, cursors, onCursors, reading, actions
           {c1.table.more > 0 && <div className="muted">and {c1.table.more} more</div>}
         </div>
       )}
-      <div className="row-controls">
-        <button onClick={act((a) => a.find("max"))} title="Key M">
+      <div className="cursor-find" role="group" aria-label="Move cursor 1 to the highest, lowest or farthest value">
+        <span className="small">Move cursor 1 to the</span>
+        <button onClick={act((a) => a.find("max"))} title="The highest stored value. Key M">
           Max
         </button>
-        <button onClick={act((a) => a.find("min"))} title="Key N">
+        <button onClick={act((a) => a.find("min"))} title="The lowest stored value. Key N">
           Min
         </button>
         <button onClick={act((a) => a.find("peak"))} title="Farthest from the median, up or down (a dip or a spike). Key P">
           Peak
         </button>
-        <button onClick={act((a) => a.remove())} disabled={!c1} title="Key Esc">
-          Remove
-        </button>
-      </div>
-      <div className="muted small">
-        {c1 && c2 ? "Searches between the cursors" : "Searches what is in view"}
-        {kind === "curve" && c1 ? `, on ${c1.label ?? "the cursor's trace"}` : ""}.
+        <div className="muted small cursor-find-where">
+          {c1 && c2 ? "Between the cursors" : "In what is in view"}
+          {kind === "curve" && c1 ? `, on ${c1.label ?? "the cursor's trace"}` : ""}. Peak: farthest from the median, a dip or a spike.
+        </div>
       </div>
       {kind === "heatmap" && (
         <>

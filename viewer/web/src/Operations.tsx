@@ -1,4 +1,4 @@
-import { KeyboardEvent, MouseEvent, useEffect, useState } from "react";
+import { KeyboardEvent, MouseEvent, useEffect, useRef, useState } from "react";
 import { Op, OpName, OpsInfo } from "./api";
 import { ContextMenu, MenuAt, MenuEntry } from "./menu";
 
@@ -34,8 +34,17 @@ interface Props {
   onEquations: (e: { x?: string; y?: string; z?: string }) => void;
 }
 
-const EQ_FUNCTIONS = "sin cos tan arcsin arccos arctan arctan2 sinh cosh tanh exp log log10 log2 sqrt abs real imag angle conj floor ceil round clip";
-const EQ_PER_TRACE = "mean median std min max";
+/** The functions equations can use (equations.py FUNCTIONS, CONSTANTS), in groups for the legend. */
+const EQ_GROUPS: [string, string[]][] = [
+  ["Trigonometry", ["sin", "cos", "tan", "arcsin", "arccos", "arctan", "arctan2"]],
+  ["Hyperbolic", ["sinh", "cosh", "tanh"]],
+  ["Powers, logs", ["exp", "log", "log10", "log2", "sqrt"]],
+  ["Complex", ["abs", "real", "imag", "angle", "conj"]],
+  ["Rounding", ["floor", "ceil", "round", "clip"]],
+  ["Per trace", ["mean", "median", "std", "min", "max"]],
+  ["Constants", ["pi", "e"]],
+];
+const EQ_EXAMPLES = ["y - mean(y)", "20*log10(abs(z))", "x/1e9"];
 
 const COMPLEX: { op: OpName; name: string; tip: string }[] = [
   { op: "delay", name: "Electrical delay", tip: "× e^(i·2π·f·τ): removes a cable's phase slope. Calculate: from the phase between the cursors (else in view)" },
@@ -357,27 +366,64 @@ function Equations({ kind, equations, info, on, onChange }: {
   const main = names.filter((n) => fields.includes(n.name as "x" | "y" | "z"));
   const others = names.filter((n) => !fields.includes(n.name as "x" | "y" | "z"));
   const used = Object.values(equations).some(Boolean);
+  // a click on a name, function or example puts it into the equation box used last (at its caret)
+  const last = useRef<string>(fields[fields.length - 1]);
+  const [request, setRequest] = useState<{ field: string; text: string; n: number } | null>(null);
+  const insert = (text: string) => setRequest((r) => ({ field: last.current, text, n: (r?.n ?? 0) + 1 }));
   return (
     <details className="equations" open={used || undefined}>
       <summary className="eq-title">Equations (after the operations){used ? "" : ": none"}</summary>
       <details className="eq-names">
         <summary className="small">Names and functions</summary>
-      <div className="eq-legend small" aria-label="What the names stand for">
-        {info?.names_note && <div className="muted">{info.names_note}</div>}
-        {main.map((n) => (
-          <div key={n.name}>
-            <code>{n.name}</code> = {n.means}
+        <div className="eq-legend small" aria-label="What the names stand for">
+          {info?.names_note && <div className="muted eq-wide">{info.names_note}</div>}
+          {main.length > 0 && <div className="eq-head">Names</div>}
+          {main.map((n) => (
+            <div key={n.name} className="eq-row">
+              <button className="eq-word" title="Put it into the equation" onClick={() => insert(n.name)}>
+                <code>{n.name}</code>
+              </button>
+              <span>= {n.means}</span>
+            </div>
+          ))}
+          {others.length > 0 && (
+            <div className="eq-row eq-others">
+              <span className="muted">From the file</span>
+              <span>
+                {others.map((n) => (
+                  <button key={n.name} className="eq-word" title={`${n.name} = ${n.means}`} onClick={() => insert(n.name)}>
+                    <code>{n.name}</code>
+                  </button>
+                ))}
+              </span>
+            </div>
+          )}
+          {main.length > 0 && <div className="muted eq-wide">Numbers are in the stored units (Hz, not GHz).</div>}
+          <div className="eq-head">Functions</div>
+          {EQ_GROUPS.map(([group, words]) => (
+            <div key={group} className="eq-row">
+              <span className="muted">{group}</span>
+              <span>
+                {words.map((w) => (
+                  <button key={w} className="eq-word" title="Put it into the equation" onClick={() => insert(group === "Constants" ? w : `${w}(`)}>
+                    <code>{w}</code>
+                  </button>
+                ))}
+                {group === "Per trace" && <span className="muted"> one number per trace</span>}
+              </span>
+            </div>
+          ))}
+          <div className="eq-row">
+            <span className="eq-head">Examples</span>
+            <span>
+              {EQ_EXAMPLES.map((w) => (
+                <button key={w} className="eq-word" title="Put it into the equation" onClick={() => insert(w)}>
+                  <code>{w}</code>
+                </button>
+              ))}
+            </span>
           </div>
-        ))}
-        {others.map((n) => (
-          <div key={n.name} className="muted">
-            <code>{n.name}</code> = {n.means}
-          </div>
-        ))}
-        <div className="muted">
-          in stored units · <code>pi</code> <code>e</code> · {EQ_FUNCTIONS} · per trace: {EQ_PER_TRACE}
         </div>
-      </div>
       </details>
       {fields.map((f) => {
         const st = info?.equations?.[f];
@@ -388,6 +434,8 @@ function Equations({ kind, equations, info, on, onChange }: {
             value={equations[f] ?? ""}
             error={on ? st?.error : undefined}
             note={on ? st?.note : undefined}
+            onFocus={() => (last.current = f)}
+            insert={request?.field === f ? request : null}
             onSet={(v) => {
               const next = { ...equations, [f]: v || undefined };
               onChange(next);
@@ -399,9 +447,29 @@ function Equations({ kind, equations, info, on, onChange }: {
   );
 }
 
-function EquationBox({ field, value, error, note, onSet }: { field: string; value: string; error?: string; note?: string; onSet: (v: string) => void }) {
+function EquationBox({ field, value, error, note, onSet, onFocus, insert }: {
+  field: string;
+  value: string;
+  error?: string;
+  note?: string;
+  onSet: (v: string) => void;
+  onFocus: () => void;
+  /** text to put in at the caret (a click in the legend); `n` tells requests apart */
+  insert: { text: string; n: number } | null;
+}) {
   const [text, setText] = useState(value);
   useEffect(() => setText(value), [value]);
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const el = input.current;
+    if (!insert || !el) return;
+    const a = el.selectionStart ?? el.value.length, b = el.selectionEnd ?? a;
+    const next = el.value.slice(0, a) + insert.text + el.value.slice(b);
+    setText(next);
+    el.focus();
+    window.setTimeout(() => el.setSelectionRange(a + insert.text.length, a + insert.text.length), 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [insert?.n]);
   const apply = () => {
     if (text.trim() !== value) onSet(text.trim());
   };
@@ -410,8 +478,10 @@ function EquationBox({ field, value, error, note, onSet }: { field: string; valu
       <label>
         <code>{field} =</code>
         <input
+          ref={input}
           value={text}
           spellCheck={false}
+          onFocus={onFocus}
           placeholder={`(none: ${field} as it is)`}
           aria-label={`Equation for ${field}`}
           aria-invalid={!!error}

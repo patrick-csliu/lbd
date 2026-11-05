@@ -174,6 +174,8 @@ interface Props {
   dataItems?: () => MenuEntry[];
   /** The left of the panel's toolbar: its number and name (and what drags it). */
   title?: ReactNode;
+  /** The panel being worked on (one panel: always): only it shows the "click the plot" hint. */
+  active?: boolean;
   /** More entries for the panel's ⋯ menu (duplicate, remove …). */
   panelItems?: () => MenuEntry[];
   /** The plot couldn't be opened (the reason), so the controls can say so. */
@@ -199,7 +201,10 @@ export interface ExploreActions {
   showCut: (which: "row" | "column") => void;
   /** Cursor i to a typed stored value along x or y (snapped to the data). */
   typed: (i: number, axis: "x" | "y", stored: number) => void;
+  /** Remove both cursors (with Undo). */
   remove: () => void;
+  /** Remove cursor 2 only (cursor 1 stays). */
+  removeSecond: () => void;
   /** Show (or hide) the mouse and keys help. */
   help: () => void;
   /** A map's values counted with these view settings (the contrast control). */
@@ -248,6 +253,7 @@ export default function ExploreView({
   onSync,
   dataItems,
   title,
+  active = true,
   panelItems,
   onFailed,
   onOpenInFigure,
@@ -990,7 +996,18 @@ export default function ExploreView({
       if (axis === "y") delete now[i].trace; // another height: the nearest trace there
       moveCursors(now);
     },
-    remove: clearCursors,
+    remove: () => {
+      const before = cursorsRef.current;
+      if (!before.at.length) return;
+      clearCursors();
+      toast("Cursors removed.", "info", { label: "Undo", onClick: () => onCursorsRef.current(before) });
+    },
+    removeSecond: () => {
+      const c1 = readingRef.current?.cursors[0];
+      if (!c1) return;
+      moveCursors([askOf(c1)]);
+      onCursorsRef.current({ ...cursorsRef.current, active: 0 });
+    },
     help: () => setHelp((h) => !h),
     histogram: (st) => (session.current ? api.exploreHistogram(session.current, st) : Promise.resolve(null)),
     calculate: async (what, index) => {
@@ -1104,7 +1121,9 @@ export default function ExploreView({
         {title}
         <span className="spacer" />
         {meta && (
-          <span className={"explore-note" + (meta.reduced ? " reduced" : "")} title={`${meta.note}: how the data fits the screen's pixels (what a pixel shows: in Display)`}>
+          <span className={"explore-note" + (meta.reduced ? " reduced" : "")} title={meta.reduced
+              ? `${meta.note}: more data than pixels, so each pixel shows several stored values. Zoom in to see every one; choose what a pixel shows in Display → Several cells per pixel. Cursors, Max / Min / Peak and the CSV always use the stored values.`
+              : `${meta.note}: every stored value has its own pixels.`}>
             {meta.note}
           </span>
         )}
@@ -1171,30 +1190,40 @@ export default function ExploreView({
           </Popover>
         )}
       </div>
-      <div className="explore-readout" aria-live="polite">
-        {c1 ? (
-          <CursorLine n={1} c={c1} />
-        ) : (
-          <span className="muted small">{cursors.on ? "Click the plot to read a stored value." : "No cursor type chosen: a click does nothing (choose one in the Cursors tab, or press K)."}</span>
-        )}
-        {c2 && <CursorLine n={2} c={c2} />}
-        {c1 && c2 && (
-          <span className="explore-pick small delta">
-            {between(c1, c2).map((d) => (
-              <span key={d.role} className="range-part">
-                Δ{d.label} = {si(d.delta, d.unit)} · ⟨{d.label}⟩ = {si(d.mean, d.unit)}
+      {/* the cursors' numbers: a row per cursor, the panel's full width (the height changes only
+          when cursor 2 comes or goes, never while a cursor moves); the full text in the tooltip */}
+      <div className={"explore-readout" + (c2 ? " two" : "")} aria-live="polite">
+        <div className="readout-row">
+          {c1 ? (
+            <CursorLine n={1} c={c1} />
+          ) : cursors.on ? (
+            active && <span className="muted small">Click the plot to read a stored value.</span>
+          ) : (
+            <span className="muted small">No cursor type chosen: a click does nothing (choose one in the Cursors tab, or press K).</span>
+          )}
+          {cutHover && <span className="small">{cutHover}</span>}
+          {note && (
+            <span className="small" role="status" title={note}>
+              {note}{" "}
+              <button className="link" onClick={() => setNote(null)}>
+                OK
+              </button>
+            </span>
+          )}
+        </div>
+        {c2 && (
+          <div className="readout-row">
+            <CursorLine n={2} c={c2} />
+            {c1 && (
+              <span className="explore-pick small delta" title={between(c1, c2).map((d) => `Δ${d.label} = ${si(d.delta, d.unit)}, mean ${si(d.mean, d.unit)}`).join(" · ")}>
+                {between(c1, c2).map((d) => (
+                  <span key={d.role} className="range-part">
+                    Δ{d.label} = {si(d.delta, d.unit)}
+                  </span>
+                ))}
               </span>
-            ))}
-          </span>
-        )}
-        {cutHover && <span className="small">{cutHover}</span>}
-        {note && (
-          <span className="small" role="status">
-            {note}{" "}
-            <button className="link" onClick={() => setNote(null)}>
-              OK
-            </button>
-          </span>
+            )}
+          </div>
         )}
       </div>
       {error && (
@@ -1309,8 +1338,9 @@ function fmt(v: number | null | undefined): string {
 function CursorLine({ n, c }: { n: number; c: CursorRead }) {
   const z = item(c, "z") ?? item(c, "y");
   const rest = c.items.filter((i) => i !== z);
+  const full = `${z ? readText(z) : ""} at ${rest.map(readText).join(", ")}`;
   return (
-    <div className="explore-pick">
+    <div className="explore-pick" title={full}>
       <span className="cursor-tag" style={{ color: CURSOR_COLORS[n - 1] }}>
         {n}
       </span>{" "}

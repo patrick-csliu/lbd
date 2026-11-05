@@ -66,7 +66,8 @@ class Raster:
         cx, cy = self.cells_per_pixel
         if not self.reduced:
             return "every cell shown"
-        return f"{self.stat} of {max(cx, 1):.3g}×{max(cy, 1):.3g} cells per pixel"
+        what = {"mean": "average", "max": "highest", "min": "lowest"}.get(self.stat, self.stat)
+        return f"{what} of {max(cx, 1):.3g}×{max(cy, 1):.3g} cells per pixel"
 
 
 class _Level:

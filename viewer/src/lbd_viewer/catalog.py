@@ -202,7 +202,8 @@ def misfit(remembered: Dict[str, Any], now: Dict[str, Any], state: Dict[str, Any
 # The remembered Explore view's shape. Version 2 (plan 4) holds panels; a record without a
 # version is one plot (LBD 1.3.0-dev before panels) and is read as one panel.
 STATE_VERSION = 2
-PANEL_DEFAULTS: Dict[str, Any] = {"active": 0, "layout": "side", "sync": {"x": True, "y": False, "sliders": True}}
+PANEL_DEFAULTS: Dict[str, Any] = {"active": 0, "layout": "side",
+                                  "sync": {"x": True, "y": False, "sliders": True, "cursors": True}}
 
 
 def upgrade(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -211,7 +212,10 @@ def upgrade(state: Dict[str, Any]) -> Dict[str, Any]:
     if "version" not in state:
         state = {"version": STATE_VERSION, "panels": [state]}
     out = {**PANEL_DEFAULTS, **state}
-    out["sync"] = {**PANEL_DEFAULTS["sync"], **(state.get("sync") or {})}
+    stored = state.get("sync") or {}
+    out["sync"] = {**PANEL_DEFAULTS["sync"], **stored}
+    if "cursors" not in stored:                       # before plan 10 the x sync also shared the cursors
+        out["sync"]["cursors"] = out["sync"]["x"]
     return out
 
 

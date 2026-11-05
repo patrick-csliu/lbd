@@ -630,7 +630,7 @@ export interface ExploreFrameMeta {
   xscale: string; // "linear" or "log"
   yscale: string;
   full: [[number, number], [number, number]];
-  note: string; // how the data was reduced, e.g. "max of 6×6 cells per pixel"
+  note: string; // how the data was reduced, e.g. "highest of 6×6 cells per pixel"
   reduced: boolean;
   stat: ReduceStat;
   draft?: boolean; // the data was drawn at half resolution (while moving)

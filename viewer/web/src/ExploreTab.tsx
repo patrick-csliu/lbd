@@ -1,4 +1,5 @@
-import { DragEvent, KeyboardEvent, MouseEvent, MutableRefObject, ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { CSSProperties, DragEvent, KeyboardEvent, MouseEvent, MutableRefObject, ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { useResizable } from "./resizable";
 import NumberRange from "./NumberRange";
 import { api, CursorsAnswer, ExploreOpen, FileInfo, OpsInfo, PlotSpec, ReduceStat, SyncKeys, ValueInfo } from "./api";
 import Operations from "./Operations";
@@ -66,7 +67,7 @@ export interface Remembered {
   panels: PanelState[];
   active: number;
   layout: "side" | "stacked";
-  sync: { x: boolean; y: boolean; sliders: boolean };
+  sync: { x: boolean; y: boolean; sliders: boolean; cursors: boolean };
 }
 
 /** At most this many panels (each is a plot drawn by the server); a new file opens with up to FIRST_PANELS. */
@@ -92,7 +93,7 @@ function fresh(info: FileInfo): Remembered {
     panels: [freshPanel(first), ...rest.map((name) => freshPanel({ values: [name] }))],
     active: 0,
     layout: "side",
-    sync: { x: true, y: false, sliders: true },
+    sync: { x: true, y: false, sliders: true, cursors: true },
   };
 }
 
@@ -327,13 +328,13 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
     [],
   );
 
-  /** With x synchronized, the cursors are shared: the active panel leads, and the panels with
+  /** With the cursors synchronized, they are shared: the active panel leads, and the panels with
    * the same x get its cursors' x (type, on, which is active); each keeps its own y or trace and
    * snaps the cursor to its own data. What the others report back changes only themselves. */
   const sharedKey = useRef("");
   const shareCursors = useCallback((id: string, c: CursorsState) => {
     const r = recRef.current, me = liveRef.current[id]?.sync;
-    if (!r || r.panels.length < 2 || !r.sync.x || r.panels[r.active]?.id !== id || !me) return;
+    if (!r || r.panels.length < 2 || !r.sync.cursors || r.panels[r.active]?.id !== id || !me) return;
     const key = JSON.stringify({ id, type: c.type, on: c.on, active: c.active, xs: c.at.map((a) => a.x), ys: c.at.map((a) => a.y) });
     if (key === sharedKey.current) return;
     sharedKey.current = key;
@@ -358,23 +359,8 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
     });
   }, []);
 
-  /** What a panel's controls and view change in it. */
-  const panelApi = useCallback(
-    (id: string) => {
-      const updateSpec = (patch: PlotSpec) => {
-        updatePanel(id, (s) => {
-          const reset = RESETS_SELECTION.some((k) => k in patch);
-          return {
-            ...s,
-            spec: { ...s.spec, ...patch },
-            settings: reset ? { ...s.settings, select: undefined } : s.settings,
-            cursors: reset ? { ...s.cursors, at: [], active: 0 } : s.cursors,
-            back: reset ? undefined : s.back,
-          };
-        });
-        // Synchronized sliders: the same position in every panel with a slider for that axis.
-        const moved = patch.index;
-        if (moved && recRef.current?.sync.sliders && recRef.current.panels.length > 1)
+  /** The other panels' sliders for the axes in `moved` go to the same positions as panel `id`'s. */
+  const syncSliders = useCallback((id: string, moved: Record<string, number>) =>
           setRec((r) => {
             if (!r) return r;
             let changed = false;
@@ -392,7 +378,27 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
               return { ...q, spec: { ...q.spec, index: { ...(q.spec.index ?? {}), ...Object.fromEntries(same) } } };
             });
             return changed ? { ...r, panels } : r;
-          });
+          }),
+  [],
+  );
+
+  /** What a panel's controls and view change in it. */
+  const panelApi = useCallback(
+    (id: string) => {
+      const updateSpec = (patch: PlotSpec) => {
+        updatePanel(id, (s) => {
+          const reset = RESETS_SELECTION.some((k) => k in patch);
+          return {
+            ...s,
+            spec: { ...s.spec, ...patch },
+            settings: reset ? { ...s.settings, select: undefined } : s.settings,
+            cursors: reset ? { ...s.cursors, at: [], active: 0 } : s.cursors,
+            back: reset ? undefined : s.back,
+          };
+        });
+        // Synchronized sliders: the same position in every panel with a slider for that axis.
+        const moved = patch.index;
+        if (moved && recRef.current?.sync.sliders && recRef.current.panels.length > 1) syncSliders(id, moved);
       };
       return {
         updateSpec,
@@ -432,7 +438,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
         },
       };
     },
-    [updatePanel, restart, shareCursors],
+    [updatePanel, restart, shareCursors, syncSliders],
   );
 
   // ---- the panels: add, remove, duplicate, reorder, make active
@@ -505,6 +511,24 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
       /* not remembered */
     }
   };
+  // The controls column and the inspector (right, or a strip below) are resized at their inner
+  // edge; double-click goes back to the default (the size the layout gives, from styles.css).
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const sizeOf = (sel: string, tall = false) => () => {
+    const r = bodyRef.current?.querySelector<HTMLElement>(sel)?.getBoundingClientRect();
+    return r ? (tall ? r.height : r.width) : tall ? 190 : 260;
+  };
+  const ctlSize = useResizable({ key: "lbd-explore-ctl-w", initial: sizeOf(".explore-controls"), min: 200, maxShare: 0.4,
+                                 maxOfContainer: true, side: "left", container: bodyRef, resetOnDoubleClick: true });
+  const inspWidth = useResizable({ key: "lbd-explore-insp-w", initial: sizeOf(".explore-inspector"), min: 220, maxShare: 0.45,
+                                   maxOfContainer: true, side: "right", container: bodyRef, resetOnDoubleClick: true });
+  const inspHeight = useResizable({ key: "lbd-explore-insp-h", initial: sizeOf(".explore-inspector .inspector-body", true), min: 100,
+                                    maxShare: 0.6, maxOfContainer: true, side: "bottom", container: bodyRef, resetOnDoubleClick: true });
+  const bodySizes = {
+    ...(ctlSize.chosen ? { "--ctl-w": `${ctlSize.width}px` } : {}),
+    ...(inspWidth.chosen ? { "--insp-w": `${inspWidth.width}px` } : {}),
+    ...(inspHeight.chosen ? { "--insp-h": `${inspHeight.width}px` } : {}),
+  } as CSSProperties;
   // narrow windows: the inspector strip unfolded (remembered in this browser)
   const [inspOpen, setInspOpenState] = useState(() => {
     try {
@@ -561,6 +585,25 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
     }
     if (Object.keys(next).length) setFollows((old) => ({ ...old, ...next }));
   }, []);
+
+  /** Turn a sync on or off; turned on, the other panels line up with the active one at once
+   * (not only from the next zoom, slider move or click). */
+  const toggleSync = (k: keyof Remembered["sync"]) => {
+    const r = recRef.current;
+    if (!r) return;
+    const on = !r.sync[k];
+    setRec((rr) => rr && { ...rr, sync: { ...rr.sync, [k]: on } });
+    const act = r.panels[r.active];
+    if (!on || !act) return;
+    window.setTimeout(() => {                         // after the new setting is in recRef
+      if (k === "x" || k === "y") onUserView(act.id, act.view);
+      else if (k === "sliders") syncSliders(act.id, act.spec.index ?? {});
+      else {
+        sharedKey.current = "";
+        shareCursors(act.id, act.cursors);
+      }
+    }, 0);
+  };
 
   const chooseAsPreview = async () => {
     if (!rec) return;
@@ -715,7 +758,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
       reading={actLive.reading}
       actions={actActions}
       onBack={act.back ? actApi.onBack : null}
-      others={rec.sync.x ? othersAtX : []}
+      others={rec.sync.cursors ? othersAtX : []}
     />
   );
   const showInspector = (t: InspectorTab) => {
@@ -769,8 +812,11 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
           <FileDetails info={info} metaFilter layout="library" />
         </div>
       ) : (
-        <div className="explore-body">
+        <div className="explore-body" ref={bodyRef} style={bodySizes}>
           <div className="explore-scrim" onClick={() => setCtlOpen(false)} />
+          <div className="ex-handle ctl-handle" aria-label="Width of the controls" title="Drag to change the width · Double-click: the default" {...ctlSize.handle} />
+          <div className="ex-handle insp-w-handle" aria-label="Width of the inspector" title="Drag to change the width · Double-click: the default" {...inspWidth.handle} />
+          <div className="ex-handle insp-h-handle" aria-label="Height of the inspector" title="Drag to change the height · Double-click: the default" {...inspHeight.handle} />
           <aside className="explore-controls" aria-label="Controls">
             <ExploreControls
               heading={several ? `Panel ${rec.active + 1}: ${titleOf(act)}` : null}
@@ -826,16 +872,16 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
                 </span>
               )}
               {several && (
-                <span className="panel-sync" title="Panels with the same axis zoom together; sliders of the same axis move together">
-                  {(["x", "y", "sliders"] as const).map((k) => (
+                <span className="panel-sync" title="What the panels share: zoom along x or y, the sliders, the cursors">
+                  {(["x", "y", "sliders", "cursors"] as const).map((k) => (
                     <button
                       key={k}
                       className="chip toggle-chip"
                       role="checkbox"
                       aria-checked={rec.sync[k]}
                       aria-label={`Sync ${k}`}
-                      title={k === "sliders" ? "Sliders of the same axis move together" : `Panels with the same ${k} axis zoom together`}
-                      onClick={() => setRec((r) => r && { ...r, sync: { ...r.sync, [k]: !r.sync[k] } })}
+                      title={SYNC_TIPS[k]}
+                      onClick={() => toggleSync(k)}
                     >
                       <Icon name="link" /> {k}
                     </button>
@@ -868,6 +914,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
                   >
                     <ExploreView
                       key={`${viewKey}-${panelKeys[p.id] ?? 0}`}
+                      active={!several || i === rec.active}
                       info={info}
                       spec={p.spec}
                       version={info.version}
@@ -966,6 +1013,13 @@ const INSPECTOR_TABS: [InspectorTab, string][] = [
   ["file", "Values & axes"],
   ["meta", "Metadata"],
 ];
+/** The panel bar's sync chips: what each shares between panels. */
+const SYNC_TIPS = {
+  x: "Panels with the same horizontal axis zoom and pan together",
+  y: "Panels with the same vertical axis zoom and pan together",
+  sliders: "Sliders of the same axis move together",
+  cursors: "Panels with the same horizontal axis share the cursors (each reads its own value there)",
+} as const;
 const INSPECTOR_KEY = "lbd-explore-inspector";
 
 /** Units as written for people: V^2 → V², Hz^-1 → Hz⁻¹. */
@@ -1133,34 +1187,35 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
         })}
       </fieldset>
 
-      <label className="field">
-        <span>Horizontal axis</span>
-        <select aria-label="Horizontal axis" value={r.x ?? ""} onChange={(e) => updateSpec({ x: e.target.value, y: undefined, series: undefined })}>
-          {xChoices.map((c) => (
-            <option key={c.name} value={c.name}>
-              {c.text}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      {kind === "heatmap" && (
-        <div className="field">
-          <span>Vertical axis</span>
-          <div className="row-controls">
-            <select aria-label="Vertical axis" value={r.y ?? ""} onChange={(e) => updateSpec({ y: e.target.value })}>
-              {others.map((a) => (
-                <option key={a} value={a}>
-                  {label(a)}
-                </option>
-              ))}
-            </select>
-            <button title="Swap the horizontal and vertical axes" aria-label="Swap the axes" onClick={() => updateSpec({ x: r.y, y: r.x })}>
-              ⇄
-            </button>
-          </div>
+      {/* the axes as one block: the same drop-downs in the same place for curves and maps */}
+      <div className={"field axes-field" + (kind === "heatmap" ? " two" : "")} role="group" aria-label="Axes">
+        <span>Axes</span>
+        <div className="axes-grid">
+          <span className="axes-name">Horizontal</span>
+          <select aria-label="Horizontal axis" value={r.x ?? ""} onChange={(e) => updateSpec({ x: e.target.value, y: undefined, series: undefined })}>
+            {xChoices.map((c) => (
+              <option key={c.name} value={c.name}>
+                {c.text}
+              </option>
+            ))}
+          </select>
+          {kind === "heatmap" && (
+            <>
+              <button className="axes-swap" title="Swap the horizontal and vertical axes" aria-label="Swap the axes" onClick={() => updateSpec({ x: r.y, y: r.x })}>
+                ⇅
+              </button>
+              <span className="axes-name">Vertical</span>
+              <select aria-label="Vertical axis" value={r.y ?? ""} onChange={(e) => updateSpec({ y: e.target.value })}>
+                {others.map((a) => (
+                  <option key={a} value={a}>
+                    {label(a)}
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
         </div>
-      )}
+      </div>
 
       {kind === "curve" && values.length === 1 && others.length > 0 && (
         <label className="field">

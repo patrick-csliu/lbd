@@ -110,7 +110,7 @@ def test_a_view_remembered_before_panels_becomes_one_panel(client, values_files)
     old = mock_values.old_record()
     new = upgrade(old)
     assert new["version"] == 2 and new["panels"] == [old] and new["active"] == 0
-    assert new["layout"] == "side" and new["sync"] == {"x": True, "y": False, "sliders": True}
+    assert new["layout"] == "side" and new["sync"] == {"x": True, "y": False, "sliders": True, "cursors": True}
     assert upgrade(new) == new                                          # the newest shape stays as it is
     path = str(next(p for p in values_files if p.name == "10 one value.lbd").resolve())
     client.put("/api/explore/remembered", json={"path": path, "state": old}).raise_for_status()
@@ -137,3 +137,13 @@ def test_panels_that_no_longer_fit_are_left_out_and_named(tmp_path):
     gone.add_value("P", np.zeros(4), axes="t")
     kept, note = fitting(before, structure(gone), state)
     assert kept is None and "panel 1: the value 'I' is gone; panel 2: the value 'Q' is gone" == note
+
+
+def test_a_view_saved_before_the_cursors_sync_keeps_its_behaviour():
+    """Plan 10: the cursors were shared with the x sync; an older view gets cursors = x."""
+    from lbd_viewer.catalog import upgrade
+
+    old = {"version": 2, "panels": [{}], "sync": {"x": False, "y": False, "sliders": True}}
+    assert upgrade(old)["sync"]["cursors"] is False
+    assert upgrade({**old, "sync": {"x": True}})["sync"]["cursors"] is True
+    assert upgrade({**old, "sync": {"x": True, "cursors": False}})["sync"]["cursors"] is False

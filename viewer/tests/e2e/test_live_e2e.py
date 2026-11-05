@@ -37,7 +37,7 @@ def test_the_status_line_then_the_finished_file(viewer, new_page):
         expect(status(page)).to_contain_text("15 of 50 points")
         points = status(page).locator(".measuring-part").filter(has_text="points")
         width = points.bounding_box()["width"]
-        expect(page.get_by_role("tab", name=re.compile(r"being measured\s*live\.lbd\.writing"))).to_be_visible()
+        expect(page.get_by_role("tab", name=re.compile(r"being measured\s*Live sweep"))).to_be_visible()   # the file's title
         for i in range(3, 6):
             w.write(power=i, S21=np.full(5, float(i)))
         w.flush()
@@ -47,7 +47,7 @@ def test_the_status_line_then_the_finished_file(viewer, new_page):
     finally:
         w.close(stopped=True)
     expect(page.get_by_text("Finished: now live.lbd")).to_be_visible()
-    expect(page.get_by_role("tab", name="live.lbd", exact=True)).to_be_visible()
+    expect(page.get_by_role("tab", name="Live sweep", exact=True)).to_be_visible()
     expect(status(page)).to_have_count(0)
 
 

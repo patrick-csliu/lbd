@@ -42,6 +42,10 @@ def test_explore_fits_the_window(values_files, new_page, size):
     assert m["picTop"] is not None and 0 <= m["picTop"] < h - 60, m        # the plot is in the first screen
     assert m["wide"] == 0, m                                               # nothing sticks out of the window
     assert all(x >= 240 for x in m["hosts"]), m                            # maps keep a usable width (or stack)
+    path = explore(page).locator(".explore-path")
+    if path.is_visible():                                                  # the copy icon right after the path
+        copy = explore(page).locator(".explore-head").get_by_role("button", name="Copy path")
+        assert copy.bounding_box()["x"] - (path.bounding_box()["x"] + path.bounding_box()["width"]) <= 8
     # a click: its value on the panel, in the window
     overlay = explore(page).locator(".panel .explore-overlay").first
     b = overlay.bounding_box()
@@ -114,3 +118,82 @@ def test_a_scatter_view_offers_figure_and_curves(viewer, new_page):
     expect(box.get_by_role("button", name="Open in Figure")).to_be_visible()
     frames(page, lambda: box.get_by_role("button", name="Show as curves").click())
     expect(explore(page).locator(".explore-error")).to_have_count(0)
+
+
+def drag(page: Page, handle, dx: float, dy: float):
+    b = handle.bounding_box()
+    x, y = b["x"] + b["width"] / 2, b["y"] + b["height"] / 2
+    page.mouse.move(x, y)
+    page.mouse.down()
+    page.mouse.move(x + dx / 2, y + dy / 2)
+    page.mouse.move(x + dx, y + dy)
+    page.mouse.up()
+
+
+@pytest.mark.parametrize("size,inspector", [((1920, 1080), "right"), ((1366, 768), "below")])
+def test_the_controls_and_the_inspector_are_resized(values_files, new_page, size, inspector):
+    """Plan 10: drag the inner edge of the controls and of the inspector; the size is kept after a
+    reload; double-click goes back to the default; limits hold."""
+    page = new_page("Explore")
+    page.set_viewport_size({"width": size[0], "height": size[1]})
+    frames(page, lambda: row(page, "7 spectroscopy 3d.lbd").dblclick())
+    ctl, insp = explore(page).locator(".explore-controls"), explore(page).locator(".explore-inspector")
+    w0 = ctl.bounding_box()["width"]
+    drag(page, explore(page).get_by_label("Width of the controls"), 60, 0)
+    assert ctl.bounding_box()["width"] == pytest.approx(w0 + 60, abs=3)
+    if inspector == "right":
+        handle, measure, move = explore(page).get_by_label("Width of the inspector"), "width", (-80, 0)
+    else:
+        handle, measure, move = explore(page).get_by_label("Height of the inspector"), "height", (0, -80)
+    i0 = insp.bounding_box()[measure]
+    drag(page, handle, *move)
+    i1 = insp.bounding_box()[measure]
+    assert i1 == pytest.approx(i0 + 80, abs=3)
+    page.reload()                                                          # the sizes stay (this browser)
+    page.get_by_role("tab", name="Explore", exact=True).click()
+    frames(page, lambda: row(page, "7 spectroscopy 3d.lbd").dblclick())
+    assert explore(page).locator(".explore-controls").bounding_box()["width"] == pytest.approx(w0 + 60, abs=3)
+    assert explore(page).locator(".explore-inspector").bounding_box()[measure] == pytest.approx(i1, abs=3)
+    explore(page).get_by_label("Width of the controls").dblclick()
+    assert explore(page).locator(".explore-controls").bounding_box()["width"] == pytest.approx(w0, abs=3)
+    drag(page, explore(page).get_by_label("Width of the controls"), -400, 0)        # the smallest it may be
+    assert explore(page).locator(".explore-controls").bounding_box()["width"] == pytest.approx(200, abs=3)
+
+
+def test_a_maps_axes_have_the_same_width(values_files, new_page):
+    page = new_page("Explore")
+    frames(page, lambda: row(page, "7 spectroscopy 3d.lbd").dblclick())
+    h, v = explore(page).get_by_label("Horizontal axis"), explore(page).get_by_label("Vertical axis")
+    assert h.bounding_box()["width"] == pytest.approx(v.bounding_box()["width"], abs=1)
+    assert h.bounding_box()["x"] == pytest.approx(v.bounding_box()["x"], abs=1)
+
+
+@pytest.mark.parametrize("size", SIZES, ids=[f"{w}x{h}" for w, h in SIZES])
+def test_two_cursors_are_read_without_cutting(values_files, new_page, size):
+    """Plan 10: with two cursors on a map, no read-out or inspector text is wider than its box
+    (it wraps, or the line has a row per cursor); a mean of ±flux reads 0, not 2.8e−17."""
+    page = new_page("Explore")
+    frames(page, lambda: row(page, "7 spectroscopy 3d.lbd").dblclick())    # opened at 1280×800, then resized
+    page.set_viewport_size({"width": size[0], "height": size[1]})
+    page.wait_for_timeout(1200)
+    overlay = explore(page).locator(".panel .explore-overlay").first
+    b = overlay.bounding_box()
+    overlay.click(position={"x": b["width"] * 0.3, "y": b["height"] * 0.25})
+    page.keyboard.down("Shift")
+    overlay.click(position={"x": b["width"] * 0.6, "y": b["height"] * 0.75})
+    page.keyboard.up("Shift")
+    expect(explore(page).locator(".panel .explore-readout").first.locator(".explore-pick")).to_have_count(3)
+    explore(page).get_by_role("tab", name="Cursors").click()
+    cut = page.evaluate(
+        """() => {
+          const main = document.querySelector('main:not([hidden])');
+          const rows = [...main.querySelectorAll('.panel .readout-row')];
+          const body = main.querySelector('.inspector-body');
+          const out = rows.filter((r) => r.scrollWidth > r.clientWidth + 1 && r.querySelector('.explore-pick:first-child')
+                                   && r.querySelector('.explore-pick:first-child').scrollWidth > r.clientWidth + 1).length;
+          return { rows: out, inspector: body && body.offsetParent ? body.scrollWidth - body.clientWidth : 0 };
+        }"""
+    )
+    assert cut["inspector"] <= 1, cut                                    # nothing in the inspector sticks out
+    if size[0] >= 1366:                                                  # a usual panel: each cursor's line whole
+        assert cut["rows"] == 0, cut

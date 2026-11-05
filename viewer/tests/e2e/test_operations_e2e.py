@@ -99,10 +99,15 @@ def test_equations_with_their_legend_and_messages(sweep, new_page):
     ops(page).locator(".equations > summary").click()                  # folded until used
     ops(page).locator(".eq-names > summary").click()
     legend = ops(page).locator(".eq-legend")
-    expect(legend).to_contain_text("x = t")                           # what the names stand for
-    expect(legend).to_contain_text("y = v")
-    expect(legend).to_contain_text("power = power, an axis: one per trace")
+    rows = legend.locator(".eq-row")                                   # what the names stand for
+    expect(rows.filter(has_text="= t").first).to_contain_text("x")
+    expect(rows.filter(has_text="= v").first).to_contain_text("y")
+    expect(legend.get_by_title("power = power, an axis: one per trace")).to_be_visible()
+    expect(legend).to_contain_text("Trigonometry")                     # the functions in groups
     box = ops(page).get_by_label("Equation for y")
+    box.click()                                                        # a click in the legend puts it in
+    legend.get_by_role("button", name="mean", exact=True).click()
+    expect(box).to_have_value("mean(")
     box.fill("y * 2 + power")
     frames(page, lambda: box.press("Enter"))
     expect(ops(page)).to_contain_text("The plot shows y * 2 + power")

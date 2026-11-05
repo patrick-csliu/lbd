@@ -149,6 +149,7 @@ def test_chosen_traces_typed_limits_and_a_swap(sweep, small_map, new_page):
     frames(page, lambda: values.nth(1).click())                       # only power -30
     frames(page, lambda: values.nth(3).click(modifiers=["ControlOrMeta"]))
     expect(explore(page).locator(".axis-select legend")).to_contain_text("2 of 5")
+    explore(page).get_by_role("button", name="Limits").click()          # typed limits: in the ⇔ popover
     box = explore(page).get_by_label("Horizontal from")
     box.fill("10")
     meta = frames(page, lambda: box.press("Enter"))

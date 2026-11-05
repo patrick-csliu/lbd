@@ -74,6 +74,26 @@ are still written as 1.2).
   value at a time"), and the equations' list of names was empty. Now a value under 64 MB is
   always read whole, **Leave free** is 0 unless set (the automatic 2 GB / 10 % reserve is gone; a
   number you set is kept), and a plot summarised only for lack of free memory says so once.
+- **Explore: a steady tab bar.** It is 30 px high with or without files (it grew by 34 px when
+  the first file opened); right-click on its empty part lists the tabs and has **Close all**.
+  The copy icon sits right after the file's path.
+- **Explore: resizable columns.** Drag the inner edge of the controls or of the inspector (on
+  the right, or the strip below) to resize it; double-click it for the default size.
+- **Explore: a map's axes as one block.** Horizontal and vertical are two drop-downs of the same
+  width, with the swap button ⇅ beside both; curves keep the horizontal one in the same place.
+- **Explore: a cursors sync, and syncs that line up at once.** A fourth chip, **cursors**, shares
+  the cursors between panels with the same horizontal axis; **x** and **y** now only zoom and pan
+  together (a view saved before keeps sharing its cursors as its x did). Turning a chip on lines
+  the panels up with the active one at once, not only from the next zoom.
+- **Explore: Names and functions** is a short table: the names and what they stand for, the
+  functions in groups, examples; a click puts one into the equation field used last.
+- **Explore: the cursors.** Cursor 2 has a **×**; **Remove** is now **Remove cursors**, beside the
+  cursor types (with Undo), apart from **Move cursor 1 to the Max / Min / Peak**. The line under
+  a panel's title has a row per cursor (nothing cut off in a usual panel; the whole text when you
+  point at it), "Click the plot …" shows only in the active panel, the inspector's numbers wrap
+  to its width, and a mean that is zero up to rounding reads 0 (not 2.8e−17).
+- **Explore: plainer pixel note**: "average of 5×8 cells per pixel" (was "mean of …"), "lowest
+  and highest point per pixel column"; its tooltip says what it means and where to change it.
 - **Explore is a workbench that fills the window.** The controls, the plots and a new
   inspector each scroll on their own, so the page never scrolls and changing a control or reading
   a cursor never moves the plot. The controls fold into **Data**, **Display** and **Processing**;

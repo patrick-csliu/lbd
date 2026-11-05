@@ -213,7 +213,7 @@ def test_a_map_bigger_than_memory_is_drawn_from_its_summary(client, big, monkeyp
     sid, meta, by_summary = picture(client, path, MAP)
     s = client.app.state.lbd.explore.get(sid)
     assert s.summarised and len(summaries.shared().entries()) == 1
-    assert "max of" in meta["note"]                                   # reduced, as any big map
+    assert "highest of" in meta["note"]                                # reduced, as any big map
     monkeypatch.setitem(memory._shared, "cache", PartCache(Memory(always_whole=0, system=FakeMemory(room=10 * GB))))
     sid2, meta2, whole = picture(client, path, MAP)
     assert not client.app.state.lbd.explore.get(sid2).summarised
@@ -393,7 +393,7 @@ def test_curves_bigger_than_memory_are_drawn_from_their_summary(client, long_tra
     little_room(monkeypatch)
     sid, meta, by_summary = picture(client, path, CURVES)
     s = client.app.state.lbd.explore.get(sid)
-    assert s.summarised and meta["note"] == "min and max per pixel column"
+    assert s.summarised and meta["note"] == "lowest and highest point per pixel column"
     assert s.full[1][0] < y.min() and s.full[1][1] > y.max()           # the range from the summary
     monkeypatch.setitem(memory._shared, "cache", PartCache(Memory(always_whole=0, system=FakeMemory(room=10 * GB))))
     sid2, meta2, whole = picture(client, path, CURVES)

@@ -76,3 +76,33 @@ def test_move_all_tabs_to_another_page(viewer, new_page):
     menu(one, re.compile(rf"^Move all tabs to Page {number}")).click()
     expect(two.locator(".tab")).to_have_count(2)
     expect(one.locator(".tab")).to_have_count(0)
+
+
+def test_explore_right_click_on_the_empty_bar_closes_all(viewer, new_page):
+    """Plan 10: the empty part of the Explore tab bar has the menu for all tabs too."""
+    from test_explore_e2e import frames
+    from pageui import row
+
+    page = new_page("Explore")
+    for name in ("a.lbd", "b.lbd"):
+        frames(page, lambda name=name: row(page, name).dblclick())
+    strip = page.locator("main:not([hidden]) .tabs")
+    box = strip.bounding_box()
+    strip.click(button="right", position={"x": box["width"] - 10, "y": box["height"] / 2})
+    menu(page, "Close all").click()
+    expect(page.locator("main:not([hidden]) .tab")).to_have_count(0)
+
+
+def test_the_tab_bar_keeps_its_height(viewer, new_page):
+    """Plan 10: the bar is the same height with or without files, in Explore and in Figure."""
+    from test_explore_e2e import frames
+    from pageui import row
+
+    page = new_page("Explore")
+    bar = page.locator("main:not([hidden]) .tabbar")
+    empty = bar.bounding_box()["height"]
+    frames(page, lambda: row(page, "a.lbd").dblclick())
+    assert bar.bounding_box()["height"] == empty == 30
+    figure = new_page()
+    open_file(figure, "a.lbd")
+    assert figure.locator("main:not([hidden]) .tabbar").bounding_box()["height"] == 30
