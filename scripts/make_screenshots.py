@@ -302,6 +302,10 @@ def explore_reading(page: Page, url: str, ctx) -> None:
     page.mouse.click(box["x"] + box["width"] * 0.6, box["y"] + box["height"] * 0.7)        # cursor 2
     page.keyboard.up("Shift")
     page.locator("main:not([hidden]) .explore-pick").nth(1).wait_for()
+    cuts = explore_area.get_by_role("button", name="Cuts")             # the explore shot left them off
+    if cuts.get_attribute("aria-pressed") != "true":
+        cuts.click()
+    page.locator("main:not([hidden]) .explore-cut-top").first.wait_for()
     page.wait_for_timeout(600)
     mark(page, [
         (1, "main:not([hidden]) .explore-cut-top", 0, "l"),
