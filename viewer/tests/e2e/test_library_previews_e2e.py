@@ -80,8 +80,9 @@ def test_a_preview_chosen_in_explore_stays_until_reset(viewer, new_page):
     row(page, "c.lbd").click()
     expect(preview(page).locator("img")).to_be_visible(timeout=30_000)
     page.get_by_role("button", name="Open in Explore").click()
-    page.locator("main:not([hidden])").get_by_role("button", name="Library preview", exact=True).click()
-    expect(page.get_by_text("This view is now the file's preview in the Library.")).to_be_visible(timeout=30_000)
+    page.locator("main:not([hidden])").get_by_role("button", name="More", exact=True).click()
+    page.get_by_role("menuitem", name="Use as Library picture").click()
+    expect(page.get_by_text(re.compile("Library picture updated"))).to_be_visible(timeout=30_000)
     page.get_by_role("tab", name="Library", exact=True).click()
     expect(preview(page)).to_contain_text("Chosen in Explore on", timeout=10_000)
     # the file changes: the chosen picture stays, and says it was chosen before

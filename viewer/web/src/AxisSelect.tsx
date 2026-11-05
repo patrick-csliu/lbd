@@ -37,7 +37,12 @@ export default function AxisSelect({ path, version, axis, title, chosen, onChang
     };
   }, [path, axis, version]);
 
-  if (error) return <div className="field muted small">{title}: {error}</div>;
+  // Positions that can't be listed (e.g. the dimension of a data point): all are shown; the
+  // reason goes to the console, never a raw message in the controls.
+  if (error) {
+    console.info(`${title}: ${error}`);
+    return <div className="field muted small">{title}: all shown</div>;
+  }
   if (!values) return <div className="field muted small">{title}: reading…</div>;
   const n = values.values.length;
   const on = new Set(chosen ?? values.values.map((_, i) => i));

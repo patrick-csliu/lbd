@@ -105,7 +105,7 @@ def test_the_library_shows_a_file_and_opens_it(small_map, new_page):
     expect(detail).to_contain_text("value")
     frames(page, lambda: detail.get_by_role("button", name="Open in Explore").click())
     expect(page.get_by_role("tab", name="Explore", exact=True)).to_have_attribute("aria-selected", "true")
-    expect(explore(page).locator(".tab-label")).to_have_text(["small_map.lbd"])
+    expect(explore(page).locator(".tab-label")).to_have_text(["Small map"])
 
 
 def test_a_figure_opens_in_explore_and_back(small_map, new_page):
@@ -125,7 +125,7 @@ def test_files_from_explorer_open_in_the_workspace_set(viewer, small_map, new_pa
               json={"open_data_in": "explore"}).raise_for_status()
     deliver(viewer, "small_map.lbd")
     expect(page.get_by_role("tab", name="Explore", exact=True)).to_have_attribute("aria-selected", "true")
-    expect(explore(page).locator(".tab-label")).to_have_text(["small_map.lbd"])
+    expect(explore(page).locator(".tab-label")).to_have_text(["Small map"])
     # Explore keeps no hold on the file: the Figure workspace of any page can still open it.
     assert all(not p["files"] for p in viewer.state.pages.page_list())
 

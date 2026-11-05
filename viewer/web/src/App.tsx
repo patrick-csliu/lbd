@@ -145,6 +145,10 @@ function Shell() {
   const [exploreTabs, setExploreTabs] = useState<Tab[]>([]);
   const [exploreActive, setExploreActive] = useState<string | null>(null);
   const [exploreMenu, setExploreMenu] = useState<{ x: number; y: number; path: string } | null>(null);
+  // Explore: each open file's title (its tab shows it; the file name is in the tooltip), and the list of all tabs
+  const [exploreTitles, setExploreTitles] = useState<Record<string, string>>({});
+  const [exploreList, setExploreList] = useState<MenuAt | null>(null);
+  const exploreStrip = useRef<HTMLDivElement>(null);
   const [libraryPath, setLibraryPath] = useState<string | null>(null);
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [active, setActive] = useState<string | null>(null);
@@ -387,6 +391,10 @@ function Shell() {
     [openTab],
   );
 
+  // the active Explore tab (a new preview tab too) is scrolled into view in the tab strip
+  useEffect(() => {
+    exploreStrip.current?.querySelector(".tab.active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [exploreActive, exploreTabs.length]);
   const closeExplore = useCallback((paths: string[]) => {
     const gone = new Set(paths);
     setExploreTabs((prev) => {
@@ -965,12 +973,23 @@ function Shell() {
         <main className="main" hidden={page !== "explore"}>
           <div className="tabbar">
             {!sidebarShown && <SidebarToggle open={false} onToggle={toggleFolders} what="Files: the Library selection" className="folders-toggle" />}
-            <div className="tabs" role="tablist" aria-label="Files in Explore">
+            <div className="tabs" role="tablist" aria-label="Files in Explore" ref={exploreStrip}
+                 onKeyDown={(e) => {
+                   // one Tab stop for the strip: ← → move between the tabs
+                   if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+                   const i = exploreTabs.findIndex((t) => t.path === exploreActive);
+                   const next = exploreTabs[(i + (e.key === "ArrowRight" ? 1 : -1) + exploreTabs.length) % exploreTabs.length];
+                   if (next) {
+                     setExploreActive(next.path);
+                     e.preventDefault();
+                     window.setTimeout(() => exploreStrip.current?.querySelector<HTMLElement>(".tab.active .tab-label")?.focus(), 0);
+                   }
+                 }}>
               {exploreTabs.map((t) => (
                 <div
                   key={t.path}
                   className={"tab" + (t.path === exploreActive ? " active" : "") + (t.pinned ? "" : " preview")}
-                  title={`${t.path}\nRight-click: close, open in Figure`}
+                  title={`${exploreTitles[t.path] ? `${exploreTitles[t.path]}\n` : ""}${t.path}${t.pinned ? "" : "\nPreview: double-click to keep it open"}\nRight-click: close, open in Figure`}
                   onContextMenu={(e) => {
                     e.preventDefault();
                     setExploreMenu({ ...menuAt(e, []), path: t.path });
@@ -979,26 +998,54 @@ function Shell() {
                   <button
                     role="tab"
                     aria-selected={t.path === exploreActive}
+                    tabIndex={t.path === exploreActive ? 0 : -1}
                     className="tab-label"
                     onClick={() => setExploreActive(t.path)}
                     onDoubleClick={() => openExplore([t.path], true)}
                   >
                     {measuredMark(t.path)}
-                    {baseName(t.path)}
+                    {exploreTitles[t.path] || baseName(t.path)}
                   </button>
-                  <button className="tab-close" aria-label={`Close ${baseName(t.path)}`} onClick={() => closeExplore([t.path])}>
+                  <button className="tab-close" tabIndex={-1} aria-label={`Close ${baseName(t.path)}`} onClick={() => closeExplore([t.path])}>
                     ×
                   </button>
                 </div>
               ))}
             </div>
+            {exploreTabs.length > 0 && (
+              <button
+                className="tabs-more"
+                title="All tabs: show one, close all"
+                aria-label="All Explore tabs"
+                aria-haspopup="menu"
+                onClick={(e) => {
+                  const r = e.currentTarget.getBoundingClientRect();
+                  setExploreList({
+                    x: r.right - 260,
+                    y: r.bottom,
+                    items: [
+                      ...exploreTabs.map((t) => ({
+                        label: `${t.path === exploreActive ? "✓ " : "\u2003"}${exploreTitles[t.path] || baseName(t.path)}`,
+                        onClick: () => setExploreActive(t.path),
+                      })),
+                      "-" as const,
+                      { label: "Close all", onClick: () => closeExplore(exploreTabs.map((t) => t.path)) },
+                    ],
+                  });
+                }}
+              >
+                ⋯
+              </button>
+            )}
           </div>
+          {exploreList && <ContextMenu menu={exploreList} onClose={() => setExploreList(null)} />}
           {exploreMenuShown && <ContextMenu menu={exploreMenuShown} onClose={() => setExploreMenu(null)} />}
-          {exploreTabs.length === 0 && <EmptyMain hasRoots={!!state?.roots.length} where="explore" />}
+          {exploreTabs.length === 0 && <EmptyMain hasRoots={!!state?.roots.length} where="explore" onShowFiles={sidebarShown ? undefined : toggleFolders} />}
           {exploreTabs.map((t) => (
             <div key={t.path} className="tab-body" hidden={t.path !== exploreActive}>
               <ExploreTab
                 path={t.path}
+                onTitle={(title) => setExploreTitles((old) => (old[t.path] === title ? old : { ...old, [t.path]: title }))}
                 onOpenInFigure={() => openIn(t.path, "figure")}
                 onError={(m) => toast(m, "error")}
                 onMenu={(e) => {
@@ -1063,7 +1110,7 @@ function Shell() {
           </div>
           {tabMenuShown && <ContextMenu menu={tabMenuShown} onClose={closeTabMenu} />}
           {confirm && <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />}
-          {tabs.length === 0 && <EmptyMain hasRoots={!!state?.roots.length} where="figure" />}
+          {tabs.length === 0 && <EmptyMain hasRoots={!!state?.roots.length} where="figure" onShowFiles={sidebarShown ? undefined : toggleFolders} />}
           {state &&
             tabs.map((t) => (
               <div key={t.path} className="tab-body" hidden={t.path !== active}>
@@ -1125,16 +1172,23 @@ function Shell() {
   );
 }
 
-function EmptyMain({ hasRoots, where }: { hasRoots: boolean; where: "explore" | "figure" }) {
+function EmptyMain({ hasRoots, where, onShowFiles }: { hasRoots: boolean; where: "explore" | "figure"; onShowFiles?: () => void }) {
   return (
     <div className="empty">
       <h2>No file open</h2>
       {hasRoots ? (
-        where === "explore" ? (
-          <p>Click a file in the Files sidebar to look at it, and double-click it to keep it open. Zoom with the wheel; click a point to read its value.</p>
-        ) : (
-          <p>Click a file in the Files sidebar to see what is inside it, and double-click it to plot it.</p>
-        )
+        <>
+          {where === "explore" ? (
+            <p>Click a file in the Files sidebar to look at it, and double-click it to keep it open. Zoom with the wheel; click a point to read its value.</p>
+          ) : (
+            <p>Click a file in the Files sidebar to see what is inside it, and double-click it to plot it.</p>
+          )}
+          {onShowFiles && (
+            <button className="primary" onClick={onShowFiles}>
+              Show files
+            </button>
+          )}
+        </>
       ) : (
         <p>
           Add a folder that contains <code>.lbd</code> files in the <strong>Library</strong> (<strong>+ Add folder</strong>). You can also

@@ -3,6 +3,7 @@ import {
   KeyboardEvent as ReactKeyboardEvent,
   MutableRefObject,
   PointerEvent as ReactPointerEvent,
+  ReactNode,
   useCallback,
   useEffect,
   useRef,
@@ -32,6 +33,17 @@ import { ConfirmDialog, ConfirmRequest, ContextMenu, MenuAt, MenuEntry, Popover 
 import type { ExportSource } from "./ExportDialog";
 import type { PictureWhat } from "./clipboard";
 import { SummaryProgress } from "./SummaryProgress";
+import { Icon } from "./icons";
+import { useToast } from "./toast";
+
+/** The timing line under the plot (server and drawing times) is for developers: ?debug in the address. */
+const DEBUG = (() => {
+  try {
+    return new URLSearchParams(window.location.search).has("debug");
+  } catch {
+    return false;
+  }
+})();
 
 /**
  * The Explore view (preview): a file's plot drawn by the server's matplotlib (explore.py), made
@@ -135,7 +147,6 @@ interface Props {
   settings: ViewSettings;
   /** How a pixel shows several map cells. */
   stat: ReduceStat;
-  onStat: (s: ReduceStat) => void;
   /** The zoom to start with (remembered), or null: all the data. */
   initialView: View | null;
   /** The view now (each new picture), to be remembered. */
@@ -153,9 +164,6 @@ interface Props {
   onShowCut: (which: "row" | "column", index: Record<string, number>) => void;
   /** The operations' state with each picture (which applied, what the plot shows). */
   onOpsInfo: (info: OpsInfo | null) => void;
-  /** One of several panels: the typed limits fold behind a button, the read-out is one line
-   *  (the active panel's numbers are in the Cursors section). */
-  compact?: boolean;
   /** Another panel's zoom to follow (several panels, synchronized); a new `seq` applies it. */
   follow?: Follow | null;
   /** The user changed the view here (zoom, pan, typed limits; null: show everything). */
@@ -164,6 +172,15 @@ interface Props {
   onSync?: (s: SyncKeys & { full: [Lim, Lim] }) => void;
   /** Getting data out (plan 5): the entries of this panel's Data menu (also in the right-click menu). */
   dataItems?: () => MenuEntry[];
+  /** The left of the panel's toolbar: its number and name (and what drags it). */
+  title?: ReactNode;
+  /** More entries for the panel's ⋯ menu (duplicate, remove …). */
+  panelItems?: () => MenuEntry[];
+  /** The plot couldn't be opened (the reason), so the controls can say so. */
+  onFailed?: (msg: string) => void;
+  /** What a plot Explore can't draw offers instead: Figure, or the values as curves. */
+  onOpenInFigure?: () => void;
+  onShowCurves?: () => void;
 }
 
 /** Limits pushed from another panel: x, y or both. */
@@ -183,6 +200,8 @@ export interface ExploreActions {
   /** Cursor i to a typed stored value along x or y (snapped to the data). */
   typed: (i: number, axis: "x" | "y", stored: number) => void;
   remove: () => void;
+  /** Show (or hide) the mouse and keys help. */
+  help: () => void;
   /** A map's values counted with these view settings (the contrast control). */
   histogram: (settings: ViewSettings) => Promise<Histogram | null>;
   /** Operation `index`'s delay (s) or rotation (°), from the data between the cursors (else in
@@ -197,7 +216,6 @@ export interface ExploreActions {
 
 const CURSOR_COLORS = ["#e0001b", "#0057d9"];
 const GRAB_PX = 7; // how near a cursor the mouse must be to drag it
-const CUT_PX = 96; // the cuts' strips: height above the map, width beside it
 
 const askOf = (c: CursorRead): CursorAsk => ({ x: c.x, y: c.y, ...(c.trace !== undefined ? { trace: c.trace } : {}), ...(c.free ? { free: true } : {}) });
 const cursorsKey = (type: string, at: CursorAsk[], cuts: boolean, on: boolean) =>
@@ -216,7 +234,6 @@ export default function ExploreView({
   onError,
   settings,
   stat,
-  onStat,
   initialView,
   onView,
   cursors,
@@ -226,12 +243,20 @@ export default function ExploreView({
   onStepSlider,
   onShowCut,
   onOpsInfo,
-  compact = false,
   follow = null,
   onUserView,
   onSync,
   dataItems,
+  title,
+  panelItems,
+  onFailed,
+  onOpenInFigure,
+  onShowCurves,
 }: Props) {
+  const onFailedRef = useRef(onFailed);
+  onFailedRef.current = onFailed;
+  const toast = useToast();
+  const limitsButton = useRef<HTMLButtonElement>(null);
   const [limitsOpen, setLimitsOpen] = useState(false);
   // Pictures travel as raw pixels (fastest on this computer; "png" is the server's other choice).
   const format = "raw" as const;
@@ -246,7 +271,6 @@ export default function ExploreView({
   const [reading, setReading] = useState<CursorsAnswer | null>(null);
   const [mouse, setMouse] = useState<[number, number] | null>(null);
   const [help, setHelp] = useState(false);
-  const helpButton = useRef<HTMLButtonElement>(null);
   const [menu, setMenu] = useState<MenuAt | null>(null);
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -678,7 +702,8 @@ export default function ExploreView({
           setOpens((k) => k + 1);
           setOpened(o);
           onOpenedRef.current(o);
-          if (o.warnings.length) onErrorRef.current(o.warnings.join(" "));
+          // notes about what is drawn (a variable sweep against its point number …): in the panel, not a red toast
+          if (o.warnings.length) setNote(o.warnings.map((w) => w.replace(/^[^:]*\.lbd: /, "")).join(" "));
           // the zoom to keep, else all the data as the server finds it (with the view settings applied)
           wanted.current = keepView;
           showAll.current = !keepView;
@@ -686,8 +711,10 @@ export default function ExploreView({
         })
         .catch((e) => {
           if (!cancelled) {
-            setError(e instanceof Error ? e.message : String(e));
+            const msg = e instanceof Error ? e.message : String(e);
+            setError(msg);
             setStatus("");
+            onFailedRef.current?.(msg);
           }
         });
     };
@@ -964,6 +991,7 @@ export default function ExploreView({
       moveCursors(now);
     },
     remove: clearCursors,
+    help: () => setHelp((h) => !h),
     histogram: (st) => (session.current ? api.exploreHistogram(session.current, st) : Promise.resolve(null)),
     calculate: async (what, index) => {
       const sid = session.current, m = current(), r = readingRef.current;
@@ -1044,7 +1072,14 @@ export default function ExploreView({
         box.current = null;
         down.current = null;
         paintOverlay();
-      } else clearCursors();
+      } else if (help) setHelp(false);
+      else if (limitsOpen) setLimitsOpen(false);
+      else if (document.querySelector("dialog[open], .context-menu, .popover-open")) return; // closing those, not the cursors
+      else if (st.at.length) {
+        const before = st;
+        clearCursors();
+        toast("Cursors removed.", "info", { label: "Undo", onClick: () => onCursorsRef.current(before) });
+      }
     } else if (k === "?") setHelp((h) => !h);
     else return;
     e.preventDefault();
@@ -1055,78 +1090,134 @@ export default function ExploreView({
   // ---- layout
 
   const cssSize: CSSProperties = meta ? { width: meta.width / meta.dpr, height: meta.height / meta.dpr } : {};
-  const showCuts = opened?.kind === "heatmap" && cursors.cuts && cursors.on;
+  // A map's cuts take their room from the start (guessed from the plot settings until the server
+  // says), so the plot doesn't shrink once it has been drawn.
+  const firstValue = info.values.find((v) => v.name === (spec.values ?? [])[0]) ?? info.values.find((v) => v.shape.length > 0);
+  const kindNow = opened?.kind ?? spec.kind ?? (firstValue && firstValue.shape.filter((n) => n > 1).length >= 2 ? "heatmap" : "curve");
+  const showCuts = kindNow === "heatmap" && cursors.cuts && cursors.on;
   const plotCss = meta ? meta.plot.map((v) => v / meta.dpr) : null;
   const c1 = reading?.cursors[0] ?? null, c2 = reading?.cursors[1] ?? null;
 
   return (
     <div className="explore">
       <div className="explore-toolbar">
-        {opened?.kind === "heatmap" && (
-          <label title="When a screen pixel stands for several cells, what it shows">
-            Several cells per pixel{" "}
-            <select value={stat} onChange={(e) => onStat(e.target.value as ReduceStat)}>
-              <option value="max">max (peaks stay)</option>
-              <option value="min">min (dips stay)</option>
-              <option value="mean">mean</option>
-            </select>
-          </label>
+        {title}
+        <span className="spacer" />
+        {meta && (
+          <span className={"explore-note" + (meta.reduced ? " reduced" : "")} title={`${meta.note}: how the data fits the screen's pixels (what a pixel shows: in Display)`}>
+            {meta.note}
+          </span>
         )}
-        <button onClick={() => setView(null)} title="Show all the data (or double-click the plot)">
-          Reset view
+        <button className="ib" onClick={() => setView(null)} aria-label="Reset view" title="Reset view: all the data (key 0, or double-click the plot)">
+          <Icon name="reset" />
         </button>
+        {meta && (
+          <button ref={limitsButton} className="ib" aria-label="Limits" aria-expanded={limitsOpen} aria-pressed={limitsOpen} onClick={() => setLimitsOpen((o) => !o)} title="Limits: type the range shown">
+            <Icon name="limits" />
+          </button>
+        )}
+        {opened?.kind === "heatmap" && (
+          <button
+            className="ib"
+            aria-label="Cuts"
+            aria-pressed={cursors.cuts}
+            disabled={!cursors.on}
+            onClick={() => onCursorsRef.current({ ...cursorsRef.current, cuts: !cursorsRef.current.cuts })}
+            title="Cuts: the row and column through cursor 1, beside the map (key C)"
+          >
+            <Icon name="cuts" />
+          </button>
+        )}
         {dataItems && (
           <button
+            className="ib"
             aria-haspopup="menu"
-            title="Get the data out: the numbers shown as a CSV file, or the picture"
+            aria-label="Data"
+            title="Data: save the numbers shown as CSV, copy or save the picture"
             onClick={(e) => {
               const r = e.currentTarget.getBoundingClientRect();
               setMenu({ x: r.left, y: r.bottom, items: dataItems() });
             }}
           >
-            Data ▾
+            <Icon name="download" />
           </button>
         )}
-        {compact && (
-          <button aria-expanded={limitsOpen} onClick={() => setLimitsOpen((o) => !o)} title="Type the limits of the view">
-            Limits {limitsOpen ? "▴" : "▾"}
-          </button>
-        )}
-        {opened?.kind === "heatmap" && (
-          <label className="check" title="The row and column through cursor 1, beside the map (key C)">
-            <input
-              type="checkbox"
-              checked={cursors.cuts}
-              disabled={!cursors.on}
-              onChange={(e) => onCursorsRef.current({ ...cursorsRef.current, cuts: e.target.checked })}
+        <button
+          className="ib"
+          aria-haspopup="menu"
+          aria-label="Panel menu"
+          title="More: mouse and keys, panel"
+          onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            setMenu({ x: r.right - 200, y: r.bottom, items: [{ label: "Mouse and keys… (?)", onClick: () => setHelp(true) }, ...(panelItems ? ["-" as const, ...panelItems()] : [])] });
+          }}
+        >
+          <Icon name="more" />
+        </button>
+        {meta && limitsOpen && (
+          <Popover className="explore-limits" label="Limits" onClose={() => setLimitsOpen(false)} opener={limitsButton}>
+            <NumberRange
+              label="Horizontal"
+              value={meta.xlim}
+              log={meta.xscale === "log"}
+              onChange={(v) => setView({ xlim: [v[0] ?? meta.full[0][0], v[1] ?? meta.full[0][1]], ylim: wanted.current?.ylim ?? meta.ylim })}
             />
-            Cuts
-          </label>
+            <NumberRange
+              label="Vertical"
+              value={meta.ylim}
+              log={meta.yscale === "log"}
+              onChange={(v) => setView({ xlim: wanted.current?.xlim ?? meta.xlim, ylim: [v[0] ?? meta.full[1][0], v[1] ?? meta.full[1][1]] })}
+            />
+          </Popover>
         )}
-        <span className="spacer" />
-        {meta && (
-          <span className={"explore-note" + (meta.reduced ? " reduced" : "")} title="How the data fits the screen's pixels">
-            {meta.note}
+      </div>
+      <div className="explore-readout" aria-live="polite">
+        {c1 ? (
+          <CursorLine n={1} c={c1} />
+        ) : (
+          <span className="muted small">{cursors.on ? "Click the plot to read a stored value." : "No cursor type chosen: a click does nothing (choose one in the Cursors tab, or press K)."}</span>
+        )}
+        {c2 && <CursorLine n={2} c={c2} />}
+        {c1 && c2 && (
+          <span className="explore-pick small delta">
+            {between(c1, c2).map((d) => (
+              <span key={d.role} className="range-part">
+                Δ{d.label} = {si(d.delta, d.unit)} · ⟨{d.label}⟩ = {si(d.mean, d.unit)}
+              </span>
+            ))}
+          </span>
+        )}
+        {cutHover && <span className="small">{cutHover}</span>}
+        {note && (
+          <span className="small" role="status">
+            {note}{" "}
+            <button className="link" onClick={() => setNote(null)}>
+              OK
+            </button>
           </span>
         )}
       </div>
-      {meta && (!compact || limitsOpen) && (
-        <div className="explore-limits">
-          <NumberRange
-            label="Horizontal"
-            value={meta.xlim}
-            log={meta.xscale === "log"}
-            onChange={(v) => setView({ xlim: [v[0] ?? meta.full[0][0], v[1] ?? meta.full[0][1]], ylim: wanted.current?.ylim ?? meta.ylim })}
-          />
-          <NumberRange
-            label="Vertical"
-            value={meta.ylim}
-            log={meta.yscale === "log"}
-            onChange={(v) => setView({ xlim: wanted.current?.xlim ?? meta.xlim, ylim: [v[0] ?? meta.full[1][0], v[1] ?? meta.full[1][1]] })}
-          />
+      {error && (
+        <div className="error-box explore-error" role="alert">
+          {/scatter/i.test(error) ? (
+            <>
+              <strong>Explore can't show this saved scatter view.</strong> Figure draws it; or show the values here as curves.
+              <div className="error-actions">
+                {onOpenInFigure && <button onClick={onOpenInFigure}>Open in Figure</button>}
+                {onShowCurves && <button onClick={onShowCurves}>Show as curves</button>}
+              </div>
+            </>
+          ) : (
+            <>
+              <strong>This plot can't be shown.</strong>
+              <details>
+                <summary>Details</summary>
+                <span className="small">{error.charAt(0).toUpperCase() + error.slice(1)}</span>
+              </details>
+            </>
+          )}
         </div>
       )}
-      {error && <div className="error-box">{error}</div>}
       {meta?.hidden && meta.hidden.length > 0 && (
         <div className="explore-hidden" role="status">
           {meta.hidden.map((h) => (
@@ -1139,7 +1230,7 @@ export default function ExploreView({
           <div className="explore-cut explore-cut-top">
             <canvas
               ref={topCut}
-              style={plotCss ? { left: plotCss[0], width: plotCss[2], height: CUT_PX - 6 } : {}}
+              style={plotCss ? { left: plotCss[0], width: plotCss[2], height: "calc(100% - 6px)" } : {}}
               onMouseMove={(e) => setCutHover(cutValue(reading?.cuts?.row, e, "x", current(), reading))}
               onMouseLeave={() => setCutHover(null)}
             />
@@ -1155,7 +1246,8 @@ export default function ExploreView({
             {meta.empty}
           </div>
         )}
-        <canvas ref={picture} className="explore-picture" style={cssSize} />
+        <canvas ref={picture} className={"explore-picture " + (opened?.kind ?? "")} style={cssSize} />
+        {mouse && <span className="mouse-at small">x = {fmt(mouse[0])}, y = {fmt(mouse[1])}</span>}
         <canvas
           ref={overlay}
           className="explore-overlay"
@@ -1173,7 +1265,7 @@ export default function ExploreView({
           aria-label="Plot: click for a cursor, drag to zoom, ? for all mouse actions and keys"
         />
         {help && (
-          <Popover className="explore-help" label="Mouse and keys" onClose={() => setHelp(false)} opener={helpButton}>
+          <Popover className="explore-help" label="Mouse and keys" onClose={() => setHelp(false)}>
             <button className="link" onClick={() => setHelp(false)} aria-label="Close">
               ×
             </button>
@@ -1194,53 +1286,14 @@ export default function ExploreView({
           <div className="explore-cut explore-cut-right">
             <canvas
               ref={rightCut}
-              style={plotCss ? { top: plotCss[1], height: plotCss[3], width: CUT_PX - 6 } : {}}
+              style={plotCss ? { top: plotCss[1], height: plotCss[3], width: "calc(100% - 6px)" } : {}}
               onMouseMove={(e) => setCutHover(cutValue(reading?.cuts?.column, e, "y", current(), reading))}
               onMouseLeave={() => setCutHover(null)}
             />
           </div>
         )}
       </div>
-      <div className={"explore-readout" + (compact ? " compact" : "")}>
-        <div className="muted small">
-          {compact ? "" : cursors.on ? "Click: cursor · Shift+click: second cursor · " : ""}
-          {compact ? "" : "drag: zoom · right-drag: pan · "}
-          <button ref={helpButton} className="link" onClick={() => setHelp((h) => !h)} aria-expanded={help}>
-            ? all mouse actions and keys
-          </button>
-          {mouse && (
-            <>
-              {" "}
-              · mouse at x = {fmt(mouse[0])}, y = {fmt(mouse[1])}
-            </>
-          )}
-        </div>
-        {compact ? null : c1 ? (
-          <CursorLine n={1} c={c1} />
-        ) : (
-          <div className="muted small">{cursors.on ? "Click the plot to read a stored value." : "No cursor type chosen: a click does nothing (choose one in the Cursors section, or press K)."}</div>
-        )}
-        {!compact && c2 && <CursorLine n={2} c={c2} />}
-        {!compact && c1 && c2 && (
-          <div className="explore-pick small">
-            {between(c1, c2).map((d) => (
-              <span key={d.role} className="range-part">
-                Δ{d.label} = {si(d.delta, d.unit)} · ⟨{d.label}⟩ = {si(d.mean, d.unit)}
-              </span>
-            ))}
-          </div>
-        )}
-        {cutHover && <div className="small">{cutHover}</div>}
-        {note && (
-          <div className="small" role="status">
-            {note}{" "}
-            <button className="link" onClick={() => setNote(null)}>
-              OK
-            </button>
-          </div>
-        )}
-        {timing && !compact && <div className="muted small mono">{timing}</div>}
-      </div>
+      {timing && DEBUG && <div className="muted small mono">{timing}</div>}
       {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} />}
       {confirm && <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />}
     </div>

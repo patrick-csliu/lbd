@@ -315,8 +315,7 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
     variable = [a for a in all_axes if getattr(d.axes[a], "group", None) is not None]
     if variable:
         _warn(f"{_where(d)}{', '.join(variable)} {'is' if len(variable) == 1 else 'are'} part of a variable sweep "
-              "(an axis group): drawn against the point number for now; drawing variable sweeps against their "
-              "coordinates comes later", RenderWarning)
+              "(its values differ from point to point): drawn against the point number", RenderWarning)
     return out
 
 

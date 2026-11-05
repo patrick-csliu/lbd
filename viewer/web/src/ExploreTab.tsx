@@ -10,7 +10,10 @@ import ExportDialog, { ExportSource } from "./ExportDialog";
 import { around, compose, copyPng, downloadPng, pageBackground, pictureChoice, rememberPictureChoice } from "./clipboard";
 import type { MenuEntry } from "./menu";
 import AxisSelect from "./AxisSelect";
-import { COMPLEX_MODES, SliceControl } from "./FileView";
+import { COMPLEX_MODES, FileDetails, SliceControl } from "./FileView";
+import { Icon } from "./icons";
+import { middle } from "./labelText";
+import { copyPath } from "./fileActions";
 import { useDiskVersion } from "./watch";
 import { ContextMenu, MenuAt, menuAt } from "./menu";
 import { useToast } from "./toast";
@@ -27,8 +30,8 @@ import { MeasuringStatus } from "./MeasuringStatus";
  * When the file changes on disk and only grew (the same axes and values, more data), the view
  * stays as it is (cursors included); anything else starts afresh, with a note saying why.
  *
- * "Library preview" (above the panels) draws the panels as shown once, on the server, as the file's picture
- * in the Library; only the picture is kept, so later changes here don't change it.
+ * "Use as Library picture" (the header's ⋯ menu) draws the panels as shown once, on the server, as
+ * the file's picture in the Library; only the picture is kept, so later changes here don't change it.
  */
 
 interface Props {
@@ -36,6 +39,8 @@ interface Props {
   onOpenInFigure: () => void;
   onError: (msg: string) => void;
   onMenu?: (e: MouseEvent) => void;
+  /** The file's title, once read (its tab shows it). */
+  onTitle?: (title: string) => void;
 }
 
 /** One panel's plot, as remembered. */
@@ -106,8 +111,10 @@ interface Live {
   opsInfo: OpsInfo | null;
   /** With the last picture: what it must share with another panel to follow its zoom, and where its data is. */
   sync: (SyncKeys & { full: [[number, number], [number, number]] }) | null;
+  /** The panel couldn't open its plot: why (the controls say so instead of "Opening…"). */
+  failed?: string | null;
 }
-const NO_LIVE: Live = { resolved: null, reading: null, opsInfo: null, sync: null };
+const NO_LIVE: Live = { resolved: null, reading: null, opsInfo: null, sync: null, failed: null };
 
 /** Two ranges together. */
 const union = (a: [number, number], b: [number, number]): [number, number] => [Math.min(a[0], b[0]), Math.max(a[1], b[1])];
@@ -149,7 +156,7 @@ function grewOnly(before: FileInfo, now: FileInfo): boolean {
   return before.values.every((v) => values.get(v.name)?.axes.join() === v.axes.join() && values.get(v.name)?.dtype === v.dtype);
 }
 
-export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Props) {
+export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTitle }: Props) {
   const [info, setInfo] = useState<FileInfo | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [choosing, setChoosing] = useState(false); // drawing the Library preview
@@ -241,6 +248,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
         const [i, r] = await Promise.all([api.file(path), api.remembered(path)]);
         if (!live) return;
         setInfo(i);
+        onTitle?.(i.title || i.name);
         if (r.note) onErrorRef.current(r.note);
         // a remembered view (upgraded by the server; panels may lack later keys), else a start from the file
         const st = r.state as unknown as Remembered | null;
@@ -326,7 +334,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
   const shareCursors = useCallback((id: string, c: CursorsState) => {
     const r = recRef.current, me = liveRef.current[id]?.sync;
     if (!r || r.panels.length < 2 || !r.sync.x || r.panels[r.active]?.id !== id || !me) return;
-    const key = JSON.stringify({ id, type: c.type, on: c.on, active: c.active, xs: c.at.map((a) => a.x) });
+    const key = JSON.stringify({ id, type: c.type, on: c.on, active: c.active, xs: c.at.map((a) => a.x), ys: c.at.map((a) => a.y) });
     if (key === sharedKey.current) return;
     sharedKey.current = key;
     setRec((rr) => {
@@ -337,9 +345,11 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
         if (q.id === id || theirs?.sync?.x !== me.x) return q;
         const own = q.cursors.at, curve = theirs.resolved?.kind !== "heatmap";
         const mid = q.view ? (q.view.ylim[0] + q.view.ylim[1]) / 2 : 0;
+        // maps on the same vertical axis too (two values of one file): the same row as the leader
+        const sameRow = !curve && liveRef.current[id]?.resolved?.kind === "heatmap" && !!theirs.sync?.y && theirs.sync.y === me.y;
         const at = c.at.map((a, k) => {
           const trace = own[k]?.trace ?? (curve ? 0 : undefined); // curves: on a trace, so the x is kept
-          return { x: a.x, y: own[k]?.y ?? mid, ...(trace !== undefined ? { trace } : {}) };
+          return { x: a.x, y: sameRow ? a.y : own[k]?.y ?? mid, ...(trace !== undefined ? { trace } : {}) };
         });
         changed = true;
         return { ...q, cursors: { ...q.cursors, type: c.type, on: c.on, active: c.active, at } };
@@ -477,6 +487,53 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
     [panelApi, setActive],
   );
   const [menu, setMenu] = useState<MenuAt | null>(null);
+  // the controls drawer (narrow windows) and the inspector (its tab remembered in this browser)
+  const [ctlOpen, setCtlOpen] = useState(false);
+  const [inspTab, setInspTabState] = useState<InspectorTab>(() => {
+    try {
+      const t = localStorage.getItem(INSPECTOR_KEY) as InspectorTab | null;
+      return t && INSPECTOR_TABS.some(([x]) => x === t) ? t : "cursors";
+    } catch {
+      return "cursors";
+    }
+  });
+  const setInspTab = (t: InspectorTab) => {
+    setInspTabState(t);
+    try {
+      localStorage.setItem(INSPECTOR_KEY, t);
+    } catch {
+      /* not remembered */
+    }
+  };
+  // narrow windows: the inspector strip unfolded (remembered in this browser)
+  const [inspOpen, setInspOpenState] = useState(() => {
+    try {
+      return localStorage.getItem(INSPECTOR_KEY + "-open") === "yes";
+    } catch {
+      return false;
+    }
+  });
+  const setInspOpen = (v: boolean | ((o: boolean) => boolean)) =>
+    setInspOpenState((o) => {
+      const next = typeof v === "function" ? v(o) : v;
+      try {
+        localStorage.setItem(INSPECTOR_KEY + "-open", next ? "yes" : "no");
+      } catch {
+        /* not remembered */
+      }
+      return next;
+    });
+  // the panels' width: side by side panels narrower than 450 px are stacked instead
+  const gridRef = useRef<HTMLDivElement>(null);
+  const [gridWidth, setGridWidth] = useState(0);
+  useEffect(() => {
+    const el = gridRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setGridWidth(el.clientWidth));
+    ro.observe(el);
+    setGridWidth(el.clientWidth);
+    return () => ro.disconnect();
+  });
 
   /** Panel `id`'s view changed by the user: the panels that share its x (and y, if synchronized)
    * follow. Showing everything shows all the data of the panels that follow each other. */
@@ -511,7 +568,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
     try {
       const panels = rec.panels.map((p) => ({ spec: p.spec, settings: p.settings, stat: p.stat, view: p.view }));
       const answer = await api.libraryPreviewChoose(path, panels, gridOf(rec.panels.length, rec.layout), null);
-      toast("This view is now the file's preview in the Library.");
+      toast("Library picture updated: the Library now shows these panels for this file.");
       for (const w of answer.warnings) toast(w, "warning");
     } catch (e) {
       onError((e as Error).message);
@@ -520,18 +577,36 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
     }
   };
 
+  /** Start afresh; the view before can come back (Undo) while the toast shows. */
   const forget = async () => {
-    if (!info) return;
+    if (!info || !rec) return;
+    const before = rec;
     await api.forget(path).catch((e) => onError((e as Error).message));
     setRec(fresh(info));
     setViewKey((k) => k + 1);
+    toast("This file's view is forgotten: it starts afresh.", "info", {
+      label: "Undo",
+      onClick: () => {
+        setRec(before);
+        setViewKey((k) => k + 1);
+      },
+    });
   };
 
   if (loadError) {
+    // A file that can't be read: a plain sentence and what can be done; the details folded.
+    const damaged = /truncated|eof|signature|unable to (synchronously )?open|not an hdf5|can't read/i.test(loadError);
     return (
-      <div className="file-view">
+      <div className="file-view explore-tab explore-failed">
         <div className="error-box">
-          <strong>Can't open this file.</strong> {loadError}
+          <strong>{damaged ? "This file is damaged or incomplete (it may end early)." : "Explore can't open this file."}</strong>
+          <div className="error-actions">
+            <button onClick={() => api.reveal(path).catch((e) => onError(e.message))}>Show in folder</button>
+          </div>
+          <details>
+            <summary>Details</summary>
+            <p className="small mono">{loadError}</p>
+          </details>
         </div>
       </div>
     );
@@ -545,13 +620,15 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
   const actApi = panelApi(act.id);
   const actActions = actionsOf(act.id);
   const resolved = actLive.resolved;
-  const [rows, cols] = gridOf(n, rec.layout);
+  // side by side would make each panel too narrow here: stacked, for this size only
+  const tooNarrow = several && rec.layout === "side" && gridWidth > 0 && gridWidth / gridOf(n, "side")[1] < 450;
+  const [rows, cols] = gridOf(n, tooNarrow ? "stacked" : rec.layout);
   const byName = new Map(info.values.map((v) => [v.name, v]));
   const titleOf = (p: PanelState) =>
     (live[p.id]?.resolved?.spec.values ?? p.spec.values ?? [plottable[0]?.name ?? ""])
       .map((name) => {
         const v = byName.get(name);
-        return v ? `${v.label || v.name}${v.unit ? ` (${v.unit})` : ""}` : name;
+        return v ? `${v.label || v.name}${v.unit ? ` (${unitText(v.unit)})` : ""}` : name;
       })
       .join(", ");
   const full = n >= MAX_PANELS;
@@ -571,20 +648,19 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
       x: r.left,
       y: r.bottom,
       items: plottable.map((v) => ({
-        label: `${v.label || v.name}${v.unit ? ` (${v.unit})` : ""}`,
+        label: `${v.label || v.name}${v.unit ? ` (${unitText(v.unit)})` : ""}`,
         disabled: full,
         onClick: () => addPanel({ values: [v.name] }),
       })),
     });
   };
+  const panelEntries = (i: number): MenuEntry[] => [
+    { label: "Duplicate panel", onClick: () => duplicatePanel(i), disabled: full },
+    { label: "Remove panel", onClick: () => removePanel(i), disabled: n <= 1, danger: true },
+  ];
   const panelMenu = (e: MouseEvent, i: number) => {
     e.preventDefault();
-    setMenu(
-      menuAt(e, [
-        { label: "Duplicate panel", onClick: () => duplicatePanel(i), disabled: full },
-        { label: "Remove panel", onClick: () => removePanel(i), disabled: n <= 1, danger: true },
-      ]),
-    );
+    setMenu(menuAt(e, panelEntries(i)));
   };
   const valueMenu = (e: MouseEvent, name: string) => {
     e.preventDefault();
@@ -594,6 +670,19 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
         { label: "Show only this value here", onClick: () => actApi.updateSpec({ values: [name], x: undefined, y: undefined, series: undefined }) },
       ]),
     );
+  };
+  const headMenu = (e: MouseEvent) => {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setMenu({
+      x: r.right - 240,
+      y: r.bottom,
+      items: [
+        { label: choosing ? "Drawing the Library picture…" : "Use as Library picture", disabled: choosing, onClick: () => void chooseAsPreview() },
+        { label: "Copy path", onClick: () => void copyPath(info.path, toast) },
+        "-",
+        { label: "Forget this view…", onClick: () => void forget() },
+      ],
+    });
   };
   // Keys 1–6 make a panel active (when no box has the focus).
   const onKeyDown = (e: KeyboardEvent) => {
@@ -618,26 +707,47 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
   const allowDrop = (e: DragEvent) => {
     if (e.dataTransfer.types.includes(DRAG_VALUE) || e.dataTransfer.types.includes(DRAG_PANEL)) e.preventDefault();
   };
+  const cursorPanel = resolved && (
+    <CursorPanel
+      kind={resolved.kind}
+      cursors={act.cursors}
+      onCursors={actApi.onCursors}
+      reading={actLive.reading}
+      actions={actActions}
+      onBack={act.back ? actApi.onBack : null}
+      others={rec.sync.x ? othersAtX : []}
+    />
+  );
+  const showInspector = (t: InspectorTab) => {
+    setInspTab(t);
+    setInspOpen(true);
+  };
 
   return (
-    <div className="file-view explore-tab" onKeyDown={onKeyDown}>
-      <div className="file-head" onContextMenu={onMenu}>
-        <div>
-          <h1>{info.title || info.name}</h1>
-          <div className="muted small path" title={info.path}>
-            {info.path}
-          </div>
-          {/\.lbd\.writing$/i.test(info.path) && <MeasuringStatus path={info.path} />}
-        </div>
-        <div className="actions">
-          <button onClick={onOpenInFigure} title="Make a figure of this file: styles and export">
+    <div className={"explore-tab" + (ctlOpen ? " controls-open" : "") + (inspOpen ? " inspector-open" : "")} onKeyDown={onKeyDown}>
+      <div className="explore-head" onContextMenu={onMenu}>
+        <h1 title={info.title || info.name}>{info.title || info.name}</h1>
+        <span className="explore-path mono" title={info.path}>
+          {middle(info.path, 90)}
+        </span>
+        <button className="ib" aria-label="Copy path" title="Copy the file's path" onClick={() => void copyPath(info.path, toast)}>
+          <Icon name="copy" />
+        </button>
+        {/\.lbd\.writing$/i.test(info.path) && <MeasuringStatus path={info.path} />}
+        <span className="explore-head-actions">
+          <button className="primary" onClick={onOpenInFigure} title="Make a figure of this file: styles and export">
             Open in Figure
           </button>
-          <button onClick={forget} title="LBD remembers this view on this computer (not in the file); start afresh">
-            Forget this view
+          <button className="ib" aria-label="Show in folder" title="Show in folder" onClick={() => api.reveal(info.path).catch((e) => onError(e.message))}>
+            <Icon name="folder" />
           </button>
-          <button onClick={() => api.reveal(info.path).catch((e) => onError(e.message))}>Show in folder</button>
-        </div>
+          <button className="ib" aria-label="File info" title="File info: its values, axes and metadata" onClick={() => showInspector("file")}>
+            <Icon name="info" />
+          </button>
+          <button className="ib" aria-label="More" aria-haspopup="menu" title="More: Library picture, forget this view" onClick={headMenu}>
+            <Icon name="more" />
+          </button>
+        </span>
       </div>
       {updating && (
         <div className="disk-note" role="status">
@@ -645,92 +755,107 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
         </div>
       )}
       {plottable.length === 0 ? (
-        <div className="numbers-only" role="status">
-          <p>This file has only single numbers, so there is nothing to explore:</p>
-          <ul>
-            {info.values.map((v) => (
-              <li key={v.name}>
-                {v.label || v.name} = {v.text ?? "?"}
-              </li>
-            ))}
-          </ul>
+        <div className="explore-body numbers">
+          <div className="numbers-only" role="status">
+            <p>This file has only single numbers, so there is nothing to explore:</p>
+            <ul>
+              {info.values.map((v) => (
+                <li key={v.name}>
+                  {v.label || v.name} = {v.text ?? "?"}
+                </li>
+              ))}
+            </ul>
+          </div>
+          <FileDetails info={info} metaFilter layout="library" />
         </div>
       ) : (
-        <div className="plot-area">
-          <ExploreControls
-            heading={several ? `Panel ${rec.active + 1}: ${titleOf(act)}` : null}
-            info={info}
-            resolved={resolved}
-            settings={act.settings}
-            listOpen={act.listOpen}
-            opsInfo={actLive.opsInfo}
-            calculate={(what, index) => actActions.current?.calculate(what, index) ?? Promise.reject(new Error("the plot isn't open yet"))}
-            onListOpen={actApi.onListOpen}
-            updateSpec={actApi.updateSpec}
-            updateSettings={actApi.updateSettings}
-            onValueMenu={valueMenu}
-            contrast={
-              resolved?.kind === "heatmap" ? (
-                <Contrast
-                  load={() => actActions.current?.histogram(act.settings) ?? Promise.resolve(null)}
-                  loadKey={JSON.stringify([resolved.session, resolved.spec, act.settings.select ?? null, act.settings.cscale ?? null, info.version])}
-                  clim={act.settings.clim ?? [null, null]}
-                  onClim={(c) => actApi.updateSettings({ clim: c })}
-                />
-              ) : null
-            }
-          >
-            {resolved && (
-              <CursorPanel
-                kind={resolved.kind}
-                cursors={act.cursors}
-                onCursors={actApi.onCursors}
-                reading={actLive.reading}
-                actions={actActions}
-                onBack={act.back ? actApi.onBack : null}
-                others={rec.sync.x ? othersAtX : []}
-              />
-            )}
-          </ExploreControls>
+        <div className="explore-body">
+          <div className="explore-scrim" onClick={() => setCtlOpen(false)} />
+          <aside className="explore-controls" aria-label="Controls">
+            <ExploreControls
+              heading={several ? `Panel ${rec.active + 1}: ${titleOf(act)}` : null}
+              info={info}
+              resolved={resolved}
+              settings={act.settings}
+              stat={act.stat}
+              onStat={actApi.onStat}
+              listOpen={act.listOpen}
+              opsInfo={actLive.opsInfo}
+              failed={actLive.failed}
+              onOpenInFigure={onOpenInFigure}
+              calculate={(what, index) => actActions.current?.calculate(what, index) ?? Promise.reject(new Error("the plot isn't open yet"))}
+              onListOpen={actApi.onListOpen}
+              updateSpec={actApi.updateSpec}
+              updateSettings={actApi.updateSettings}
+              onValueMenu={valueMenu}
+              contrast={
+                resolved?.kind === "heatmap" ? (
+                  <Contrast
+                    load={() => actActions.current?.histogram(act.settings) ?? Promise.resolve(null)}
+                    loadKey={JSON.stringify([resolved.session, resolved.spec, act.settings.select ?? null, act.settings.cscale ?? null, info.version])}
+                    clim={act.settings.clim ?? [null, null]}
+                    onClim={(c) => actApi.updateSettings({ clim: c })}
+                  />
+                ) : null
+              }
+            />
+          </aside>
           <div className="panels">
             <div className="panel-bar" onDragOver={allowDrop} onDrop={(e) => dropOn(e, null)}>
+              <button className="ib controls-toggle" aria-label="Controls" aria-expanded={ctlOpen} title="Controls: what to plot, display, processing" onClick={() => setCtlOpen((o) => !o)}>
+                <Icon name="gear" />
+              </button>
               <button onClick={addMenu} title={full ? `At most ${MAX_PANELS} panels` : "Show a value in a new panel (or drag a value here)"}>
                 + Panel ▾
               </button>
               {several && (
-                <span className="panel-layout" role="radiogroup" aria-label="Layout">
+                <span className="segmented-icons" role="radiogroup" aria-label="Layout">
                   {(["side", "stacked"] as const).map((l) => (
-                    <label key={l} className="check">
-                      <input type="radio" name={`layout-${path}`} checked={rec.layout === l} onChange={() => setRec((r) => r && { ...r, layout: l })} />
-                      {l === "side" ? "side by side" : "stacked"}
-                    </label>
+                    <button
+                      key={l}
+                      className="ib"
+                      role="radio"
+                      aria-checked={rec.layout === l}
+                      aria-label={l === "side" ? "side by side" : "stacked"}
+                      title={l === "side" ? "Side by side" : "Stacked"}
+                      onClick={() => setRec((r) => r && { ...r, layout: l })}
+                    >
+                      <Icon name={l === "side" ? "side" : "stacked"} />
+                    </button>
                   ))}
                 </span>
               )}
               {several && (
                 <span className="panel-sync" title="Panels with the same axis zoom together; sliders of the same axis move together">
-                  Sync:
                   {(["x", "y", "sliders"] as const).map((k) => (
-                    <label key={k} className="check">
-                      <input
-                        type="checkbox"
-                        checked={rec.sync[k]}
-                        aria-label={`Sync ${k}`}
-                        onChange={(e) => setRec((r) => r && { ...r, sync: { ...r.sync, [k]: e.target.checked } })}
-                      />
-                      {k}
-                    </label>
+                    <button
+                      key={k}
+                      className="chip toggle-chip"
+                      role="checkbox"
+                      aria-checked={rec.sync[k]}
+                      aria-label={`Sync ${k}`}
+                      title={k === "sliders" ? "Sliders of the same axis move together" : `Panels with the same ${k} axis zoom together`}
+                      onClick={() => setRec((r) => r && { ...r, sync: { ...r.sync, [k]: !r.sync[k] } })}
+                    >
+                      <Icon name="link" /> {k}
+                    </button>
                   ))}
                 </span>
               )}
-              <button className="panel-preview" onClick={chooseAsPreview} disabled={choosing}
-                      title="Use these panels, as they are now, as this file's picture in the Library (kept on this computer, not in the file)">
-                {choosing ? "Drawing…" : "Library preview"}
+              {tooNarrow && <span className="muted small stack-note">stacked: too narrow side by side</span>}
+              <span className="spacer" />
+              <button className="ib" aria-label="Mouse and keys" title="Mouse and keys (?)" onClick={() => actActions.current?.help()}>
+                <Icon name="help" />
               </button>
             </div>
-            <div className={"panel-grid" + (several ? " several" : "")} style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, ["--rows" as string]: rows }}>
+            <div
+              ref={gridRef}
+              className={"panel-grid" + (several ? " several" : "") + (rows > 1 ? " rows" : "")}
+              style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${rows}, minmax(${rows > 2 ? 150 : 200}px, 1fr))` }}
+            >
               {rec.panels.map((p, i) => {
                 const pa = panelApi(p.id);
+                const note = rec.sync.x && i !== rec.active ? notSynced(p) : null;
                 return (
                   <section
                     key={p.id}
@@ -741,34 +866,16 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
                     onDragOver={allowDrop}
                     onDrop={(e) => dropOn(e, i)}
                   >
-                    {several && (
-                      <div
-                        className="panel-title"
-                        draggable
-                        onDragStart={(e) => e.dataTransfer.setData(DRAG_PANEL, String(i))}
-                        onContextMenu={(e) => panelMenu(e, i)}
-                        title="Drag to move this panel; right-click for more"
-                      >
-                        <span className="panel-num">{i + 1}</span>
-                        <span className="panel-name">{titleOf(p)}</span>
-                        {rec.sync.x && i !== rec.active && notSynced(p) && <span className="panel-note muted small">{notSynced(p)}</span>}
-                        <span className="spacer" />
-                        <button className="link" aria-label={`Remove panel ${i + 1}`} title="Remove this panel" onClick={() => removePanel(i)}>
-                          ×
-                        </button>
-                      </div>
-                    )}
                     <ExploreView
                       key={`${viewKey}-${panelKeys[p.id] ?? 0}`}
-                      compact={several}
                       info={info}
                       spec={p.spec}
                       version={info.version}
-                      onOpened={(o) => setLive(p.id, { resolved: o })}
-                      onError={(m) => onError(several ? `Panel ${i + 1}: ${m}` : m)}
+                      onOpened={(o) => setLive(p.id, { resolved: o, failed: null })}
+                      onFailed={(m) => setLive(p.id, { failed: m })}
+                      onError={(m) => (several ? onError(`Panel ${i + 1}: ${m}`) : onError(m))}
                       settings={p.settings}
                       stat={p.stat}
-                      onStat={pa.onStat}
                       initialView={p.view}
                       onView={pa.onView}
                       cursors={p.cursors}
@@ -781,6 +888,31 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
                       follow={follows[p.id] ?? null}
                       onUserView={(v) => onUserView(p.id, v)}
                       dataItems={() => dataItems(p.id)}
+                      onOpenInFigure={onOpenInFigure}
+                      onShowCurves={() => {
+                        // the plot didn't open: a new one with the values as curves
+                        pa.updateSpec({ kind: "curve", x: undefined, y: undefined, series: undefined, complex: "abs" });
+                        restart(p.id);
+                      }}
+                      panelItems={several ? () => panelEntries(i) : undefined}
+                      title={
+                        <div
+                          className="panel-title"
+                          draggable={several}
+                          onDragStart={(e) => e.dataTransfer.setData(DRAG_PANEL, String(i))}
+                          onContextMenu={several ? (e) => panelMenu(e, i) : undefined}
+                          title={several ? "Drag to move this panel; right-click for more" : titleOf(p)}
+                        >
+                          {several && <span className="panel-num">{i + 1}</span>}
+                          <span className="panel-name">{titleOf(p)}</span>
+                          {note && <span className="panel-note muted small" title={note}>{note}</span>}
+                          {several && (
+                            <button className="ib panel-remove" aria-label={`Remove panel ${i + 1}`} title="Remove this panel" onClick={() => removePanel(i)}>
+                              <Icon name="close" />
+                            </button>
+                          )}
+                        </div>
+                      }
                       onSync={(sy) => {
                         const old = liveRef.current[p.id]?.sync;
                         if (!old || JSON.stringify(old) !== JSON.stringify(sy)) setLive(p.id, { sync: sy });
@@ -791,6 +923,29 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
               })}
             </div>
           </div>
+          <aside className="explore-inspector" aria-label="Inspector">
+            <div className="inspector-tabs" role="tablist" aria-label="Inspector">
+              {INSPECTOR_TABS.map(([t, label]) => (
+                <button
+                  key={t}
+                  role="tab"
+                  aria-selected={inspTab === t}
+                  className={inspTab === t ? "on" : ""}
+                  onClick={() => (inspTab === t && inspOpen ? setInspOpen(false) : showInspector(t))}
+                >
+                  {label}
+                </button>
+              ))}
+              <button className="ib inspector-fold" aria-label={inspOpen ? "Fold the inspector" : "Unfold the inspector"} aria-expanded={inspOpen} onClick={() => setInspOpen((o) => !o)}>
+                {inspOpen ? "▾" : "▴"}
+              </button>
+            </div>
+            <div className="inspector-body" role="tabpanel" aria-label={INSPECTOR_TABS.find(([t]) => t === inspTab)![1]}>
+              {inspTab === "cursors" && (cursorPanel ?? <p className="muted small">Opening…</p>)}
+              {inspTab === "file" && <FileDetails info={info} layout="library" part="tables" />}
+              {inspTab === "meta" && <FileDetails info={info} metaFilter layout="library" part="meta" />}
+            </div>
+          </aside>
         </div>
       )}
       {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} />}
@@ -803,6 +958,20 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu }: Pr
       )}
     </div>
   );
+}
+
+type InspectorTab = "cursors" | "file" | "meta";
+const INSPECTOR_TABS: [InspectorTab, string][] = [
+  ["cursors", "Cursors"],
+  ["file", "Values & axes"],
+  ["meta", "Metadata"],
+];
+const INSPECTOR_KEY = "lbd-explore-inspector";
+
+/** Units as written for people: V^2 → V², Hz^-1 → Hz⁻¹. */
+export function unitText(unit: string): string {
+  const sup: Record<string, string> = { "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴", "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹", "-": "⁻" };
+  return unit.replace(/\^(-?\d+)/g, (_, p: string) => [...p].map((c) => sup[c] ?? c).join(""));
 }
 
 // ---- what to plot, and how ------------------------------------------------------------------------
@@ -824,13 +993,65 @@ interface ControlsProps {
   calculate: (what: "delay" | "rotation", index: number) => Promise<number>;
   /** A value's right-click menu (new panel, only this value). */
   onValueMenu: (e: MouseEvent, name: string) => void;
+  /** How a pixel shows several map cells (Display). */
+  stat: ReduceStat;
+  onStat: (s: ReduceStat) => void;
+  /** The plot couldn't be opened: why. */
+  failed?: string | null;
+  onOpenInFigure: () => void;
+}
+
+/** The sections of the controls that are open (this browser); Data is open at first. */
+const SECTIONS_KEY = "lbd-explore-sections";
+function useSections(): [Record<string, boolean>, (name: string, open: boolean) => void] {
+  const [open, setOpen] = useState<Record<string, boolean>>(() => {
+    try {
+      return { data: true, ...JSON.parse(localStorage.getItem(SECTIONS_KEY) ?? "{}") };
+    } catch {
+      return { data: true };
+    }
+  });
+  const set = (name: string, on: boolean) =>
+    setOpen((o) => {
+      const next = { ...o, [name]: on };
+      try {
+        localStorage.setItem(SECTIONS_KEY, JSON.stringify(next));
+      } catch {
+        /* not remembered */
+      }
+      return next;
+    });
+  return [open, set];
+}
+
+/** One folding section of the controls. */
+function Section({ name, title, badge, open, onToggle, children }: { name: string; title: string; badge?: ReactNode; open: boolean; onToggle: (name: string, open: boolean) => void; children: ReactNode }) {
+  return (
+    <details className="controls-section" open={open} onToggle={(e) => onToggle(name, (e.currentTarget as HTMLDetailsElement).open)}>
+      <summary>
+        {title}
+        {badge && <span className="section-badge">{badge}</span>}
+      </summary>
+      <div className="section-body">{children}</div>
+    </details>
+  );
 }
 
 /** Axes of a value with more than one point (the ones that can be drawn along). */
 const swept = (info: FileInfo, v: ValueInfo) => v.axes.filter((a, i) => v.shape[i] > 1 && info.axes.some((x) => x.name === a));
 
-function ExploreControls({ heading, info, resolved, settings, updateSpec, updateSettings, children, contrast, listOpen, onListOpen, opsInfo, calculate, onValueMenu }: ControlsProps) {
-  if (!resolved) return <div className="controls muted small">Opening…</div>;
+function ExploreControls({ heading, info, resolved, settings, updateSpec, updateSettings, children, contrast, listOpen, onListOpen, opsInfo, calculate, onValueMenu, stat, onStat, failed, onOpenInFigure }: ControlsProps) {
+  const [sections, setSection] = useSections();
+  if (!resolved)
+    return failed ? (
+      <div className="controls">
+        {heading && <h2 className="panel-heading">{heading}</h2>}
+        <p className="small">This plot can't be shown here: see the panel.</p>
+        <button onClick={onOpenInFigure}>Open in Figure</button>
+      </div>
+    ) : (
+      <div className="controls muted small">Opening…</div>
+    );
   const r = resolved.spec;
   const kind = resolved.kind;
   const values = r.values ?? [];
@@ -863,9 +1084,11 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
   const traceAxis = kind === "curve" ? r.series : r.y;
   const clim = settings.clim ?? [null, null];
 
+  const opsCount = (settings.ops ?? []).length + Object.values(settings.equations ?? {}).filter(Boolean).length;
   return (
     <div className="controls">
       {heading && <h2 className="panel-heading">{heading}</h2>}
+      <Section name="data" title="Data" open={!!sections.data} onToggle={setSection}>
       <label className="field">
         <span>Plot</span>
         <select aria-label="Plot type" value={kind} onChange={(e) => updateSpec({ kind: e.target.value as PlotSpec["kind"], x: undefined, y: undefined, series: undefined })}>
@@ -989,21 +1212,10 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
         />
       )}
 
-      <Operations
-        kind={kind}
-        xLabel={label(along ?? r.x ?? "x")}
-        tracesLabel={kind === "heatmap" ? label(r.y ?? "") : traceAxis && traceAxis !== "none" && values.length === 1 ? label(traceAxis) : null}
-        ops={settings.ops ?? []}
-        on={settings.ops_on !== false}
-        info={opsInfo}
-        onChange={(ops) => updateSettings({ ops: ops.length ? ops : undefined, ...(ops.length ? {} : { ops_on: undefined }) })}
-        onOn={(on) => updateSettings({ ops_on: on ? undefined : false })}
-        complexValues={anyComplex}
-        calculate={calculate}
-        equations={settings.equations ?? {}}
-        onEquations={(e) => updateSettings({ equations: e.x || e.y || e.z ? e : undefined })}
-      />
+      </Section>
 
+      <Section name="display" title="Display" open={!!sections.display} onToggle={setSection}
+               badge={settings.xscale === "log" || settings.yscale === "log" || settings.cscale === "log" ? "log" : undefined}>
       <fieldset className="field">
         <legend>Scales</legend>
         <label className="check">
@@ -1021,8 +1233,7 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
           </label>
         )}
       </fieldset>
-
-      {kind === "heatmap" && (
+            {kind === "heatmap" && (
         <fieldset className="field">
           <legend>Colour</legend>
           <div className="row-controls">
@@ -1048,6 +1259,36 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
           {contrast}
         </fieldset>
       )}
+      {kind === "heatmap" && (
+        <label className="field" title="When a screen pixel stands for several cells, what it shows">
+          <span>Several cells per pixel</span>
+          <select aria-label="Several cells per pixel" value={stat} onChange={(e) => onStat(e.target.value as ReduceStat)}>
+            <option value="max">max (peaks stay)</option>
+            <option value="min">min (dips stay)</option>
+            <option value="mean">mean</option>
+          </select>
+        </label>
+      )}
+      </Section>
+
+      <Section name="processing" title="Processing" open={!!sections.processing} onToggle={setSection}
+               badge={opsCount ? `${opsCount} on` : undefined}>
+      <Operations
+        kind={kind}
+        xLabel={label(along ?? r.x ?? "x")}
+        tracesLabel={kind === "heatmap" ? label(r.y ?? "") : traceAxis && traceAxis !== "none" && values.length === 1 ? label(traceAxis) : null}
+        ops={settings.ops ?? []}
+        on={settings.ops_on !== false}
+        info={opsInfo}
+        onChange={(ops) => updateSettings({ ops: ops.length ? ops : undefined, ...(ops.length ? {} : { ops_on: undefined }) })}
+        onOn={(on) => updateSettings({ ops_on: on ? undefined : false })}
+        complexValues={anyComplex}
+        calculate={calculate}
+        equations={settings.equations ?? {}}
+        onEquations={(e) => updateSettings({ equations: e.x || e.y || e.z ? e : undefined })}
+      />
+
+      </Section>
       {children}
     </div>
   );

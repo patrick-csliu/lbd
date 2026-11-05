@@ -997,7 +997,8 @@ export function SliceControl({ path, version, slice: s, onIndex }: { path: strin
  * Library's selected file, whose description, date and size are shown beside the preview
  * (FileFacts): here only the tables (without columns empty in every row), the metadata in
  * columns, and at the end, folded, what wrote the file. */
-export function FileDetails({ info, metaFilter = false, layout = "explore" }: { info: FileInfo; metaFilter?: boolean; layout?: "explore" | "library" }) {
+export function FileDetails({ info, metaFilter = false, layout = "explore", part = "all" }: { info: FileInfo; metaFilter?: boolean; layout?: "explore" | "library"; part?: "all" | "tables" | "meta" }) {
+  const tables = part !== "meta", metaShown = part !== "tables";
   const [filter, setFilter] = useState("");
   const meta = metaFilter && filter.trim() ? filterMeta(info.meta, filter.trim().toLowerCase()) : info.meta;
   const library = layout === "library";
@@ -1024,6 +1025,7 @@ export function FileDetails({ info, metaFilter = false, layout = "explore" }: { 
         )}
       </dl>}
 
+      {tables && <>
       <h3>Values</h3>
       <table>
         <thead>
@@ -1091,6 +1093,8 @@ export function FileDetails({ info, metaFilter = false, layout = "explore" }: { 
         </tbody>
       </table>
 
+      </>}
+      {metaShown && <>
       <h3>Metadata</h3>
       {metaFilter && !isEmptyObject(info.meta) && (
         <input className="meta-filter" type="search" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter metadata…" aria-label="Filter metadata" />
@@ -1102,7 +1106,8 @@ export function FileDetails({ info, metaFilter = false, layout = "explore" }: { 
       ) : (
         <MetaTree value={meta} fold={metaFilter} />
       )}
-      {library && (
+      </>}
+      {library && tables && (
         <details className="file-written">
           <summary>File (written by, format)</summary>
           <dl className="props">

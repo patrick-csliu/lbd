@@ -52,7 +52,7 @@ def test_one_panel_per_value_on_first_open(values_files, new_page):
     assert "Mixing chamber temperature" not in " ".join(titles(page))
     frames(page, lambda: row(page, "10 one value.lbd").dblclick())
     expect(panels(page)).to_have_count(1)
-    expect(shown(page).locator(".panel-title")).to_have_count(0)
+    expect(shown(page).locator(".panel-title .panel-num")).to_have_count(0)      # one panel: no number, no heading
     expect(shown(page).locator(".panel-heading")).to_have_count(0)
 
 

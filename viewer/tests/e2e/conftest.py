@@ -129,6 +129,8 @@ def context(browser, viewer):
     c = browser.new_context(viewport={"width": 1280, "height": 800})
     # each browser tab starts with the Files sidebar on the folder tree (see Viewer)
     c.add_init_script("try { if (!sessionStorage.getItem('lbd-sidebar-scope')) sessionStorage.setItem('lbd-sidebar-scope', 'folders') } catch (e) {}")
+    # Explore's control sections (Data, Display, Processing) all open, as the tests reach into each
+    c.add_init_script("try { if (!localStorage.getItem('lbd-explore-sections')) localStorage.setItem('lbd-explore-sections', '{\"data\":true,\"display\":true,\"processing\":true}'); if (!localStorage.getItem('lbd-explore-inspector-open')) localStorage.setItem('lbd-explore-inspector-open', 'yes') } catch (e) {}")
     c.set_default_timeout(TIMEOUT_MS)
     sync_api.expect.set_options(timeout=TIMEOUT_MS)
     yield c

@@ -96,6 +96,8 @@ def test_smoothing_points_can_be_typed_and_a_median_steps_through_odd_numbers(sw
 def test_equations_with_their_legend_and_messages(sweep, new_page):
     page = new_page("Explore")
     frames(page, lambda: row(page, "sweep.lbd").dblclick())
+    ops(page).locator(".equations > summary").click()                  # folded until used
+    ops(page).locator(".eq-names > summary").click()
     legend = ops(page).locator(".eq-legend")
     expect(legend).to_contain_text("x = t")                           # what the names stand for
     expect(legend).to_contain_text("y = v")

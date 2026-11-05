@@ -170,8 +170,8 @@ export default function ExportDialog({ sources, onClose, onSaved }: Props) {
         </fieldset>
         <fieldset>
           <legend>Units</legend>
-          {radio("units", "stored", "stored (Hz)")}
-          {radio("units", "shown", "as on screen (GHz)")}
+          {radio("units", "stored", "as stored in the file")}
+          {radio("units", "shown", "as on screen (e.g. GHz, mV)")}
         </fieldset>
         {several && (
           <fieldset>

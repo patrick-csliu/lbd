@@ -21,7 +21,7 @@ def sweep(viewer):
 
 
 def open_dialog(page: Page):
-    explore(page).get_by_role("button", name="Data ▾").click()
+    explore(page).get_by_role("button", name="Data", exact=True).click()
     page.get_by_role("menuitem", name="Save as CSV…").click()
     dialog = page.get_by_role("dialog", name="Save as CSV")
     expect(dialog).to_be_visible()
@@ -76,7 +76,7 @@ def test_copy_picture_of_a_panel_and_of_all(sweep, viewer, context, new_page):
     box = lambda css: explore(page).locator(css).bounding_box()    # noqa: E731  (the layout settles: measured late)
 
     def copy(entry="Copy picture"):
-        explore(page).get_by_role("button", name="Data ▾").first.click()
+        explore(page).get_by_role("button", name="Data", exact=True).first.click()
         page.get_by_role("menuitem", name=entry).click()
         expect(page.get_by_text("Picture copied")).to_be_visible()
         return clipboard_png(page)
@@ -84,7 +84,7 @@ def test_copy_picture_of_a_panel_and_of_all(sweep, viewer, context, new_page):
     w, h = copy()                                            # as on screen: the stage (with the cuts' room)
     stage = box(".explore-stage")
     assert abs(w - stage["width"]) <= 2 and abs(h - stage["height"]) <= 2
-    explore(page).get_by_role("button", name="Data ▾").first.click()
+    explore(page).get_by_role("button", name="Data", exact=True).first.click()
     page.get_by_role("menuitem", name="○ Picture of the plot only").click()
     page.evaluate("navigator.clipboard.writeText('')")
     w, h = copy()                                            # the plot alone
@@ -114,9 +114,9 @@ def test_copy_picture_of_all_panels(viewer, context, new_page):
     stages = explore(page).locator(".explore-stage")
     expect(stages).to_have_count(2)
     boxes = [stages.nth(k).bounding_box() for k in range(2)]
-    explore(page).get_by_role("button", name="Data ▾").first.click()
+    explore(page).get_by_role("button", name="Data", exact=True).first.click()
     page.get_by_role("menuitem", name="○ Picture of all panels").click()
-    explore(page).get_by_role("button", name="Data ▾").first.click()
+    explore(page).get_by_role("button", name="Data", exact=True).first.click()
     page.get_by_role("menuitem", name="Copy picture of all panels").click()
     expect(page.get_by_text("Picture copied")).to_be_visible()
     w, h = clipboard_png(page)

@@ -112,7 +112,7 @@ export default function Operations({ kind, xLabel, tracesLabel, ops, on, info, o
           </label>
         )}
       </legend>
-      {ops.length === 0 && <p className="muted small">None: the stored data is shown. Explore only; never written into the file.</p>}
+      {ops.length === 0 && <p className="muted small" title="Operations change only what Explore shows; never the file">None: the stored data.</p>}
       <ol className="op-list">
         {ops.map((o, i) => {
           if (isComplex(o)) {
@@ -356,9 +356,12 @@ function Equations({ kind, equations, info, on, onChange }: {
   const names = info?.names ?? [];
   const main = names.filter((n) => fields.includes(n.name as "x" | "y" | "z"));
   const others = names.filter((n) => !fields.includes(n.name as "x" | "y" | "z"));
+  const used = Object.values(equations).some(Boolean);
   return (
-    <div className="equations">
-      <div className="eq-title">Equations (after the operations)</div>
+    <details className="equations" open={used || undefined}>
+      <summary className="eq-title">Equations (after the operations){used ? "" : ": none"}</summary>
+      <details className="eq-names">
+        <summary className="small">Names and functions</summary>
       <div className="eq-legend small" aria-label="What the names stand for">
         {main.map((n) => (
           <div key={n.name}>
@@ -374,6 +377,7 @@ function Equations({ kind, equations, info, on, onChange }: {
           in stored units · <code>pi</code> <code>e</code> · {EQ_FUNCTIONS} · per trace: {EQ_PER_TRACE}
         </div>
       </div>
+      </details>
       {fields.map((f) => {
         const st = info?.equations?.[f];
         return (
@@ -390,7 +394,7 @@ function Equations({ kind, equations, info, on, onChange }: {
           />
         );
       })}
-    </div>
+    </details>
   );
 }
 
