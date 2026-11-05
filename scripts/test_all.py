@@ -325,7 +325,9 @@ def main(argv=None) -> int:
                 continue
             print(f"... {title}: {len(failed_tests)} failed side by side; running them again alone", flush=True)
             t0 = time.time()
-            r = run([sys.executable, "-m", "pytest", "-q", "--lf", *where], REPO, e2e_env)
+            # without the shard: --lf already keeps only this run's failures (the shard, worked out
+            # again from those files only, would deselect them)
+            r = run([sys.executable, "-m", "pytest", "-q", "--lf", *where], REPO)
             secs = results[title][1] + time.time() - t0
             if r.returncode == 0:
                 results[title] = ("passed", secs, results[title][2])

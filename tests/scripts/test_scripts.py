@@ -499,9 +499,12 @@ def test_test_all_reruns_viewer_tests_that_failed_side_by_side(load_module, monk
         def __init__(self, code, out=""):
             self.returncode, self.stdout, self.stderr = code, out, ""
 
+    envs = []
+
     def run(cmd, cwd, env=None):
         calls.append(cmd)
         if "--lf" in cmd:
+            envs.append(env)
             return R(0)                                    # alone: passes
         if "viewer/tests/e2e" in cmd:
             return R(1, "FAILED viewer/tests/e2e/test_x.py::test_slow - timeout\n")
@@ -516,3 +519,6 @@ def test_test_all_reruns_viewer_tests_that_failed_side_by_side(load_module, monk
     out = capsys.readouterr().out
     assert "test_slow failed side by side, passed alone" in out
     assert any("--lf" in c for c in calls)
+    # a shard's failures run again without the shard (it would deselect them: --lf keeps fewer files)
+    assert ta.main(["--only", "e2e", "--shard", "1/2"]) == 0
+    assert envs[-1] is None or "LBD_SHARD" not in envs[-1]

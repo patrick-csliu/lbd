@@ -147,6 +147,10 @@ jobs:
           version: "1"
       - name: Install Python packages
         run: uv sync --all-packages
+      # The Julia module's packages (HDF5, JSON3 …); in the suites job its own tests install them.
+      - name: Install the Julia module's packages
+        working-directory: languages/julia
+        run: julia --project=. --startup-file=no -e "using Pkg; Pkg.instantiate()"
       - name: Run the cross-language matrix
         run: uv run python scripts/test_all.py --only crosslang
 
