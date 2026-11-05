@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
+from matplotlib import colors as mcolors
 
 import lbd
 from lbd.plot import render as rnd
@@ -31,6 +32,8 @@ if TYPE_CHECKING:
 CURSOR_TYPES = ("cross", "vertical", "horizontal")
 FIND = ("max", "min", "peak")
 TABLE_LIMIT = 2000      # a vertical cursor lists at most this many traces' values
+CROSSINGS_SHOWN = 10    # a horizontal cursor lists at most this many crossings per trace
+AT_LINE = ("interpolated", "stored")
 NEAR_POINTS = 4096      # curves too big for memory: a cursor looks this many points each side for its point
 HIST_BINS = 128
 AUTO_RANGE = (0.5, 99.5)  # "Auto" colour range: leave out 0.5 % of the cells at each end
@@ -158,7 +161,8 @@ def _nearest(arr: np.ndarray, v: float) -> int:
 # -- cursors ---------------------------------------------------------------------------------------
 
 def cursors(s: "ExploreSession", items: List[Dict[str, Any]], kind: str, view: Dict[str, Any],
-            size: Sequence[int], cuts: bool = True, lines: bool = True) -> Dict[str, Any]:
+            size: Sequence[int], cuts: bool = True, lines: bool = True, every: bool = True,
+            at_line: str = "interpolated", limit: int = 50) -> Dict[str, Any]:
     """Snap each cursor to the stored data and read it out; with a map, the cuts through cursor 1.
 
     `items`: per cursor {x, y} in plot units, optionally `trace` (curves: stay on this trace),
@@ -166,9 +170,14 @@ def cursors(s: "ExploreSession", items: List[Dict[str, Any]], kind: str, view: D
     `kind`: cross, vertical or horizontal. `view` {xlim, ylim} and `size` [w, h] are the plot area
     as the page shows it (for the nearest point in pixels and the cuts' pixel columns). `lines`:
     with each curve cursor's trace as last drawn (plot units; None breaks it), to highlight it.
-    `factors`: plot units per stored unit, to turn typed stored values into positions."""
+    `factors`: plot units per stored unit, to turn typed stored values into positions.
+    `every`: a vertical or horizontal cursor on curves reads every visible trace at its line;
+    `at_line` "interpolated" (between a trace's stored points) or "stored" (the nearest stored
+    point); `limit`: markers and crossings for at most this many visible traces."""
     if kind not in CURSOR_TYPES:
         raise ExploreError(f"unknown cursor type {kind!r}; use one of {', '.join(CURSOR_TYPES)}")
+    if at_line not in AT_LINE:
+        raise ExploreError(f"unknown way to read at a cursor line {at_line!r}; use one of {', '.join(AT_LINE)}")
     if not 1 <= len(items) <= 2:
         raise ExploreError("there are one or two cursors")
     xlim, ylim = view.get("xlim"), view.get("ylim")
@@ -187,7 +196,7 @@ def cursors(s: "ExploreSession", items: List[Dict[str, Any]], kind: str, view: D
         if cuts and first is not None:
             out["cuts"] = _cuts(s, first, kind, geo)
     else:
-        out["cursors"] = [_curve_cursor(s, c, kind, geo) for c in items]
+        out["cursors"] = [_curve_cursor(s, c, kind, geo, every, at_line, limit) for c in items]
         if lines and len(_visible(s)) > 1:          # a single curve needs no highlight: it would only cover it
             for c in out["cursors"]:
                 drawn = s._drawn(c["trace"]) if c else None
@@ -268,7 +277,8 @@ def _cell_box(m, i: int, j: int) -> Tuple[float, float, float, float]:
     return x0, y0, x1, y1
 
 
-def _curve_cursor(s: "ExploreSession", c: Dict[str, Any], kind: str, geo) -> Optional[Dict[str, Any]]:
+def _curve_cursor(s: "ExploreSession", c: Dict[str, Any], kind: str, geo, every: bool = True,
+                  at_line: str = "interpolated", limit: int = 50) -> Optional[Dict[str, Any]]:
     m = s.model
     x, y = _check_point(c)
     shown = _visible(s)
@@ -317,9 +327,96 @@ def _curve_cursor(s: "ExploreSession", c: Dict[str, Any], kind: str, geo) -> Opt
         stored = _stored(s, name, s.raw_model.lines[k][0][i], s.raw_model.yf)
         if stored:
             out["stored"] = stored
-    if kind == "vertical":
-        out["table"] = _table(s, k, i, shown)
+    if every and kind in ("vertical", "horizontal"):
+        off = _lines_off(s, shown, limit)
+        if off:
+            out["line_note"] = off
+        if kind == "vertical":
+            out["table"] = _table(s, k, i, shown, px, at_line if not off else "stored", not off, geo[4][0] == "log")
+            if not off:
+                out["points"] = [_dot(s, r["trace"], r["px"], r["py"]) for r in out["table"]["rows"] if r["py"] is not None]
+        elif not off:
+            out["crossings"] = _crossings(s, k, i, py, shown, at_line, geo[4])
+            out["points"] = [_dot(s, r["trace"], x, y) for r in out["crossings"]["rows"] for x, y in zip(r["px"], r["py"])]
     return out
+
+
+def _lines_off(s: "ExploreSession", shown: List[int], limit: int) -> Optional[str]:
+    """Why a cursor line doesn't mark every trace here (None: it does)."""
+    if s.summarised:
+        return "These curves are shown from a summary: markers and crossings are for curves that fit in memory."
+    if len(shown) > limit:
+        return (f"{len(shown)} traces shown: markers and crossings are shown for up to {limit} "
+                "(Settings → Explore). Choose fewer traces, or raise the limit.")
+    return None
+
+
+def _dot(s: "ExploreSession", t: int, x: float, y: float) -> Dict[str, Any]:
+    """A place where a cursor line meets trace t: drawn on the plot, named when pointed at."""
+    artists = getattr(s, "lines", None) or []
+    color = "#444444"
+    if t < len(artists) and hasattr(artists[t], "get_color"):
+        color = mcolors.to_hex(artists[t].get_color())
+    return {"x": float(x), "y": float(y), "trace": int(t), "label": s.model.lines[t][1], "color": color}
+
+
+def _at_x(xs: Any, ys: Any, x0: float, log: bool) -> Optional[float]:
+    """Trace (xs, ys) at x0, straight between its two neighbouring stored points (on a log axis
+    in log x). None outside the trace or next to a gap."""
+    a, b = np.asarray(xs, dtype=float), np.asarray(ys, dtype=float)
+    ok = np.isfinite(a)
+    a, b = a[ok], b[ok]
+    if not a.size:
+        return None
+    order = np.argsort(a, kind="stable")
+    a, b = a[order], b[order]
+    if x0 < a[0] or x0 > a[-1]:
+        return None
+    j = int(np.searchsorted(a, x0))
+    if a[j] == x0:
+        return _num(b[j])
+    x1, x2, y1, y2 = a[j - 1], a[j], b[j - 1], b[j]
+    if not (np.isfinite(y1) and np.isfinite(y2)):
+        return None
+    f = (np.log(x0 / x1) / np.log(x2 / x1)) if log and x1 > 0 else (x0 - x1) / (x2 - x1)
+    return float(y1 + f * (y2 - y1))
+
+
+def _crossings(s: "ExploreSession", k: int, i: int, y0: float, shown: List[int], at_line: str, scales) -> Dict[str, Any]:
+    """Where each visible trace crosses the height y0 (plot units): between its stored points
+    ("interpolated": straight, on log axes in log) or the nearer of them ("stored")."""
+    m = s.model
+    xlog, ylog = scales[0] == "log", scales[1] == "log"
+    rows = []
+    for t in shown[:TABLE_LIMIT]:
+        xs, ys = np.asarray(m.xs[t], dtype=float), np.asarray(m.lines[t][0], dtype=float)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            d = np.log10(ys) - np.log10(y0) if ylog and y0 > 0 else ys - y0
+        a, b = d[:-1], d[1:]
+        with np.errstate(invalid="ignore"):
+            hits = np.flatnonzero(np.isfinite(a) & np.isfinite(b) & ((a * b < 0) | (a == 0)))
+        found = [int(j) for j in hits]
+        px, py = [], []
+        for j in found[:CROSSINGS_SHOWN]:
+            if at_line == "stored" or a[j] == 0:
+                n = j if abs(a[j]) <= abs(b[j]) else j + 1
+                px.append(float(xs[n]))
+                py.append(float(ys[n]))
+                continue
+            f = a[j] / (a[j] - b[j])
+            if xlog and xs[j] > 0 and xs[j + 1] > 0:
+                px.append(float(xs[j] * (xs[j + 1] / xs[j]) ** f))
+            else:
+                px.append(float(xs[j] + f * (xs[j + 1] - xs[j])))
+            py.append(float(y0))
+        if len(ys) and np.isfinite(d[-1]) and d[-1] == 0 and len(px) < CROSSINGS_SHOWN:
+            px.append(float(xs[-1]))
+            py.append(float(ys[-1]))
+        rows.append({"trace": int(t), "label": m.lines[t][1], "x": [p / m.xf for p in px], "px": px, "py": py,
+                     "more": max(len(found) - CROSSINGS_SHOWN, 0)})
+    xi, yi = _curve_x_item(s, k, i), _value_item(s, "y", _trace_value(s, k), y0, k)
+    return {"rows": rows, "more": max(len(shown) - TABLE_LIMIT, 0), "x_label": xi["label"], "x_unit": xi["unit"],
+            "label": yi["label"], "unit": yi["unit"], "y": yi["value"], "mode": at_line}
 
 
 def _near_trace(m, k: int, x: float, n: int = NEAR_POINTS) -> Tuple[np.ndarray, np.ndarray, int]:
@@ -394,22 +491,34 @@ def _step_point(m, k: int, i: int, n: int) -> int:
     return at + int(order[pos])
 
 
-def _table(s: "ExploreSession", k: int, i: int, shown: List[int]) -> Dict[str, Any]:
-    """A vertical cursor: every visible trace's value at the cursor's x (cursor's trace first)."""
+def _table(s: "ExploreSession", k: int, i: int, shown: List[int], at: Optional[float] = None,
+           at_line: str = "stored", dots: bool = False, xlog: bool = False) -> Dict[str, Any]:
+    """A vertical cursor: every visible trace's value at the cursor's x (cursor's trace first):
+    its nearest stored point, or ("interpolated") its value at exactly `at` (plot units)."""
     m = s.model
     x0 = m.xs[k][i]
     order = [k] + [t for t in shown if t != k]
     rows = []
     for t in order[:TABLE_LIMIT]:
         xs = m.xs[t]
-        it = i if xs is m.xs[k] else _nearest(xs, x0)
+        if at_line == "interpolated":
+            y = _at_x(xs, m.lines[t][0], float(at if at is not None else x0), xlog)
+            row_item = _value_item(s, "y", _trace_value(s, t), np.nan if y is None else y, t)
+            rows.append({"trace": int(t), "label": m.lines[t][1], "value": row_item["value"], "unit": row_item["unit"],
+                         "x": _num(float(at if at is not None else x0) / m.xf),
+                         "px": float(at if at is not None else x0), "py": y})
+            continue
+        want = x0 if at is None else at                  # (a free cursor: its own x, not its nearest point's)
+        it = i if xs is m.xs[k] and want == x0 else _nearest(xs, want)
         row_item = _value_item(s, "y", _trace_value(s, t), m.lines[t][0][it], t)
         rows.append({"trace": int(t), "label": m.lines[t][1], "value": row_item["value"], "unit": row_item["unit"],
                      "x": _num(xs[it] / m.xf)})
+        if dots:
+            rows[-1].update({"px": float(xs[it]), "py": _num(m.lines[t][0][it])})
     name = _trace_value(s, k)
     shown_item = _value_item(s, "y", name, 0.0, k)
     label, unit = shown_item["label"], shown_item["unit"]
-    return {"rows": rows, "more": max(len(order) - TABLE_LIMIT, 0), "label": label, "unit": unit}
+    return {"rows": rows, "more": max(len(order) - TABLE_LIMIT, 0), "label": label, "unit": unit, "mode": at_line}
 
 
 # -- cuts through a map ----------------------------------------------------------------------------

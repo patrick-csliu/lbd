@@ -53,3 +53,14 @@ def test_links_open_a_section_and_a_narrow_window_has_tabs(viewer, new_page):
     tabs = d.get_by_role("tab")
     assert len({round(t.bounding_box()["y"]) for t in tabs.all()}) == 1                # the sections in one row
     assert page.evaluate("document.querySelector('.settings-main').scrollWidth <= document.querySelector('.settings-main').clientWidth")
+
+
+def test_the_limit_of_a_cursor_line_is_a_setting(new_page):
+    page = new_page()
+    box = open_settings(page, "Explore").get_by_label("Most traces marked at a cursor line")
+    expect(box).to_have_value("50")
+    box.fill("7")
+    box.press("Enter")
+    page.wait_for_timeout(300)
+    page.reload()
+    expect(open_settings(page, "Explore").get_by_label("Most traces marked at a cursor line")).to_have_value("7")

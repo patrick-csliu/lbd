@@ -773,6 +773,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
       actions={actActions}
       onBack={act.back ? actApi.onBack : null}
       others={rec.sync.cursors ? othersAtX : []}
+      file={{ path: info.path, name: info.name, id: info.id }}
       onSaveCut={(which) => {
         // the active panel's cut first, then the other panels' (the dialog says which can join)
         const ids = [act.id, ...rec.panels.filter((q) => q.id !== act.id).map((q) => q.id)];

@@ -378,6 +378,7 @@ class SettingsBody(_Body):
     library: Optional[Dict[str, Any]] = None  # {read_headers?, notice_seen?, columns?} (config.LIBRARY_DEFAULTS)
     memory: Optional[Dict[str, Any]] = None   # {reserve_gb?, maximum_gb?, summary_cache_gb?} (config.MEMORY_DEFAULTS)
     measurements: Optional[Dict[str, Any]] = None   # {progress?, time?, percent?, points?, axes?, notify?}
+    explore: Optional[Dict[str, Any]] = None  # {line_traces?} (config.EXPLORE_DEFAULTS)
 
 
 class SectionBody(_Body):
@@ -465,6 +466,8 @@ class CursorsBody(_Body):
     height: int
     cuts: bool = True                     # maps: the row and column through cursor 1
     lines: bool = True                    # curves: each cursor's trace as drawn (to highlight it)
+    every: bool = True                    # a vertical or horizontal cursor reads every trace at its line
+    at_line: str = "interpolated"         # ... between stored points, or "stored": the nearest
 
 
 class FindBody(_Body):
@@ -909,7 +912,7 @@ def create_app(state: AppState) -> FastAPI:
             "version": VERSION, "lbd_version": lbd.FORMAT_VERSION,
             "roots": s["roots"], "default_style": s["default_style"], "styles": names,
             "open_files_in": s["open_files_in"], "open_data_in": s["open_data_in"], "theme": s["theme"],
-            "library": s["library"], "memory": {**s["memory"], **memory_now()}, "measurements": s["measurements"], "login": getpass.getuser(), "platform": sys.platform, "config_dir": str(cfg.dir), "warnings": problems + warns,
+            "library": s["library"], "memory": {**s["memory"], **memory_now()}, "measurements": s["measurements"], "explore": s["explore"], "login": getpass.getuser(), "platform": sys.platform, "config_dir": str(cfg.dir), "warnings": problems + warns,
             "defaults": section_defaults(),
         }
 
@@ -1388,7 +1391,8 @@ def create_app(state: AppState) -> FastAPI:
         s = _session(session_id)
         s.last_used = time.monotonic()
         return reading.cursors(s, body.cursors, body.type, {"xlim": body.xlim, "ylim": body.ylim},
-                               (body.width, body.height), body.cuts, body.lines)
+                               (body.width, body.height), body.cuts, body.lines, body.every, body.at_line,
+                               cfg.settings()["explore"]["line_traces"])
 
     @app.post("/api/explore/{session_id}/find")
     def explore_find(session_id: str, body: FindBody):
@@ -1722,11 +1726,13 @@ def create_app(state: AppState) -> FastAPI:
     def put_settings(body: SettingsBody):
         if (body.default_style is None and body.open_files_in is None and body.open_data_in is None
                 and body.theme is None and body.library is None and body.memory is None
-                and body.measurements is None):
+                and body.measurements is None and body.explore is None):
             raise HTTPException(400, "nothing to change: send default_style, open_files_in, open_data_in, theme, "
-                                     "library, memory and/or measurements")
+                                     "library, memory, measurements and/or explore")
         if body.measurements is not None:
             cfg.set_measurements(body.measurements)
+        if body.explore is not None:
+            cfg.set_explore(body.explore)
         if body.memory is not None:
             apply_memory(cfg.set_memory(body.memory))
             summaries.shared().trim()                     # a smaller limit: the oldest summaries go
@@ -1744,7 +1750,8 @@ def create_app(state: AppState) -> FastAPI:
             if cfg.set_library(body.library)["read_headers"] != before:
                 state.wake_library()                      # read what is missing (or stop reading)
         if (body.open_files_in is not None or body.open_data_in is not None or body.theme is not None
-                or body.library is not None or body.memory is not None or body.measurements is not None):
+                or body.library is not None or body.memory is not None or body.measurements is not None
+                or body.explore is not None):
             state.pages.broadcast("settings_changed")      # every page shows the new setting
         return get_state()
 

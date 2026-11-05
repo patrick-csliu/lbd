@@ -228,8 +228,8 @@ const CURSOR_COLORS = ["#e0001b", "#0057d9"];
 const GRAB_PX = 7; // how near a cursor the mouse must be to drag it
 
 const askOf = (c: CursorRead): CursorAsk => ({ x: c.x, y: c.y, ...(c.trace !== undefined ? { trace: c.trace } : {}), ...(c.free ? { free: true } : {}) });
-const cursorsKey = (type: string, at: CursorAsk[], cuts: boolean, on: boolean) =>
-  JSON.stringify({ type, cuts, on, at: at.map((a) => [a.x, a.y, a.trace ?? null, !!a.free]) });
+const cursorsKey = (type: string, at: CursorAsk[], cuts: boolean, on: boolean, every?: boolean, atLine?: string) =>
+  JSON.stringify({ type, cuts, on, every: every !== false, atLine: atLine ?? "interpolated", at: at.map((a) => [a.x, a.y, a.trace ?? null, !!a.free]) });
 
 /** Two plot settings that differ only in the slider positions (the view is kept then). */
 function onlySlicesDiffer(a: PlotSpec, b: PlotSpec): boolean {
@@ -453,6 +453,19 @@ export default function ExploreView({
       }
       if (r.type !== "horizontal" || kindRef.current === "heatmap") edged(color, 2, () => ctx.arc(x, y, 6, 0, 2 * Math.PI));
     });
+    // where a vertical or horizontal cursor meets each trace
+    r?.cursors.forEach((c) =>
+      c?.points?.forEach((p) => {
+        const [x, y] = toPx(m, p.x, p.y);
+        ctx.beginPath();
+        ctx.arc(x, y, 3.5, 0, 2 * Math.PI);
+        ctx.fillStyle = p.color;
+        ctx.fill();
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = edge;
+        ctx.stroke();
+      }),
+    );
     // the numbers: small badges, placed so they are never on top of each other
     const badges = labelPlaces(places, [l, t, w, h], r?.type ?? "cross");
     for (const b of badges) {
@@ -613,15 +626,15 @@ export default function ExploreView({
     if (!sid || !at.length) return Promise.resolve();
     const cuts = st.cuts && kindRef.current === "heatmap";
     return api
-      .exploreCursors(sid, { cursors: at, type: st.type, xlim: m.view.xlim, ylim: m.view.ylim, width: m.plot[2], height: m.plot[3], cuts })
+      .exploreCursors(sid, { cursors: at, type: st.type, xlim: m.view.xlim, ylim: m.view.ylim, width: m.plot[2], height: m.plot[3], cuts, every: st.every !== false, at_line: st.at_line ?? "interpolated" })
       .then((a) => {
         if (session.current !== sid || cursorsGone.current !== gone) return;
         readingRef.current = a;
         setReading(a);
         onReadingRef.current(a);
         const snapped = a.cursors.filter((c): c is CursorRead => !!c).map(askOf);
-        answered.current = cursorsKey(st.type, snapped, st.cuts, st.on);
-        if (cursorsKey(st.type, at, st.cuts, st.on) !== answered.current || st.at.length !== snapped.length)
+        answered.current = cursorsKey(st.type, snapped, st.cuts, st.on, st.every, st.at_line);
+        if (cursorsKey(st.type, at, st.cuts, st.on, st.every, st.at_line) !== answered.current || st.at.length !== snapped.length)
           onCursorsRef.current({ ...cursorsRef.current, at: snapped, active: Math.min(cursorsRef.current.active, Math.max(snapped.length - 1, 0)) as 0 | 1 });
       });
   }, []);
@@ -653,7 +666,7 @@ export default function ExploreView({
     cursorsGone.current++;
     cursorNext.current = null;
     readingRef.current = null;
-    answered.current = cursorsKey(cursorsRef.current.type, [], cursorsRef.current.cuts, cursorsRef.current.on);
+    answered.current = cursorsKey(cursorsRef.current.type, [], cursorsRef.current.cuts, cursorsRef.current.on, cursorsRef.current.every, cursorsRef.current.at_line);
     setReading(null);
     onReadingRef.current(null);
     onCursorsRef.current({ ...cursorsRef.current, at: [], active: 0 });
@@ -661,12 +674,34 @@ export default function ExploreView({
   }, [paintOverlay]);
   clearCursorsRef.current = clearCursors;
 
+  // Pointing at a dot on a cursor line names its trace and the number read there.
+  useEffect(() => {
+    const c = overlay.current;
+    if (!c) return;
+    const move = (e: globalThis.MouseEvent) => {
+      const m = current(), r = readingRef.current;
+      const box = c.getBoundingClientRect();
+      let text = "";
+      for (const cur of r?.cursors ?? []) {
+        for (const p of (m && cur?.points) || []) {
+          const [x, y] = toPx(m!, p.x, p.y);
+          if (Math.hypot(x - (e.clientX - box.left), y - (e.clientY - box.top)) > 6) continue;
+          const row = cur!.table?.rows.find((q) => q.trace === p.trace);
+          text = row ? `${p.label}: ${si(row.value, row.unit ?? cur!.table!.unit)}` : `${p.label}: ${si(p.x / (r!.factors.x || 1), cur!.crossings?.x_unit ?? "")}`;
+        }
+      }
+      c.title = text;
+    };
+    c.addEventListener("mousemove", move);
+    return () => c.removeEventListener("mousemove", move);
+  }, [current]);
+
   // A view that ends (another plot, back to the map) takes its read-outs with it.
   useEffect(() => () => onReadingRef.current(null), []);
 
   // Cursors set elsewhere (remembered, typed, another type, cuts or cursors on or off): ask for
   // them. Off: hidden, but kept, so they come back as they were.
-  const cursorsNow = cursorsKey(cursors.type, cursors.at, cursors.cuts, cursors.on);
+  const cursorsNow = cursorsKey(cursors.type, cursors.at, cursors.cuts, cursors.on, cursors.every, cursors.at_line);
   const haveFrame = !!meta;
   useEffect(() => {
     if (!haveFrame || cursorsNow === answered.current) return;

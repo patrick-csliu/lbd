@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, AppState, OpenDataIn, OpenFilesIn, Theme } from "./api";
 import { ConfirmDialog, ConfirmRequest } from "./menu";
+import { ExploreSettings } from "./ExploreSettings";
 import { MemorySettings } from "./MemorySettings";
 import { MeasurementSettings } from "./MeasurementSettings";
 import { SidebarScopeSettings } from "./FilesSidebar";
@@ -13,7 +14,7 @@ import { PreviewSettings } from "./LibraryPage";
 import { Segmented, Setting, SettingsGroup, Switch } from "./settingsUi";
 import { useToast } from "./toast";
 
-export type SettingsSection = "general" | "library" | "sidebar" | "memory" | "measurements";
+export type SettingsSection = "general" | "library" | "sidebar" | "explore" | "memory" | "measurements";
 
 /** The sections, and for "Find a setting" every setting in them: its name and the words it is
  * found by (its help, and other words people use). */
@@ -40,6 +41,11 @@ export const SECTIONS: { id: SettingsSection; title: string; settings: { id: str
     id: "sidebar",
     title: "Files sidebar",
     settings: [{ id: "library.sidebar_scopes", name: "What the Files sidebar can list", words: "folders starred recent library selection explore figure" }],
+  },
+  {
+    id: "explore",
+    title: "Explore",
+    settings: [{ id: "explore.line_traces", name: "Every trace at a cursor line, at most", words: "cursor vertical horizontal crossings markers traces limit" }],
   },
   {
     id: "memory",
@@ -256,6 +262,7 @@ export function SettingsDialog({
             </>
           )}
           {section === "sidebar" && <SidebarScopeSettings state={state} onSettings={onSettings} />}
+          {section === "explore" && <ExploreSettings settings={state.explore} onSettings={onSettings} />}
           {section === "memory" && <MemorySettings settings={state.memory} onSettings={onSettings} />}
           {section === "measurements" && <MeasurementSettings settings={state.measurements} onSettings={onSettings} />}
         </div>

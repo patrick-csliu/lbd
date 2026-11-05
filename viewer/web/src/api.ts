@@ -20,6 +20,8 @@ export interface AppState {
   library: LibrarySettings;
   /** memory for data (config.MEMORY_DEFAULTS, server memory_now) */
   memory: MemorySettings;
+  /** Explore (config.EXPLORE_DEFAULTS) */
+  explore: ExploreSettings;
   /** what the status of a file being measured shows (config.MEASUREMENTS_DEFAULTS) */
   measurements: MeasurementSettings;
   /** this computer's user name (suggested first when labelling users) */
@@ -51,6 +53,10 @@ export interface LiveStatus {
 }
 
 /** Memory for data (plan 6d): GB; null = automatic (reserve) / no maximum. */
+export interface ExploreSettings {
+  line_traces: number; // a cursor line marks every trace up to this many
+}
+
 export interface MemorySettings {
   reserve_gb: number | null;
   maximum_gb: number | null;
@@ -733,6 +739,9 @@ export interface ReadItem {
   text?: string | null;
 }
 
+/** How a vertical or horizontal cursor reads a trace at its line: between stored points, or the nearest. */
+export type AtLine = "interpolated" | "stored";
+
 export interface CursorRead {
   x: number; // snapped position, plot units
   y: number;
@@ -741,7 +750,11 @@ export interface CursorRead {
   label?: string; // the trace's name
   index: Record<string, number>; // stored indices
   items: ReadItem[];
-  table?: { rows: { trace: number; label: string; value: number | null; unit?: string; x: number | null }[]; more: number; label: string; unit: string };
+  table?: { rows: { trace: number; label: string; value: number | null; unit?: string; x: number | null }[]; more: number; label: string; unit: string; mode: AtLine };
+  /** A horizontal cursor: where each visible trace crosses its height (x in stored units). */
+  crossings?: { rows: { trace: number; label: string; x: number[]; more: number }[]; more: number; x_label: string; x_unit: string; label: string; unit: string; y: number | null; mode: AtLine };
+  points?: { x: number; y: number; trace: number; label: string; color: string }[]; // where the line meets the traces (plot units)
+  line_note?: string; // why the traces aren't marked at the line
   line?: ([number, number] | null)[]; // the trace as drawn (plot units), to highlight it
   stored?: { label: string; unit: string; value: number | null }; // with operations on: the stored value behind it
   cell?: [number, number, number, number]; // maps: the cell, x0 y0 x1 y1 (plot units)
@@ -815,7 +828,7 @@ export const api = {
   /** Cursors snapped to the stored data, their read-outs and (maps) the cuts through cursor 1. */
   exploreCursors: (
     session: string,
-    body: { cursors: CursorAsk[]; type: CursorType; xlim: number[]; ylim: number[]; width: number; height: number; cuts: boolean },
+    body: { cursors: CursorAsk[]; type: CursorType; xlim: number[]; ylim: number[]; width: number; height: number; cuts: boolean; every: boolean; at_line: AtLine },
   ) => call<CursorsAnswer>("POST", `/api/explore/${encodeURIComponent(session)}/cursors`, body),
   /** Where the max, min or peak (farthest from the median) is, in a range of the stored data. */
   exploreFind: (session: string, what: "max" | "min" | "peak", xlim: number[], ylim: number[], trace?: number) =>
@@ -913,6 +926,7 @@ export const api = {
   setTheme: (theme: Theme) => call<AppState>("PUT", "/api/settings", { theme }),
   resetSettings: (section: string) => call<AppState>("POST", "/api/settings/reset", { section }),
   setLibrary: (changes: Partial<LibrarySettings>) => call<AppState>("PUT", "/api/settings", { library: changes }),
+  setExplore: (changes: Partial<ExploreSettings>) => call<AppState>("PUT", "/api/settings", { explore: changes }),
   setMemory: (changes: Partial<Pick<MemorySettings, "reserve_gb" | "maximum_gb" | "summary_cache_gb">>) =>
     call<AppState>("PUT", "/api/settings", { memory: changes }),
   // summaries of maps bigger than memory (summaries.py)

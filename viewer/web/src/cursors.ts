@@ -1,4 +1,4 @@
-import { CursorAsk, CursorRead, CursorType, ReadItem } from "./api";
+import { AtLine, CursorAsk, CursorRead, CursorType, ReadItem } from "./api";
 
 /**
  * The Explore view's cursors: what is remembered for a file (positions on the data, type, cuts)
@@ -12,6 +12,8 @@ export interface CursorsState {
   active: 0 | 1; // the one the keys move
   cuts: boolean; // maps: the row and column through cursor 1
   on: boolean; // off: a click places no cursor; the cursors are kept, hidden, for when they are on again
+  every?: boolean; // curves, a vertical or horizontal cursor: read every trace at the line (absent: yes)
+  at_line?: AtLine; // ... between its stored points (absent) or the nearest stored point
 }
 
 export const NO_CURSORS: CursorsState = { type: "cross", at: [], active: 0, cuts: true, on: true };

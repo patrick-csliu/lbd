@@ -5,6 +5,9 @@ import numpy as np
 import pytest
 
 import lbd
+import lbd.plot as lp
+from lbd_viewer import reading
+from lbd_viewer.explore import ExploreSession
 
 
 def open_view(client, path, spec=None, width=640, height=420):
@@ -253,3 +256,102 @@ def test_only_one_of_several_traces_is_highlighted(client, traces, data_dir):
     o = open_view(client, data_dir / "one.lbd")
     client.post(f"/api/explore/{o['session']}/render", json={}).raise_for_status()
     assert "line" not in cursors(client, o, [{"x": 0.5, "y": 0.5}])["cursors"][0]   # nothing to tell apart
+
+
+# ---- every trace at a cursor line (plan 13) --------------------------------------------------------
+
+
+@pytest.fixture()
+def three(tmp_path):
+    """Three traces of a sine, a Lorentzian dip and a straight line, on 0 … 10."""
+    x = np.linspace(0.0, 10.0, 101)
+    d = lbd.Dataset(title="Traces")
+    d.add_axis("t", x, unit="s")
+    d.add_axis("n", [0.0, 1.0, 2.0])
+    z = np.stack([np.sin(x), 1 - 1 / (1 + (x - 5) ** 2), 0.1 * x])
+    d.add_value("v", z, axes=["n", "t"], unit="V")
+    p = tmp_path / "traces.lbd"
+    d.save(p)
+    return p, x, z
+
+
+def curve_session(path):
+    return ExploreSession(path, "v", {"kind": "curve", "values": ["v"], "x": "t", "series": "n"}, lp.load_style(), 600, 400, 1)
+
+
+def read_at(s, kind, x, y, **kw):
+    a = reading.cursors(s, [{"x": x, "y": y, "free": kw.pop("free", True)}], kind, {"xlim": list(s.full[0]), "ylim": list(s.full[1])}, (600, 400), **kw)
+    return a["cursors"][0]
+
+
+def test_a_vertical_cursor_reads_every_trace_between_its_points(three):
+    path, x, z = three
+    s = curve_session(path)
+    c = read_at(s, "vertical", 2.55, 0.0)                               # between stored points
+    rows = {r["trace"]: r for r in c["table"]["rows"]}
+    assert rows[2]["value"] == pytest.approx(0.255)                     # the straight line: exact
+    assert rows[0]["value"] == pytest.approx((np.sin(2.5) + np.sin(2.6)) / 2)
+    assert len(c["points"]) == 3 and c["points"][0]["x"] == pytest.approx(2.55) and c["points"][0]["color"].startswith("#")
+    stored = read_at(s, "vertical", 2.55, 0.0, at_line="stored")
+    assert {r["trace"]: r for r in stored["table"]["rows"]}[2]["value"] == pytest.approx(0.25, abs=0.011)
+
+
+def test_a_horizontal_cursor_gives_every_crossing(three):
+    path, x, z = three
+    s = curve_session(path)
+    c = read_at(s, "horizontal", 5.0, 0.5, )
+    rows = {r["trace"]: r for r in c["crossings"]["rows"]}
+    # the straight line once, at x = 5; the dip twice, at 5 ± 1 (where 1/(1 + u²) = 1/2)
+    assert rows[2]["x"] == pytest.approx([5.0])
+    assert rows[1]["x"] == pytest.approx([4.0, 6.0], abs=1e-6)
+    assert len(rows[0]["x"]) == 4                                       # the sine: up and down
+    assert all(y == pytest.approx(0.5) for r in rows.values() for y in r["py"])
+    assert len(c["points"]) == 7
+    near = read_at(s, "horizontal", 5.0, 0.53, at_line="stored")
+    r = {r["trace"]: r for r in near["crossings"]["rows"]}[2]
+    assert r["x"] == pytest.approx([5.3]) and r["py"] == pytest.approx([0.53])
+
+
+def test_no_crossing_and_gaps(tmp_path):
+    d = lbd.Dataset()
+    d.add_axis("t", np.arange(6.0))
+    d.add_value("v", [0.0, 1.0, np.nan, 3.0, 4.0, 5.0], axes="t")
+    d.save(tmp_path / "g.lbd")
+    s = ExploreSession(tmp_path / "g.lbd", "v", {"kind": "curve", "values": ["v"], "x": "t"}, lp.load_style(), 600, 400, 1)
+    assert read_at(s, "horizontal", 1.0, 2.0)["crossings"]["rows"][0]["x"] == []     # over the gap: no crossing
+    assert read_at(s, "horizontal", 1.0, 100.0)["crossings"]["rows"][0]["x"] == []
+    assert read_at(s, "horizontal", 1.0, 0.5)["crossings"]["rows"][0]["x"] == pytest.approx([0.5])
+    assert read_at(s, "vertical", 1.5, 0.0)["table"]["rows"][0]["value"] is None     # next to the gap
+
+
+def test_traces_with_their_own_x_are_read_at_the_cursors_x(tmp_path):
+    """Both ways on a sweep where each trace has its own x (the case the choice is for)."""
+    d = lbd.Dataset()
+    d.add_axis("n", [0.0, 1.0])
+    d.add_axis("i", np.arange(3.0))
+    d.add_value("xs", [[0.0, 1.0, 2.0], [0.5, 1.5, 2.5]], axes=["n", "i"])
+    d.add_value("ys", [[0.0, 10.0, 20.0], [5.0, 15.0, 25.0]], axes=["n", "i"])
+    d.save(tmp_path / "own.lbd")
+    s = ExploreSession(tmp_path / "own.lbd", "v", {"kind": "curve", "values": ["ys"], "x": "xs", "series": "n"}, lp.load_style(), 600, 400, 1)
+    at = {r["trace"]: r for r in read_at(s, "vertical", 1.0, 10.0, free=False)["table"]["rows"]}
+    assert at[1]["value"] == pytest.approx(10.0) and at[1]["x"] == pytest.approx(1.0)  # between 0.5 and 1.5
+    near = {r["trace"]: r for r in read_at(s, "vertical", 1.0, 10.0, free=False, at_line="stored")["table"]["rows"]}
+    assert near[1]["value"] in (5.0, 15.0) and near[1]["x"] in (0.5, 1.5)
+
+
+def test_many_traces_stop_the_markers(three):
+    path, x, z = three
+    s = curve_session(path)
+    c = read_at(s, "horizontal", 5.0, 0.5, limit=2)
+    assert "crossings" not in c and "points" not in c and "Settings → Explore" in c["line_note"]
+    c = read_at(s, "vertical", 5.0, 0.5, limit=2)
+    assert "points" not in c and len(c["table"]["rows"]) == 3 and c["table"]["mode"] == "stored"
+    c = read_at(s, "vertical", 5.0, 0.5, every=False)
+    assert "table" not in c and "points" not in c
+
+
+def test_the_limit_is_a_setting(client):
+    assert client.get("/api/state").json()["explore"]["line_traces"] == 50
+    assert client.put("/api/settings", json={"explore": {"line_traces": 5}}).json()["explore"]["line_traces"] == 5
+    r = client.put("/api/settings", json={"explore": {"line_traces": -1}})
+    assert r.status_code == 400 and "whole number" in r.text

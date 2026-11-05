@@ -473,6 +473,11 @@ details.group fieldset > .group-fields { margin-top: -4px; }
 .cursor-value { font-size: 13px; }
 .cursor-between th { text-align: left; font-weight: 600; padding-right: 8px; }
 .cursor-between td { padding-right: 8px; white-space: nowrap; }
+.cursor-line-choice { display: flex; flex-direction: column; gap: 4px; }
+.cursor-line-choice .field { margin: 0; }
+.cursor-line { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.cursor-line-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; }
+.cursor-line-head button { padding: 2px 7px; }
 .cursor-table { max-height: 180px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius); padding: 2px 6px; }
 .cursor-table th { text-align: left; font-weight: normal; padding-right: 10px; }
 .cursor-table tr.on { font-weight: 700; }

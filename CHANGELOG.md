@@ -124,6 +124,12 @@ are still written as 1.2).
   every slider position (complex mode, operations and equations applied), worked out once in the
   background; **This slice** keeps each position's own range, as before (and for panels set up
   before). The Contrast histogram counts the same values.
+- **Explore: every trace at a cursor line.** On curves, a vertical or horizontal cursor marks where
+  it meets each visible trace and lists the numbers right under the cursor's: a vertical cursor
+  each trace's value (with two cursors both and Δ), a horizontal cursor every crossing and, for
+  two, the distance between them. **Interpolated** (default) or **Nearest stored point**; **Copy**
+  and **Save as CSV…**; a tick box turns it off, and **Settings → Explore** sets how many traces
+  it marks at most (50).
 - **Explore: cursors show on any map.** Their lines, circles and numbers have a white edge (a blue
   cursor on a blue map was lost), the numbers are small badges that keep apart when two cursors
   are close, and share one badge at the same point.

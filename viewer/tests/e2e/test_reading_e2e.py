@@ -251,3 +251,28 @@ def test_a_cursor_has_a_white_edge_on_any_background(small_map, new_page):
     painted = [p for p in colours if p[3] > 100]
     assert any(p[0] > 200 and p[1] > 200 and p[2] > 200 for p in painted)     # the white edge
     assert any(p[0] > 150 and p[1] < 110 for p in painted)                    # the red line
+
+
+def test_a_vertical_and_a_horizontal_cursor_read_every_trace(sweep, new_page):
+    """Plan 13: dots where the line meets the traces, the table under the numbers, the two ways of
+    reading, and the tick box that turns it off."""
+    page = new_page("Explore")
+    meta = frames(page, lambda: row(page, "sweep.lbd").dblclick())
+    explore(page).get_by_role("button", name="Vertical").click()
+    explore(page).locator(".explore-overlay").scroll_into_view_if_needed()
+    a = cursor_answer(page, lambda: page.mouse.click(*at(page, meta, 25, 2.1)))
+    assert len(a["cursors"][0]["points"]) == 5
+    panel = explore(page).locator(".cursor-panel")
+    expect(panel).to_contain_text("Every trace at")
+    expect(panel.get_by_label("Interpolated")).to_be_checked()
+    cursor_answer(page, lambda: panel.get_by_label("Nearest stored point").check())
+    expect(panel.locator(".cursor-line-head")).not_to_contain_text("≈")
+    a = cursor_answer(page, lambda: panel.get_by_label("Every trace at the line").uncheck())
+    assert "points" not in a["cursors"][0] and "table" not in a["cursors"][0]
+    expect(panel.locator(".cursor-table")).to_have_count(0)
+    cursor_answer(page, lambda: panel.get_by_label("Every trace at the line").check())
+
+    a = cursor_answer(page, lambda: explore(page).get_by_role("button", name="Horizontal").click())
+    assert "crossings" in a["cursors"][0]
+    expect(panel).to_contain_text("Where the traces cross")
+    expect(panel.locator(".cursor-table")).to_contain_text("doesn't cross")

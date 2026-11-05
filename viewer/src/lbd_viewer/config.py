@@ -60,6 +60,9 @@ MEMORY_DEFAULTS: Dict[str, Any] = {"reserve_gb": None, "maximum_gb": None, "summ
 # browser notification when a measurement finishes or stops while the page is in the background.
 MEASUREMENTS_DEFAULTS: Dict[str, Any] = {"progress": True, "time": True, "percent": True, "points": True,
                                          "axes": True, "notify": False}
+# Explore (plan 13): a vertical or horizontal cursor marks every trace at its line for at most
+# this many visible traces (more makes each cursor move slow, and the plot unreadable).
+EXPLORE_DEFAULTS: Dict[str, Any] = {"line_traces": 50}
 # The sections of the Settings dialog (SettingsDialog.tsx) and the settings in each, as
 # "key" (top level) or "group.key"; "Reset this section" puts these back to their defaults.
 GENERAL_DEFAULTS: Dict[str, Any] = {"theme": "system", "open_files_in": "viewer", "open_data_in": "explore"}
@@ -69,6 +72,7 @@ SETTINGS_SECTIONS: Dict[str, List[str]] = {
     "sidebar": ["library.sidebar_scopes"],
     "memory": [f"memory.{k}" for k in MEMORY_DEFAULTS],
     "measurements": [f"measurements.{k}" for k in MEASUREMENTS_DEFAULTS],
+    "explore": [f"explore.{k}" for k in EXPLORE_DEFAULTS],
 }
 
 
@@ -76,7 +80,7 @@ def setting_default(key: str) -> Any:
     """The default of a setting named as in SETTINGS_SECTIONS."""
     group, _, name = key.rpartition(".")
     table = {"": GENERAL_DEFAULTS, "library": LIBRARY_DEFAULTS, "memory": MEMORY_DEFAULTS,
-             "measurements": MEASUREMENTS_DEFAULTS}[group]
+             "measurements": MEASUREMENTS_DEFAULTS, "explore": EXPLORE_DEFAULTS}[group]
     value = table[name]
     return list(value) if isinstance(value, list) else dict(value) if isinstance(value, dict) else value
 
@@ -126,7 +130,7 @@ class Config:
         if data is None:
             return {"roots": [], "default_style": None, "open_files_in": "viewer", "open_data_in": "explore",
                     "theme": "system", "library": dict(LIBRARY_DEFAULTS), "memory": dict(MEMORY_DEFAULTS),
-                    "measurements": dict(MEASUREMENTS_DEFAULTS)}
+                    "measurements": dict(MEASUREMENTS_DEFAULTS), "explore": dict(EXPLORE_DEFAULTS)}
         if not isinstance(data, dict):
             raise ConfigError(f"{self.settings_path} must contain a JSON object; fix or delete the file")
         roots = data.get("roots", [])
@@ -160,9 +164,13 @@ class Config:
             measurements = _check_measurements({**MEASUREMENTS_DEFAULTS, **(data.get("measurements") or {})})
         except ConfigError as e:
             raise ConfigError(f"{self.settings_path}: {e}; fix or delete the file") from None
+        try:
+            explore = _check_explore({**EXPLORE_DEFAULTS, **(data.get("explore") or {})})
+        except ConfigError as e:
+            raise ConfigError(f"{self.settings_path}: {e}; fix or delete the file") from None
         return {"roots": list(roots), "default_style": default or None, "open_files_in": open_in,
                 "open_data_in": open_data, "theme": theme, "library": library, "memory": memory,
-                "measurements": measurements}
+                "measurements": measurements, "explore": explore}
 
     def settings(self) -> Dict[str, Any]:
         """{"roots": [...], "default_style": name, "open_files_in": ..., "open_data_in": ...,
@@ -173,7 +181,7 @@ class Config:
             default = "default"
         return {"roots": stored["roots"], "default_style": default, "open_files_in": stored["open_files_in"],
                 "open_data_in": stored["open_data_in"], "theme": stored["theme"], "library": stored["library"],
-                "memory": stored["memory"], "measurements": stored["measurements"]}
+                "memory": stored["memory"], "measurements": stored["measurements"], "explore": stored["explore"]}
 
     def problems(self) -> List[str]:
         """Things the user should know about the settings (shown as warnings in the viewer)."""
@@ -265,6 +273,17 @@ class Config:
             s["memory"] = _check_memory({**s["memory"], **changes})
             self._save_settings(s)
             return s["memory"]
+
+    def set_explore(self, changes: Dict[str, Any]) -> Dict[str, Any]:
+        """Change the Explore settings (EXPLORE_DEFAULTS); returns them all."""
+        unknown = sorted(set(changes) - set(EXPLORE_DEFAULTS))
+        if unknown:
+            raise ConfigError(f"unknown Explore setting(s) {unknown}; known: {sorted(EXPLORE_DEFAULTS)}")
+        with self._lock:
+            s = self.settings()
+            s["explore"] = _check_explore({**s["explore"], **changes})
+            self._save_settings(s)
+            return s["explore"]
 
     def set_measurements(self, changes: Dict[str, Any]) -> Dict[str, Any]:
         """Change what the status of a file being measured shows (MEASUREMENTS_DEFAULTS, each
@@ -405,6 +424,13 @@ def _check_memory(memory: Dict[str, Any]) -> Dict[str, Any]:
     if isinstance(x, bool) or not isinstance(x, (int, float)) or x < 0:
         raise ConfigError(f"memory setting 'summary_cache_gb' must be a number of GB (≥ 0), not {x!r}")
     return {k: (None if memory[k] is None else float(memory[k])) for k in MEMORY_DEFAULTS}
+
+
+def _check_explore(e: Dict[str, Any]) -> Dict[str, Any]:
+    x = e.get("line_traces")
+    if isinstance(x, bool) or not isinstance(x, int) or x < 0:
+        raise ConfigError(f"Explore setting 'line_traces' must be a whole number of traces (≥ 0), not {x!r}")
+    return {k: e[k] for k in EXPLORE_DEFAULTS}
 
 
 def _check_measurements(m: Dict[str, Any]) -> Dict[str, Any]:

@@ -1,7 +1,9 @@
 import { KeyboardEvent, MutableRefObject, useEffect, useState } from "react";
-import { CursorRead, CursorsAnswer, CursorType, ReadItem } from "./api";
+import { api, ApiError, CursorRead, CursorsAnswer, CursorType, ReadItem } from "./api";
 import { between, CursorsState, item, si } from "./cursors";
 import { ExploreActions } from "./ExploreView";
+import { Segmented } from "./settingsUi";
+import { useToast } from "./toast";
 
 /**
  * The Cursors section of the Explore view's side panel: the cursor type, each cursor's numbers
@@ -21,6 +23,132 @@ interface Props {
   others?: OtherPanel[];
   /** Save the row, column or trace through cursor 1 as CSV. */
   onSaveCut: (which: "row" | "column" | "trace") => void;
+  /** The data file: where the table at a cursor line says it comes from. */
+  file: { path: string; name: string; id?: string | null };
+}
+
+/** A table of what a vertical or horizontal cursor reads at its line, as text and as numbers. */
+function lineRows(c1: CursorRead, c2: CursorRead | null): { title: string; head: string[]; rows: { key: number; on: boolean; cells: string[]; raw: (number | string)[] }[]; more: number; about: boolean } | null {
+  const about = (c1.table ?? c1.crossings)?.mode === "interpolated";
+  if (c1.table) {
+    const x = item(c1, "x");
+    const t2 = c2?.table;
+    const unit = c1.table.unit;
+    return {
+      title: `Every trace at ${x?.label ?? "x"} = ${si(x?.value ?? c1.table.rows[0]?.x ?? null, x?.unit ?? "")}`,
+      head: t2 ? ["Trace", "Cursor 1", "Cursor 2", "Δ"] : ["Trace", c1.table.label],
+      about,
+      more: c1.table.more,
+      rows: c1.table.rows.map((r) => {
+        const u = r.unit ?? unit;
+        const other = t2?.rows.find((q) => q.trace === r.trace);
+        const d = other && r.value !== null && other.value !== null ? other.value - r.value : null;
+        return {
+          key: r.trace,
+          on: r.trace === c1.trace,
+          cells: t2 ? [r.label, si(r.value, u), si(other?.value ?? null, u), si(d, u)] : [r.label, si(r.value, u)],
+          raw: t2 ? [r.label, r.value ?? "", other?.value ?? "", d ?? ""] : [r.label, r.value ?? ""],
+        };
+      }),
+    };
+  }
+  if (c1.crossings) {
+    const k = c1.crossings;
+    return {
+      title: `Where the traces cross ${k.label} = ${si(k.y, k.unit)}`,
+      head: ["Trace", k.x_label, "Between"],
+      about,
+      more: k.more,
+      rows: k.rows.map((r) => {
+        const width = r.x.length === 2 ? Math.abs(r.x[1] - r.x[0]) : null;
+        return {
+          key: r.trace,
+          on: r.trace === c1.trace,
+          cells: [r.label, r.x.length ? r.x.map((v) => si(v, k.x_unit)).join(", ") + (r.more ? `, and ${r.more} more` : "") : "doesn't cross", width === null ? "" : `Δ ${si(width, k.x_unit)}`],
+          raw: [r.label, r.x.join(" "), width ?? ""],
+        };
+      }),
+    };
+  }
+  return null;
+}
+
+/** What a vertical or horizontal cursor reads on every trace, with Copy and Save as CSV. */
+function LineTable({ c1, c2, file }: { c1: CursorRead; c2: CursorRead | null; file: Props["file"] }) {
+  const toast = useToast();
+  const t = lineRows(c1, c2);
+  if (!t) return null;
+  const say = t.about ? " (≈ between stored points)" : " (the nearest stored points)";
+  const copy = async () => {
+    const text = [t.head.join("\t"), ...t.rows.map((r) => r.raw.join("\t"))].join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      toast("Copied: paste it into a spreadsheet or your notes.");
+    } catch {
+      toast("Couldn't use the clipboard here.", "error");
+    }
+  };
+  const saveCsv = async () => {
+    const quote = (v: number | string) => (typeof v === "string" && /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : String(v));
+    const lines = [
+      `# ${t.head.join(",")}`,
+      `# LBD export: ${file.name}`,
+      `# id: ${file.id ?? "none (the file has no id; LBD gives it one when it next saves the file)"}`,
+      `# ${t.title}${t.about ? ", interpolated between stored points" : ", the nearest stored points"}`,
+      ...t.rows.map((r) => r.raw.map(quote).join(",")),
+    ];
+    try {
+      const { path } = await api.pickSave(file.path, `${file.name.replace(/\.lbd(\.writing)?$/i, "")} - at the cursor.csv`, "csv", "Save the traces at the cursor");
+      if (path === null) return;
+      await api.savePicture(path, new Blob([lines.join("\n") + "\n"], { type: "text/csv" }));
+      toast(`Saved ${path}`);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 501) toast("This computer has no Save dialog here: use Copy.", "error");
+      else toast((e as Error).message, "error");
+    }
+  };
+  return (
+    <div className="cursor-line">
+      <div className="cursor-line-head small">
+        <span title={t.title + say}>
+          {t.title}
+          {t.about ? " ≈" : ""}
+        </span>
+        <span className="row-controls">
+          <button onClick={copy} title="Copy this table: paste it into a spreadsheet or your notes">
+            Copy
+          </button>
+          <button onClick={saveCsv} title="Save this table as a CSV file">
+            Save as CSV…
+          </button>
+        </span>
+      </div>
+      <div className="cursor-table small" aria-label={t.title}>
+        <table>
+          {t.head.length > 2 && (
+            <thead>
+              <tr>
+                {t.head.map((h) => (
+                  <th key={h}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+          )}
+          <tbody>
+            {t.rows.map((r) => (
+              <tr key={r.key} className={r.on ? "on" : ""}>
+                <th>{r.cells[0]}</th>
+                {r.cells.slice(1).map((v, i) => (
+                  <td key={i}>{v}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {t.more > 0 && <div className="muted">and {t.more} more</div>}
+      </div>
+    </div>
+  );
 }
 
 /** Another panel's read-out at the shared cursor. */
@@ -177,7 +305,7 @@ function CursorNumbers({ n, c, kind, type, actions }: { n: number; c: CursorRead
   );
 }
 
-export default function CursorPanel({ kind, cursors, onCursors, reading, actions, onBack, others = [], onSaveCut }: Props) {
+export default function CursorPanel({ kind, cursors, onCursors, reading, actions, onBack, others = [], onSaveCut, file }: Props) {
   const list = reading?.cursors ?? [];
   const [c1, c2] = [list[0] ?? null, list[1] ?? null];
   const act = (fn: (a: ExploreActions) => void) => () => actions.current && fn(actions.current);
@@ -229,6 +357,32 @@ export default function CursorPanel({ kind, cursors, onCursors, reading, actions
       {!c1 && <p className="muted small">Click the plot for cursor 1, Shift+click for cursor 2.</p>}
       {c1 && <CursorNumbers n={1} c={c1} kind={kind} type={cursors.type} actions={actions} />}
       {c2 && <CursorNumbers n={2} c={c2} kind={kind} type={cursors.type} actions={actions} />}
+      {kind === "curve" && cursors.type !== "cross" && (
+        <div className="cursor-line-choice">
+          <label className="check" title="Mark where the line meets each visible trace, and list the numbers there">
+            <input type="checkbox" checked={cursors.every !== false} onChange={(e) => onCursors({ ...cursors, every: e.target.checked })} />
+            Every trace at the line
+          </label>
+          {cursors.every !== false && (
+            <div className="field">
+              <span className="small">Values at the line</span>
+              <Segmented
+                name="cursor-at-line"
+                label="Values at the line"
+                value={cursors.at_line ?? "interpolated"}
+                options={[
+                  ["interpolated", "Interpolated", "Worked out between a trace's two neighbouring stored points: every row at exactly the line"],
+                  ["stored", "Nearest stored point", "The stored point of each trace nearest the line: numbers straight from the file, each row at its own place"],
+                ]}
+                onChange={(v) => onCursors({ ...cursors, at_line: v })}
+              />
+            </div>
+          )}
+        </div>
+      )}
+      {c1 && (c1.table || c1.crossings) && <LineTable c1={c1} c2={c2} file={file} />}
+      {c2 && c2.crossings && <LineTable c1={c2} c2={null} file={file} />}
+      {c1?.line_note && <p className="muted small">{c1.line_note}</p>}
       {c1 && c2 && (
         <table className="cursor-between small">
           <tbody>
@@ -243,21 +397,6 @@ export default function CursorPanel({ kind, cursors, onCursors, reading, actions
         </table>
       )}
       {c1 && others.length > 0 && <OtherPanels others={others} two={!!c2} />}
-      {c1?.table && (
-        <div className="cursor-table small" aria-label="Every trace at the cursor">
-          <table>
-            <tbody>
-              {c1.table.rows.map((r) => (
-                <tr key={r.trace} className={r.trace === c1.trace ? "on" : ""}>
-                  <th>{r.label}</th>
-                  <td>{si(r.value, r.unit ?? c1.table!.unit)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {c1.table.more > 0 && <div className="muted">and {c1.table.more} more</div>}
-        </div>
-      )}
       <div className="cursor-find" role="group" aria-label="Move cursor 1 to the highest, lowest or farthest value">
         <span className="small">Move cursor 1 to:</span>
         <span className="cursor-find-buttons">

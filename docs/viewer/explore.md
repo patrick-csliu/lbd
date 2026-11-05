@@ -196,9 +196,22 @@ they share one badge.
 **Cursor types**, in the inspector's Cursors tab:
 
 - **Crosshair** (the default): a point of one trace, or a cell.
-- **Vertical:** a line at one x; the section lists **every visible trace's value there**, the
-  cursor's own trace first.
-- **Horizontal:** a line at one height, for example to compare peaks with a level.
+- **Vertical:** a line at one x; on curves, the Cursors tab lists **every visible trace's value
+  there**, the cursor's own trace first. With two cursors: both, and the difference (Δ) per trace.
+- **Horizontal:** a line at one height; on curves, the Cursors tab lists **where each trace
+  crosses it**: every crossing (up to 10 per trace), or *doesn't cross*. When a trace crosses
+  twice, the distance between them is shown, such as the width of a resonance at −3 dB.
+
+**Every trace at the line** (curves, the Cursors tab): a dot marks where the line meets each trace
+(point at one for its trace and number). **Values at the line** says how they are read:
+**Interpolated** (the default) works them out straight between the trace's two neighbouring stored
+points, so every row is at exactly the line (marked ≈); **Nearest stored point** gives numbers
+straight from the file, each at its own place. It matters for horizontal crossings, and for traces
+with different x points (a variable sweep). **Copy** puts the table on the clipboard for a
+spreadsheet; **Save as CSV…** saves it. Untick **Every trace at the line** to read only the
+cursor's own trace. Markers and crossings work up to 50 visible traces (**Settings → Explore**: a
+high number can make every cursor move slow) and for curves that fit in memory; above that a note
+says so, and a vertical cursor still lists the nearest stored values.
 
 **The Cursors tab** of the inspector shows each cursor's numbers (the lines under each panel's
 title show them too; point at one for the whole text). Positions can be typed (with a prefix if
