@@ -124,6 +124,9 @@ are still written as 1.2).
   every slider position (complex mode, operations and equations applied), worked out once in the
   background; **This slice** keeps each position's own range, as before (and for panels set up
   before). The Contrast histogram counts the same values.
+- **Explore: cursors show on any map.** Their lines, circles and numbers have a white edge (a blue
+  cursor on a blue map was lost), the numbers are small badges that keep apart when two cursors
+  are close, and share one badge at the same point.
 - **Explore: a new equation shows that axis whole.** Changing the x (or y) equation, or an
   operation that changes what an axis measures (FFT, d/dx, normalize), shows all of that axis and
   keeps the other's zoom; the cursors, at the old numbers, are removed; a new z equation clears

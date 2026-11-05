@@ -28,7 +28,7 @@ import {
   ReduceStat,
   SyncKeys,
 } from "./api";
-import { between, CursorsState, HELP, item, readText, si } from "./cursors";
+import { labelPlaces, between, CursorsState, HELP, item, readText, si } from "./cursors";
 import { ConfirmDialog, ConfirmRequest, ContextMenu, MenuAt, MenuEntry, Popover } from "./menu";
 import type { ExportSource } from "./ExportDialog";
 import type { PictureWhat } from "./clipboard";
@@ -409,40 +409,76 @@ export default function ExploreView({
       else if (r!.type === "horizontal") ctx.fillRect(cl, Math.min(ay, by), w, Math.abs(by - ay));
       else ctx.fillRect(Math.min(ax, bx), Math.min(ay, by), Math.abs(bx - ax), Math.abs(by - ay));
     }
-    r?.cursors.forEach((c, i) => {
-      if (!c) return;
-      const [x, y] = toPx(m, c.x, c.y);
-      const color = CURSOR_COLORS[i];
-      ctx.strokeStyle = color;
-      ctx.fillStyle = color;
-      const active = cursorsRef.current.active === i && r.cursors.length === 2;
-      ctx.lineWidth = active ? 2 : 1.25;
-      ctx.setLineDash(r.type === "cross" ? [5, 4] : []);
+    // every mark twice: a wider edge first, then its colour, so a cursor shows on any background
+    // (a blue cursor on a blue map); the edge is solid under a dashed line
+    const edge = document.documentElement.dataset.theme === "dark" && kindRef.current === "curve" ? "rgba(24,24,24,0.85)" : "rgba(255,255,255,0.85)";
+    const edged = (color: string, width: number, path: () => void, dash: number[] = []) => {
       ctx.beginPath();
-      if (r.type !== "horizontal") {
-        ctx.moveTo(x, ct);
-        ctx.lineTo(x, ct + h);
-      }
-      if (r.type !== "vertical") {
-        ctx.moveTo(cl, y);
-        ctx.lineTo(cl + w, y);
-      }
+      path();
+      ctx.setLineDash([]);
+      ctx.strokeStyle = edge;
+      ctx.lineWidth = width + 2;
+      ctx.stroke();
+      ctx.setLineDash(dash);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
       ctx.stroke();
       ctx.setLineDash([]);
+    };
+    const places: ([number, number] | null)[] = (r?.cursors ?? []).map((c) => (c ? (toPx(m, c.x, c.y) as [number, number]) : null));
+    r?.cursors.forEach((c, i) => {
+      if (!c) return;
+      const [x, y] = places[i]!;
+      const color = CURSOR_COLORS[i];
+      const active = cursorsRef.current.active === i && r.cursors.length === 2;
+      edged(
+        color,
+        active ? 2 : 1.25,
+        () => {
+          if (r.type !== "horizontal") {
+            ctx.moveTo(x, ct);
+            ctx.lineTo(x, ct + h);
+          }
+          if (r.type !== "vertical") {
+            ctx.moveTo(cl, y);
+            ctx.lineTo(cl + w, y);
+          }
+        },
+        r.type === "cross" ? [5, 4] : [],
+      );
       if (c.cell && r.type === "cross") {
         const [ax, ay] = toPx(m, c.cell[0], c.cell[1]);
         const [bx, by] = toPx(m, c.cell[2], c.cell[3]);
-        if (Math.abs(bx - ax) > 8 && Math.abs(by - ay) > 8) ctx.strokeRect(Math.min(ax, bx), Math.min(ay, by), Math.abs(bx - ax), Math.abs(by - ay));
+        if (Math.abs(bx - ax) > 8 && Math.abs(by - ay) > 8) edged(color, 1.25, () => ctx.rect(Math.min(ax, bx), Math.min(ay, by), Math.abs(bx - ax), Math.abs(by - ay)));
       }
-      if (r.type !== "horizontal" || kindRef.current === "heatmap") {
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(x, y, 6, 0, 2 * Math.PI);
-        ctx.stroke();
-      }
-      ctx.font = "bold 11px system-ui, sans-serif";
-      ctx.fillText(String(i + 1), x + 8, y - 8);
+      if (r.type !== "horizontal" || kindRef.current === "heatmap") edged(color, 2, () => ctx.arc(x, y, 6, 0, 2 * Math.PI));
     });
+    // the numbers: small badges, placed so they are never on top of each other
+    const badges = labelPlaces(places, [l, t, w, h], r?.type ?? "cross");
+    for (const b of badges) {
+      ctx.beginPath();
+      ctx.roundRect(b.x - b.w / 2, b.y - b.h / 2, b.w, b.h, b.h / 2);
+      ctx.fillStyle = edge;
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = edge;
+      ctx.stroke();
+      b.cursors.forEach((n, k) => {
+        const part = b.w / b.cursors.length;
+        ctx.save();
+        ctx.beginPath();
+        ctx.roundRect(b.x - b.w / 2, b.y - b.h / 2, b.w, b.h, b.h / 2);
+        ctx.clip();
+        ctx.fillStyle = CURSOR_COLORS[n];
+        ctx.fillRect(b.x - b.w / 2 + k * part, b.y - b.h / 2, part, b.h);
+        ctx.fillStyle = "#fff";
+        ctx.font = "bold 11px system-ui, sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(String(n + 1), b.x - b.w / 2 + (k + 0.5) * part, b.y + 0.5);
+        ctx.restore();
+      });
+    }
+    c.dataset.badges = JSON.stringify(badges);
     ctx.restore();
     const b = box.current;
     if (b) {

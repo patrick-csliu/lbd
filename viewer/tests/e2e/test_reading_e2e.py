@@ -4,6 +4,8 @@ differences, Max finds the highest cell, typed positions snap to the data, curso
 remembered, a row is saved as its own file or shown as a curve, the contrast sets the colour
 range, and a vertical cursor lists every trace."""
 
+import json
+
 import lbd
 import numpy as np
 from lbd_viewer import server
@@ -202,3 +204,50 @@ def test_a_row_is_saved_as_csv(small_map, viewer, new_page, monkeypatch, tmp_pat
     text = (tmp_path / "row.csv").read_text(encoding="utf-8")
     assert "cut: row at" in text and "# id: " in text
     assert np.loadtxt(tmp_path / "row.csv", delimiter=",", encoding="utf-8")[:, 1].tolist() == [10, 11, 12, 13, 14]
+
+
+def badges(page):
+    return json.loads(explore(page).locator(".explore-overlay").first.get_attribute("data-badges"))
+
+
+def overlap(a, b):
+    return abs(a["x"] - b["x"]) < (a["w"] + b["w"]) / 2 and abs(a["y"] - b["y"]) < (a["h"] + b["h"]) / 2
+
+
+def test_the_cursors_numbers_stay_apart(sweep, new_page):
+    """Plan 13: the numbers are badges that never lie on top of each other; at one point, one badge."""
+    page = new_page("Explore")
+    meta = frames(page, lambda: row(page, "sweep.lbd").dblclick())
+    x, y = at(page, meta, 20, 2)
+    cursor_answer(page, lambda: page.mouse.click(x, y))
+    page.keyboard.down("Shift")
+    cursor_answer(page, lambda: page.mouse.click(*at(page, meta, 21, 2)))    # the next point: a few pixels away
+    page.keyboard.up("Shift")
+    two = badges(page)
+    assert [b["cursors"] for b in two] == [[0], [1]] and not overlap(*two)
+    page.keyboard.down("Shift")
+    cursor_answer(page, lambda: page.mouse.click(x, y))                       # the same point
+    page.keyboard.up("Shift")
+    one = badges(page)
+    assert [b["cursors"] for b in one] == [[0, 1]]
+
+
+def test_a_cursor_has_a_white_edge_on_any_background(small_map, new_page):
+    """Plan 13: the cursor's line is drawn over a wider edge, so it shows on a map of its colour."""
+    page = new_page("Explore")
+    meta = frames(page, lambda: row(page, "small_map.lbd").dblclick())
+    px, py = at(page, meta, 8, 30)
+    cursor_answer(page, lambda: page.mouse.click(px, py))
+    # a row of the overlay through the vertical line, away from the circle: edge, colour, edge
+    colours = page.evaluate(
+        """([x, y]) => {
+          const c = document.querySelector('main:not([hidden]) .explore-overlay');
+          const r = c.getBoundingClientRect(), s = c.width / r.width;
+          const row = c.getContext('2d').getImageData(Math.round((x - r.left - 8) * s), Math.round((y - r.top + 30) * s), Math.round(16 * s), 1).data;
+          const px = [];
+          for (let i = 0; i < row.length; i += 4) px.push([row[i], row[i + 1], row[i + 2], row[i + 3]]);
+          return px;
+        }""", [px, py])
+    painted = [p for p in colours if p[3] > 100]
+    assert any(p[0] > 200 and p[1] > 200 and p[2] > 200 for p in painted)     # the white edge
+    assert any(p[0] > 150 and p[1] < 110 for p in painted)                    # the red line

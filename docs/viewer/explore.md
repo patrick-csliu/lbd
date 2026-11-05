@@ -189,6 +189,10 @@ dB for a complex value shown in dB.
 | **Alt** + click or drag | A free position, not on the data; the read-out then gives the nearest stored value. |
 | **Esc** | Removes the cursors (with Undo). |
 
+Cursor 1 is red and cursor 2 blue, each with a white edge so it shows on any map, and each has its
+number in a small round badge. Two cursors close together keep their badges apart; at one point
+they share one badge.
+
 **Cursor types**, in the inspector's Cursors tab:
 
 - **Crosshair** (the default): a point of one trace, or a cell.
