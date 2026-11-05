@@ -490,7 +490,6 @@ class ExportBody(_Body):
     views: Optional[List[Dict[str, List[float]]]] = None   # per session {"xlim", "ylim"} in plot units
     layout: str = "rows"                  # "rows" or "matrix"
     rows_are: str = "t"                   # matrix: "t" (series / map rows) or "x"
-    units: str = "stored"                 # "stored" (Hz) or "shown" (GHz, as on screen)
     path: Optional[str] = None            # None: only the size, the options and a file name
 
 
@@ -1415,7 +1414,7 @@ def create_app(state: AppState) -> FastAPI:
         for k, s in enumerate(sessions):
             s.last_used = time.monotonic()
             view = body.views[k] if body.zoomed else None
-            tables.append(csv_export.session_table(s, body.numbers, view, body.units))
+            tables.append(csv_export.session_table(s, body.numbers, view))
         return sessions, csv_export.join(tables)
 
     @app.post("/api/explore/export-csv")

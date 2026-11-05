@@ -418,10 +418,11 @@ right-click menu.
 | **Numbers** | **as shown** (complex mode, operations and equations applied) · **as shown + stored** (each shown column followed by the file's own numbers) · **stored** |
 | **How much** | **everything** (all chosen traces, every point) · **the zoomed range** |
 | **Layout** | **one data point per row** · **table (matrix)**, for 2-D data: a map, or curves of a series |
-| **Units** | **stored** (Hz: nothing rounded) · **as on screen** (GHz) |
 | **Panels** | **this panel** · **all panels**: one file when they share their axes (a column per panel), else one file each |
 
-Some choices can't be made for every panel; they are greyed, and pointing at one says why (for
+Numbers are always in the units stored in the file (Hz, not GHz: nothing rounded); the header
+names each column's unit. Pointing at a choice says what it does. Some choices can't be made for
+every panel; they are greyed, and pointing at one says why (for
 example the stored numbers after an FFT, whose points aren't stored ones).
 
 Under the choices, the dialog says how big the file will be (*About 48 MB, 1 010 101 rows ×

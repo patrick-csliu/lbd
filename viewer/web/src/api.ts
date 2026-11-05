@@ -75,7 +75,6 @@ export interface ExportChoice {
   zoomed: boolean;
   layout: "rows" | "matrix";
   rows_are: "t" | "x";
-  units: "stored" | "shown";
 }
 
 /** Without a path: a file name, the size, and the choices that can't be made (with why). */

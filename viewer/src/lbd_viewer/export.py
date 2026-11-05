@@ -53,10 +53,9 @@ def options(s: "ExploreSession") -> Dict[str, Optional[str]]:
     return {"stored": stored, "both": stored, "zoomed": zoomed}
 
 
-def session_table(s: "ExploreSession", numbers: str = "shown", view: Optional[Dict[str, Any]] = None,
-                  units: str = "stored") -> Table:
-    """The table of what a panel shows. `view`: {"xlim", "ylim"} in plot units (the zoomed
-    range), None: everything."""
+def session_table(s: "ExploreSession", numbers: str = "shown", view: Optional[Dict[str, Any]] = None) -> Table:
+    """The table of what a panel shows, in the stored units. `view`: {"xlim", "ylim"} in plot
+    units (the zoomed range), None: everything."""
     why = options(s).get(numbers) if numbers != "shown" else None
     if why:
         raise ExploreError(why)
@@ -71,11 +70,11 @@ def session_table(s: "ExploreSession", numbers: str = "shown", view: Optional[Di
             ylim = [v / m.yf for v in view["ylim"]]
     if not _operated(s) and s.kind == s.base_kind:
         traces = _chosen(s)
-        t = tables.from_model(s.data, s.spec, m, numbers=numbers, xlim=xlim, ylim=ylim, units=units, traces=traces)
+        t = tables.from_model(s.data, s.spec, m, numbers=numbers, xlim=xlim, ylim=ylim, traces=traces)
         if traces is not None:
             t.comments.append(f"chosen traces only ({len(traces)})")
     else:
-        t = _operated_table(s, numbers, xlim, ylim, units)
+        t = _operated_table(s, numbers, xlim, ylim)
     if s.summarised:
         t.comments.append("read from the file part by part (too big for memory)")
     return t
@@ -87,10 +86,10 @@ def _slug(text: str) -> str:
     return name or "value"
 
 
-def _operated_table(s: "ExploreSession", numbers: str, xlim, ylim, units: str) -> Table:
+def _operated_table(s: "ExploreSession", numbers: str, xlim, ylim) -> Table:
     """After operations or equations: the grid they made (operations.py, stored units)."""
     g, shown_info, m, spec = s.ops_result.grid, s.ops_shown, s.model, s.spec
-    shown = units == "shown"
+    shown = False                                        # units: always as stored (since 1.3)
     fx = m.xf if shown else 1.0
     ft = m.yf if shown and g.kind == "heatmap" else 1.0
     fv = shown_info.value_factor if shown else 1.0

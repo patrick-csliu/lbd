@@ -30,7 +30,6 @@ from . import render as _r
 from .units import PREFIXES
 
 NUMBERS = ("shown", "stored", "both")
-UNITS = ("stored", "shown")
 LAYOUTS = ("rows", "matrix")
 BLOCK_NUMBERS = 1 << 20          # numbers read and written at a time (memory stays small)
 _WHOLE = re.compile(r"(?<![\w.])(-?\d+)\.0(?=,|$)", re.MULTILINE)   # 3.0 -> 3 (whole numbers)
@@ -345,7 +344,7 @@ def prefixed(unit: str, factor: float) -> str:
 
 def table(data, kind: Optional[str] = None, values: Any = None, *, numbers: str = "shown",
           xlim: Optional[Tuple[float, float]] = None, ylim: Optional[Tuple[float, float]] = None,
-          units: str = "stored", style: Any = None, file_style: bool = True, **spec: Any) -> Table:
+          style: Any = None, file_style: bool = True, **spec: Any) -> Table:
     """The numbers a curve plot or heat map shows, as a table (write it with `Table.to_csv`).
 
     **Use it when** you want the numbers of the viewer's plot (complex mode applied, the series
@@ -367,10 +366,9 @@ def table(data, kind: Optional[str] = None, values: Any = None, *, numbers: str 
     xlim, ylim : (low, high), optional
         Keep only the points with x (and, for a heat map, the rows with y) in this range, in
         stored units (Hz, not GHz).
-    units : {"stored", "shown"}
-        "stored": numbers in the file's units (Hz); "shown": with the plot's unit prefixes (GHz).
     style, file_style, **spec
-        As for `plot` (the style matters only for the prefixes of `units="shown"`).
+        As for `plot`. Numbers are always in the units stored in the file (Hz, not GHz: nothing
+        rounded); the header names each column's unit.
 
     Returns
     -------
@@ -384,6 +382,9 @@ def table(data, kind: Optional[str] = None, values: Any = None, *, numbers: str 
     """
     from . import api
 
+    if "units" in spec:
+        raise TypeError("units: a CSV always has the units stored in the file since LBD 1.3 (Hz, not GHz); "
+                        "remove the units= argument")
     unknown = set(spec) - api.SPEC_KEYS
     if unknown:
         raise TypeError(f"unknown plot setting(s) {sorted(unknown)}; allowed: {sorted(api.SPEC_KEYS)}")
@@ -414,18 +415,17 @@ def table(data, kind: Optional[str] = None, values: Any = None, *, numbers: str 
 
     with matplotlib.rc_context(s.to_rcparams()):
         model = prepare(d, resolved, s)
-    return from_model(d, resolved, model, numbers=numbers, xlim=xlim, ylim=ylim, units=units)
+    return from_model(d, resolved, model, numbers=numbers, xlim=xlim, ylim=ylim)
 
 
 def from_model(d, spec: Dict[str, Any], model: Any, *, numbers: str = "shown",
                xlim: Optional[Tuple[float, float]] = None, ylim: Optional[Tuple[float, float]] = None,
-               units: str = "stored", traces: Optional[Sequence[int]] = None) -> Table:
+               traces: Optional[Sequence[int]] = None) -> Table:
     """The table of a prepared plot (render.prepare_curves / prepare_map; LBD Viewer passes its
-    own): the numbers are read from the data (complex mode applied), the model gives the units'
-    prefixes for `units="shown"`. `traces`: only these traces (series positions, a map's rows)."""
+    own): the numbers are read from the data (complex mode applied), in the stored units.
+    `traces`: only these traces (series positions, a map's rows)."""
     _check(numbers, NUMBERS, "numbers")
-    _check(units, UNITS, "units")
-    shown = units == "shown"
+    shown = False                                        # units: always as stored (since 1.3)
     mode = spec["complex"]
 
     def columns(name: str, cols: str, rows: Optional[str], f: float) -> List[Tuple[Column, Rows]]:

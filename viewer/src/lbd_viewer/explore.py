@@ -777,6 +777,9 @@ class ExploreSession:
         whole, self.crange_info = None, None
         if settings.get("crange") == "all" and None in clim and not getattr(self, "style_fixed", False):
             whole, self.crange_info = crange_mod.get(self, settings)
+            if whole is not None and np.isfinite(whole.lo) and (whole.lo, whole.hi) != getattr(self, "zspan", None):
+                # ready just now: once more, for the colour bar's unit prefix (apply, set_spec)
+                self.crange_info = {"state": "working", "fraction": 1.0, "slices": whole.slices, "error": None}
         if "cscale" in settings or any(v is not None for v in clim) or whole is not None:
             log = settings.get("cscale") == "log"
             z = self._finite_z()

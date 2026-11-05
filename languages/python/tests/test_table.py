@@ -58,15 +58,22 @@ def test_a_map_as_a_matrix_both_ways(d, tmp_path):
     np.testing.assert_array_equal(b[1:, 1:], d.values["V"].data.T)
 
 
-def test_zoomed_range_and_units_as_shown(d, tmp_path):
-    t = lp.table(d, "heatmap", "V", x="freq", y="power", xlim=(7.0e9, 6.995e9), ylim=(-55, -35), units="shown")
+def test_zoomed_range_in_stored_units(d, tmp_path):
+    t = lp.table(d, "heatmap", "V", x="freq", y="power", xlim=(7.0e9, 6.995e9), ylim=(-55, -35))
     a = read(t.to_csv(tmp_path / "z.csv", layout="matrix"))
     keep = (F >= 6.995e9) & (F <= 7.0e9)
-    np.testing.assert_allclose(a[0, 1:], F[keep] / 1e9)
-    assert "\nnan,6.995," in (tmp_path / "z.csv").read_text(encoding="utf-8")   # exact text, no 6.995000000000001
+    np.testing.assert_array_equal(a[0, 1:], F[keep])                   # Hz, nothing rounded
+    assert "\nnan,6995000000," in (tmp_path / "z.csv").read_text(encoding="utf-8")
     np.testing.assert_array_equal(a[1:, 0], [-50, -40])
-    np.testing.assert_allclose(a[1:, 1:], d.values["V"].data[1:][:, keep] * 1e6)
-    assert "Frequency (GHz)" in (tmp_path / "z.csv").read_text(encoding="utf-8") and "Voltage (µV)" in (tmp_path / "z.csv").read_text(encoding="utf-8")
+    np.testing.assert_array_equal(a[1:, 1:], d.values["V"].data[1:][:, keep])
+    text = (tmp_path / "z.csv").read_text(encoding="utf-8")
+    assert "Frequency (Hz)" in text and "Voltage (V)" in text
+
+
+def test_units_are_always_stored(d):
+    """Since 1.3 a CSV has the file's units; a script still asking for others is told, not ignored."""
+    with pytest.raises(TypeError, match="units stored in the file"):
+        lp.table(d, "heatmap", "V", x="freq", y="power", units="shown")
 
 
 def test_stored_numbers_and_both(d, tmp_path):

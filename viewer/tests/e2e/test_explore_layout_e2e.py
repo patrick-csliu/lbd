@@ -175,9 +175,14 @@ def test_two_cursors_are_read_without_cutting(values_files, new_page, size):
     page = new_page("Explore")
     frames(page, lambda: row(page, "7 spectroscopy 3d.lbd").dblclick())    # opened at 1280×800, then resized
     page.set_viewport_size({"width": size[0], "height": size[1]})
-    page.wait_for_timeout(1200)
     overlay = explore(page).locator(".panel .explore-overlay").first
-    b = overlay.bounding_box()
+    b = None
+    for _ in range(40):                                                    # the panels redrawn at their new size
+        page.wait_for_timeout(400)
+        was, b = b, overlay.bounding_box()
+        if was == b and page.evaluate("document.querySelector('main:not([hidden]) .explore-overlay').width > 0"):
+            break
+    page.wait_for_timeout(800)
     overlay.click(position={"x": b["width"] * 0.3, "y": b["height"] * 0.25})
     page.keyboard.down("Shift")
     overlay.click(position={"x": b["width"] * 0.6, "y": b["height"] * 0.75})

@@ -74,18 +74,18 @@ def test_curves_as_shown(client, sweep, tmp_path):
     assert 0.8 < plan["estimate"]["bytes"] / path.with_name("a.csv").stat().st_size < 1.2
 
 
-def test_chosen_traces_zoom_and_units_as_shown(client, sweep):
+def test_chosen_traces_and_zoom_in_stored_units(client, sweep):
     path, d = sweep
     sid = open_view(client, path, CURVES)
     render(client, sid, {"select": {"power": [0, 2]}})
-    (out,) = save(client, [sid], path.with_name("z.csv"), zoomed=True, units="shown",
-                  views=[{"xlim": [4.5, 5.0], "ylim": [-100, 100]}])
+    (out,) = save(client, [sid], path.with_name("z.csv"), zoomed=True,
+                  views=[{"xlim": [4.5, 5.0], "ylim": [-100, 100]}])                  # the view: GHz, as drawn
     a = read(out)
     keep = (F >= 4.5e9) & (F <= 5.0e9)
     assert set(a[:, 0]) == {-30, -10} and a.shape[0] == 2 * keep.sum()
-    np.testing.assert_allclose(a[: keep.sum(), 1], F[keep] / 1e9)
+    np.testing.assert_array_equal(a[: keep.sum(), 1], F[keep])                       # the file: Hz
     text = path.with_name("z.csv").read_text(encoding="utf-8")
-    assert "Frequency (GHz)" in text and "chosen traces only (2)" in text
+    assert "Frequency (Hz)" in text and "chosen traces only (2)" in text
 
 
 def test_after_operations(client, sweep):
@@ -132,7 +132,7 @@ def test_panels_sharing_axes_go_into_one_file(client, sweep):
     assert ask(client, [a, b])["estimate"]["files"] == 1
     (out,) = save(client, [a, b], path.with_name("p.csv"))
     assert np.genfromtxt(out, delimiter=",", names=True, encoding="utf-8").dtype.names == ("power", "f", "S21", "T")
-    paths = save(client, [a, c], path.with_name("q.csv"), units="shown")
+    paths = save(client, [a, c], path.with_name("q.csv"))
     assert len(paths) == 2 and paths[1].endswith("q – part 2.csv")
 
 

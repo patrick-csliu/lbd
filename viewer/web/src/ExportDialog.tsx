@@ -1,10 +1,11 @@
 // Save as CSV (plan 5): the numbers a panel shows, with the choices the user makes (which numbers,
-// how much, the layout, the panels, the units). The server says how big the file will be and which
+// how much, the layout, the panels; units are always as stored). The server says how big the file will be and which
 // choices can't be made (with why); the file is written in the background with progress and Cancel
 // (server: export.py, lbd.plot.tables).
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { api, ExportChoice, ExportJob, ExportPlan } from "./api";
+import { HelpLink } from "./help";
 
 /** One panel the dialog can save: its session and its view now (plot units). */
 export interface ExportSource {
@@ -21,12 +22,29 @@ interface Props {
 }
 
 const CHOICE_KEY = "lbd.exportChoice";
-const DEFAULT: ExportChoice = { numbers: "shown", zoomed: false, layout: "rows", rows_are: "t", units: "stored" };
+const DEFAULT: ExportChoice = { numbers: "shown", zoomed: false, layout: "rows", rows_are: "t" };
+
+/** What each choice does (its tooltip). */
+const TIPS: Record<string, string> = {
+  "numbers:shown": "The numbers drawn in the panel: complex mode, operations and equations applied",
+  "numbers:both": "Each column as drawn, followed by the file's own numbers (a complex value: its real and imaginary part)",
+  "numbers:stored": "The file's own numbers, unchanged (a complex value: its real and imaginary part)",
+  "zoomed:false": "All the chosen traces, every point, also outside the zoom",
+  "zoomed:true": "Only the points inside the panel's zoom",
+  "layout:rows": "A column for each axis, then for each value; a row per data point. Good for Origin, pandas, Excel filters",
+  "layout:matrix": "A 2-D grid (a map, or curves of a series): the first row and the first column hold the axes",
+  "rows_are:t": "Each row of the grid is a trace (or a map's row)",
+  "rows_are:x": "Each row of the grid is a point of the horizontal axis",
+  "panels:this": "Only the active panel",
+  "panels:all": "Every panel with the same axes in one file, a column per panel",
+};
 const BAD_NAME = /[\\/:*?"<>|]/;
 
 function remembered(): ExportChoice {
   try {
-    return { ...DEFAULT, ...JSON.parse(localStorage.getItem(CHOICE_KEY) ?? "{}") };
+    // (a "units" choice remembered from before 1.3 is left out: units are always as stored)
+    const { units: _gone, ...kept } = JSON.parse(localStorage.getItem(CHOICE_KEY) ?? "{}");
+    return { ...DEFAULT, ...kept };
   } catch {
     return DEFAULT;
   }
@@ -132,7 +150,7 @@ export default function ExportDialog({ sources, onClose, onSaved }: Props) {
   };
 
   const radio = <K extends keyof ExportChoice>(key: K, value: ExportChoice[K], label: string, why: string | null = null) => (
-    <label className={"check" + (why ? " muted" : "")} title={why ?? undefined}>
+    <label className={"check" + (why ? " muted" : "")} title={why ? `Not available: ${why}. ${TIPS[`${key}:${value}`] ?? ""}` : TIPS[`${key}:${value}`]}>
       <input type="radio" name={`export-${key}`} checked={choice[key] === value} disabled={!!why || writing} onChange={() => set({ [key]: value } as Partial<ExportChoice>)} />
       {label}
     </label>
@@ -144,7 +162,8 @@ export default function ExportDialog({ sources, onClose, onSaved }: Props) {
       <form onSubmit={submit}>
         <h3 id="export-title">Save as CSV</h3>
         <p className="muted small">
-          A table of numbers that Excel, Origin and <code>numpy.loadtxt</code> read. The data file is not changed.
+          A table of numbers that Excel, Origin and <code>numpy.loadtxt</code> read, in the units stored in the file. The data file is
+          not changed. Point at a choice for what it does. <HelpLink page="viewer/explore.html" anchor="save-as-csv" topic="Save as CSV" />
         </p>
         <fieldset>
           <legend>Numbers</legend>
@@ -168,19 +187,14 @@ export default function ExportDialog({ sources, onClose, onSaved }: Props) {
             </span>
           )}
         </fieldset>
-        <fieldset>
-          <legend>Units</legend>
-          {radio("units", "stored", "as stored in the file")}
-          {radio("units", "shown", "as on screen (e.g. GHz, mV)")}
-        </fieldset>
         {several && (
           <fieldset>
             <legend>Panels</legend>
-            <label className="check">
+            <label className="check" title={TIPS["panels:this"]}>
               <input type="radio" name="export-panels" checked={!all} disabled={writing} onChange={() => setAll(false)} />
               this panel
             </label>
-            <label className="check">
+            <label className="check" title={TIPS["panels:all"]}>
               <input type="radio" name="export-panels" checked={all} disabled={writing} onChange={() => setAll(true)} />
               all panels (one file when they share their axes)
             </label>

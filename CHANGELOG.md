@@ -8,6 +8,11 @@ are still written as 1.2).
 
 **Changes to how things behave** (read these when upgrading)
 
+- **CSV files always have the units stored in the file** (Hz, not GHz). Save as CSV no longer
+  has a Units choice, and `lbd.plot.table` no longer takes `units=`: a script still passing it
+  gets an error saying to remove it. Each choice of the Save as CSV dialog says what it does when
+  you point at it.
+
 - **File format 2.0: variable sweeps** (axis groups, spec §1.8; every language). A sweep whose
   inner points depend on the outer ones (frequencies chosen per power, a different number of
   points per row, adaptive points) is stored as an axis group: only the measured points, level
