@@ -106,3 +106,20 @@ def test_the_tab_bar_keeps_its_height(viewer, new_page):
     figure = new_page()
     open_file(figure, "a.lbd")
     assert figure.locator("main:not([hidden]) .tabbar").bounding_box()["height"] == 30
+
+
+def test_a_preview_tab_is_as_tall_as_a_kept_one(viewer, new_page):
+    """Plan 11: the preview tab (one click: in italics) has the height and the name's place of
+    a kept tab (it once took the Library preview's margins, being called "preview" too)."""
+    from test_explore_e2e import frames
+    from pageui import row
+
+    page = new_page("Explore")
+    frames(page, lambda: row(page, "a.lbd").dblclick())
+    frames(page, lambda: row(page, "b.lbd").click())
+    tabs = page.locator("main:not([hidden]) .tabbar .tab")
+    expect(tabs).to_have_count(2)
+    kept, preview = tabs.nth(0), tabs.nth(1)
+    expect(preview).to_have_class(re.compile(r"\bpreview\b"))
+    assert preview.bounding_box()["height"] == kept.bounding_box()["height"]
+    assert preview.locator(".tab-label").bounding_box()["y"] == kept.locator(".tab-label").bounding_box()["y"]

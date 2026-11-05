@@ -17,7 +17,7 @@ def row(page: Page, name: str):
 
 
 def preview(page: Page):
-    return page.locator(".library-detail .preview")
+    return page.locator(".library-detail .library-preview")
 
 
 def put_settings(viewer, library):

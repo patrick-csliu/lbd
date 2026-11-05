@@ -1619,12 +1619,12 @@ function PreviewBox({ path, version }: { path: string; version: string }) {
   // nothing to show (being written, can't be drawn, previews off): one line, not an empty box
   if (!url && (error || (preview && !preview.picture && preview.state !== "drawing")))
     return (
-      <div className="preview preview-none small" aria-label="Preview">
+      <div className="library-preview preview-none small" aria-label="Preview">
         {inside}
       </div>
     );
   return (
-    <div className="preview" aria-label="Preview">
+    <div className="library-preview" aria-label="Preview">
       <div className="preview-box" data-state={url ? "picture" : preview && !preview.picture ? preview.state : "asking"}>
         {inside}
       </div>

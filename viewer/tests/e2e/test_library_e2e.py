@@ -190,7 +190,7 @@ def test_the_selected_file_fits_its_pane(viewer, new_page):
     top = page.locator(".library-detail .file-top")
     expect(page.locator(".library-detail .file-facts")).to_contain_text("Created")
     assert top.evaluate("e => getComputedStyle(e).flexDirection") == "row"
-    preview, facts = page.locator(".library-detail .file-top > .preview"), page.locator(".library-detail .file-facts")
+    preview, facts = page.locator(".library-detail .file-top > .library-preview"), page.locator(".library-detail .file-facts")
     assert facts.bounding_box()["x"] > preview.bounding_box()["x"] + preview.bounding_box()["width"] - 1   # beside it
     written = page.locator(".library-detail .file-written")
     expect(written).to_contain_text("File (written by, format)")

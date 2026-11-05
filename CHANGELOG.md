@@ -92,6 +92,10 @@ are still written as 1.2).
   a panel's title has a row per cursor (nothing cut off in a usual panel; the whole text when you
   point at it), "Click the plot …" shows only in the active panel, the inspector's numbers wrap
   to its width, and a mean that is zero up to rounding reads 0 (not 2.8e−17).
+- **Explore: the sync toggles are explained**: their tooltips say what each links and between
+  which panels (sliders: what a slider is), and *Explore → Sync* in the Help has examples.
+- **Explore: the preview tab's name** (one click, in italics) is at the same height as the other
+  tabs' names; it took the Library preview's margins before.
 - **Explore: a map's colours can mean the same at every slider position.** Display → Colour →
   **Colour range over: All slices** (the default for new panels) takes the colour range from
   every slider position (complex mode, operations and equations applied), worked out once in the

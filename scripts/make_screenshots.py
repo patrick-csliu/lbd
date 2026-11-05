@@ -425,7 +425,7 @@ def library(page: Page, url: str, ctx) -> None:
     rows.first.wait_for()
     rows.first.click()
     page.locator(".library-detail h1", has_text="Late resonator sweep").wait_for()
-    page.locator(".library-detail .preview img").wait_for(timeout=60_000)   # drawn by the server
+    page.locator(".library-detail .library-preview img").wait_for(timeout=60_000)   # drawn by the server
     page.mouse.move(5, 400)
     page.wait_for_timeout(800)
     mark(page, [                                # the numbers of the list in library.md
@@ -611,14 +611,14 @@ def styles_page(page: Page, url: str, ctx) -> None:
     open_file(page, "sweep.lbd")               # the preview shows the open file
     page.get_by_role("button", name="Styles", exact=True).click()
     page.locator(".style-editor").wait_for()
-    page.locator(".preview img").wait_for()
+    page.locator(".styles-preview img").wait_for()
     page.wait_for_timeout(800)
     mark(page, [
         (1, ".style-list ul", 0, "r"),
         (2, ".style-list .panel-head .actions", 0, "b"),
         (3, ".editor-head .actions", 0, "tl"),
         (4, ".style-editor .group", 0, "tl"),
-        (5, ".preview", 0, "tl"),
+        (5, ".styles-preview", 0, "tl"),
     ])
     save(page, VIEWER_IMG / "styles-page.png")
 
