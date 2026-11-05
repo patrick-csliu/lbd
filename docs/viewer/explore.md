@@ -300,6 +300,12 @@ has no names: equations need the full data.
 Examples: `y - 0.5 * power`, `abs(S21) / abs(S21_ref)`, `x * 1e-9`, `10 * log10(y)`.
 
 - The result has **no unit**; the axis is labelled with the equation.
+- **A new equation shows that axis whole:** its old limits were in the old numbers. Changing the
+  `x =` equation shows all of the horizontal axis and keeps the vertical zoom (and the other way
+  round); the cursors are removed, since they were at the old numbers. A new `z =` equation on a
+  map clears typed colour limits, so the colours follow the new values. The same for an
+  operation that changes what an axis measures (an FFT: time → frequency; d/dx; normalize); one
+  that keeps the axes (smoothing, subtract the mean) keeps the zoom.
 - Only formulas are read: LBD checks every part itself and never runs what is typed as a
   program.
 - A field that can't be used turns red and says why (a typing mistake and where it is, a name
@@ -319,6 +325,16 @@ Examples: `y - 0.5 * power`, `abs(S21) / abs(S21_ref)`, `x * 1e-9`, `10 * log10(
 - **Colour** (maps): a colour map (*viridis*, *plasma*, *magma* and *cividis* are even to the
   eye; *gray*; *RdBu* for values around zero; *twilight* for phases, which wrap around),
   **Invert**, and the **Colour range** (empty: from the data).
+- **Colour range over** (maps with a slider): **All slices** (the default for a new panel) takes
+  the colours from the lowest to the highest value at **every** slider position, so a colour
+  means the same number at every step and moving the slider shows the signal grow or fade;
+  **This slice** gives each position its own range (every step at full contrast, but a colour
+  means another number at each step). All slices is of the numbers as shown: the complex mode,
+  operations and equations are applied to every slice. It is worked out in the background once
+  (for a large file this takes a while: the Colour section says how far, and until then each
+  slice has its own range), then kept while LBD Viewer runs. Typed colour limits win over both;
+  with one end typed, the other comes from the choice. The colour bar's unit prefix (mV, V) is
+  also chosen from every slice, so it stays while the slider moves.
 - **Contrast** (maps): a histogram of the map's values (all its cells, not only the view) with
   the colour range as two lines. Drag a line to move that end, or drag between them to move the
   range. **Auto** leaves out the outliers (0.5 % of the cells at each end), **Full** spans every

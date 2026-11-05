@@ -1,7 +1,7 @@
 import { CSSProperties, DragEvent, KeyboardEvent, MouseEvent, MutableRefObject, ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { useResizable } from "./resizable";
 import NumberRange from "./NumberRange";
-import { api, CursorsAnswer, ExploreOpen, FileInfo, OpsInfo, PlotSpec, ReduceStat, SyncKeys, ValueInfo } from "./api";
+import { api, CursorsAnswer, ExploreFrameMeta, ExploreOpen, FileInfo, OpsInfo, PlotSpec, ReduceStat, SyncKeys, ValueInfo } from "./api";
 import Operations from "./Operations";
 import Contrast from "./Contrast";
 import CursorPanel, { OtherPanel } from "./CursorPanel";
@@ -12,6 +12,7 @@ import { around, compose, copyPng, downloadPng, pageBackground, pictureChoice, r
 import type { MenuEntry } from "./menu";
 import AxisSelect from "./AxisSelect";
 import { COMPLEX_MODES, FileDetails, SliceControl } from "./FileView";
+import { Segmented } from "./settingsUi";
 import { Icon } from "./icons";
 import { middle } from "./labelText";
 import { copyPath } from "./fileActions";
@@ -78,7 +79,9 @@ const DRAG_VALUE = "application/x-lbd-value";
 const DRAG_PANEL = "application/x-lbd-panel";
 
 const newId = () => Math.random().toString(36).slice(2, 10);
-const freshPanel = (spec: PlotSpec): PanelState => ({ id: newId(), spec, settings: {}, stat: "max", view: null, cursors: NO_CURSORS });
+// A new panel: a map with a slider takes its colours from every slice (plan 11); panels remembered
+// from before (no `crange`) keep their slice's range.
+const freshPanel = (spec: PlotSpec): PanelState => ({ id: newId(), spec, settings: { crange: "all" }, stat: "max", view: null, cursors: NO_CURSORS });
 
 /** A file opened for the first time: panel 1 from the file's saved figure view, then one panel
  * per other value with axes (up to FIRST_PANELS), like Labber's panels for its log channels. */
@@ -114,6 +117,8 @@ interface Live {
   sync: (SyncKeys & { full: [[number, number], [number, number]] }) | null;
   /** The panel couldn't open its plot: why (the controls say so instead of "Opening…"). */
   failed?: string | null;
+  /** A map with a slider: where its colours come from, and how far every slice's range is. */
+  crange?: ExploreFrameMeta["crange"];
 }
 const NO_LIVE: Live = { resolved: null, reading: null, opsInfo: null, sync: null, failed: null };
 
@@ -834,11 +839,12 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
               updateSpec={actApi.updateSpec}
               updateSettings={actApi.updateSettings}
               onValueMenu={valueMenu}
+              crange={actLive.crange ?? null}
               contrast={
                 resolved?.kind === "heatmap" ? (
                   <Contrast
                     load={() => actActions.current?.histogram(act.settings) ?? Promise.resolve(null)}
-                    loadKey={JSON.stringify([resolved.session, resolved.spec, act.settings.select ?? null, act.settings.cscale ?? null, info.version])}
+                    loadKey={JSON.stringify([resolved.session, resolved.spec, act.settings.select ?? null, act.settings.cscale ?? null, info.version, act.settings.crange ?? null, live[act.id]?.crange?.state ?? null])}
                     clim={act.settings.clim ?? [null, null]}
                     onClim={(c) => actApi.updateSettings({ clim: c })}
                   />
@@ -964,6 +970,9 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
                         const old = liveRef.current[p.id]?.sync;
                         if (!old || JSON.stringify(old) !== JSON.stringify(sy)) setLive(p.id, { sync: sy });
                       }}
+                      onCrange={(c) => {
+                        if (JSON.stringify(liveRef.current[p.id]?.crange ?? null) !== JSON.stringify(c ?? null)) setLive(p.id, { crange: c });
+                      }}
                     />
                   </section>
                 );
@@ -1033,6 +1042,8 @@ export function unitText(unit: string): string {
 interface ControlsProps {
   /** "Panel 2: Q" when there are several panels. */
   heading: string | null;
+  /** A map with a slider: where its colours come from, and how far every slice's range is. */
+  crange?: ExploreFrameMeta["crange"];
   info: FileInfo;
   resolved: ExploreOpen | null;
   settings: ViewSettings;
@@ -1094,7 +1105,7 @@ function Section({ name, title, badge, open, onToggle, children }: { name: strin
 /** Axes of a value with more than one point (the ones that can be drawn along). */
 const swept = (info: FileInfo, v: ValueInfo) => v.axes.filter((a, i) => v.shape[i] > 1 && info.axes.some((x) => x.name === a));
 
-function ExploreControls({ heading, info, resolved, settings, updateSpec, updateSettings, children, contrast, listOpen, onListOpen, opsInfo, calculate, onValueMenu, stat, onStat, failed, onOpenInFigure }: ControlsProps) {
+function ExploreControls({ heading, info, resolved, settings, updateSpec, updateSettings, children, contrast, listOpen, onListOpen, opsInfo, calculate, onValueMenu, stat, onStat, failed, onOpenInFigure, crange }: ControlsProps) {
   const [sections, setSection] = useSections();
   if (!resolved)
     return failed ? (
@@ -1305,6 +1316,27 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
               Invert
             </label>
           </div>
+          {(r.slices ?? []).length > 0 && (
+            <div className="field crange-field">
+              <span>Colour range over</span>
+              <Segmented
+                name="crange"
+                label="Colour range over"
+                value={settings.crange ?? "slice"}
+                options={[
+                  ["slice", "This slice", "Each slider position has its own colour range: every step shows its full contrast, but a colour means another number at each step"],
+                  ["all", "All slices", "The range of every slider position: a colour means the same number at every step, so moving the slider shows the change"],
+                ]}
+                onChange={(v) => updateSettings({ crange: v })}
+              />
+              {crange?.state === "working" && (
+                <span className="muted small" role="status">
+                  Working out every slice's range: {Math.round((crange.fraction ?? 0) * 100)} % of {crange.slices} slices; until then this slice's.
+                </span>
+              )}
+              {crange?.state === "failed" && <span className="small export-warning">{crange.error}</span>}
+            </div>
+          )}
           <NumberRange
             label="Colour range"
             value={clim}
@@ -1340,7 +1372,13 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
         complexValues={anyComplex}
         calculate={calculate}
         equations={settings.equations ?? {}}
-        onEquations={(e) => updateSettings({ equations: e.x || e.y || e.z ? e : undefined })}
+        onEquations={(e) =>
+          updateSettings({
+            equations: e.x || e.y || e.z ? e : undefined,
+            // a new z equation: typed colour limits are in the old numbers, so the colours follow the new values
+            ...((e.z ?? "") !== (settings.equations?.z ?? "") ? { clim: undefined } : {}),
+          })
+        }
       />
 
       </Section>

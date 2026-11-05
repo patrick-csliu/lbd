@@ -156,3 +156,28 @@ def test_the_list_of_rows_folds(small_map, new_page):
     expect(select.locator(".axis-values")).to_have_count(0)            # folded while all are shown
     select.locator(".fold").click()
     expect(select.locator(".axis-values li")).to_have_count(4)
+
+
+def test_a_maps_colours_come_from_every_slice(values_files, new_page):
+    """Plan 11: a new panel of a map with a slider takes its colour range from every slice, so the
+    range stays when the slider moves; This slice gives each position its own range."""
+    page = new_page("Explore")
+    frames(page, lambda: row(page, "7 spectroscopy 3d.lbd").dblclick())
+    choice = explore(page).get_by_role("radiogroup", name="Colour range over")
+    expect(choice.get_by_label("All slices")).to_be_checked()
+    hist = explore(page).locator(".contrast")
+    expect(hist).to_contain_text("The values of all", timeout=30_000)        # worked out in the background
+
+    def full():
+        frames(page, lambda: hist.get_by_role("button", name="Full").click())
+        lo, hi = (explore(page).get_by_label(f"Colour range {e}").input_value() for e in ("from", "to"))
+        frames(page, lambda: hist.get_by_role("button", name="Style").click())
+        return lo, hi
+
+    every = full()
+    slider = explore(page).get_by_role("slider").first
+    frames(page, lambda: slider.press("End"))
+    assert full() == every                                                   # the same range at every step
+    frames(page, lambda: choice.get_by_label("This slice").check())
+    expect(hist).not_to_contain_text("The values of all")
+    assert full() != every

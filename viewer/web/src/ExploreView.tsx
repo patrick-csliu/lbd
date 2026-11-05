@@ -79,6 +79,7 @@ export interface ViewSettings {
   ops?: Op[]; // operations on the data shown (operations.py), in order
   ops_on?: boolean; // false: all of them off (the list kept)
   equations?: { x?: string; y?: string; z?: string }; // after the operations (equations.py)
+  crange?: "slice" | "all"; // a map with a slider: colours from the slice shown or from every slice (crange.py)
 }
 interface Size {
   w: number;
@@ -170,6 +171,8 @@ interface Props {
   onUserView?: (v: View | null) => void;
   /** With each picture: what this view must share with another to follow its zoom, and where all its data is. */
   onSync?: (s: SyncKeys & { full: [Lim, Lim] }) => void;
+  /** With each picture of a map with a slider: where its colours come from (crange.py). */
+  onCrange?: (c: ExploreFrameMeta["crange"]) => void;
   /** Getting data out (plan 5): the entries of this panel's Data menu (also in the right-click menu). */
   dataItems?: () => MenuEntry[];
   /** The left of the panel's toolbar: its number and name (and what drags it). */
@@ -251,6 +254,7 @@ export default function ExploreView({
   follow = null,
   onUserView,
   onSync,
+  onCrange,
   dataItems,
   title,
   active = true,
@@ -294,6 +298,11 @@ export default function ExploreView({
   onViewRef.current = onView;
   const initialViewRef = useRef(initialView); // used by the first opening only
   const showAll = useRef(false); // the next picture shows all the data (its limits come from the server)
+  // An axis that now measures something else (its equation changed, or an operation changed its
+  // label or unit): the next picture shows all of it; the other axis keeps its zoom.
+  const resetAxes = useRef({ x: false, y: false });
+  const checkAxes = useRef(false); // view settings changed: compare the next picture's axes with the last
+  const clearCursorsRef = useRef<() => void>(() => {});
   const host = useRef<HTMLDivElement>(null);
   const picture = useRef<HTMLCanvasElement>(null);
   const overlay = useRef<HTMLCanvasElement>(null);
@@ -322,6 +331,9 @@ export default function ExploreView({
   onUserViewRef.current = onUserView;
   const onSyncRef = useRef(onSync);
   onSyncRef.current = onSync;
+  const onCrangeRef = useRef(onCrange);
+  onCrangeRef.current = onCrange;
+  const crangeTimer = useRef(0);
   const kindRef = useRef<"curve" | "heatmap" | null>(null);
   kindRef.current = opened?.kind ?? null;
   const readingRef = useRef<CursorsAnswer | null>(null); // the cursors on screen: the last answer
@@ -463,8 +475,12 @@ export default function ExploreView({
     inflight.current = true;
     dirty.current = false;
     const all = showAll.current;
+    const reset = { ...resetAxes.current };
+    const check = checkAxes.current;
+    checkAxes.current = false;
     const sizeNow = sz ? { width: sz.w, height: sz.h, dpr: window.devicePixelRatio || 1 } : {};
-    const view = all || !v ? { xlim: null, ylim: null } : { xlim: v.xlim, ylim: v.ylim };
+    // null: all of that axis (the server's whole range)
+    const view = all || !v ? { xlim: null, ylim: null } : { xlim: reset.x ? null : v.xlim, ylim: reset.y ? null : v.ylim };
     api
       .exploreRender(sid, {
         ...view,
@@ -476,6 +492,20 @@ export default function ExploreView({
       })
       .then(async (f) => {
         if (session.current !== sid) return;
+        // an operation changed what an axis measures (FFT: time → frequency, d/dx, normalize):
+        // show all of that axis, and the cursors (at the old numbers) go
+        const was = frame.current?.meta.sync, now = f.meta.sync;
+        if (check && !all && was && now && (was.x !== now.x || was.y !== now.y)) {
+          resetAxes.current = { x: resetAxes.current.x || was.x !== now.x, y: resetAxes.current.y || was.y !== now.y };
+          if (cursorsRef.current.at.length) clearCursorsRef.current();
+          dirty.current = true;
+          return; // asked again (finally), with that axis whole
+        }
+        if (reset.x || reset.y) {
+          resetAxes.current = { x: resetAxes.current.x && !reset.x, y: resetAxes.current.y && !reset.y };
+          const w = wanted.current;
+          wanted.current = { xlim: reset.x || !w ? f.meta.xlim : w.xlim, ylim: reset.y || !w ? f.meta.ylim : w.ylim };
+        }
         const at = cursorsRef.current.at;
         if (at.length && cursorsRef.current.on) {
           // the cursors for this picture's view: shown together with it (cuts follow the view)
@@ -491,6 +521,15 @@ export default function ExploreView({
         onViewRef.current({ xlim: f.meta.xlim, ylim: f.meta.ylim });
         onOpsInfoRef.current(f.meta.ops ?? null);
         if (f.meta.sync) onSyncRef.current?.({ ...f.meta.sync, full: f.meta.full });
+        onCrangeRef.current?.(f.meta.crange ?? null);
+        if (f.meta.crange?.state === "working" && !crangeTimer.current) {
+          // every slice's colour range is being worked out: the same view again in a moment
+          crangeTimer.current = window.setTimeout(() => {
+            crangeTimer.current = 0;
+            dirty.current = true;
+            if (session.current === sid) request();
+          }, 700);
+        }
         if (f.meta.notes?.length) onErrorRef.current(f.meta.notes.join(" "));
         let src = frameCanvas.current;
         if (!src) src = frameCanvas.current = document.createElement("canvas");
@@ -582,6 +621,7 @@ export default function ExploreView({
     onCursorsRef.current({ ...cursorsRef.current, at: [], active: 0 });
     paintOverlay();
   }, [paintOverlay]);
+  clearCursorsRef.current = clearCursors;
 
   // A view that ends (another plot, back to the map) takes its read-outs with it.
   useEffect(() => () => onReadingRef.current(null), []);
@@ -772,6 +812,14 @@ export default function ExploreView({
     shownSettings.current = settingsKey;
     if ((before.xscale ?? "linear") !== (settings.xscale ?? "linear") || (before.yscale ?? "linear") !== (settings.yscale ?? "linear"))
       showAll.current = true;
+    // a new equation for x or y: that axis measures something else now (old limits mean nothing)
+    const eb = before.equations ?? {}, ea = settings.equations ?? {};
+    const ex = (eb.x ?? "") !== (ea.x ?? ""), ey = (eb.y ?? "") !== (ea.y ?? "");
+    if (ex || ey) {
+      resetAxes.current = { x: resetAxes.current.x || ex, y: resetAxes.current.y || ey };
+      if (cursorsRef.current.at.length) clearCursorsRef.current();
+    }
+    checkAxes.current = true;
     dirty.current = true;
     if (session.current) request();
   }, [settingsKey, settings, request]);

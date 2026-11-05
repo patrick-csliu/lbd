@@ -92,6 +92,15 @@ are still written as 1.2).
   a panel's title has a row per cursor (nothing cut off in a usual panel; the whole text when you
   point at it), "Click the plot …" shows only in the active panel, the inspector's numbers wrap
   to its width, and a mean that is zero up to rounding reads 0 (not 2.8e−17).
+- **Explore: a map's colours can mean the same at every slider position.** Display → Colour →
+  **Colour range over: All slices** (the default for new panels) takes the colour range from
+  every slider position (complex mode, operations and equations applied), worked out once in the
+  background; **This slice** keeps each position's own range, as before (and for panels set up
+  before). The Contrast histogram counts the same values.
+- **Explore: a new equation shows that axis whole.** Changing the x (or y) equation, or an
+  operation that changes what an axis measures (FFT, d/dx, normalize), shows all of that axis and
+  keeps the other's zoom; the cursors, at the old numbers, are removed; a new z equation clears
+  typed colour limits. Before, the plot kept the old limits and showed an empty or tiny part.
 - **Explore: Max, Min and Peak on one line.** "Move cursor 1 to: Max Min Peak" fits the
   inspector's default width; a narrower inspector puts the three buttons together on the next line.
 - **Explore: plainer pixel note**: "average of 5×8 cells per pixel" (was "mean of …"), "lowest

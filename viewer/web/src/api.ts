@@ -640,6 +640,9 @@ export interface ExploreFrameMeta {
   hidden?: string[]; // what the scales hide (points ≤ 0 on a log scale, …): kept on screen
   empty?: string | null; // nothing can be shown, and why
   sync?: SyncKeys; // what panels must share to follow each other's zoom
+  /** A map with a slider: where its colour range comes from, and while every slice's range is
+   *  worked out (crange.py) how far it is, or why it failed. */
+  crange?: { from: "slice" | "all"; state?: "working" | "failed"; fraction?: number; slices?: number; error?: string | null } | null;
 }
 
 /** A panel follows another's zoom along x (y) when these are the same (explore.py `sync_keys`). */
@@ -759,6 +762,8 @@ export interface Histogram {
   cells: number;
   /** a map too big for memory: counted from its summary's blocks, so the shape is approximate */
   approximate?: boolean;
+  /** how many slider positions it counts: more than 1 with the colour range from all slices */
+  slices?: number;
 }
 
 async function exploreRender(

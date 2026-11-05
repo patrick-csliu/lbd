@@ -955,10 +955,13 @@ def draw_curves(fig: Figure, ax, model: CurveModel, d, spec, style: Style,
     return drawn
 
 
-def prepare_map(d, spec, style: Style, big: Optional[Any] = None) -> MapModel:
+def prepare_map(d, spec, style: Style, big: Optional[Any] = None,
+                zspan: Optional[Tuple[float, float]] = None) -> MapModel:
     """`big`: stands for the map when it is too big to read whole (LBD Viewer's
     summaries.BigMap): `big.range()` gives its lowest and highest drawn number, `big * factor`
-    the same map scaled; the model's `z` is then `big` scaled, read part by part."""
+    the same map scaled; the model's `z` is then `big` scaled, read part by part. `zspan`: the
+    numbers the colour bar's unit prefix is chosen for, instead of this map's (LBD Viewer: the
+    range of every slider position, so the prefix stays while the slider moves)."""
     d = flat(d)
     a = style.figure.axes
     xs, ys = style.axis_style("x"), style.axis_style("y")
@@ -982,6 +985,8 @@ def prepare_map(d, spec, style: Style, big: Optional[Any] = None) -> MapModel:
                                                    (spec["y"], yq, ya.unit, ys.label.auto_prefix, yunit))
                  if _auto_prefix(q, unit, auto)]
     # With fixed limits, the colour bar keeps the value's own unit so the limits read as entered.
+    if zspan is not None:
+        span = np.asarray(zspan, dtype=float)
     zf, zunit = _unit_scale(span, unit, q, ys.label.auto_prefix and q.vmin is None and q.vmax is None)
     if q.scale == "log":
         _check_log(np.asarray(span, dtype=float), f"the colour scale of '{name}'")

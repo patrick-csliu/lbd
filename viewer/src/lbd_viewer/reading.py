@@ -22,7 +22,7 @@ import lbd
 from lbd.plot import render as rnd
 from lbd.plot.reduce import cell_edges, curve_minmax
 
-from . import summaries
+from . import crange, summaries
 from .explore import ExploreError
 
 if TYPE_CHECKING:
@@ -504,11 +504,17 @@ def histogram(s: "ExploreSession", bins: int = HIST_BINS) -> Dict[str, Any]:
     if s.kind != "heatmap":
         raise ExploreError("the contrast histogram is for maps")
     log = s.settings.get("cscale") == "log"
-    key = (tuple(sorted(_selected_rows(s) or [])), _selected_rows(s) is None, log, bins)
+    # the colour range from every slider position (crange "all"): the numbers of every slice
+    whole = crange.get(s, s.settings)[0] if s.settings.get("crange") == "all" else None
+    key = (tuple(sorted(_selected_rows(s) or [])), _selected_rows(s) is None, log, bins, whole is not None)
     cache = getattr(s, "_hist", None)
     if cache and cache[0] == key and cache[2] is s.model:
         return cache[1]
-    if s.summarised:                                  # too big for memory: from its summary
+    if whole is not None:
+        # a sample of every slice's numbers (all of them when few), with the exact lowest and highest
+        ends = [e for e in (whole.lo, whole.lo_pos, whole.hi) if np.isfinite(e)]
+        v = np.concatenate([whole.sample, ends]) * float(s.model.zf or 1.0)
+    elif s.summarised:                                # too big for memory: from its summary
         v = s._finite_z()
         v = v[np.isfinite(v)]
     else:
@@ -532,8 +538,9 @@ def histogram(s: "ExploreSession", bins: int = HIST_BINS) -> Dict[str, Any]:
     out = {"edges": [float(e) for e in back(np.linspace(lo, hi, bins + 1))],
            "counts": [int(c) for c in counts.reshape(bins, 64).sum(axis=1)],
            "lowest": float(back(lo)), "highest": float(back(hi)),
-           "auto": [float(a) for a in back(auto)], "log": log, "cells": int(v.size)}
-    if s.summarised:      # counts of the summary's blocks: the shape is right, the numbers are not cells
+           "auto": [float(a) for a in back(auto)], "log": log, "cells": int(v.size),
+           "slices": whole.slices if whole is not None else 1}
+    if s.summarised and whole is None:      # counts of the summary's blocks: the shape is right, the numbers are not cells
         out["cells"] = summaries.histogram_cells(s.model.z)[1]
         out["approximate"] = True
     s._hist = (key, out, s.model)

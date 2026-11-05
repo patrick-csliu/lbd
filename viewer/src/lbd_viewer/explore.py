@@ -43,7 +43,7 @@ from lbd.plot.reduce import STATS, CurvePyramid, MapPyramid, cell_edges, curve_m
 from lbd.plot.style import Style
 from lbd.plot.units import prefix_scale
 
-from . import equations, memory, summaries
+from . import crange as crange_mod, equations, memory, summaries
 from . import operations as ops_mod
 
 KINDS = ("curve", "heatmap")
@@ -190,7 +190,12 @@ class ExploreSession:
             if self.base_kind == "curve":
                 self.base_model = rnd.prepare_curves(self.data, self.spec, self.style, big=big)
             else:
-                self.base_model = rnd.prepare_map(self.data, self.spec, self.style, big=big)
+                # colours from every slider position (crange.py): the colour bar's prefix from
+                # that range too, so it stays while the slider moves
+                now = getattr(self, "settings", None) or {}
+                whole = crange_mod.peek(self, now) if now.get("crange") == "all" else None
+                self.zspan = (whole.lo, whole.hi) if whole is not None and np.isfinite(whole.lo) else None
+                self.base_model = rnd.prepare_map(self.data, self.spec, self.style, big=big, zspan=self.zspan)
         for v in self.data.values.values():           # a value read by part: the next slider positions
             if isinstance(v.data, memory.Cached):
                 v.data.read_ahead()
@@ -467,6 +472,7 @@ class ExploreSession:
         self.x_edges, self.y_edges = np.sort(xe), np.sort(ye)
         # colour limits from all the data, not the view (a summarised map: its lowest and highest)
         whole = np.asarray(m.z.range()) if isinstance(m.z, summaries.BigMap) else m.z
+        self.style_fixed = m.norm.vmin is not None or m.norm.vmax is not None   # the style's own colour range
         m.norm.autoscale_None(np.ma.masked_invalid(whole))
         self.image = rnd.draw_map(self.fig, self.ax, m, self.data, self.spec, self.style,
                                   image=np.full((2, 2), np.nan))
@@ -490,11 +496,15 @@ class ExploreSession:
         `select` {axis: [positions]}: which traces are drawn (curves: along the series axis) or
         make the map (its vertical axis; left-out rows stay empty, so every row keeps its place).
         `cmap` and `invert`: the map's colour map. `xscale`, `yscale`, `cscale`: "linear" or "log".
-        `clim` [from, to]: the colour range (None: from the data). Missing settings keep the plot's
-        own (its style and saved figure settings)."""
+        `clim` [from, to]: the colour range (None: from the data). `crange` "all" (a map with a
+        slider): that range from every slider position (crange.py), "slice" (or missing): from
+        the slice shown. Missing settings keep the plot's own (its style and saved figure
+        settings)."""
         settings = dict(settings or {})
-        if settings == self.settings:
-            return []
+        if settings == self.settings and (getattr(self, "crange_info", None) or {}).get("state") != "working":
+            return []                                    # (a range of every slice still coming: again)
+        if settings.get("crange", "slice") not in ("slice", "all"):
+            raise ExploreError(f"crange must be 'slice' or 'all', not {settings['crange']!r}")
         for key in ("xscale", "yscale", "cscale"):
             if settings.get(key, "linear") not in ("linear", "log"):
                 raise ExploreError(f"{key} must be 'linear' or 'log', not {settings[key]!r}")
@@ -507,6 +517,15 @@ class ExploreSession:
             raise ExploreError("the colour range must be two numbers (or empty for automatic)")
         if None not in clim and clim[0] >= clim[1]:
             raise ExploreError("the colour range needs 'from' lower than 'to'")
+        if self.base_kind == "heatmap":
+            # every slider position's range newly known (or no longer wanted): the map again, with
+            # the colour bar's unit prefix chosen for it (set_spec)
+            whole = crange_mod.peek(self, settings) if settings.get("crange") == "all" else None
+            span = (whole.lo, whole.hi) if whole is not None and np.isfinite(whole.lo) else None
+            if span != getattr(self, "zspan", None):
+                self.settings = settings
+                self.set_spec({k: v for k, v in self.spec.items() if k in rnd.SPEC_KEYS})
+                self.settings = {}                       # every setting again, on the new map
         notes: List[str] = []
         axis = self.spec.get("series") if self.base_kind == "curve" else self.spec.get("y")
         select = settings.get("select") or {}
@@ -556,6 +575,17 @@ class ExploreSession:
             self.full = self._full_view()
         self.settings = settings
         return notes
+
+    def crange_state(self) -> Optional[Dict[str, Any]]:
+        """For the page: a map with sliders, its colour range's source ("slice" or "all") and,
+        while every slice's range is worked out, how far ("working", fraction) or why it failed."""
+        if self.kind != "heatmap" or not crange_mod.sliders(self):
+            return None
+        info = getattr(self, "crange_info", None)
+        out: Dict[str, Any] = {"from": self.settings.get("crange", "slice")}
+        if info:
+            out.update(info)
+        return out
 
     def _has_positive(self, which: str) -> bool:
         """Whether the data shown has a value above 0 along this axis (else a log scale shows nothing)."""
@@ -742,13 +772,23 @@ class ExploreSession:
         if settings.get("invert"):
             name = name[:-2] if name.endswith("_r") else name + "_r"
         self.image.set_cmap(name)
-        if "cscale" in settings or any(v is not None for v in clim):
+        # every slider position's range (crange "all"): unless both ends are typed or the style
+        # fixes its own; until it is worked out, this slice's (meta["crange"] says how far)
+        whole, self.crange_info = None, None
+        if settings.get("crange") == "all" and None in clim and not getattr(self, "style_fixed", False):
+            whole, self.crange_info = crange_mod.get(self, settings)
+        if "cscale" in settings or any(v is not None for v in clim) or whole is not None:
             log = settings.get("cscale") == "log"
             z = self._finite_z()
             if log:
                 z = z[z > 0]
             lo = clim[0] if clim[0] is not None else (float(z.min()) if z.size else 1.0)
             hi = clim[1] if clim[1] is not None else (float(z.max()) if z.size else 10.0)
+            if whole is not None:
+                wlo, whi = crange_mod.norm_limits(whole, float(self.model.zf or 1.0), log)
+                if wlo is not None:
+                    lo = clim[0] if clim[0] is not None else wlo
+                    hi = clim[1] if clim[1] is not None else whi
             if log and not z.size:
                 log = False                              # nothing above 0: a log scale would show nothing
                 self.log_refused.append("The map has no value above 0, so the colour scale stays linear.")
@@ -1025,6 +1065,7 @@ class ExploreSession:
             "full": [list(self.full[0]), list(self.full[1])],
             "note": note, "reduced": reduced, "stat": stat, "draft": draft, "ops": self.ops_info(),
             "hidden": hidden, "empty": empty, "sync": self.sync_keys(),
+            "crange": self.crange_state(),
             "ms": {"wait": round((t1 - t0) * 1000, 1), "reduce": round((t2 - t1) * 1000, 1),
                    "draw": round((t3 - t2) * 1000, 1), "encode": round((t4 - t3) * 1000, 1)},
         }
