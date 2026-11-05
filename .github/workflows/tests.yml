@@ -76,6 +76,11 @@ jobs:
         if: runner.os == 'Linux'
       - name: Install Python packages
         run: uv sync --all-packages --group docs
+      # The Julia module's packages, installed and compiled before the suites run side by side (the
+      # Julia examples in the tools tests and the docs need them while the Julia suite still runs).
+      - name: Install the Julia module's packages
+        working-directory: languages/julia
+        run: julia --project=. --startup-file=no -e "using Pkg; Pkg.instantiate(); Pkg.precompile()"
       - uses: actions/download-artifact@v8
         with:
           name: web-ui
@@ -150,7 +155,7 @@ jobs:
       # The Julia module's packages (HDF5, JSON3 …); in the suites job its own tests install them.
       - name: Install the Julia module's packages
         working-directory: languages/julia
-        run: julia --project=. --startup-file=no -e "using Pkg; Pkg.instantiate()"
+        run: julia --project=. --startup-file=no -e "using Pkg; Pkg.instantiate(); Pkg.precompile()"
       - name: Run the cross-language matrix
         run: uv run python scripts/test_all.py --only crosslang
 
