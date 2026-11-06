@@ -464,10 +464,11 @@ class CursorsBody(_Body):
     ylim: List[float]
     width: int
     height: int
-    cuts: bool = True                     # maps: the row and column through cursor 1
+    cuts: bool = True                     # maps: the rows and columns through the cursors
     lines: bool = True                    # curves: each cursor's trace as drawn (to highlight it)
     every: bool = True                    # a vertical or horizontal cursor reads every trace at its line
     at_line: str = "interpolated"         # ... between stored points, or "stored": the nearest
+    together: bool = False                # two cursors: their steps are one move of both
 
 
 class FindBody(_Body):
@@ -1387,12 +1388,12 @@ def create_app(state: AppState) -> FastAPI:
     @app.post("/api/explore/{session_id}/cursors")
     def explore_cursors(session_id: str, body: CursorsBody):
         """The cursors snapped to the stored data, their read-outs and (maps) the cuts through
-        cursor 1: everything the page draws for one cursor state (reading.py)."""
+        them: everything the page draws for one cursor state (reading.py)."""
         s = _session(session_id)
         s.last_used = time.monotonic()
         return reading.cursors(s, body.cursors, body.type, {"xlim": body.xlim, "ylim": body.ylim},
                                (body.width, body.height), body.cuts, body.lines, body.every, body.at_line,
-                               cfg.settings()["explore"]["line_traces"])
+                               cfg.settings()["explore"]["line_traces"], body.together)
 
     @app.post("/api/explore/{session_id}/find")
     def explore_find(session_id: str, body: FindBody):

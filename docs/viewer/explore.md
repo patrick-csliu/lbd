@@ -203,6 +203,10 @@ they share one badge.
   crosses it**: every crossing (up to 10 per trace), or *doesn't cross*. When a trace crosses
   twice, the distance between them is shown, such as the width of a resonance at −3 dB.
 
+**Move both cursors together** (the Cursors tab, with two cursors): dragging either cursor, or the
+arrow keys, moves both by the same amount; each stays on its own trace, and both stop at the data's
+edge, so the distance between them stays.
+
 **Every trace at the line** (curves, the Cursors tab): a dot marks where the line meets each trace
 (point at one for its trace and number). **Values at the line** says how they are read:
 **Interpolated** (the default) works them out straight between the trace's two neighbouring stored
@@ -223,10 +227,11 @@ or a spike, whichever stands out more): between the two cursors when there are t
 what is in view; on curves, on cursor 1's trace if it is on one. They search the stored data,
 not the picture.
 
-**Cuts** (maps): the row and the column through cursor 1 are drawn above and beside the map, on
+**Cuts** (maps): the row and the column through the cursor are drawn above and beside the map, on
 exactly the map's axes, and follow the cursor while you drag it. Their value axis fits the part
 in view; when a cut has more points than pixels, each pixel shows its lowest and highest value.
-Hover a cut to read it. **Cuts** above the plot (or the key **C**) turns them off.
+With two cursors each cut shows two curves, in the cursors' colours, on one scale. Hover a cut to
+read it. **Cuts** above the plot (or the key **C**) turns them off.
 
 To switch the cursors off, click the chosen cursor type again (or press **K**): no type is
 chosen, a click on the plot does nothing, and the cursors, cuts and values are hidden. Choose a

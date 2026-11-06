@@ -789,6 +789,7 @@ export interface CursorsAnswer {
   factors: { x: number; y: number; z: number }; // plot units per stored unit
   cursors: (CursorRead | null)[];
   cuts?: { row?: Cut; column?: Cut; zf: number };
+  cuts2?: { row?: Cut; column?: Cut; zf: number }; // through cursor 2
 }
 
 export interface Histogram {
@@ -842,7 +843,7 @@ export const api = {
   /** Cursors snapped to the stored data, their read-outs and (maps) the cuts through cursor 1. */
   exploreCursors: (
     session: string,
-    body: { cursors: CursorAsk[]; type: CursorType; xlim: number[]; ylim: number[]; width: number; height: number; cuts: boolean; every: boolean; at_line: AtLine },
+    body: { cursors: CursorAsk[]; type: CursorType; xlim: number[]; ylim: number[]; width: number; height: number; cuts: boolean; every: boolean; at_line: AtLine; together: boolean },
   ) => call<CursorsAnswer>("POST", `/api/explore/${encodeURIComponent(session)}/cursors`, body),
   /** Where the max, min or peak (farthest from the median) is, in a range of the stored data. */
   exploreFind: (session: string, what: "max" | "min" | "peak", xlim: number[], ylim: number[], trace?: number) =>

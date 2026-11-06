@@ -134,6 +134,11 @@ are still written as 1.2).
   the list), and **⋯** chooses what each picture shows: its title or file name, and any of the
   fields, such as sweep size, project or tags.
 - **The version is in Settings → About**, no longer in the header.
+- **Explore: two cursors, both cuts.** With two cursors, the cuts beside a map show two curves in the
+  cursors' colours, on one scale.
+- **Explore: move two cursors together.** The tick box **Move both cursors together** in the Cursors
+  tab: dragging either cursor, or the arrow keys, moves both by the same amount, each on its own
+  trace, and both stop at the data's edge, so the distance between them stays.
 - **Explore: the preview tab's name** (one click, in italics) is at the same height as the other
   tabs' names; it took the Library preview's margins before.
 - **Explore: a map's colours can mean the same at every slider position.** Display → Colour →

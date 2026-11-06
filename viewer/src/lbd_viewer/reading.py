@@ -162,8 +162,8 @@ def _nearest(arr: np.ndarray, v: float) -> int:
 
 def cursors(s: "ExploreSession", items: List[Dict[str, Any]], kind: str, view: Dict[str, Any],
             size: Sequence[int], cuts: bool = True, lines: bool = True, every: bool = True,
-            at_line: str = "interpolated", limit: int = 20) -> Dict[str, Any]:
-    """Snap each cursor to the stored data and read it out; with a map, the cuts through cursor 1.
+            at_line: str = "interpolated", limit: int = 20, together: bool = False) -> Dict[str, Any]:
+    """Snap each cursor to the stored data and read it out; with a map, the cuts through the cursors.
 
     `items`: per cursor {x, y} in plot units, optionally `trace` (curves: stay on this trace),
     `free` (keep the position: Alt), `step` [along x, along y or traces] in stored points.
@@ -173,7 +173,8 @@ def cursors(s: "ExploreSession", items: List[Dict[str, Any]], kind: str, view: D
     `factors`: plot units per stored unit, to turn typed stored values into positions.
     `every`: a vertical or horizontal cursor on curves reads every visible trace at its line;
     `at_line` "interpolated" (between a trace's stored points) or "stored" (the nearest stored
-    point); `limit`: markers and crossings for at most this many visible traces."""
+    point); `limit`: markers and crossings for at most this many visible traces. `together`: the
+    cursors' `step`s are one move of both, as far as both can go (see _same_steps)."""
     if kind not in CURSOR_TYPES:
         raise ExploreError(f"unknown cursor type {kind!r}; use one of {', '.join(CURSOR_TYPES)}")
     if at_line not in AT_LINE:
@@ -189,12 +190,17 @@ def cursors(s: "ExploreSession", items: List[Dict[str, Any]], kind: str, view: D
         scales = (s.ax.get_xscale(), s.ax.get_yscale())
     geo = (xlim, ylim, w, h, scales)
     m = s.model
+    if together and len(items) == 2:
+        items = _same_steps(s, items)
     out: Dict[str, Any] = {"type": kind, "factors": {"x": m.xf, "y": m.yf, "z": getattr(m, "zf", 1.0)}}
     if s.kind == "heatmap":
         out["cursors"] = [_map_cursor(s, c, kind) for c in items]
         first = out["cursors"][0]
         if cuts and first is not None:
             out["cuts"] = _cuts(s, first, kind, geo)
+            second = out["cursors"][1] if len(out["cursors"]) > 1 else None
+            if second is not None:
+                out["cuts2"] = _cuts(s, second, kind, geo)
     else:
         out["cursors"] = [_curve_cursor(s, c, kind, geo, every, at_line, limit) for c in items]
         if lines and len(_visible(s)) > 1:          # a single curve needs no highlight: it would only cover it
@@ -206,6 +212,30 @@ def cursors(s: "ExploreSession", items: List[Dict[str, Any]], kind: str, view: D
     if s.path.name.lower().endswith(".lbd.writing"):
         _not_measured_yet(out["cursors"])
     return out
+
+
+def _room(s: "ExploreSession", c: Dict[str, Any]) -> List[Tuple[int, int]]:
+    """How many stored points a cursor can step down and up: along x, and along y on a map."""
+    m = s.model
+    x, y = _check_point(c)
+    if s.kind == "heatmap":
+        i, j = _clip_cell(m.x, x), _clip_cell(m.y, y)
+        return [(-i, len(m.x) - 1 - i), (-j, len(m.y) - 1 - j)]
+    k = int(c.get("trace", 0))
+    xs, ys = np.asarray(m.xs[k], dtype=float), np.asarray(m.lines[k][0], dtype=float)
+    ok = xs[np.isfinite(xs) & np.isfinite(ys)]
+    return [(-int((ok < x).sum()), int((ok > x).sum())), (0, 0)]
+
+
+def _same_steps(s: "ExploreSession", items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Both cursors move together: each takes the same number of stored points, as many as the one
+    nearer the data's edge can, so the distance between them stays. Without steps: as they are."""
+    step = items[0].get("step")
+    if not step or not all(c.get("step") == step for c in items):
+        return items
+    rooms = [_room(s, c) for c in items]
+    done = [int(np.clip(int(step[a]), max(r[a][0] for r in rooms), min(r[a][1] for r in rooms))) for a in (0, 1)]
+    return [{**c, "step": done} for c in items]
 
 
 def _not_measured_yet(found: Any) -> None:

@@ -10,10 +10,11 @@ export interface CursorsState {
   type: CursorType;
   at: CursorAsk[]; // 0, 1 or 2 cursors
   active: 0 | 1; // the one the keys move
-  cuts: boolean; // maps: the row and column through cursor 1
+  cuts: boolean; // maps: the row and column through the cursors
   on: boolean; // off: a click places no cursor; the cursors are kept, hidden, for when they are on again
   every?: boolean; // curves, a vertical or horizontal cursor: read every trace at the line (absent: yes)
   at_line?: AtLine; // ... between its stored points (absent) or the nearest stored point
+  together?: boolean; // two cursors: a drag or an arrow key moves both
 }
 
 export const NO_CURSORS: CursorsState = { type: "cross", at: [], active: 0, cuts: true, on: true };
@@ -149,6 +150,7 @@ export const HELP: [string, string][] = [
   ["← →", "move the active cursor one stored point (Shift: 10)"],
   ["↑ ↓", "curves: the next / previous trace; maps: one row"],
   ["Tab", "switch the active cursor (1 ↔ 2)"],
+  ["Move both cursors together", "ticked in the Cursors tab: dragging either cursor or the arrow keys move both"],
   ["M  N  P", "max, min, peak (between the cursors, else in the view)"],
   ["[  ]", "the first slider one step back / on"],
   ["+  −", "zoom in / out around cursor 1"],

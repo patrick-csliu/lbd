@@ -346,6 +346,7 @@ export default function ExploreView({
   // (with a new picture, or a move) is dropped, so it never brings them back.
   const cursorsGone = useRef(0);
   const drag = useRef<number | null>(null); // the cursor being dragged
+  const dragFrom = useRef<CursorAsk[] | null>(null); // moving both: where they were when the drag began
   const stage = useRef<HTMLDivElement>(null);
   const topCut = useRef<HTMLCanvasElement>(null);
   const rightCut = useRef<HTMLCanvasElement>(null);
@@ -626,7 +627,7 @@ export default function ExploreView({
     if (!sid || !at.length) return Promise.resolve();
     const cuts = st.cuts && kindRef.current === "heatmap";
     return api
-      .exploreCursors(sid, { cursors: at, type: st.type, xlim: m.view.xlim, ylim: m.view.ylim, width: m.plot[2], height: m.plot[3], cuts, every: st.every !== false, at_line: st.at_line ?? "interpolated" })
+      .exploreCursors(sid, { cursors: at, type: st.type, xlim: m.view.xlim, ylim: m.view.ylim, width: m.plot[2], height: m.plot[3], cuts, every: st.every !== false, at_line: st.at_line ?? "interpolated", together: !!st.together })
       .then((a) => {
         if (session.current !== sid || cursorsGone.current !== gone) return;
         readingRef.current = a;
@@ -957,6 +958,18 @@ export default function ExploreView({
     const [dx, dy] = toData(m, x, y);
     const r = readingRef.current;
     const now = (r?.cursors ?? []).filter((c): c is CursorRead => !!c).map(askOf);
+    const from = dragFrom.current;
+    if (from?.length === 2 && cursorsRef.current.together && drag.current === i) {
+      // both move: the same shift from where the drag began, stopping at the data's edge
+      const [[x0, x1], [y0, y1]] = frame.current?.meta.full ?? [[-Infinity, Infinity], [-Infinity, Infinity]];
+      const type = cursorsRef.current.type;
+      const shift = (want: number, lo: number, hi: number, a: number, b: number) =>
+        Math.min(Math.max(want, Math.max(Math.min(lo, hi) - a, Math.min(lo, hi) - b)), Math.min(Math.max(lo, hi) - a, Math.max(lo, hi) - b));
+      const sx = type === "horizontal" ? 0 : shift(dx - from[i].x, x0, x1, from[0].x, from[1].x);
+      const sy = type === "vertical" ? 0 : shift(dy - from[i].y, y0, y1, from[0].y, from[1].y);
+      moveCursors(from.map((c) => ({ ...c, x: c.x + sx, y: c.y + sy })));
+      return;
+    }
     const wish: CursorAsk = { x: dx, y: dy, ...(free ? { free: true } : {}) };
     if (keepTrace && now[i]?.trace !== undefined) wish.trace = now[i].trace;
     const at = now.length ? [...now] : [];
@@ -976,6 +989,7 @@ export default function ExploreView({
       const hit = cursorAt(x, y);
       if (hit !== null && !e.shiftKey) {
         drag.current = hit;
+        dragFrom.current = (readingRef.current?.cursors ?? []).filter((c): c is CursorRead => !!c).map(askOf);
         onCursorsRef.current({ ...cursorsRef.current, active: hit as 0 | 1 });
         return;
       }
@@ -1201,8 +1215,13 @@ export default function ExploreView({
     const step = (dx: number, dy: number) => {
       if (!now.length) return;
       const i = Math.min(st.active, now.length - 1);
-      now[i] = { ...now[i], free: false, step: [dx, dy] };
-      moveCursors(now);
+      // both move along x, and along y on a map (on curves up and down choose the active cursor's trace)
+      const both = st.together && now.length === 2 && (kindRef.current === "heatmap" || dy === 0);
+      if (both) moveCursors(now.map((c) => ({ ...c, free: false, step: [dx, dy] as [number, number] })));
+      else {
+        now[i] = { ...now[i], free: false, step: [dx, dy] };
+        moveCursors(now);
+      }
     };
     const k = e.key;
     if (k === "ArrowLeft" || k === "ArrowRight") step((k === "ArrowLeft" ? -1 : 1) * (e.shiftKey ? 10 : 1), 0);
@@ -1278,7 +1297,7 @@ export default function ExploreView({
             aria-pressed={cursors.cuts}
             disabled={!cursors.on}
             onClick={() => onCursorsRef.current({ ...cursorsRef.current, cuts: !cursorsRef.current.cuts })}
-            title="Cuts: the row and column through cursor 1, beside the map (key C)"
+            title="Cuts: the rows and columns through the cursors, beside the map (key C)"
           >
             <Icon name="cuts" />
           </button>
@@ -1396,7 +1415,7 @@ export default function ExploreView({
             <canvas
               ref={topCut}
               style={plotCss ? { left: plotCss[0], width: plotCss[2], height: "calc(100% - 6px)" } : {}}
-              onMouseMove={(e) => setCutHover(cutValue(reading?.cuts?.row, e, "x", current(), reading))}
+              onMouseMove={(e) => setCutHover(cutValue("row", e, "x", current(), reading))}
               onMouseLeave={() => setCutHover(null)}
             />
             {!c1 && <span className="muted small">Click the map: its row shows here</span>}
@@ -1452,7 +1471,7 @@ export default function ExploreView({
             <canvas
               ref={rightCut}
               style={plotCss ? { top: plotCss[1], height: plotCss[3], width: "calc(100% - 6px)" } : {}}
-              onMouseMove={(e) => setCutHover(cutValue(reading?.cuts?.column, e, "y", current(), reading))}
+              onMouseMove={(e) => setCutHover(cutValue("column", e, "y", current(), reading))}
               onMouseLeave={() => setCutHover(null)}
             />
           </div>
@@ -1493,28 +1512,39 @@ function CursorLine({ n, c }: { n: number; c: CursorRead }) {
 }
 
 /** The value of a cut under the mouse, as text. */
-function cutValue(cut: Cut | undefined, e: { clientX: number; clientY: number; currentTarget: HTMLCanvasElement }, along: "x" | "y", m: Mapping | null, r: CursorsAnswer | null): string | null {
-  if (!cut || !m || !r) return null;
+function cutValue(which: "row" | "column", e: { clientX: number; clientY: number; currentTarget: HTMLCanvasElement }, along: "x" | "y", m: Mapping | null, r: CursorsAnswer | null): string | null {
+  const cut = r?.cuts?.[which], cut2 = r?.cuts2?.[which];
+  if (!cut || !m || !r || !r.cursors[0]) return null;
   const rect = e.currentTarget.getBoundingClientRect();
   const lim = along === "x" ? m.view.xlim : m.view.ylim, scale = along === "x" ? m.xscale : m.yscale;
   const f = along === "x" ? (e.clientX - rect.left) / rect.width : 1 - (e.clientY - rect.top) / rect.height;
   const at = back(scale, fwd(scale, lim[0]) + f * (fwd(scale, lim[1]) - fwd(scale, lim[0])));
-  let best = -1, d = Infinity;
-  cut.pos.forEach((p, i) => {
-    if (Math.abs(p - at) < d && cut.z[i] !== null) [best, d] = [i, Math.abs(p - at)];
-  });
+  const nearest = (k: Cut) => {
+    let best = -1, d = Infinity;
+    k.pos.forEach((p, i) => {
+      if (Math.abs(p - at) < d && k.z[i] !== null) [best, d] = [i, Math.abs(p - at)];
+    });
+    return best;
+  };
+  const best = nearest(cut);
   if (best < 0) return null;
   const zi = item(r.cursors[0], "z"), ai = item(r.cursors[0], along);
   if (!zi || !ai) return null;
   const zf = r.factors.z, af = r.factors[along];
-  return `${along === "x" ? "Row" : "Column"}: ${zi.label} = ${si(cut.z[best]! / zf, zi.unit)} at ${ai.label} = ${si(cut.pos[best] / af, ai.unit)}`;
+  const value = (k: Cut, i: number) => `${zi.label} = ${si(k.z[i]! / zf, zi.unit)}`;
+  const place = `at ${ai.label} = ${si(cut.pos[best] / af, ai.unit)}`;
+  const name = along === "x" ? "Row" : "Column";
+  if (!cut2) return `${name}: ${value(cut, best)} ${place}`;
+  const best2 = nearest(cut2);
+  return `${name} 1: ${value(cut, best)} · ${name} 2: ${best2 < 0 ? "empty" : value(cut2, best2)} ${place}`;
 }
 
-/** Draw the cuts through cursor 1: the row above the map (along x), the column beside it (along y),
- *  on exactly the map's axes. Their value axis fits the part in view. */
+/** Draw the cuts through the cursors: the rows above the map (along x), the columns beside it
+ *  (along y), on exactly the map's axes, in the cursors' colours when there are two. Their value
+ *  axis, shared by both, fits the part in view. */
 function paintCuts(top: HTMLCanvasElement | null, right: HTMLCanvasElement | null, m: Mapping, r: CursorsAnswer | null) {
   const dpr = window.devicePixelRatio || 1;
-  const draw = (c: HTMLCanvasElement | null, cut: Cut | undefined, along: "x" | "y") => {
+  const draw = (c: HTMLCanvasElement | null, cut: Cut | undefined, cut2: Cut | undefined, along: "x" | "y") => {
     if (!c) return;
     const w = c.clientWidth, h = c.clientHeight;
     if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) {
@@ -1534,8 +1564,9 @@ function paintCuts(top: HTMLCanvasElement | null, right: HTMLCanvasElement | nul
     const a = fwd(scale, lim[0]), b = fwd(scale, lim[1]);
     const len = along === "x" ? w : h;
     const posPx = (p: number) => ((fwd(scale, p) - a) / (b - a)) * len;
-    let [lo, hi] = cut.range;
-    if (lo === null || hi === null) return;
+    const ends = [cut, ...(cut2 ? [cut2] : [])].flatMap((k) => k.range).filter((v): v is number => v !== null);
+    if (!ends.length) return;
+    let [lo, hi] = [Math.min(...ends), Math.max(...ends)];
     if (lo === hi) [lo, hi] = [lo - 0.5, hi + 0.5];
     const pad = (hi - lo) * 0.08;
     const span = along === "x" ? h : w;
@@ -1544,23 +1575,27 @@ function paintCuts(top: HTMLCanvasElement | null, right: HTMLCanvasElement | nul
     ctx.beginPath();
     ctx.rect(0, 0, w, h);
     ctx.clip();
-    ctx.strokeStyle = ink;
-    ctx.lineWidth = 1.25;
-    ctx.beginPath();
-    let pen = false;
-    cut.pos.forEach((p, i) => {
-      const z = cut.z[i];
-      if (z === null) {
-        pen = false;
-        return;
-      }
-      const u = posPx(p), v = valPx(z);
-      const [x, y] = along === "x" ? [u, h - v] : [v, h - u];
-      if (pen) ctx.lineTo(x, y);
-      else ctx.moveTo(x, y);
-      pen = true;
-    });
-    ctx.stroke();
+    const curve = (k: Cut, colour: string) => {
+      ctx.strokeStyle = colour;
+      ctx.lineWidth = 1.25;
+      ctx.beginPath();
+      let pen = false;
+      k.pos.forEach((p, i) => {
+        const z = k.z[i];
+        if (z === null) {
+          pen = false;
+          return;
+        }
+        const u = posPx(p), v = valPx(z);
+        const [x, y] = along === "x" ? [u, h - v] : [v, h - u];
+        if (pen) ctx.lineTo(x, y);
+        else ctx.moveTo(x, y);
+        pen = true;
+      });
+      ctx.stroke();
+    };
+    curve(cut, cut2 ? CURSOR_COLORS[0] : ink);
+    if (cut2) curve(cut2, CURSOR_COLORS[1]);
     // where the cursors are along this cut
     r.cursors.forEach((cr, i) => {
       if (!cr) return;
@@ -1602,6 +1637,6 @@ function paintCuts(top: HTMLCanvasElement | null, right: HTMLCanvasElement | nul
       }
     }
   };
-  draw(top, r?.cuts?.row, "x");
-  draw(right, r?.cuts?.column, "y");
+  draw(top, r?.cuts?.row, r?.cuts2?.row, "x");
+  draw(right, r?.cuts?.column, r?.cuts2?.column, "y");
 }

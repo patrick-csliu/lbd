@@ -144,6 +144,35 @@ def test_two_vertical_cursors_read_as_one_small_table(viewer, new_page):
     expect(panel.locator(".cursor-between")).to_contain_text("Frequency")
 
 
+def test_two_cursors_show_two_cuts_and_move_together(small_map, new_page):
+    page = new_page("Explore")
+    meta = frames(page, lambda: row(page, "small_map.lbd").dblclick())
+    cursor_answer(page, lambda: page.mouse.click(*at(page, meta, 8, 30)))
+    page.keyboard.down("Shift")
+    a = cursor_answer(page, lambda: page.mouse.click(*at(page, meta, 16, 10)))
+    page.keyboard.up("Shift")
+    assert a["cuts2"]["row"]["z"] != a["cuts"]["row"]["z"]
+    cut = explore(page).locator(".explore-cut-top canvas")
+    box = cut.bounding_box()
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    expect(explore(page).get_by_text("Row 2:")).to_be_visible()        # both values on hover
+    two = explore(page).get_by_label("Move both cursors together")
+    two.check()
+    page.locator(".explore-overlay").first.focus()
+    cells = lambda r: [c["at"][0] for c in r["cursors"]]               # (this map's columns aren't evenly spaced)
+    b = cursor_answer(page, lambda: page.keyboard.press("ArrowLeft"))
+    assert cells(b) == [cells(a)[0] - 1, cells(a)[1] - 1]              # both, by one stored point
+    assert cursor_answer(page, lambda: page.keyboard.press("ArrowLeft"))["cursors"][0]["at"][0] == cells(b)[0] - 1
+    # a drag of one moves both
+    start = at(page, meta, b["cursors"][1]["x"], b["cursors"][1]["y"])
+    end = at(page, meta, b["cursors"][1]["x"] - 4, b["cursors"][1]["y"])
+    page.mouse.move(*start)
+    page.mouse.down()
+    c = cursor_answer(page, lambda: page.mouse.move(*end, steps=3))
+    page.mouse.up()
+    assert c["cursors"][1]["x"] < b["cursors"][1]["x"] and c["cursors"][0]["x"] <= b["cursors"][0]["x"]
+
+
 def test_cursors_can_be_switched_off_and_back_on(small_map, new_page):
     page = new_page("Explore")
     meta = frames(page, lambda: row(page, "small_map.lbd").dblclick())

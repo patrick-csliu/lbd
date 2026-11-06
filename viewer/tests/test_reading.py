@@ -99,6 +99,28 @@ def test_the_cursors_own_trace_stays_in_a_cut_off_table(client, traces, monkeypa
     assert [r["trace"] for r in t["rows"]] == [0, 2] and t["more"] == 1
 
 
+def test_two_cursors_have_a_cut_each(client, small_map):
+    o = open_view(client, small_map)
+    a = cursors(client, o, [{"x": 2.0, "y": 100.0}, {"x": 4.0, "y": 300.0}])
+    assert a["cuts"]["row"]["z"] != a["cuts2"]["row"]["z"] and a["cuts"]["column"]["z"] != a["cuts2"]["column"]["z"]
+    assert "cuts2" not in cursors(client, o, [{"x": 2.0, "y": 100.0}])
+
+
+def test_two_cursors_step_together_and_stop_at_the_edge(client, small_map):
+    o = open_view(client, small_map)
+    at = [{"x": 2.0, "y": 100.0, "step": [1, 0]}, {"x": 4.0, "y": 100.0, "step": [1, 0]}]
+
+    def move(items):
+        (lo, hi), (bottom, top) = o["full"]
+        r = client.post(f"/api/explore/{o['session']}/cursors", json={"cursors": items, "type": "cross", "xlim": [lo, hi], "ylim": [bottom, top],
+                                                                      "width": 500, "height": 300, "cuts": False, "together": True})
+        r.raise_for_status()
+        return [c["x"] for c in r.json()["cursors"]]
+    assert move(at) == [3.0, 5.0]
+    assert move([{**c, "x": c["x"] + 1.0} for c in at]) == [3.0, 5.0]   # cursor 2 is at the edge: neither moves
+    assert move([{**c, "step": [5, 0]} for c in at]) == [3.0, 5.0]      # as far as both can go
+
+
 def test_a_free_cursor_keeps_its_position_and_reads_the_nearest_point(client, traces):
     o = open_view(client, traces, spec=SPEC)
     c = cursors(client, o, [{"x": 0.304, "y": 14.0, "free": True}])["cursors"][0]

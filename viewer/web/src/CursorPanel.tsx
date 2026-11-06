@@ -419,6 +419,12 @@ export default function CursorPanel({ kind, cursors, onCursors, reading, actions
       {!c1 && <p className="muted small">Click the plot for cursor 1, Shift+click for cursor 2.</p>}
       {c1 && <CursorNumbers n={1} c={c1} kind={kind} type={cursors.type} actions={actions} />}
       {c2 && <CursorNumbers n={2} c={c2} kind={kind} type={cursors.type} actions={actions} />}
+      {c1 && c2 && (
+        <label className="check" title="Dragging either cursor, or the arrow keys, moves both by the same amount; each stays on its own trace">
+          <input type="checkbox" checked={!!cursors.together} onChange={(e) => onCursors({ ...cursors, together: e.target.checked })} />
+          Move both cursors together
+        </label>
+      )}
       {kind === "curve" && cursors.type !== "cross" && (
         <div className="cursor-line-choice">
           <label className="check" title="Mark where the line meets each visible trace, and list the numbers there">

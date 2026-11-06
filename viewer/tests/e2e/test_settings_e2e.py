@@ -58,6 +58,9 @@ def test_links_open_a_section_and_a_narrow_window_has_tabs(viewer, new_page):
 def test_the_version_is_in_settings_not_the_header(new_page):
     page = new_page()
     expect(page.locator(".version")).to_have_count(0)
+    page.set_viewport_size({"width": 1600, "height": 900})
+    help_right = page.get_by_role("link", name="Help").or_(page.get_by_role("button", name="Help")).first.bounding_box()
+    assert help_right["x"] + help_right["width"] > 1500             # the right of the header stays at the right
     about = open_settings(page, "About")
     expect(about.locator("[data-setting='about.version']")).to_contain_text(re.compile(r"\d+\.\d+"))
     expect(about.locator("[data-setting='about.format']")).to_contain_text(re.compile(r"\d+\.\d+"))
