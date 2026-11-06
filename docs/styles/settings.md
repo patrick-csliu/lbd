@@ -130,6 +130,17 @@ empty means none.
 Scatter plots with more than 5000 points are stored as an image inside PDF/SVG files (at
 `figure.dpi`), so the files stay small. Axes, labels and text stay vector.
 
+### Matrix and bars
+
+`figure.axes.matrix` — cells with their numbers. The colour map of the range 0 to 1 and of Auto is
+`image.cmap`.
+
+{{ style_table("MatrixStyle") }}
+
+`figure.axes.bars` — bars with labels, grouped or stacked. Their colours are the colour cycle.
+
+{{ style_table("BarsStyle") }}
+
 ### Image and colour bar
 
 `figure.axes.image` — heat maps, and colour scales in general (scatter colouring, long curve

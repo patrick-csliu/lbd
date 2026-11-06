@@ -27,7 +27,9 @@ Every change redraws the figure straight away. The same settings are available i
 
 | Control | Meaning |
 |---|---|
-| **Plot type** | **Curves** draws lines. **Scatter** draws markers (see [below](#common-tasks)). **Heat map** draws a colour map of a value with at least two axes that have more than one point. |
+| **Plot type** | **Curves** draws lines. **Scatter** draws markers (see [below](#common-tasks)). **Heat map** draws a colour map of a value with at least two axes that have more than one point. **Matrix** draws cells with their numbers, and **Bars** bars with labels; see [Plot types](explore.md#plot-types) for what each one is for. |
+| **Value**, **Columns**, **Rows** (Matrix) | Which value and which of its axes; complex values show **Re and Im** side by side, or the usual choices. **Numbers**, **Significant digits**, **Row sums** (each row's sum beside it) and **Colour range** (0 to 1, −1 to 1, Auto) set what the cells show. |
+| **Values**, **Groups**, **Bars in a group** (Bars) | What the bars are. **Bars** chooses Grouped or Stacked, **Values on the bars** writes each number at its bar. |
 | **Values** (curves, scatter) | Tick several values to draw them together; they share the horizontal axis. **On other axes** lists values measured over another axis; click one to plot it instead. **Numbers** lists the file's single numbers with their value. A single number isn't plotted: there is nothing to draw. A file with only single numbers shows the list instead of a figure. |
 | **Value** (heat map, I/Q scatter) | The value to show. Heat maps list values with two swept axes; the I/Q plane lists complex values. |
 | **Complex data as** | For complex values: magnitude, magnitude in dB (20·log₁₀), phase in radians or degrees, real part, imaginary part. For scatter also **I/Q plane**: real part against imaginary part, with equal scales. |

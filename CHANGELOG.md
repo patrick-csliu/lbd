@@ -146,6 +146,7 @@ are still written as 1.2).
 
 <!-- plan 15b -->
 - **Open in Figure** takes a plot type of its own along with its choices.
+- New plot type **Bars**, in Explore and Figure: bars with labels, grouped or stacked, for short axes, a vector in each data point, several values, or several single numbers. Two units get a second vertical axis. A click reads a bar; a horizontal cursor is a level to compare them with.
 - New plot type **Matrix**, in Explore and Figure: cells with their numbers, for two axes or a matrix in each data point. A click reads a cell; complex values show Re and Im side by side; the colour range can be fixed to 0 to 1 or −1 to 1.
 
 <!-- plan 15c -->

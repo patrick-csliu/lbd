@@ -5,9 +5,9 @@ set win over the ones saved in the file.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `kind` | text | `"auto"` | `curve`, `scatter`, `heatmap`, or `auto`: `heatmap` when the value has two or more axes with more than one point, else `curve`. Axes with a single point are fixed parameters. |
-| `values` | list of names | the first value with axes | Values to plot. Curves and scatter can show several; heat maps use the first. Single numbers (values without axes) can't be plotted; the viewer lists them with the values. |
-| `complex` | text | `"abs"` | How complex values are shown: `abs` (magnitude), `db` (20·log₁₀\|z\|), `phase` (radians), `phase_deg` (degrees), `phase_unwrap` and `phase_deg_unwrap` (the phase without its 2π jumps along the horizontal axis; missing points are skipped), `real`, `imag`, and for scatter only `iq` (the I/Q plane). Real values are shown as they are (with a warning if you asked for another mode). |
+| `kind` | text | `"auto"` | `curve`, `scatter`, `heatmap`, `matrix`, `bars`, or `auto`: `heatmap` when the value has two or more axes with more than one point, else `curve`. Axes with a single point are fixed parameters. |
+| `values` | list of names | the first value with axes | Values to plot. Curves, scatter and bars can show several; heat maps and matrices use the first. Single numbers (values without axes) can only be drawn as bars; the viewer lists them with the values. |
+| `complex` | text | `"abs"` | How complex values are shown: `abs` (magnitude), `db` (20·log₁₀\|z\|), `phase` (radians), `phase_deg` (degrees), `phase_unwrap` and `phase_deg_unwrap` (the phase without its 2π jumps along the horizontal axis; missing points are skipped), `real`, `imag`, for scatter only `iq` (the I/Q plane), and for matrices and bars `re_im` (both parts side by side; a matrix of complex numbers starts with it). Real values are shown as they are (with a warning if you asked for another mode). |
 | `x` | name | the value's last axis | Horizontal axis. Heat maps: an axis. Curves and scatter: an axis, or a **value** with the same axes as the plotted one (value against value; for curves each trace is then drawn at its own x, along the value's last swept axis). |
 | `y` | axis name | the last remaining axis | Heat maps: vertical axis. |
 | `series` | axis name or `"none"` | the first other axis | Curves of a single 2-D (or higher) value: one curve per point of this axis. `"none"` draws one curve and uses a slice instead. |

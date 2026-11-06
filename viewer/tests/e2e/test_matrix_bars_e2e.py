@@ -171,3 +171,109 @@ def test_open_in_figure_keeps_the_matrix(viewer, new_page):
     expect(plot_type(page)).to_have_value("matrix")
     expect(body.get_by_label("Colour range")).to_have_value("unit")
     expect(body.get_by_label("Significant digits")).to_have_value("2")
+
+
+def test_bars_from_the_plot_menu(viewer, new_page):
+    name, = files(viewer, mock.bars)
+    page = new_page("Explore")
+    open_as(page, name, "bars")
+    expect(explore(page).get_by_label("Plot type")).to_have_value("bars")
+    expect(explore(page).get_by_label("Groups")).to_have_value("state")
+    expect(explore(page).get_by_label("Log horizontal")).to_have_count(0)
+    expect(explore(page).get_by_label("Log vertical")).to_have_count(1)
+
+
+def test_single_numbers_as_bars(viewer, new_page):
+    name, = files(viewer, mock.bars)
+    page = new_page("Explore")
+    open_as(page, name, "bars")
+    frames(page, lambda: explore(page).get_by_label("Fidelity").click())
+    expect(explore(page).get_by_label("Groups")).to_have_count(0)
+    frames(page, lambda: explore(page).get_by_label("Visibility").click())
+    expect(explore(page).get_by_label("Population")).not_to_be_checked()
+    expect(explore(page).get_by_label("Fidelity")).to_be_checked()
+    expect(explore(page).get_by_label("Visibility")).to_be_checked()
+
+
+def test_a_vector_as_bars_with_a_slider(viewer, new_page):
+    name, = files(viewer, mock.tomography)
+    page = new_page("Explore")
+    frames(page, lambda: row(page, name).dblclick())
+    frames(page, lambda: explore(page).get_by_label("Plot type").select_option("bars"))
+    expect(explore(page).get_by_label("Groups")).to_have_value("bloch_dim1")
+    expect(explore(page).get_by_label("Bars in a group")).to_have_value("none")
+    expect(explore(page).locator(".controls").get_by_text("(point 1 of 6)")).to_be_visible()       # its slider
+
+
+def test_grouped_and_stacked(viewer, new_page):
+    name, = files(viewer, mock.assignment_matrix)
+    page = new_page("Explore")
+    open_as(page, name, "bars")
+    bars = explore(page).get_by_label("Bars", exact=True)
+    expect(bars).to_have_value("grouped")
+    frames(page, lambda: bars.select_option("stacked"))
+    expect(bars).to_have_value("stacked")
+    frames(page, lambda: explore(page).get_by_label("Values on the bars").click())
+    expect(explore(page).get_by_label("Values on the bars")).to_be_checked()
+
+
+def test_a_click_reads_a_bar(viewer, new_page):
+    name, = files(viewer, mock.assignment_matrix)
+    page = new_page("Explore")
+    meta = open_as(page, name, "bars")
+    a = cursor_answer(page, lambda: page.mouse.click(*at(page, meta, 1, 0.1)))     # the middle bar of the middle group
+    assert a["cursors"][0]["index"] == {"prepared": 1, "measured": 1}
+    numbers = explore(page).locator(".cursor-numbers")
+    expect(numbers).to_contain_text("Prepared = excited")
+    expect(numbers).to_contain_text("Bar = Measured = excited")
+    expect(numbers).to_contain_text("Probability = 0.92")
+
+
+def test_a_bar_chart_shares_no_cursors_with_curves(viewer, new_page):
+    name, = files(viewer, mock.bars)
+    page = new_page("Explore")
+    meta = open_as(page, name, "bars")
+    cursor_answer(page, lambda: page.mouse.click(*first_panel_at(page, meta, 1, 0.01)))
+    expect(explore(page).get_by_text("The other panels at the same x")).to_have_count(0)
+
+
+def test_a_horizontal_level_on_bars(viewer, new_page):
+    name, = files(viewer, mock.assignment_matrix)
+    page = new_page("Explore")
+    meta = open_as(page, name, "bars")
+    explore(page).get_by_role("button", name="Horizontal").click()
+    a = cursor_answer(page, lambda: page.mouse.click(*at(page, meta, 1, 0.5)))
+    assert abs(a["cursors"][0]["y"] - 0.5) < 0.02
+
+
+def test_bars_on_the_figure_page(viewer, new_page):
+    name, = files(viewer, mock.bars)
+    page = new_page("Figure")
+    open_file(page, name)
+    with page.expect_response(lambda r: "/api/render" in r.url and r.ok):
+        plot_type(page).select_option("bars")
+    body = page.locator(".tab-body:not([hidden])")
+    with page.expect_response(lambda r: "/api/render" in r.url and r.ok):
+        body.get_by_label("Error").check()
+    with page.expect_response(lambda r: "/api/render" in r.url and r.ok):
+        body.get_by_label("Bars", exact=True).select_option("stacked")
+    expect(body.get_by_text("Log y")).to_have_count(1)
+
+
+def test_open_in_figure_keeps_the_bars(viewer, new_page):
+    name, = files(viewer, mock.bars)
+    page = new_page("Explore")
+    open_as(page, name, "bars")
+    frames(page, lambda: explore(page).get_by_label("Bars", exact=True).select_option("stacked"))
+    explore(page).get_by_role("button", name="Open in Figure").click()
+    body = page.locator(".tab-body:not([hidden])")
+    expect(plot_type(page)).to_have_value("bars")
+    expect(body.get_by_label("Bars", exact=True)).to_have_value("stacked")
+    expect(body.get_by_label("Error")).to_be_checked()
+
+
+def test_no_cuts_button_on_bars(viewer, new_page):
+    name, = files(viewer, mock.bars)
+    page = new_page("Explore")
+    open_as(page, name, "bars")
+    expect(explore(page).get_by_role("button", name="Cuts", exact=True)).to_have_count(0)

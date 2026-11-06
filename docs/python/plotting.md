@@ -149,7 +149,7 @@ LBD only adds prefixes, it never converts between units. See
 
 ### From a dataset or file
 
-[`lp.plot`][lbd.plot.plot] draws a curve, scatter or heat map exactly like LBD Viewer. `data` is
+[`lp.plot`][lbd.plot.plot] draws a curve, scatter, heat map, matrix or bars exactly like LBD Viewer. `data` is
 a `Dataset` in memory or an `.lbd` path; the other arguments are the
 [plot settings](../styles/plot-settings.md). Settings saved in the file's view are used unless
 you override them, as in the viewer. The result is a normal matplotlib figure: add
@@ -159,6 +159,18 @@ annotations, change limits, then `plt.show()` or `lp.save(...)`.
 fig = lp.plot("sweep.lbd")                                   # the file's saved view and style
 fig = lp.plot(d, "curve", "S21", complex="phase_deg", series="power")
 fig = lp.plot(d, "scatter", "S21", complex="iq", color="power", style="thesis")
+```
+
+For few positions, a matrix shows the numbers themselves and bars compare them. A type's own
+choices go in `options`:
+
+```python
+m = lbd.Dataset(title="Assignment")
+m.add_axis("prepared", [0.0, 1.0], label="Prepared", elements=["ground", "excited"])
+m.add_axis("measured", [0.0, 1.0], label="Measured", elements=["ground", "excited"])
+m.add_value("p", [[0.97, 0.03], [0.06, 0.94]], axes=["prepared", "measured"], label="Probability")
+fig = lp.plot(m, "matrix", "p", options={"digits": 2, "row_sums": True})
+fig = lp.plot(m, "bars", "p", x="prepared", series="measured", options={"layout": "stacked", "numbers": True})
 ```
 
 Annotations (lines, text, arrows, shapes) can be passed the same way, or stored in the file's

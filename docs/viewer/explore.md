@@ -194,6 +194,29 @@ share their zoom: a matrix's columns are positions, not an axis.
 
 ### Bars
 
+For few named positions, where a line between them would mean nothing. Choose **Bars** in the Plot
+menu.
+
+| Data | Drawing |
+|---|---|
+| A value on one short axis | a bar per position, labelled by its `elements` or numbers |
+| A value on two short axes | **Groups** along the first; **Bars in a group** for the second |
+| Several values on one axis | a bar per value in each group |
+| A vector in each data point | a bar per element; the other axes get sliders |
+| Several single numbers | one bar each, named by the value |
+
+- Tick more **Values** to put them side by side. A value on other axes replaces what is shown.
+- **Bars** chooses Grouped or Stacked; stacked bars pile positive numbers up from zero and negative
+  ones down from it, and need one unit.
+- **Values on the bars** writes each number at the end of its bar, unless the bars are too narrow.
+- **Complex values:** the usual choices, or **Re and Im**, two bars side by side.
+- Two units get a second vertical axis, as curves do; a third is refused, saying which.
+- A click selects a bar: its group, name and value are in the Cursors tab. The **Horizontal** cursor
+  is a level to compare the bars with. Zero is always in the vertical axis; **Log vertical** is
+  under Display.
+
+Operations that keep the shape are available when the bars have one unit. There are no cuts.
+
 ### 3D bars
 
 ### Histogram
