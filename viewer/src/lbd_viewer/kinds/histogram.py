@@ -410,6 +410,41 @@ class Histogram(Interaction):
         total = sum(int(s.counts.sum()) for s in m.series)
         return f"{total:,} numbers in {m.edges.size - 1:,} bins", False
 
+    def _bin(self, x: float) -> int:
+        """The bin at x: the nearest one outside the edges; the top edge is in the last bin."""
+        edges = self.s.model.edges
+        return int(np.clip(np.searchsorted(edges, x, side="right") - 1, 0, edges.size - 2))
+
+    def _rows(self, first: int, last: int) -> List[Dict[str, Any]]:
+        """Each series' count and fraction in bins `first` to `last`, both included."""
+        rows = []
+        for s in self.s.model.series:
+            total, n = int(s.counts.sum()), int(s.counts[first:last + 1].sum())
+            rows.append({"label": s.label, "count": n, "fraction": n / total if total else None})
+        return rows
+
+    def read(self, cursor: Dict[str, Any], kind: str, geo: Any) -> Optional[Dict[str, Any]]:
+        from ..reading import _check_point
+
+        m = self.s.model
+        x, _ = _check_point(cursor)
+        i = int(np.clip(self._bin(x) + int((cursor.get("step") or (0, 0))[0]), 0, m.edges.size - 2))
+        lo, hi = float(m.edges[i]), float(m.edges[i + 1])
+        top = max(float(hist.heights(m, s)[i]) for s in m.series)
+        return {"x": (lo + hi) / 2, "y": top, "free": False, "index": {"bin": i},
+                "items": [{"role": "x", "name": "bin", "label": m.label, "unit": m.unit, "value": (lo + hi) / 2 / m.xf}],
+                "bin": {"lo": lo / m.xf, "hi": hi / m.xf, "unit": m.unit, "rows": self._rows(i, i)}}
+
+    def read_all(self, cursors: List[Any], kind: str, geo: Any) -> Dict[str, Any]:
+        if len(cursors) < 2 or None in cursors:
+            return {}
+        a, b = sorted(c["index"]["bin"] for c in cursors)
+        return {"between": {"rows": self._rows(a, b)}}
+
+    def room(self, cursor: Dict[str, Any]) -> List[Tuple[int, int]]:
+        i, last = self._bin(float(cursor["x"])), self.s.model.edges.size - 2
+        return [(-i, last - i), (0, 0)]
+
     def has_positive(self, which: str) -> bool:
         return which == "horizontal" or any(s.counts.any() for s in self.s.model.series)
 

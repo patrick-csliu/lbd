@@ -102,6 +102,8 @@ class HistModel:
     auto_axes: List[Tuple[str, str]]
     yf: float = 1.0
     notes: List[str] = field(default_factory=list)
+    label: str = ""                             # what is counted, and its stored unit
+    unit: str = ""
 
 
 @dataclass
@@ -281,7 +283,8 @@ def prepare(d: Any, spec: Dict[str, Any], style: Style, big: Optional[Counted] =
         x_label=axis_label(spec.get("x_label") or (shown[0][0] if len(labels) == 1 else "Value"), xunit, xs.label.unit_format),
         x_unit=xunit, y_label=axis_label(spec.get("y_label") or y_mode.capitalize(), y_unit, ys.label.unit_format),
         y_mode=y_mode, y_scale=spec["y_scale"], style="outline" if len(series) > 1 else options["hist_style"],
-        left_out=counted.left_out, auto_axes=auto_axes, notes=notes)
+        left_out=counted.left_out, auto_axes=auto_axes, notes=notes,
+        label=shown[0][0] if len(labels) == 1 else "Value", unit=unit)
 
 
 def heights(model: HistModel, series: HistSeries) -> np.ndarray:

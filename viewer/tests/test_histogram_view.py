@@ -13,7 +13,7 @@ import lbd.plot as lp
 import mock_values
 from lbd.plot import histogram as hist
 from lbd.plot import render as rnd
-from lbd_viewer import crange
+from lbd_viewer import crange, reading
 from lbd_viewer.explore import ExploreError, ExploreSession
 from lbd_viewer.kinds import histogram as kind
 
@@ -404,3 +404,80 @@ def test_an_operation_that_fails_says_why(iq, monkeypatch):
     finished(s)
     meta = finished(s, {"equations": {"y": "nonsense + 1"}})
     assert "error" in meta["ops"]["equations"]["y"]
+
+
+# -- the cursor -------------------------------------------------------------------------------------
+
+def read(s, xs, kind="vertical", **kw):
+    meta = picture(s)
+    return reading.cursors(s, [{"x": x, "y": 0.0} for x in xs], kind, {"xlim": meta["xlim"], "ylim": meta["ylim"]}, (500, 300), **kw)
+
+
+SPLIT = {"kind": "histogram", "values": ["I"], "color": "state", "all": ["shot"], "index": {"readout_power": 1},
+         "options": {"bins": 10}}
+
+
+def test_a_cursor_reads_its_bin(iq):
+    s = session(iq, {**SPLIT, "color": "none", "index": {"readout_power": 1, "state": 0}})
+    picture(s)
+    e, c = s.model.edges, counts(s)[0]
+    got = read(s, [(e[3] + e[4] * 3) / 4])
+    assert got["type"] == "vertical"
+    one = got["cursors"][0]
+    assert one["x"] == pytest.approx((e[3] + e[4]) / 2)
+    assert one["bin"]["lo"] == pytest.approx(e[3] / s.model.xf) and one["bin"]["unit"] == "V"
+    row = one["bin"]["rows"][0]
+    assert row["count"] == c[3] and row["fraction"] == pytest.approx(c[3] / c.sum())
+    assert "between" not in got
+
+
+def test_the_numbers_stay_counts_on_every_vertical_axis(iq):
+    spec = {**SPLIT, "color": "none", "index": {"readout_power": 1, "state": 0}, "options": {"bins": 10, "hist_y": "density"}}
+    s = session(iq, spec)
+    picture(s)
+    row = read(s, [s.model.edges[3]])["cursors"][0]["bin"]["rows"][0]
+    assert row["count"] == counts(s)[0][3]
+
+
+def test_each_outline_has_its_count(iq):
+    s = session(iq, SPLIT)
+    picture(s)
+    rows = read(s, [s.model.edges[5]])["cursors"][0]["bin"]["rows"]
+    assert [r["label"] for r in rows] == ["ground", "excited"]
+    assert [r["count"] for r in rows] == [int(c[5]) for c in counts(s)]
+
+
+def test_two_cursors_count_between(iq):
+    s = session(iq, SPLIT)
+    picture(s)
+    e = s.model.edges
+    got = read(s, [e[7], e[2]])                        # in either order; both end bins are in
+    rows = got["between"]["rows"]
+    assert [r["count"] for r in rows] == [int(c[2:8].sum()) for c in counts(s)]
+    assert rows[0]["fraction"] == pytest.approx(counts(s)[0][2:8].sum() / 200)
+
+
+def test_the_top_edge_is_in_the_last_bin(iq):
+    s = session(iq, SPLIT)
+    picture(s)
+    e = s.model.edges
+    assert read(s, [e[-1]])["cursors"][0]["index"] == {"bin": 9}
+    assert read(s, [e[-1] + 100])["cursors"][0]["index"] == {"bin": 9}
+    assert read(s, [e[0] - 100])["cursors"][0]["index"] == {"bin": 0}
+
+
+def test_any_cursor_type_chosen_earlier_reads_as_vertical(iq):
+    s = session(iq, SPLIT)
+    assert read(s, [0.0], kind="cross")["type"] == "vertical"
+
+
+def test_keys_step_by_a_bin_and_together_stop_at_the_edge(iq):
+    s = session(iq, SPLIT)
+    meta = picture(s)
+    e = s.model.edges
+    view = {"xlim": meta["xlim"], "ylim": meta["ylim"]}
+    got = reading.cursors(s, [{"x": e[1], "y": 0.0, "step": [2, 0]}], "vertical", view, (500, 300))
+    assert got["cursors"][0]["index"] == {"bin": 3}
+    both = [{"x": e[0], "y": 0.0, "step": [-3, 0]}, {"x": e[4], "y": 0.0, "step": [-3, 0]}]
+    got = reading.cursors(s, both, "vertical", view, (500, 300), together=True)
+    assert [c["index"]["bin"] for c in got["cursors"]] == [0, 4]

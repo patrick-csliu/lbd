@@ -75,3 +75,21 @@ def test_values_of_one_unit_overlay(viewer, new_page):
     view, meta = open_histogram(page)
     both = frames(page, lambda: view.get_by_role("checkbox", name="Q (V)", exact=True).click())
     assert both["note"].startswith("800 numbers")
+
+
+def test_click_reads_the_bin_and_two_cursors_the_count_between(viewer, new_page):
+    shots(viewer)
+    page = new_page("Explore")
+    view, meta = open_histogram(page)
+    view.get_by_role("tab", name="Cursors").click()
+    canvas = view.locator("canvas.explore-overlay").first
+    left, top, width, height = (v / meta["dpr"] for v in meta["plot"])
+    canvas.click(position={"x": left + width * 0.3, "y": top + height / 2})
+    table = view.get_by_label(re.compile(" to "))
+    expect(table.locator("tbody tr")).to_have_count(2)
+    expect(table.locator("tbody tr").first).to_contain_text("ground")
+    expect(view.get_by_role("button", name="Max", exact=True)).to_have_count(0)
+    canvas.click(position={"x": left + width * 0.7, "y": top + height / 2}, modifiers=["Shift"])
+    between = view.get_by_label("Between the cursors")
+    expect(between.locator("tbody tr")).to_have_count(2)
+    expect(between.locator("tbody tr").nth(1)).to_contain_text("excited")

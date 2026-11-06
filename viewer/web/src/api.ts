@@ -785,6 +785,14 @@ export interface CursorRead {
   stored?: { label: string; unit: string; value: number | null }; // with operations on: the stored value behind it
   cell?: [number, number, number, number]; // maps: the cell, x0 y0 x1 y1 (plot units)
   at?: [number, number]; // maps: the cell's column and row in the map as shown
+  bin?: { lo: number; hi: number; unit: string; rows: BinRow[] }; // a histogram: the bin at the cursor
+}
+
+/** A histogram's series in a bin, or between two cursors. `fraction`: of all the series' numbers. */
+export interface BinRow {
+  label: string;
+  count: number;
+  fraction: number | null;
 }
 
 /** A cut through a map: positions (plot units) and values (plot units) along one axis. */
@@ -802,6 +810,7 @@ export interface CursorsAnswer {
   cursors: (CursorRead | null)[];
   cuts?: { row?: Cut; column?: Cut; zf: number };
   cuts2?: { row?: Cut; column?: Cut; zf: number }; // through cursor 2
+  between?: { rows: BinRow[] }; // a histogram with two cursors: from the one's bin to the other's
 }
 
 export interface Histogram {

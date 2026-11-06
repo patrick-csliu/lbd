@@ -72,6 +72,10 @@ class Interaction:
         """Added to the whole cursors answer."""
         return {}
 
+    def room(self, cursor: Dict[str, Any]) -> Optional[List[Tuple[int, int]]]:
+        """How far a cursor can step down and up, along x and along y (None: as on curves and maps)."""
+        return None
+
     def pick(self, px: float, py: float) -> Optional[Dict[str, Any]]:
         return None
 
