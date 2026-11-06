@@ -167,6 +167,15 @@ def test_a_matrix_has_no_cuts_or_sync(tmp_path):
     assert "cuts" not in reading.cursors(s, [{"x": 0, "y": 0}], "cross", {}, (300, 300))
 
 
+def test_the_table_has_the_row_sums(tmp_path):
+    s = session(tmp_path, mock.assignment_matrix, {"kind": "matrix", "options": {"row_sums": True}})
+    t = export.session_table(s)
+    t.to_csv(tmp_path / "t.csv", layout="matrix")
+    grid = np.loadtxt(tmp_path / "t.csv", delimiter=",")
+    assert np.isnan(grid[0, -1]) and grid[1:, -1] == pytest.approx(1.0)
+    assert "each row's sum" in (tmp_path / "t.csv").read_text(encoding="utf-8")
+
+
 def test_a_preview_has_only_the_cells(tmp_path):
     mock.assignment_matrix(False).save(tmp_path / "x.lbd")
     s = ExploreSession(tmp_path / "x.lbd", "v", {"kind": "matrix"}, lp.load_style(), 120, 90, 1.0, bare=True)

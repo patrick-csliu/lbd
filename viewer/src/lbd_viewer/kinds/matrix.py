@@ -116,14 +116,21 @@ class Matrix(ShapeOps):
         shown = [(self._column(g, b.title), Rows(b.raw)) for b in g.blocks]
         stored = self._stored()
         values = {"shown": shown, "stored": stored, "both": shown + stored}[numbers]
+        x = np.asarray(xa.data, dtype=float)
         names: Dict[str, Any] = {}
         for column, rows in values:                      # the same numbers shown and stored: once
             names.setdefault(column.name, (column, rows))
         comments = [f"{axis.label or axis.name}: " + ", ".join(f"{k} = {t}" for k, t in enumerate(axis.elements))
                     for axis in (ya, xa) if axis.elements is not None]
-        t = Table(x=np.asarray(xa.data, dtype=float), x_col=Column(g.col_axis, xa.label, xa.unit),
+        columns = list(names.values())
+        if m.sums is not None:                           # one more column, for the rows' sums
+            x = np.r_[x, np.nan]
+            comments.append("the last column, at nan on the horizontal axis, holds each row's sum")
+            columns = [(c, Rows(np.c_[rows.source, m.sums if c.name == g.value and numbers != "stored" else np.nan]))
+                       for c, rows in columns]
+        t = Table(x=x, x_col=Column(g.col_axis, xa.label, xa.unit),
                   t=np.asarray(ya.data, dtype=float), t_col=Column(g.row_axis, ya.label, ya.unit),
-                  values=list(names.values()), comments=comments, kind="matrix")
+                  values=columns, comments=comments, kind="matrix")
         if view is not None:
             self._keep_view(t, view)
         return t
@@ -148,6 +155,8 @@ class Matrix(ShapeOps):
         (xa, xb), (ya, yb) = view["xlim"], view["ylim"]
         places = [start + np.arange(columns) for start in m.starts]
         t.points = np.flatnonzero(np.any([(xa <= p) & (p <= xb) for p in places], axis=0))
+        if m.sums is not None and xa <= len(m.x) <= xb:
+            t.points = np.r_[t.points, columns]
         t.traces = np.flatnonzero((ya <= m.y) & (m.y <= yb))
 
     # -- operations
@@ -176,7 +185,8 @@ class Matrix(ShapeOps):
                                   unit=shown.value_unit, raw_unit=grid.value.unit, zf=factor)
         norm = mcolors.Normalize()
         norm.autoscale_None(np.ma.masked_invalid(z))
-        return dataclasses.replace(m, grid=new, z=z, zf=factor, norm=norm, range="auto", z_label=label, artists={})
+        sums = None if m.sums is None else np.nansum(grid.a, axis=1)
+        return dataclasses.replace(m, grid=new, z=z, zf=factor, norm=norm, range="auto", z_label=label, sums=sums, artists={})
 
 
 INTERACTION = Matrix

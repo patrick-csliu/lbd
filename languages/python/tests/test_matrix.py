@@ -201,6 +201,36 @@ def test_the_starting_axes():
     assert render.resolve_spec(three, {"kind": "matrix", "values": "v", "x": "a", "y": "b"})["y"] == "b"
 
 
+def assignment():
+    d = two_axes(np.array([[0.904, 0.096], [0.3333333, 0.6666667], [0.5, 0.5]]))
+    return d
+
+
+def test_row_sums_are_shown():
+    _, ax, _ = drawn(assignment(), values="p", x="measured", y="prepared", options={"row_sums": True})
+    sums = next(a for a in ax.artists if isinstance(a, matrix.CellNumbers) and a.texts[0].get_position()[0] == 2)
+    assert [t.get_text() for t in sums.texts] == ["1", "1", "1"]
+    assert "Σ" in [t.get_text() for t in ax.texts]
+    assert ax.get_xlim()[1] == 2.5
+
+
+def test_row_sums_use_the_stored_numbers():
+    # 0.1 twice, shown with 1 digit, but the sum of the numbers before rounding
+    d = two_axes(np.array([[0.14, 0.14], [0.0, 0.0], [0.0, 0.0]]))
+    spec = render.resolve_spec(d, {"kind": "matrix", "values": "p", "x": "measured", "y": "prepared",
+                                   "options": {"row_sums": True, "digits": 1}})
+    m = matrix.prepare(d, spec, lp.load_style())
+    assert m.sums[0] == pytest.approx(0.28)
+
+
+def test_no_row_sums_for_re_and_im():
+    d = complex_matrix()
+    spec = render.resolve_spec(d, {"kind": "matrix", "values": "rho", "options": {"row_sums": True}})
+    with pytest.warns(render.RenderWarning, match="row sums aren't shown for Re and Im"):
+        m = matrix.prepare(d, spec, lp.load_style())
+    assert m.sums is None
+
+
 def test_svg_and_png_export(tmp_path):
     two_axes().save(tmp_path / "m.lbd")
     style = lp.load_style()

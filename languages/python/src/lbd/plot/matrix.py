@@ -106,6 +106,7 @@ OPTIONS = {
     "numbers": (lambda v: isinstance(v, bool), "numbers must be true or false"),
     "digits": (_whole_digits, "digits must be a whole number from 1 to 9"),
     "range": (lambda v: v in RANGES, f"range must be one of {RANGES}"),
+    "row_sums": (lambda v: isinstance(v, bool), "row_sums must be true or false"),
 }
 
 
@@ -138,7 +139,7 @@ def resolve(d, out, values, pick, spec, index_in, warn_unused, file_spec) -> Dic
     """Rows and columns are chosen like a map's axes: `y`, `x`; every other axis gets a slider."""
     first = d.values[values[0]]
     if len(values) > 1 and warn_unused:
-        _warn(f"a matrix shows one value; {values[1:]} ignored", r.RenderWarning)
+        _warn(f"a {out['kind']} plot shows one value; {values[1:]} ignored", r.RenderWarning)
     out["values"] = values[:1]
     axes = list(first.axes)
     y_start, x_start = starting_axes(d, first)
@@ -165,9 +166,10 @@ class CellNumbers(Artist):
 
     Whether they fit is known only at drawing, after the layout, and changes with zooming."""
 
-    def __init__(self, ax, texts: List[Text], chars: int, size_pt: float):
+    def __init__(self, ax, texts: List[Text], chars: int, size_pt: float, cell: Tuple[float, float] = (1.0, 1.0)):
+        """`chars`: the longest text; `cell`: the room for it, in data units (height 0: no limit)."""
         super().__init__()
-        self.texts, self.chars, self.size_pt = texts, chars, size_pt
+        self.texts, self.chars, self.size_pt, self.cell = texts, chars, size_pt, cell
         self.set_in_layout(False)
         self.set_zorder(3)
         ax.add_artist(self)
@@ -179,9 +181,10 @@ class CellNumbers(Artist):
 
     def fit(self) -> bool:
         ax = self.axes
-        (x0, y0), (x1, y1) = ax.transData.transform([(0, 0), (1, 1)])
+        box, (xa, xb), (ya, yb) = ax.get_window_extent(), ax.get_xlim(), ax.get_ylim()
         size = self.size_pt * ax.figure.dpi / 72
-        return abs(x1 - x0) >= self.chars * 0.6 * size and abs(y1 - y0) >= 1.2 * size
+        wide = box.width / abs(xb - xa) * self.cell[0] >= self.chars * 0.6 * size
+        return wide and (not self.cell[1] or box.height / abs(yb - ya) * self.cell[1] >= 1.2 * size)
 
     def draw(self, renderer) -> None:
         if not self.get_visible() or not self.fit():
@@ -216,6 +219,7 @@ class MatrixModel:
     number_digits: int
     numbers: bool               # the numbers are wanted, and not too many
     note: Optional[str]         # why there are no numbers
+    sums: Optional[np.ndarray] = None     # each row's sum in stored units, to show beside the row
     xf: float = 1.0
     yf: float = 1.0
     lines: Tuple = ()
@@ -261,6 +265,12 @@ def prepare(d, spec, style: Style, **kw) -> MatrixModel:
         starts.append(sum(p.shape[1] for p in pieces))
         pieces.append(block.z)
     z = np.hstack(pieces)
+    sums = None
+    if options.get("row_sums"):
+        if len(grid.blocks) > 1:
+            _warn("row sums aren't shown for Re and Im: choose another complex mode", r.RenderWarning)
+        else:
+            sums = np.nansum(grid.blocks[0].raw, axis=1)
     many = rows > MATRIX_NUMBERS or columns > MATRIX_NUMBERS
     wanted = options.get("numbers", True)
     note = (f"Numbers are shown up to {MATRIX_NUMBERS} × {MATRIX_NUMBERS}; this has {rows} × {columns} cells."
@@ -269,11 +279,16 @@ def prepare(d, spec, style: Style, **kw) -> MatrixModel:
     xa, ya = d.axes[spec["x"]], d.axes[spec["y"]]
     return MatrixModel(
         grid=grid, x=np.arange(z.shape[1], dtype=float), y=rows - 1.0 - np.arange(rows), z=z, starts=starts,
-        extent=((-0.5, z.shape[1] - 0.5), (-0.5, rows - 0.5)), zf=grid.zf, norm=norm, cmap=cmap, range=use,
+        extent=((-0.5, z.shape[1] - 0.5 + (sums is not None)), (-0.5, rows - 0.5)), sums=sums, zf=grid.zf, norm=norm, cmap=cmap, range=use,
         x_label=axis_label(spec.get("x_label") or xa.label, "" if xa.elements is not None else xa.unit, xs.label.unit_format),
         y_label=axis_label(spec.get("y_label") or ya.label, "" if ya.elements is not None else ya.unit, ys.label.unit_format),
         z_label=axis_label(spec.get("z_label") or grid.label, grid.unit, ys.label.unit_format),
         number_digits=options.get("digits", DIGITS), numbers=wanted and not many, note=note)
+
+
+def usual_length(texts: List[Text]) -> int:
+    """The length to make room for: a rare long number may touch its neighbours, and doesn't hide all the others."""
+    return int(np.percentile([len(t.get_text()) for t in texts], 90)) if texts else 1
 
 
 def number_text(v: float, digits: int, largest: float) -> str:
@@ -320,6 +335,9 @@ def draw(fig, ax, m: MatrixModel, d, spec, style: Style):
                            for s, b in zip(m.starts, m.grid.blocks) if b.title]
     if m.numbers:
         m.artists["numbers"] = _numbers(ax, m, style)
+    if m.sums is not None:
+        m.artists["sums"] = _sums(ax, m, style)
+        m.artists["titles"].append(ax.text(len(m.x), 1.01, "Σ", ha="center", va="bottom", transform=ax.get_xaxis_transform()))
     if m.note:
         _warn(m.note, r.RenderWarning)
     r._annotate(ax, d, spec, [])
@@ -339,7 +357,17 @@ def _numbers(ax, m: MatrixModel, style: Style) -> CellNumbers:
             if np.isfinite(v):
                 texts.append(Text(x, y, number_text(float(v), m.number_digits, largest), ha="center", va="center",
                                   fontsize=size, color=text_colour(cmap(m.norm(v))), clip_on=True))
-    return CellNumbers(ax, texts, max((len(t.get_text()) for t in texts), default=1), size)
+    return CellNumbers(ax, texts, usual_length(texts), size)
+
+
+def _sums(ax, m: MatrixModel, style: Style) -> CellNumbers:
+    """Each row's sum beside it, outside the colours, from the numbers before rounding."""
+    size = style.figure.axes.matrix.number_size_pt or style.figure.font.size_pt
+    shown = m.sums * m.zf
+    largest = float(np.abs(shown).max()) if shown.size else 0.0
+    texts = [Text(len(m.x), y, number_text(float(v), m.number_digits, largest), ha="center", va="center", fontsize=size,
+                  clip_on=True) for y, v in zip(m.y, shown)]
+    return CellNumbers(ax, texts, usual_length(texts), size)
 
 
 KIND = Kind("matrix", "Matrix", fits, resolve, prepare, draw,

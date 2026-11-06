@@ -63,6 +63,12 @@ function MatrixControls({ info, resolved: r, update }: KindControlsProps) {
           ))}
         </select>
       </label>
+      <div className="field">
+        <label className="check" title={reIm ? "Not for Re and Im: choose another complex mode" : "Each row's sum beside it, from the numbers before rounding"}>
+          <input type="checkbox" checked={!!options.row_sums && !reIm} disabled={reIm} onChange={(e) => set({ row_sums: e.target.checked })} />
+          Row sums
+        </label>
+      </div>
       <label className="field" title="Matrices are only comparable with a fixed range. From the data: 0 to 1 or −1 to 1 when the numbers have no unit and fit in it, otherwise Auto">
         <span>Colour range</span>
         <select aria-label="Colour range" value={options.range ?? ""} onChange={(e) => set({ range: e.target.value || undefined })}>

@@ -121,3 +121,22 @@ def test_only_operations_that_keep_the_shape_are_offered(viewer, new_page):
     expect(page.get_by_role("menuitem", name="FFT")).to_have_count(0)
     frames(page, lambda: page.get_by_role("menuitem", name="Subtract the mean").click())
     expect(explore(page).get_by_text("The plot shows")).to_be_visible()
+
+
+def test_row_sums_option(viewer, new_page):
+    name, = files(viewer, mock.assignment_matrix)
+    page = new_page("Explore")
+    open_as(page, name, "matrix")
+    box = explore(page).get_by_label("Row sums")
+    meta = frames(page, lambda: box.click())
+    expect(box).to_be_checked()
+    assert meta["full"][0] == [-0.5, 3.5]                   # the plot has one column more
+    meta = frames(page, lambda: box.click())
+    assert meta["full"][0] == [-0.5, 2.5]
+
+
+def test_no_row_sums_box_on_re_and_im(viewer, new_page):
+    name, = files(viewer, mock.density_matrix)
+    page = new_page("Explore")
+    open_as(page, name, "matrix")
+    expect(explore(page).get_by_label("Row sums")).to_be_disabled()
