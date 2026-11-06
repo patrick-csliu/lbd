@@ -161,6 +161,15 @@ fig = lp.plot(d, "curve", "S21", complex="phase_deg", series="power")
 fig = lp.plot(d, "scatter", "S21", complex="iq", color="power", style="thesis")
 ```
 
+A scatter plot takes all the points, unless `index` fixes an axis. With `all`, the axes listed keep all their
+points and the others not drawn are fixed; `options` holds `equal` (the same scale both ways) and `sides`
+(histograms of the points beside the plot):
+
+```python
+fig = lp.plot(d, "scatter", "S21", complex="iq", color="none", all=["freq"], index={"power": 0},
+              options={"sides": True})
+```
+
 A histogram counts the numbers of a value. `all` lists the axes whose points all go in, `index` fixes
 the others, `color` gives an outline per step of one axis (or `"none"`), and `options` holds the bins
 (`"auto"` or a number), `hist_style` (`"bars"`, `"outline"`) and `hist_y` (`"count"`, `"fraction"`,

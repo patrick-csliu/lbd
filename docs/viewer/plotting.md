@@ -104,6 +104,16 @@ These changes are not saved until you use **Save this view to the file**
 | Readout I/Q blobs per prepared state | Scatter; Value = `IQ`, Complex data as = I/Q plane, Colour by = `prep`. |
 | Magnitude in dB | **Complex data as** → Magnitude (dB). |
 
+## Scatter
+
+Scatter has the same **Colour by** and **All of …** as Explore, plus **Equal axes**. In Figure, **Colour by** can also
+be another value with the same axes. **Histograms beside the plot** adds a histogram of the points in the
+figure's limits above and to the right of the plot, on its axes; a legend then goes under the figure. Their
+size and opacity are in the style (`figure.axes.scatter`, `sides_size_mm`, `sides_alpha`).
+
+A figure is exact: it always draws its markers, however many (above 5000 they are stored as a picture inside
+SVG and PDF files). The points per pixel are only Explore's way of showing very many.
+
 ## Histogram
 
 **Histogram** counts how many numbers fall in each bin. It has the controls it has in Explore: **Colour by**

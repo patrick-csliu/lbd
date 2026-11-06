@@ -358,6 +358,20 @@ def explore_histogram(page: Page, url: str, ctx) -> None:
 
 
 @shot
+def explore_scatter(page: Page, url: str, ctx) -> None:
+    fresh(page, url, "Explore")
+    page.locator(".row-label", has_text="single_shot_iq.lbd").first.dblclick()
+    area = page.locator("main:not([hidden])")
+    area.get_by_label("Plot type").select_option("scatter")
+    page.wait_for_timeout(1500)
+    mark(page, [
+        (1, "main:not([hidden]) .axes-choice", 0, "r"),
+        (2, "main:not([hidden]) .explore-cut-top", 0, "tr"),
+    ])
+    save(page, VIEWER_IMG / "explore_scatter.png")
+
+
+@shot
 def explore_equations(page: Page, url: str, ctx) -> None:
     fresh(page, url, "Explore")
     page.locator(".row-label", has_text="sweep.lbd").first.dblclick()
