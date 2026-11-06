@@ -33,6 +33,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
+from lbd.plot.histogram import count_bins
 from lbd.plot.units import axis_label, prefix_scale
 
 
@@ -281,7 +282,7 @@ def histogram(g: Grid, along: str = "x", bins: int = 50) -> Grid:
     if lo == hi:
         lo, hi = lo - 0.5, hi + 0.5
     edges = np.linspace(lo, hi, bins + 1)
-    counts = np.array([np.histogram(r[np.isfinite(r)], edges)[0] for r in rows], dtype=float)
+    counts = np.array([count_bins(r, edges)[1] for r in rows], dtype=float)
     counts[~np.isfinite(rows).any(axis=1)] = np.nan
     centres = (edges[:-1] + edges[1:]) / 2
     out = replace(g, a=counts, x=centres, xq=g.value, ragged=False, one_to_one=False,
