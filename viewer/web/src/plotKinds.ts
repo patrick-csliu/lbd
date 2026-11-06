@@ -1,6 +1,6 @@
 import type { ComponentType } from "react";
 import type { CursorType, FileInfo, PlotSpec } from "./api";
-import type { ViewSettings } from "./ExploreView";
+import type { Angle, ViewSettings } from "./ExploreView";
 import { kindRow as bars } from "./BarsControls";
 import { kindRow as bars3d } from "./Bars3dControls";
 import { kindRow as histogram } from "./HistogramControls";
@@ -20,6 +20,8 @@ export interface KindControlsProps {
   settings?: ViewSettings; // Explore's view settings
   updateSettings?: (patch: ViewSettings) => void;
   page: "explore" | "figure";
+  angle?: Angle | null; // a 3D plot in Explore: its view's angle
+  setAngle?: (a: Partial<Angle> | null) => void; // null: the default angle
 }
 
 export interface PlotKind {

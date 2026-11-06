@@ -23,6 +23,7 @@ class Bars3d(Matrix):
     name = kind = "bars3d"
     model = bars3d.Bars3dModel
     cursor_types: Tuple[str, ...] = ()
+    fixed_layout = True    # turning moves the tick labels, and no new layout helps: laid out once per size
 
     def setup(self) -> None:
         s = self.s
@@ -83,7 +84,8 @@ class Bars3d(Matrix):
         return f"{len(m.y)} × {len(m.x)} bars", False
 
     def meta(self) -> Dict[str, Any]:
-        return {"angle": dict(self.angle)}
+        m = self.s.style.figure.axes.bars3d
+        return {"angle": dict(self.angle), "default_angle": {"elev": m.elev, "azim": m.azim, "zoom": 1.0}}
 
     def read(self, cursor, kind, geo) -> Optional[Dict[str, Any]]:
         return None                                      # no cursors in 3D: `pick` reads a bar

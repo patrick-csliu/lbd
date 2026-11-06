@@ -444,7 +444,11 @@ export default function CursorPanel({ kind, cursors, onCursors, reading, actions
           Remove cursors
         </button>
       </div>
-      {!c1 && <p className="muted small">{kindOf(kind).cursorMark === "cell" ? "Click a cell or bar to read it; Shift+click for a second." : "Click the plot for cursor 1, Shift+click for cursor 2."}</p>}
+      {!c1 && (
+        <p className="muted small">
+          {kindOf(kind).axes === "3d" ? "Click a bar to read it." : kindOf(kind).cursorMark === "cell" ? "Click a cell or bar to read it; Shift+click for a second." : "Click the plot for cursor 1, Shift+click for cursor 2."}
+        </p>
+      )}
       {c1 && <CursorNumbers n={1} c={c1} kind={kind} type={cursors.type} actions={actions} />}
       {c2 && <CursorNumbers n={2} c={c2} kind={kind} type={cursors.type} actions={actions} />}
       {c1 && c2 && kindOf(kind).cursorMark === "lines" && (

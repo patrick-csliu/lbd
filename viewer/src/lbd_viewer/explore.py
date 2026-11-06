@@ -969,7 +969,7 @@ class ExploreSession:
             self.fig.set_size_inches(width / 96, height / 96)
             self.ax.set_xlim(*self.full[0])
             self.ax.set_ylim(*self.full[1])
-            self._lay_out()
+            self.view.lay_out()
 
     def _curve_picture(self, pxe: np.ndarray, draft: bool, w: int, h: int) -> Tuple[str, bool]:
         """The curves for these pixel edges: (the note, whether they are reduced)."""
@@ -1047,7 +1047,7 @@ class ExploreSession:
             note, reduced = self.view.picture(pxe, pye, stat, draft, dw, dh)
             t2 = time.perf_counter()
             self.fig.canvas.draw()
-            if not _again and self._spills():
+            if not _again and not getattr(self.view, "fixed_layout", False) and self._spills():
                 # Text that still doesn't fit (rare: the layout leaves room for wide tick labels):
                 # lay out again, once.
                 self.view.lay_out()

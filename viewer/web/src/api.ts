@@ -676,6 +676,8 @@ export interface ExploreFrameMeta {
   empty?: string | null; // nothing can be shown, and why
   sync?: SyncKeys | Record<string, never>; // what panels must share to follow each other's zoom; empty: nothing to share
   strips?: "cuts" | "histograms" | null; // beside the plot, for this picture
+  angle?: { elev: number; azim: number; zoom: number }; // a 3D plot: what was drawn
+  default_angle?: { elev: number; azim: number; zoom: number };
   /** A map with a slider: where its colour range comes from, and while every slice's range is
    *  worked out (crange.py) how far it is, or why it failed. */
   crange?: { from: "slice" | "all"; state?: "working" | "failed"; fraction?: number; slices?: number; error?: string | null } | null;
@@ -796,6 +798,20 @@ export interface Cut {
   index: number;
 }
 
+/** The bar of a 3D plot under a click: its top in pixels of the picture, its labels, its stored number. */
+export interface BarPick {
+  row: string;
+  column: string;
+  row_label: string;
+  column_label: string;
+  panel: string;
+  label: string;
+  value: number;
+  unit: string;
+  index: Record<string, number>;
+  at: [number, number];
+}
+
 export interface CursorsAnswer {
   type: CursorType;
   factors: { x: number; y: number; z: number }; // plot units per stored unit
@@ -830,6 +846,7 @@ async function exploreRender(
     width?: number; // the panel's size now (CSS pixels), when it changed since opening
     height?: number;
     dpr?: number;
+    angle?: unknown; // a 3D plot: {elev, azim, zoom}
   },
   signal?: AbortSignal,
 ): Promise<ExploreFrame> {
@@ -858,6 +875,8 @@ export const api = {
     body: { cursors: CursorAsk[]; type: CursorType; xlim: number[]; ylim: number[]; width: number; height: number; cuts: boolean; every: boolean; at_line: AtLine; together: boolean },
   ) => call<CursorsAnswer>("POST", `/api/explore/${encodeURIComponent(session)}/cursors`, body),
   /** Where the max, min or peak (farthest from the median) is, in a range of the stored data. */
+  explorePick: (session: string, x: number, y: number) =>
+    call<{ pick: BarPick | null }>("POST", `/api/explore/${encodeURIComponent(session)}/pick`, { x, y }),
   exploreFind: (session: string, what: "max" | "min" | "peak", xlim: number[], ylim: number[], trace?: number) =>
     call<{ x: number; y: number; trace?: number }>("POST", `/api/explore/${encodeURIComponent(session)}/find`, { what, xlim, ylim, trace }),
   /** The map's values counted, with these view settings (chosen rows, colour scale). */

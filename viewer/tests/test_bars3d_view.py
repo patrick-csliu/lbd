@@ -130,6 +130,21 @@ def test_operations_keep_the_shape(tmp_path):
     assert np.nansum(s.model.panels[0].raw, axis=1) == pytest.approx(0)
 
 
+def test_a_new_panel_size_is_laid_out(tmp_path):
+    s = session(tmp_path, mock.density_matrix, {})
+    s.resize(500, 400, 1.0)
+    _, meta = s.render(None, None)
+    assert (meta["width"], meta["height"]) == (500, 400)
+    assert meta["plot"][0] + meta["plot"][2] <= 500
+
+
+def test_a_high_zoom_needs_no_new_layout(tmp_path, recwarn):
+    s = session(tmp_path, mock.assignment_matrix, {})
+    s.view.turn({"zoom": 3})
+    s.render(None, None)
+    assert not [w for w in recwarn if "constrained_layout" in str(w.message)]
+
+
 def test_a_preview_of_a_3d_view_is_drawn(tmp_path):
     s = session(tmp_path, mock.density_matrix, {}, bare=True)
     body, meta = s.render(None, None)

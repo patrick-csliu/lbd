@@ -71,6 +71,20 @@ export interface View {
   [more: string]: unknown; // what a plot type adds to a view (3D bars: the angle)
 }
 
+/** How a 3D plot is seen: in degrees, and its zoom. It is part of the view, as limits are. */
+export interface Angle {
+  elev: number;
+  azim: number;
+  zoom: number;
+}
+
+const TURN_PER_PX = 0.4;
+const ZOOM_3D: Lim = [0.5, 3];
+const held = (v: number, [lo, hi]: Lim) => Math.min(hi, Math.max(lo, v));
+const withinTurn = (azim: number) => ((((azim + 180) % 360) + 360) % 360) - 180;
+const angleOf = (v: View | null) => v?.angle as Angle | undefined;
+const sameAngle = (a?: Angle, b?: Angle) => !a || !b || (Math.abs(a.elev - b.elev) < 1e-6 && Math.abs(a.azim - b.azim) < 1e-6 && Math.abs(a.zoom - b.zoom) < 1e-6);
+
 /** How the data is shown, never what (explore.py `apply`): kept in LBD's database, not the file. */
 export interface ViewSettings {
   select?: Record<string, number[]>; // the traces drawn (curves) or making the map; absent: all
@@ -220,6 +234,8 @@ export interface ExploreActions {
   /** Operation `index`'s delay (s) or rotation (°), from the data between the cursors (else in
    *  view), on cursor 1's trace (else all shown). */
   calculate: (what: "delay" | "rotation", index: number) => Promise<number>;
+  /** A 3D plot: another angle (null: the default one). */
+  setAngle: (a: Partial<Angle> | null) => void;
   /** What Save as CSV needs from this panel: its session, its view now and its kind. */
   exportSource: () => ExportSource | null;
   /** The same for a cut through cursor 1 (null: no cursor here, or another kind of plot). */
@@ -357,6 +373,8 @@ export default function ExploreView({
   const rightCut = useRef<HTMLCanvasElement>(null);
   const box = useRef<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const pan = useRef<{ x: number; y: number; view: View } | null>(null);
+  const turning = useRef<{ x: number; y: number; angle: Angle; moved: boolean } | null>(null); // a 3D plot: left drag
+  const picked = useRef<[number, number] | null>(null); // a 3D plot: where the bar read is, CSS pixels
   const down = useRef<{ x: number; y: number } | null>(null);
 
   // The mapping of what is on screen: the last picture, whose axes and data always belong
@@ -380,6 +398,21 @@ export default function ExploreView({
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, c.width, c.height);
     if (!m) return;
+    if (kindOf(kindRef.current).axes === "3d") {
+      // no cursors in 3D: a ring on the bar that was clicked, until the picture turns
+      if (picked.current) {
+        const [x, y] = picked.current;
+        ctx.beginPath();
+        ctx.arc(x, y, 7, 0, 2 * Math.PI);
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = "rgba(255,255,255,0.85)";
+        ctx.stroke();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = CURSOR_COLORS[0];
+        ctx.stroke();
+      }
+      return;
+    }
     const [l, t, w, h] = m.plot;
     ctx.save();
     ctx.beginPath();
@@ -564,7 +597,7 @@ export default function ExploreView({
         if (reset.x || reset.y) {
           resetAxes.current = { x: resetAxes.current.x && !reset.x, y: resetAxes.current.y && !reset.y };
           const w = wanted.current;
-          wanted.current = { xlim: reset.x || !w ? f.meta.xlim : w.xlim, ylim: reset.y || !w ? f.meta.ylim : w.ylim };
+          wanted.current = { ...(w ? moreOf(w) : {}), xlim: reset.x || !w ? f.meta.xlim : w.xlim, ylim: reset.y || !w ? f.meta.ylim : w.ylim };
         }
         const at = cursorsRef.current.at;
         if (at.length && cursorsRef.current.on) {
@@ -573,12 +606,14 @@ export default function ExploreView({
           if (session.current !== sid) return;
         }
         frame.current = f;
+        // a 3D plot just chosen: its first picture says the angle to turn from
+        if (f.meta.angle && wanted.current && !angleOf(wanted.current)) wanted.current = { ...wanted.current, angle: f.meta.angle };
         if (all && showAll.current) {
           // all the data was asked for: the server said where that is
           showAll.current = false;
-          wanted.current = { xlim: f.meta.xlim, ylim: f.meta.ylim };
+          wanted.current = { xlim: f.meta.xlim, ylim: f.meta.ylim, ...(f.meta.angle ? { angle: f.meta.angle } : {}) };
         }
-        onViewRef.current({ xlim: f.meta.xlim, ylim: f.meta.ylim });
+        onViewRef.current({ xlim: f.meta.xlim, ylim: f.meta.ylim, ...(f.meta.angle ? { angle: f.meta.angle } : {}) });
         onOpsInfoRef.current(f.meta.ops ?? null);
         onSyncRef.current?.(f.meta.sync?.x !== undefined ? { ...(f.meta.sync as SyncKeys), full: f.meta.full } : null); // null: nothing to share
         onCrangeRef.current?.(f.meta.crange ?? null);
@@ -627,10 +662,11 @@ export default function ExploreView({
       })
       .finally(() => {
         inflight.current = false;
-        const f = frame.current, sz = sizeRef.current;
+        const f = frame.current, sz = sizeRef.current, w = wanted.current;
         const stale =
           f &&
-          (!same(wanted.current, { xlim: f.meta.xlim, ylim: f.meta.ylim }) ||
+          (!same(w && { xlim: w.xlim, ylim: w.ylim }, { xlim: f.meta.xlim, ylim: f.meta.ylim }) ||
+            !sameAngle(angleOf(w), f.meta.angle) ||
             (sz && Math.abs(f.meta.width / f.meta.dpr - sz.w) > 1) ||
             (f.meta.draft && !moving.current)); // a draft, and the mouse rests: the sharp picture
         if (session.current === sid && (wanted.current || showAll.current) && (stale || dirty.current || showAll.current)) request();
@@ -757,12 +793,16 @@ export default function ExploreView({
   /** Show this view, or all the data (null). */
   const showView = useCallback(
     (v: View | null) => {
-      const full = frame.current?.meta.full;
-      wanted.current = v ?? (full ? { xlim: full[0], ylim: full[1] } : null);
+      const full = frame.current?.meta.full, start = frame.current?.meta.default_angle;
+      wanted.current = v ?? (full ? { xlim: full[0], ylim: full[1], ...(start ? { angle: start } : {}) } : null);
+      if (start) {
+        picked.current = null;
+        paintOverlay();
+      }
       paint();
       request();
     },
-    [paint, request],
+    [paint, request, paintOverlay],
   );
   /** The user shows this view (or all the data): panels that follow this one are told. */
   const setView = useCallback(
@@ -924,7 +964,8 @@ export default function ExploreView({
         onOpenedRef.current(o);
         if (o.warnings.length) onErrorRef.current(o.warnings.join(" "));
         const keep = onlySlicesDiffer(before, specRef.current) && wanted.current;
-        wanted.current = keep || { xlim: o.full[0], ylim: o.full[1] };
+        const more = wanted.current && kindOf(o.kind).axes === "3d" ? moreOf(wanted.current) : {};       // a 3D plot's angle stays
+        wanted.current = keep || { ...more, xlim: o.full[0], ylim: o.full[1] };
         dirty.current = true; // the last picture shows the old settings, even where the view is the same
         request();
       })
@@ -981,6 +1022,12 @@ export default function ExploreView({
       const m = current();
       if (!m || !wanted.current) return;
       e.preventDefault();
+      const angle = angleOf(wanted.current);
+      if (angle && kindOf(kindRef.current).axes === "3d") {
+        markMoving();
+        showView({ ...wanted.current, angle: { ...angle, zoom: held(angle.zoom * Math.exp(-e.deltaY * 0.0015), ZOOM_3D) } });
+        return;
+      }
       const [px, py] = cssPoint(e);
       const [x, y] = toData(m, px, py);
       const f = Math.exp(e.deltaY * 0.0015);
@@ -993,7 +1040,7 @@ export default function ExploreView({
     };
     c.addEventListener("wheel", onWheel, { passive: false });
     return () => c.removeEventListener("wheel", onWheel);
-  }, [current, setView, markMoving]);
+  }, [current, setView, showView, markMoving]);
 
   /** The cursor (index) under the mouse, if any: its mark, or its line for vertical / horizontal. */
   const cursorAt = (x: number, y: number): number | null => {
@@ -1043,6 +1090,12 @@ export default function ExploreView({
     (e.target as HTMLCanvasElement).setPointerCapture(e.pointerId);
     (e.target as HTMLCanvasElement).focus({ preventScroll: true });
     setMenu(null);
+    const angle = angleOf(wanted.current);
+    if (e.button === 0 && angle && kindOf(kindRef.current).axes === "3d") {
+      down.current = { x, y };
+      turning.current = { x, y, angle, moved: false };
+      return;
+    }
     if (e.button === 0) {
       const hit = cursorAt(x, y);
       if (hit !== null && !e.shiftKey) {
@@ -1063,6 +1116,19 @@ export default function ExploreView({
   const onPointerMove = (e: ReactPointerEvent<HTMLCanvasElement>) => {
     const [x, y] = cssPoint(e);
     const m = current();
+    const three = kindOf(kindRef.current).axes === "3d";
+    if (three) {
+      (e.target as HTMLCanvasElement).style.cursor = "grab";
+      const t = turning.current, v = wanted.current;
+      if (!t || !v) return;
+      if (!t.moved && Math.abs(x - t.x) < 4 && Math.abs(y - t.y) < 4) return; // not a turn yet: a click
+      t.moved = true;
+      picked.current = null;
+      markMoving();
+      showView({ ...v, angle: { ...t.angle, azim: withinTurn(t.angle.azim - (x - t.x) * TURN_PER_PX), elev: held(t.angle.elev + (y - t.y) * TURN_PER_PX, [-90, 90]) } });
+      paintOverlay();
+      return;
+    }
     if (m) setMouse(toData(m, x, y));
     if (drag.current !== null) {
       placeCursor(drag.current, x, y, e.altKey, !e.altKey);
@@ -1090,6 +1156,13 @@ export default function ExploreView({
   const onPointerUp = (e: ReactPointerEvent<HTMLCanvasElement>) => {
     const [x, y] = cssPoint(e);
     const b = box.current, d = down.current, m = current(), p = pan.current;
+    const t = turning.current;
+    turning.current = null;
+    if (t) {
+      down.current = null;
+      if (!t.moved) pickBar(x, y);
+      return;
+    }
     box.current = null;
     down.current = null;
     pan.current = null;
@@ -1115,6 +1188,29 @@ export default function ExploreView({
       setView({ xlim: wx >= 4 ? [ax, bx] : v.xlim, ylim: wy >= 4 ? [ay, by] : v.ylim });
     }
     paintOverlay();
+  };
+
+  /** A 3D plot: the bar at this place, from the server (no cursor lines: its numbers are in the Cursors tab). */
+  const pickBar = (x: number, y: number) => {
+    const sid = session.current, dpr = frame.current?.meta.dpr ?? 1;
+    if (!sid) return;
+    api
+      .explorePick(sid, x * dpr, y * dpr)
+      .then(({ pick: p }) => {
+        if (session.current !== sid) return;
+        picked.current = p ? [p.at[0] / dpr, p.at[1] / dpr] : null;
+        const item = (role: "x" | "y", label: string, text: string) => ({ role, name: role, label, unit: "", value: null, text });
+        const a: CursorsAnswer | null = p && {
+          type: "cross",
+          factors: { x: 1, y: 1, z: 1 },
+          cursors: [{ x: 0, y: 0, free: false, index: p.index, items: [item("y", p.row_label, p.row), item("x", p.column_label, p.column), { role: "z", name: "value", label: p.label, unit: p.unit, value: p.value }] }],
+        };
+        readingRef.current = a;
+        setReading(a);
+        onReadingRef.current(a);
+        paintOverlay();
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
   };
 
   // ---- what the Cursors section, the menu and the keys ask for
@@ -1182,7 +1278,16 @@ export default function ExploreView({
     [info.name, info.path],
   );
 
+  const setAngle = (a: Partial<Angle> | null) => {
+    const v = wanted.current, now = angleOf(v), start = frame.current?.meta.default_angle;
+    if (!v || !now || !start) return;
+    picked.current = null;
+    showView({ ...v, angle: a ? { ...now, ...a, azim: withinTurn(a.azim ?? now.azim) } : start });
+    paintOverlay();
+  };
+
   actions.current = {
+    setAngle,
     find,
     saveCut,
     showCut: (which) => {
@@ -1288,6 +1393,17 @@ export default function ExploreView({
       }
     };
     const k = e.key;
+    const angle = angleOf(wanted.current);
+    if (angle && kindOf(kindRef.current).axes === "3d") {
+      const by = e.shiftKey ? 15 : 5;
+      if (k === "ArrowLeft" || k === "ArrowRight") setAngle({ azim: angle.azim + (k === "ArrowLeft" ? by : -by) });
+      else if (k === "ArrowUp" || k === "ArrowDown") setAngle({ elev: held(angle.elev + (k === "ArrowUp" ? by : -by), [-90, 90]) });
+      else if (k === "Home" || k === "0") setAngle(null);
+      else if (k === "[" || k === "]") onStepSlider(k === "[" ? -1 : 1);
+      else return;
+      e.preventDefault();
+      return;
+    }
     if (k === "ArrowLeft" || k === "ArrowRight") step((k === "ArrowLeft" ? -1 : 1) * (e.shiftKey ? 10 : 1), 0);
     else if (k === "ArrowUp" || k === "ArrowDown") step(0, (k === "ArrowUp" ? 1 : -1) * (e.shiftKey ? 10 : 1));
     else if (k === "Tab" && now.length === 2) onCursorsRef.current({ ...st, active: st.active === 0 ? 1 : 0 });
@@ -1345,7 +1461,7 @@ export default function ExploreView({
         <button className="ib" onClick={() => setView(null)} aria-label="Reset view" title="Reset view: all the data (key 0, or double-click the plot)">
           <Icon name="reset" />
         </button>
-        {meta && (
+        {meta && kindOf(kindOfPanel).axes === "2d" && (
           <button ref={limitsButton} className="ib" aria-label="Limits" aria-expanded={limitsOpen} aria-pressed={limitsOpen} onClick={() => setLimitsOpen((o) => !o)} title="Limits: type the range shown">
             <Icon name="limits" />
           </button>
@@ -1491,7 +1607,7 @@ export default function ExploreView({
           </div>
         )}
         <canvas ref={picture} className={"explore-picture " + (opened?.kind ?? "") + (opened && opened.kind !== "curve" && kindOf(opened.kind).darkInverted ? " curve" : "")} style={cssSize} />
-        {mouse && <span className="mouse-at small">x = {fmt(mouse[0])}, y = {fmt(mouse[1])}</span>}
+        {mouse && kindOf(kindOfPanel).axes === "2d" && <span className="mouse-at small">x = {fmt(mouse[0])}, y = {fmt(mouse[1])}</span>}
         <canvas
           ref={overlay}
           className="explore-overlay"
@@ -1502,7 +1618,7 @@ export default function ExploreView({
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerLeave={() => setMouse(null)}
-          onDoubleClick={() => setView(null)}
+          onDoubleClick={() => (kindOf(kindRef.current).axes === "3d" ? setAngle(null) : setView(null))}
           onContextMenu={(e) => e.preventDefault()}
           onKeyDown={onKeyDown}
           tabIndex={0}

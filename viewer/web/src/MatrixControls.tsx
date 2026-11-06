@@ -1,22 +1,16 @@
 import { axisChoices, ComplexSelect, useValuesFor, ValueSelect } from "./KindFields";
+import type { FileInfo, PlotSpec } from "./api";
 import type { KindControlsProps, PlotKind } from "./plotKinds";
 
 /** Matrix's controls: which value, rows and columns, the numbers, the colour range. */
 
 const DIGITS = [1, 2, 3, 4, 5, 6];
 
-function MatrixControls({ info, resolved: r, update }: KindControlsProps) {
-  const names = useValuesFor(info.path, "matrix");
-  const options = (r.options ?? {}) as { numbers?: boolean; digits?: number; range?: string; row_sums?: boolean };
-  const set = (patch: { numbers?: boolean; digits?: number; range?: string; row_sums?: boolean }) => {
-    const next = { ...(r.options ?? {}), ...patch };
-    if (next.range === undefined) delete next.range;
-    update({ options: next });
-  };
+/** Which value, and which of its axes are the columns and the rows (Matrix, 3D bars). */
+export function GridAxes({ info, r, update, kind }: { info: FileInfo; r: PlotSpec; update: (patch: PlotSpec) => void; kind: string }) {
+  const names = useValuesFor(info.path, kind);
   const axes = axisChoices(info, r, [r.y, r.x]);
-  const complex = info.values.find((v) => v.name === r.values?.[0])?.complex;
   // choosing the other drawn axis swaps them
-  const reIm = !!complex && r.complex === "re_im";
   const setRows = (a: string) => update(a === r.x ? { y: a, x: r.y } : { y: a });
   const setColumns = (a: string) => update(a === r.y ? { x: a, y: r.x } : { x: a });
   return (
@@ -46,6 +40,22 @@ function MatrixControls({ info, resolved: r, update }: KindControlsProps) {
           </select>
         </div>
       </div>
+    </>
+  );
+}
+
+function MatrixControls({ info, resolved: r, update }: KindControlsProps) {
+  const options = (r.options ?? {}) as { numbers?: boolean; digits?: number; range?: string; row_sums?: boolean };
+  const set = (patch: { numbers?: boolean; digits?: number; range?: string; row_sums?: boolean }) => {
+    const next = { ...(r.options ?? {}), ...patch };
+    if (next.range === undefined) delete next.range;
+    update({ options: next });
+  };
+  const complex = info.values.find((v) => v.name === r.values?.[0])?.complex;
+  const reIm = !!complex && r.complex === "re_im";
+  return (
+    <>
+      <GridAxes info={info} r={r} update={update} kind="matrix" />
       {complex && <ComplexSelect r={r} update={update} />}
       <div className="field">
         <label className="check" title="The number of each cell, in the cell; left out when a cell is too small for it">

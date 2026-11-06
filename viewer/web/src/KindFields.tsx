@@ -50,12 +50,17 @@ export function ValueSelect({ info, r, names, onChoose }: { info: FileInfo; r: P
 }
 
 /** The usual complex choice, with Re and Im side by side. */
-export function ComplexSelect({ r, update }: { r: PlotSpec; update: (patch: PlotSpec) => void }) {
+export function ComplexSelect({ r, update, more = [] }: { r: PlotSpec; update: (patch: PlotSpec) => void; more?: [string, string][] }) {
   return (
     <label className="field">
       <span>Complex values</span>
       <select aria-label="Complex values" value={r.complex ?? "abs"} onChange={(e) => update({ complex: e.target.value })}>
         <option value="re_im">Re and Im</option>
+        {more.map(([v, l]) => (
+          <option key={v} value={v}>
+            {l}
+          </option>
+        ))}
         {COMPLEX_MODES.filter(([v]) => v !== "iq").map(([v, l]) => (
           <option key={v} value={v}>
             {l}

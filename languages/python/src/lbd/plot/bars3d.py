@@ -270,7 +270,7 @@ def draw(fig, ax, m: Bars3dModel, d, spec, style: Style):
         a.set_box_aspect((columns, rows, 0.75 * max(rows, columns)), zoom=m.zoom)
         a.view_init(elev=m.elev, azim=m.azim)
         if p.title:
-            a.text2D(0.5, 0.97, p.title, transform=a.transAxes, ha="center", va="top")
+            a.set_title(p.title, loc="left")             # (the centre is the figure's own title)
         if m.colour_label or not style.figure.axes.image.colorbar.visible:     # the colour bar doesn't say the height
             a.text2D(0.0, 1.0, m.z_label, transform=a.transAxes, ha="left", va="top")
     fig.add_artist(_InOrder(m))
@@ -278,6 +278,8 @@ def draw(fig, ax, m: Bars3dModel, d, spec, style: Style):
         _warn(m.note, r.RenderWarning)
     scale = ScalarMappable(norm=m.norm, cmap=m.cmap)
     bar = r._colorbar(fig, scale, m.axes, style, m.colour_label or m.z_label)
+    for a in m.axes:
+        a.set_anchor("C")                                # (a colour bar of several axes pushes them to its side)
     if bar is not None and m.colour_label:
         bar.set_ticks([-np.pi, 0, np.pi], labels=["−π", "0", "π"])
     return scale

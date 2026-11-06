@@ -8,7 +8,7 @@ import CursorPanel, { OtherPanel } from "./CursorPanel";
 import { kindOf } from "./plotKinds";
 import { PlotKindSelect } from "./PlotKindSelect";
 import { CursorsState, NO_CURSORS } from "./cursors";
-import ExploreView, { ExploreActions, Follow, View, ViewSettings } from "./ExploreView";
+import ExploreView, { Angle, ExploreActions, Follow, View, ViewSettings } from "./ExploreView";
 import ExportDialog, { ExportSource } from "./ExportDialog";
 import { around, compose, copyPng, pageBackground, pictureChoice, rememberPictureChoice, savePng } from "./clipboard";
 import type { MenuEntry } from "./menu";
@@ -157,10 +157,11 @@ function startSpec(info: FileInfo): PlotSpec {
 }
 
 /** What Open in Figure takes along: a plot type of its own and its choices (curves and maps: the file's view). */
-function figureSpec(opened: ExploreOpen | null): PlotSpec | undefined {
+function figureSpec(opened: ExploreOpen | null, view?: View | null): PlotSpec | undefined {
   if (!opened || opened.kind === "curve" || opened.kind === "heatmap") return undefined;
   const { kind, values, complex, x, y, series, index, options } = opened.spec;
-  return { kind: opened.kind ?? kind, values, complex, x, y, series, index, options };
+  const angle = view?.angle as Angle | undefined; // a 3D plot's angle: in a figure, a setting
+  return { kind: opened.kind ?? kind, values, complex, x, y, series, index, options: angle ? { ...options, elev: angle.elev, azim: angle.azim, zoom: angle.zoom } : options };
 }
 
 /** A file's shape, to tell data added (same names and axes, longer) from a different file. */
@@ -812,7 +813,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
         </button>
         {/\.lbd\.writing$/i.test(info.path) && <MeasuringStatus path={info.path} />}
         <span className="explore-head-actions">
-          <button className="primary" onClick={() => onOpenInFigure(figureSpec(resolved))} title="Make a figure of this file: styles and export">
+          <button className="primary" onClick={() => onOpenInFigure(figureSpec(resolved, act.view))} title="Make a figure of this file: styles and export">
             Open in Figure
           </button>
           <button className="ib" aria-label="Show in folder" title="Show in folder" onClick={() => api.reveal(info.path).catch((e) => onError(e.message))}>
@@ -863,6 +864,8 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
               opsInfo={actLive.opsInfo}
               failed={actLive.failed}
               onOpenInFigure={() => onOpenInFigure()}
+              angle={act.view?.angle as Angle | undefined}
+              setAngle={(a) => actActions.current?.setAngle(a)}
               calculate={(what, index) => actActions.current?.calculate(what, index) ?? Promise.reject(new Error("the plot isn't open yet"))}
               onListOpen={actApi.onListOpen}
               updateSpec={actApi.updateSpec}
@@ -1096,6 +1099,8 @@ interface ControlsProps {
   /** The plot couldn't be opened: why. */
   failed?: string | null;
   onOpenInFigure: () => void;
+  angle?: Angle;
+  setAngle: (a: Partial<Angle> | null) => void;
 }
 
 /** The sections of the controls that are open (this browser); Data is open at first. */
@@ -1134,7 +1139,7 @@ function Section({ name, title, badge, open, onToggle, children }: { name: strin
   );
 }
 
-function ExploreControls({ heading, info, resolved, settings, updateSpec, updateSettings, children, contrast, listOpen, onListOpen, opsInfo, calculate, onValueMenu, stat, onStat, failed, onOpenInFigure, crange }: ControlsProps) {
+function ExploreControls({ heading, info, resolved, settings, updateSpec, updateSettings, children, contrast, listOpen, onListOpen, opsInfo, calculate, onValueMenu, stat, onStat, failed, onOpenInFigure, crange, angle, setAngle }: ControlsProps) {
   const [sections, setSection] = useSections();
   if (!resolved)
     return failed ? (
@@ -1258,7 +1263,7 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
       </div>
       )}
 
-      {Controls && <Controls info={info} spec={r} resolved={r} update={updateSpec} settings={settings} updateSettings={updateSettings} page="explore" />}
+      {Controls && <Controls info={info} spec={r} resolved={r} update={updateSpec} settings={settings} updateSettings={updateSettings} page="explore" angle={angle} setAngle={setAngle} />}
 
       {kind === "curve" && values.length === 1 && others.length > 0 && (
         <label className="field">
