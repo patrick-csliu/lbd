@@ -241,7 +241,6 @@ class ImageStyle(_Model):
     colorbar: ColorbarStyle = Field(default_factory=ColorbarStyle, description="The colour bar next to heat maps")
 
 
-# plan 15b: matrix and bars
 class MatrixStyle(_Model):
     """Cells with their numbers (`figure.axes.matrix`).
     """
@@ -259,7 +258,6 @@ class BarsStyle(_Model):
     edge_width_pt: float = Field(0.0, ge=0, le=5, description="Line around each bar")
 
 
-# plan 15c: 3D bars
 class Bars3dStyle(_Model):
     """3D bars (`figure.axes.bars3d`).
     """
@@ -273,7 +271,6 @@ class Bars3dStyle(_Model):
     phase_cmap: Cmap = Field("twilight", description="Colour map of a phase: a cyclic one")
 
 
-# plan 15d: histogram
 class HistogramStyle(_Model):
     """Histograms (`figure.axes.histogram`).
     """
@@ -297,12 +294,9 @@ class AxesStyle(_Model):
                                 description="Colour cycle (default: Okabe-Ito, ordered to differ in greyscale)")
     lines: LinesStyle = Field(default_factory=LinesStyle, description="Curves")
     scatter: ScatterStyle = Field(default_factory=ScatterStyle, description="Scatter markers")
-    # plan 15b: matrix and bars
     matrix: MatrixStyle = Field(default_factory=MatrixStyle, description="Matrix: cells with their numbers")
     bars: BarsStyle = Field(default_factory=BarsStyle, description="Bars")
-    # plan 15c: 3D bars
     bars3d: Bars3dStyle = Field(default_factory=Bars3dStyle, description="3D bars")
-    # plan 15d: histogram
     histogram: HistogramStyle = Field(default_factory=HistogramStyle, description="Histograms")
     image: ImageStyle = Field(default_factory=ImageStyle, description="Heat maps and colour scales")
 

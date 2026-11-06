@@ -151,6 +151,11 @@ function shiftRange(lim: Lim, by: number, scale: string): Lim {
   return [back(scale, fwd(scale, lim[0]) + by), back(scale, fwd(scale, lim[1]) + by)];
 }
 
+/** Whether a zoom lies mostly on the data: at least a tenth of it. */
+const onData = (a: Lim, b: readonly number[]) => {
+  const lo = Math.max(Math.min(...a), Math.min(...b)), hi = Math.min(Math.max(...a), Math.max(...b));
+  return hi > lo && (hi - lo) / Math.abs(a[1] - a[0]) >= 0.1;
+};
 const moreOf = (v: View) => Object.fromEntries(Object.entries(v).filter(([k]) => k !== "xlim" && k !== "ylim"));
 const same = (a: View | null, b: View | null) =>
   !!a && !!b && JSON.stringify(moreOf(a)) === JSON.stringify(moreOf(b)) && a.xlim[0] === b.xlim[0] && a.xlim[1] === b.xlim[1] && a.ylim[0] === b.ylim[0] && a.ylim[1] === b.ylim[1];
@@ -927,8 +932,10 @@ export default function ExploreView({
           // notes about what is drawn (a variable sweep against its point number …): in the panel, not a red toast
           if (o.warnings.length) setNote(o.warnings.map((w) => w.replace(/^[^:]*\.lbd: /, "")).join(" "));
           // the zoom to keep, else all the data as the server finds it (with the view settings applied)
-          wanted.current = keepView;
-          showAll.current = !keepView;
+          // (a zoom remembered from before can miss the data as it is drawn now: all of it then)
+          const usable = keepView && onData(keepView.xlim, o.full[0]) && onData(keepView.ylim, o.full[1]) ? keepView : null;
+          wanted.current = usable;
+          showAll.current = !usable;
           request();
         })
         .catch((e) => {

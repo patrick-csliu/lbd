@@ -148,15 +148,12 @@ are still written as 1.2).
   is drawn where nothing was measured) or **Nearest point** for scattered points, or **Smooth** when
   asked for. Cursors read the stored points, rows have cuts, Save as CSV gives every point.
 
-<!-- plan 15b -->
 - **Open in Figure** takes a plot type of its own along with its choices.
 - New plot type **Bars**, in Explore and Figure: bars with labels, grouped or stacked, for short axes, a vector in each data point, several values, or several single numbers. Two units get a second vertical axis. A click reads a bar; a horizontal cursor is a level to compare them with.
 - New plot type **Matrix**, in Explore and Figure: cells with their numbers, for two axes or a matrix in each data point. A click reads a cell; complex values show Re and Im side by side; the colour range can be fixed to 0 to 1 or −1 to 1.
 
-<!-- plan 15c -->
 - New plot type **3D bars**, in Explore and Figure, for the data of Matrix: a bar per cell, up to 64 × 64. Complex values show Re and Im side by side on one scale, or height the magnitude and colour the phase. In Explore a drag turns the picture, the wheel zooms, the arrow keys turn, and a click reads a bar; on the Figure page the angle is in boxes.
 
-<!-- plan 15d -->
 - **A new plot type: Histogram, in Explore and Figure.** It counts how many numbers fall in each bin.
   Each axis is a slider or All, one axis can give an outline per step (**Colour by**), and values of one
   unit are overlaid. Bins Auto or a number, Bars or Outline, Count, Fraction or Density, linear or log.
@@ -165,7 +162,6 @@ are still written as 1.2).
   counts; two cursors the count and fraction between them. Save as CSV and Open in Figure take it along.
   The bars' opacity and the outlines' width are in the style.
 
-<!-- plan 15e -->
 - **Explore: scatter plots.** A marker per point: an axis against a value, a value against a value, or the
   I/Q plane. **Colour by** gives one axis's steps a colour each, every other axis is a slider or All, and
   **Equal axes** keeps circles round. Above 200 000 points each pixel shows how many points are there, none
