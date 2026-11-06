@@ -1,5 +1,5 @@
 import type { ComponentType } from "react";
-import type { CursorType, FileInfo, PlotSpec } from "./api";
+import type { CursorType, FileInfo, PlotSpec, ValueInfo } from "./api";
 import type { ViewSettings } from "./ExploreView";
 import { kindRow as bars } from "./BarsControls";
 import { kindRow as bars3d } from "./Bars3dControls";
@@ -35,6 +35,7 @@ export interface PlotKind {
   syncs: boolean; // shares its x and y with other panels
   findButtons: boolean; // Max, Min and Peak
   noAxes?: boolean; // no Horizontal axis to choose: its controls say what is shown
+  starting?: (info: FileInfo, first: ValueInfo | undefined) => PlotSpec; // the settings a new plot starts with
 }
 
 const ALL_CURSORS: CursorType[] = ["cross", "vertical", "horizontal"];

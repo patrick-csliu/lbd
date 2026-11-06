@@ -1160,7 +1160,7 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
   const xChoices = first
     ? [
         ...first.axes.map((a) => ({ name: a, text: label(a) })),
-        ...(kind === "curve"
+        ...(kind === "curve" || kind === "scatter"
           ? info.values
               .filter((v) => !values.includes(v.name) && !v.complex && v.shape.length > 0 && v.axes.join() === first.axes.join())
               .map((v) => ({ name: v.name, text: `${v.label || v.name} (value)` }))
@@ -1180,7 +1180,7 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
       <Section name="data" title="Data" open={!!sections.data} onToggle={setSection}>
       <label className="field">
         <span>Plot</span>
-        <PlotKindSelect path={info.path} value={kind} first={first?.name} page="explore" onChoose={(k) => updateSpec({ kind: k, x: undefined, y: undefined, series: undefined, color: undefined, all: undefined, options: undefined })} />
+        <PlotKindSelect path={info.path} value={kind} first={first?.name} page="explore" onChoose={(k) => updateSpec({ kind: k, x: undefined, y: undefined, series: undefined, color: undefined, all: undefined, options: undefined, complex: r.complex === "iq" ? undefined : r.complex, ...kindOf(k).starting?.(info, first) })} />
       </label>
 
       <fieldset className="field">
@@ -1188,7 +1188,7 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
         {plottable.map((v) => {
           const on = values.includes(v.name);
           // a histogram overlays values of one unit
-          const fits = !first || v.name === first.name || (kind === "curve" && v.axes.includes(along ?? "")) || (kind === "histogram" && unitOf(v) === unitOf(first));
+          const fits = !first || v.name === first.name || (kind === "curve" && v.axes.includes(along ?? "")) || (kind === "histogram" && unitOf(v) === unitOf(first)) || (kind === "scatter" && r.complex !== "iq" && v.axes.join() === first.axes.join());
           // a panel shows two units (left and right axis); a third goes in another panel
           const third = kind === "curve" && !on && units.size >= 2 && !units.has(unitOf(v));
           return (
@@ -1204,10 +1204,11 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
                 type={kind === "heatmap" ? "radio" : "checkbox"}
                 name="explore-values"
                 checked={on}
-                disabled={(!fits && !on && kind !== "histogram") || third}
+                disabled={(!fits && !on && kind !== "histogram" && kind !== "scatter") || third}
                 onChange={() => {
                   if (kind === "heatmap") updateSpec({ values: [v.name], x: undefined, y: undefined });
                   else if (kind === "histogram" && !fits) updateSpec({ values: [v.name], color: undefined, all: undefined, index: undefined });
+                  else if (kind === "scatter" && !fits) updateSpec({ values: [v.name], x: undefined, color: undefined, all: undefined, index: undefined, complex: undefined, ...kindOf(kind).starting?.(info, v) });
                   else if (on && values.length > 1) updateSpec({ values: values.filter((n) => n !== v.name) });
                   else if (!on) updateSpec({ values: [...values, v.name] });
                 }}
@@ -1220,7 +1221,7 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
       </fieldset>
 
       {/* the axes as one block: the same drop-downs in the same place for curves and maps */}
-      {!kindOf(kind).noAxes && <div className={"field axes-field" + (kind === "heatmap" ? " two" : "")} role="group" aria-label="Axes">
+      {!kindOf(kind).noAxes && r.complex !== "iq" && <div className={"field axes-field" + (kind === "heatmap" ? " two" : "")} role="group" aria-label="Axes">
         <span>Axes</span>
         <div className="axes-grid">
           <span className="axes-name">Horizontal</span>
@@ -1266,7 +1267,7 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
         </label>
       )}
 
-      {anyComplex && (
+      {(anyComplex || r.complex === "iq") && (
         <label className="field">
           <span>Complex values</span>
           <select aria-label="Complex values" value={r.complex ?? "abs"} onChange={(e) => updateSpec({ complex: e.target.value })}>
