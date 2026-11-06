@@ -10,8 +10,10 @@ giving the colours is a slider.
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
+import matplotlib
 import matplotlib.colors as mcolors
 import numpy as np
+from matplotlib.cm import ScalarMappable
 
 from lbd.io import _warn
 
@@ -23,7 +25,7 @@ from .render import (SCATTER_RASTER_ABOVE, RenderError, RenderWarning, _annotate
 from .style import Style
 from .units import axis_label, mathsafe
 
-_UNWRAPPED = ("phase_unwrap", "phase_deg_unwrap")
+DENSITY_ABOVE = 200_000     # more points than this: LBD Viewer shows how many are in each pixel
 
 
 @dataclass
@@ -163,8 +165,16 @@ def prepare_scatter(d: Any, spec: Dict[str, Any], style: Style, **kw: Any) -> Sc
         auto_axes=auto_axes, ylim=ylim)
 
 
-def draw_scatter(fig: Any, ax: Any, model: ScatterModel, d: Any, spec: Dict[str, Any], style: Style) -> Any:
-    """Draw a ScatterModel: markers, a colour per group or a colour bar. Returns the artists."""
+def draw_scatter(fig: Any, ax: Any, model: ScatterModel, d: Any, spec: Dict[str, Any], style: Style,
+                 image: Optional[np.ndarray] = None, top: int = 2) -> Any:
+    """Draw a ScatterModel: markers, a colour per group or a colour bar. Returns the artists.
+    `image` replaces the markers by a picture of the plot area's pixels (`density_image`, `top`
+    points in the fullest pixel): returns it and the colour bar's mappable."""
+    if image is not None:
+        drawn, bar = _draw_density(fig, ax, model, style, image, top)
+        label = (model.c_label if model.cvals is not None else "Points per pixel") if bar is not None else ""
+        _finish(fig, ax, model, d, spec, style, bar, label)
+        return drawn, bar
     a = style.figure.axes
     sc = a.scatter
     kw = dict(s=sc.size_pt ** 2, alpha=sc.alpha, marker=sc.marker, edgecolors=sc.edgecolor, linewidths=sc.edgewidth_pt)
@@ -182,11 +192,12 @@ def draw_scatter(fig: Any, ax: Any, model: ScatterModel, d: Any, spec: Dict[str,
             drawn.append(mappable)
         else:
             drawn.append(ax.scatter(x, y, label=lab, rasterized=raster, **kw))
-    _finish(fig, ax, model, d, spec, style, mappable)
+    _finish(fig, ax, model, d, spec, style, mappable, model.c_label)
     return drawn
 
 
-def _finish(fig: Any, ax: Any, model: ScatterModel, d: Any, spec: Dict[str, Any], style: Style, mappable: Any) -> None:
+def _finish(fig: Any, ax: Any, model: ScatterModel, d: Any, spec: Dict[str, Any], style: Style, mappable: Any,
+            label: str) -> None:
     ax.set_xlabel(model.x_label)
     ax.set_ylabel(model.y_label)
     ax.set_xscale(model.x_scale)
@@ -197,9 +208,113 @@ def _finish(fig: Any, ax: Any, model: ScatterModel, d: Any, spec: Dict[str, Any]
         ax.set_aspect("equal", adjustable="datalim")
     _annotate(ax, d, spec, model.auto_axes)
     if mappable is not None:
-        _colorbar(fig, mappable, ax, style, model.c_label)
+        _colorbar(fig, mappable, ax, style, label)
     else:
         _legend(ax, style.figure.axes)
+
+
+# ---- many points: how many are in each pixel --------------------------------------------------
+
+@dataclass
+class Density:
+    """Points per pixel of a view, rows bottom to top. `counts`: per colour (group or value), with
+    its `colours`. `sums`: colour by a value: the sum of that value per pixel."""
+
+    counts: List[np.ndarray]
+    colours: List[str]
+    sums: Optional[np.ndarray]
+    note: str
+
+    @property
+    def total(self) -> np.ndarray:
+        return np.sum(self.counts, axis=0)
+
+
+def _pixel(v: np.ndarray, lim: Tuple[float, float], size: int, scale: str) -> np.ndarray:
+    """The pixel column (or row) of each number; -1 outside the view."""
+    with np.errstate(invalid="ignore", divide="ignore"):
+        if scale == "log":
+            v, lim = np.log10(v), tuple(np.log10(lim))
+        at = (v - lim[0]) / (lim[1] - lim[0]) * size
+    ok = (at >= 0) & (at <= size)                      # (NaN is neither)
+    return np.where(ok, np.minimum(at, size - 1), -1).astype(np.int64)
+
+
+def groups_of(model: ScatterModel, colours: List[str]) -> List[Tuple[int, Optional[np.ndarray], str, str]]:
+    """What gets a colour of its own: (series, mask or None, colour, label)."""
+    several = len(model.series) > 1
+    out = []
+    for k, (_, _, lab) in enumerate(model.series):
+        if model.groups is None:
+            out.append((k, None, colours[k % len(colours)], lab))
+        else:
+            out += [(k, mask, colours[g % len(colours)], f"{lab}, {glab}" if several else glab)
+                    for g, (mask, glab) in enumerate(model.groups)]
+    return out
+
+
+def density(model: ScatterModel, xlim: Tuple[float, float], ylim: Tuple[float, float], width: int, height: int,
+            scales: Tuple[str, str], colours: List[str]) -> Density:
+    """Every point in the view counted into its pixel: none is dropped."""
+    counts, used = [], []
+    sums = np.zeros(width * height) if model.cvals is not None else None
+    for k, mask, colour, _ in groups_of(model, colours):
+        x, y, _ = model.series[k]
+        ix, iy = _pixel(x, xlim, width, scales[0]), _pixel(y, ylim, height, scales[1])
+        keep = (ix >= 0) & (iy >= 0) if mask is None else (ix >= 0) & (iy >= 0) & mask
+        where = iy[keep] * width + ix[keep]
+        counts.append(np.bincount(where, minlength=width * height).reshape(height, width))
+        used.append(colour)
+        if sums is not None:
+            good = np.isfinite(model.cvals[keep])
+            sums += np.bincount(where[good], weights=model.cvals[keep][good], minlength=width * height)
+    points = sum(int(c.sum()) for c in counts)
+    return Density(counts, used, None if sums is None else sums.reshape(height, width),
+                   f"{points:,} points: each pixel shows how many are there")
+
+
+def _visibility(n: np.ndarray) -> np.ndarray:
+    """Opacity from a pixel's count: on a log scale, and a pixel with one point stays visible."""
+    top = max(int(n.max()), 2)
+    return np.where(n > 0, 0.35 + 0.65 * np.log(np.maximum(n, 1)) / np.log(top), 0.0)
+
+
+def density_image(model: ScatterModel, found: Density) -> np.ndarray:
+    """The RGBA picture of a Density (float, 0 to 1). Colour by a value: the mean there; several
+    groups: their colours, mixed by each one's share of the pixel."""
+    total = found.total
+    out = np.zeros(total.shape + (4,))
+    out[..., 3] = _visibility(total)
+    if found.sums is not None:
+        with np.errstate(invalid="ignore", divide="ignore"):
+            mean = found.sums / total
+        norm = model.cnorm
+        if norm.vmin is None or norm.vmax is None:
+            norm.autoscale_None(np.ma.masked_invalid(model.cvals))
+        out[..., :3] = matplotlib.colormaps[model.cmap](norm(np.ma.masked_invalid(mean)))[..., :3]
+        return out
+    safe = np.maximum(total, 1)
+    for n, colour in zip(found.counts, found.colours):
+        out[..., :3] += (n / safe)[..., None] * np.asarray(mcolors.to_rgb(colour))
+    return out
+
+
+def _draw_density(fig: Any, ax: Any, model: ScatterModel, style: Style, image: np.ndarray, top: int) -> Tuple[Any, Any]:
+    """The picture on the axes box (as a map's), a legend for groups, or a colour bar: the value's,
+    or Points per pixel. Returns the picture and the colour bar's mappable (None: a legend)."""
+    a = style.figure.axes
+    drawn = ax.imshow(image, extent=(0, 1, 0, 1), transform=ax.transAxes, origin="lower",
+                      interpolation="nearest", aspect="auto", zorder=1)
+    colours = groups_of(model, a.colors)
+    if model.cvals is not None:
+        return drawn, ScalarMappable(norm=model.cnorm, cmap=model.cmap)
+    if len(colours) > 1:
+        for _, _, colour, label in colours:
+            ax.scatter([], [], color=colour, label=label)
+        return drawn, None
+    faint = mcolors.to_rgba(colours[0][2], 0.35)
+    scale = mcolors.LinearSegmentedColormap.from_list("points", [faint, mcolors.to_rgba(colours[0][2], 1.0)])
+    return drawn, ScalarMappable(norm=mcolors.LogNorm(1, max(top, 2)), cmap=scale)
 
 
 def resolve(d, out, values, pick, spec, index_in, warn_unused, file_spec=None) -> Dict[str, Any]:

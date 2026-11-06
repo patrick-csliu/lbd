@@ -3,6 +3,7 @@
 import sys
 from pathlib import Path
 
+import matplotlib.colors as mcolors
 import numpy as np
 import pytest
 
@@ -99,3 +100,98 @@ def test_a_group_has_its_real_coordinates(tmp_path):
     assert spec["index"] == {} and m.series[0][0].size == flat.values["S21"].shape[0]
     assert "point number" not in m.x_label and "Hz" in m.x_label
     assert m.series[0][0].max() != flat.values["S21"].shape[0] - 1
+
+
+# -- many points -----------------------------------------------------------------------------------
+
+COLOURS = Style().figure.axes.colors
+
+
+def cloud(n=300_000, lone=True):
+    rng = np.random.default_rng(1)
+    d = lbd.Dataset()
+    d.add_axis("t", np.arange(float(n)))
+    x, y = rng.normal(size=n), rng.normal(size=n)
+    if lone:
+        x[0], y[0] = 40.0, 40.0
+    d.add_value("x", x, axes="t")
+    d.add_value("y", y, axes="t")
+    return d
+
+
+def counted(model, w=200, h=100, xlim=(-50, 50), ylim=(-50, 50), scales=("linear", "linear")):
+    return sc.density(model, xlim, ylim, w, h, scales, COLOURS)
+
+
+def test_above_the_limit_every_point_is_counted():
+    d = cloud()
+    m, _ = model_of(d, values="y", x="x")
+    found = counted(m)
+    assert found.total.sum() == 300_000 and found.total.shape == (100, 200)
+    assert found.note == "300,000 points: each pixel shows how many are there"
+    assert counted(m, xlim=(0, 50)).total.sum() == ((m.series[0][0] >= 0) & (m.series[0][0] <= 50)).sum()
+
+
+def test_one_lonely_point_shows():
+    m, _ = model_of(cloud(), values="y", x="x")
+    found = counted(m)
+    picture = sc.density_image(m, found)
+    alone = picture[int((40 + 50) / 100 * 100), int((40 + 50) / 100 * 200)]
+    assert found.total[90, 180] == 1 and alone[3] >= 0.3
+    assert picture[..., 3].max() == 1.0
+    assert picture[0, 0, 3] == 0                       # nothing there: nothing drawn
+
+
+def test_groups_keep_their_colour():
+    d = lbd.Dataset()
+    d.add_axis("g", [0.0, 1.0], elements=["a", "b"])
+    d.add_axis("t", np.arange(1000.0))
+    x = np.r_[np.full(1000, -1.0), np.full(1000, 1.0)].reshape(2, 1000)
+    d.add_value("x", x, axes=["g", "t"])
+    d.add_value("y", np.zeros((2, 1000)), axes=["g", "t"])
+    m, _ = model_of(d, values="y", x="x", color="g")
+    found = counted(m, 4, 1, (-2, 2), (-1, 1))
+    picture = sc.density_image(m, found)
+    assert len(found.counts) == 2 and found.total.sum() == 2000
+    assert np.allclose(picture[0, 1, :3], mcolors.to_rgb(COLOURS[0]))
+    assert np.allclose(picture[0, 3, :3], mcolors.to_rgb(COLOURS[1]))
+
+
+def test_a_colour_value_is_the_mean_in_the_pixel():
+    d = lbd.Dataset()
+    d.add_axis("t", np.arange(4.0))
+    d.add_value("x", np.array([0.1, 0.2, 0.3, 3.0]), axes="t")
+    d.add_value("y", np.zeros(4), axes="t")
+    d.add_value("c", np.array([1.0, 2.0, 3.0, 10.0]), axes="t")
+    m, _ = model_of(d, values="y", x="x", color="c")
+    found = counted(m, 2, 1, (0, 4), (-1, 1))
+    assert found.sums[0].tolist() == [6.0, 10.0] and found.total[0].tolist() == [3, 1]
+
+
+def test_log_axes_bins():
+    d = lbd.Dataset()
+    d.add_axis("t", np.arange(3.0))
+    d.add_value("x", np.array([1.0, 10.0, 100.0]), axes="t")
+    d.add_value("y", np.array([1.0, 1.0, 1.0]), axes="t")
+    m, _ = model_of(d, values="y", x="x")
+    found = counted(m, 3, 1, (1, 1000), (0, 2), ("log", "linear"))
+    assert found.total[0].tolist() == [1, 1, 1]
+
+
+def test_below_the_limit_are_markers():
+    d = cloud(1000, lone=False)
+    m, spec = model_of(d, values="y", x="x")
+    fig = rnd.new_figure(Style())
+    ax = fig.add_subplot()
+    assert len(sc.draw_scatter(fig, ax, m, d, spec, Style())) == 1 and not ax.images
+
+
+def test_the_density_picture_draws_with_its_colour_bar():
+    d = cloud(1000, lone=False)
+    m, spec = model_of(d, values="y", x="x")
+    found = counted(m)
+    fig = rnd.new_figure(Style())
+    ax = fig.add_subplot()
+    image, bar = sc.draw_scatter(fig, ax, m, d, spec, Style(), image=sc.density_image(m, found), top=int(found.total.max()))
+    assert image in ax.images and bar is not None
+    assert fig.axes[1].get_ylabel() == "Points per pixel"
