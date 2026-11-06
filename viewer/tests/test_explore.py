@@ -135,7 +135,7 @@ def test_clear_errors(client, data_dir):
     assert r.status_code == 400 and "too small" in r.json()["detail"]
     r = client.post("/api/explore", json={"path": str(data_dir / "curve.lbd"), "spec": {"kind": "scatter"},
                                            "width": 400, "height": 300})
-    assert r.status_code == 400 and "Figure view" in r.json()["detail"]
+    assert r.status_code == 400 and "Figure page" in r.json()["detail"]
 
 
 def test_closed_sessions_are_gone(client, data_dir):
@@ -210,7 +210,7 @@ def test_other_plot_settings_reuse_the_session(client, data_dir):
     meta, _ = render(client, o["session"])
     assert meta["note"] == "every point shown"
     r = client.post(f"/api/explore/{o['session']}/spec", json={"spec": {"kind": "scatter"}})
-    assert r.status_code == 400 and "Figure view" in r.json()["detail"]
+    assert r.status_code == 400 and "Figure page" in r.json()["detail"]
 
 
 def test_chosen_traces_are_the_only_ones_drawn_and_picked(client, data_dir):

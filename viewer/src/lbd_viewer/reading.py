@@ -193,16 +193,18 @@ def cursors(s: "ExploreSession", items: List[Dict[str, Any]], kind: str, view: D
     if together and len(items) == 2:
         items = _same_steps(s, items)
     out: Dict[str, Any] = {"type": kind, "factors": {"x": m.xf, "y": m.yf, "z": getattr(m, "zf", 1.0)}}
-    if s.kind == "heatmap":
-        out["cursors"] = [_map_cursor(s, c, kind) for c in items]
-        first = out["cursors"][0]
-        if cuts and first is not None:
-            out["cuts"] = _cuts(s, first, kind, geo)
+    s.view.line_options = {"every": every, "at_line": at_line, "limit": limit}
+    out["cursors"] = [s.view.read(c, kind, geo) for c in items]
+    first = out["cursors"][0]
+    if cuts and first is not None:
+        cut = s.view.cuts(first, kind, geo)
+        if cut is not None:
+            out["cuts"] = cut
             second = out["cursors"][1] if len(out["cursors"]) > 1 else None
             if second is not None:
-                out["cuts2"] = _cuts(s, second, kind, geo)
-    else:
-        out["cursors"] = [_curve_cursor(s, c, kind, geo, every, at_line, limit) for c in items]
+                out["cuts2"] = s.view.cuts(second, kind, geo)
+    out.update(s.view.read_all(out["cursors"], kind, geo))
+    if s.kind == "curve":
         if lines and len(_visible(s)) > 1:          # a single curve needs no highlight: it would only cover it
             for c in out["cursors"]:
                 drawn = s._drawn(c["trace"]) if c else None
@@ -236,6 +238,21 @@ def _same_steps(s: "ExploreSession", items: List[Dict[str, Any]]) -> List[Dict[s
     rooms = [_room(s, c) for c in items]
     done = [int(np.clip(int(step[a]), max(r[a][0] for r in rooms), min(r[a][1] for r in rooms))) for a in (0, 1)]
     return [{**c, "step": done} for c in items]
+
+
+def nearest_point(xs: Any, ys: Any, x: float, y: float, view: Dict[str, Any], size: Sequence[int]) -> Optional[int]:
+    """The index of the point nearest (x, y) on screen, in pixels, or None. `view`: {xlim, ylim,
+    xscale, yscale}; `size`: (w, h). A point without a number never wins."""
+    px = _pixels(np.asarray(xs, dtype=float), view["xlim"], view.get("xscale", "linear"), size[0])
+    py = _pixels(np.asarray(ys, dtype=float), view["ylim"], view.get("yscale", "linear"), size[1])
+    cx = _pixels(np.asarray([x], dtype=float), view["xlim"], view.get("xscale", "linear"), size[0])[0]
+    cy = _pixels(np.asarray([y], dtype=float), view["ylim"], view.get("yscale", "linear"), size[1])[0]
+    with np.errstate(invalid="ignore"):
+        d = (px - cx) ** 2 + (py - cy) ** 2
+    d = np.where(np.isfinite(d), d, np.inf)
+    if not d.size or not np.isfinite(d.min()):
+        return None
+    return int(np.argmin(d))
 
 
 def _not_measured_yet(found: Any) -> None:
@@ -602,19 +619,27 @@ def find(s: "ExploreSession", what: str, xlim: Sequence[float], ylim: Sequence[f
     else of every visible trace) or this rectangle (maps). Returns its position in plot units."""
     if what not in FIND:
         raise ExploreError(f"unknown search {what!r}; use one of {', '.join(FIND)}")
+    return s.view.find(what, xlim, ylim, trace)
+
+
+def _find_map(s: "ExploreSession", what: str, xlim: Sequence[float], ylim: Sequence[float]) -> Dict[str, Any]:
     x0, x1 = sorted(float(v) for v in xlim)
     y0, y1 = sorted(float(v) for v in ylim)
     m = s.model
+    ii = np.flatnonzero((m.x >= x0) & (m.x <= x1))
+    jj = np.flatnonzero((m.y >= y0) & (m.y <= y1))
+    part = _map_z(s)[np.ix_(jj, ii)] if ii.size and jj.size else np.empty((0, 0))
+    if not np.isfinite(part).any():
+        raise ExploreError("no stored values in this range to search")
+    score = _score(part, what)
+    r, c = np.unravel_index(int(np.nanargmax(score)), score.shape)
+    return {"x": float(m.x[ii[c]]), "y": float(m.y[jj[r]])}
+
+
+def _find_curve(s: "ExploreSession", what: str, xlim: Sequence[float], trace: Optional[int]) -> Dict[str, Any]:
+    x0, x1 = sorted(float(v) for v in xlim)
+    m = s.model
     best: Optional[Tuple[float, Dict[str, Any]]] = None
-    if s.kind == "heatmap":
-        ii = np.flatnonzero((m.x >= x0) & (m.x <= x1))
-        jj = np.flatnonzero((m.y >= y0) & (m.y <= y1))
-        part = _map_z(s)[np.ix_(jj, ii)] if ii.size and jj.size else np.empty((0, 0))
-        if not np.isfinite(part).any():
-            raise ExploreError("no stored values in this range to search")
-        score = _score(part, what)
-        r, c = np.unravel_index(int(np.nanargmax(score)), score.shape)
-        return {"x": float(m.x[ii[c]]), "y": float(m.y[jj[r]])}
     shown = _visible(s)
     traces = [trace] if isinstance(trace, int) and trace in shown else shown
     for k in traces:
@@ -671,7 +696,7 @@ def histogram(s: "ExploreSession", bins: int = HIST_BINS) -> Dict[str, Any]:
         ends = [e for e in (whole.lo, whole.lo_pos, whole.hi) if np.isfinite(e)]
         v = np.concatenate([whole.sample, ends]) * float(s.model.zf or 1.0)
     elif s.summarised:                                # too big for memory: from its summary
-        v = s._finite_z()
+        v = s.view.values()
         v = v[np.isfinite(v)]
     else:
         z = _map_z(s)

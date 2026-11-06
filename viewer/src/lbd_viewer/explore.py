@@ -43,10 +43,10 @@ from lbd.plot.reduce import STATS, CurvePyramid, MapPyramid, cell_edges, curve_m
 from lbd.plot.style import Style
 from lbd.plot.units import prefix_scale
 
-from . import crange as crange_mod, equations, memory, summaries
+from . import crange as crange_mod, equations, kinds, memory, summaries
 from . import operations as ops_mod
 
-KINDS = ("curve", "heatmap")
+KINDS = tuple(k for k in rnd.kinds.KINDS if k in kinds.interactions())
 UNSORTED_LIMIT = 200_000   # a curve with unsorted x and more points than this is thinned for drawing
 # Above this many curves on screen, they are painted into one picture with Pillow (paint_lines)
 # instead of drawn line by line: matplotlib needs ~0.7 ms per line, so 1000 curves would take most
@@ -158,8 +158,7 @@ class ExploreSession:
             self.data = self._read(memory.load_values(self.path, sorted(set(needed) | set(loaded)), self.version))
         new = rnd.resolve_spec(self.data, spec, warn_unused=False)
         if new["kind"] not in KINDS:
-            raise ExploreError(f"the Explore view shows curves and heat maps, not {new['kind']} plots; "
-                               "use the Figure view for this plot")
+            raise ExploreError(f"Explore can't show {rnd.kinds.KINDS[new['kind']].title} plots yet; use the Figure page")
         self.spec, self.base_kind = new, new["kind"]
         # A map with more cells (curves with more points) than the memory available holds is shown
         # from its summary, made once (and kept on disk) by reading the file part by part
@@ -189,6 +188,8 @@ class ExploreSession:
             self._check_open()
             if self.base_kind == "curve":
                 self.base_model = rnd.prepare_curves(self.data, self.spec, self.style, big=big)
+            elif self.base_kind != "heatmap":
+                self.base_model = rnd.kinds.KINDS[self.base_kind].prepare(self.data, self.spec, self.style)
             else:
                 # colours from every slider position (crange.py): the colour bar's prefix from
                 # that range too, so it stays while the slider moves
@@ -233,7 +234,7 @@ class ExploreSession:
     def take_notes(self) -> List[str]:
         """Notes for the user not told yet (each once)."""
         out, self._notes = self._notes, []
-        return out
+        return out + self.view.notes()
 
     def _big_curves(self, spec: Dict[str, Any]) -> Optional[summaries.BigCurves]:
         """The curves of `spec` from their summary when their points don't fit in the memory
@@ -270,23 +271,20 @@ class ExploreSession:
 
     def _build(self) -> None:
         """Set the figure up for `self.model` (the base model, or the one after operations)."""
-        self.kind = "curve" if isinstance(self.model, rnd.CurveModel) else "heatmap"
+        self.view = kinds.for_session(self)
+        self.kind = self.view.kind
         with rnd.RENDER_LOCK, matplotlib.rc_context(self.style.to_rcparams()):
             self._check_open()
             self.fig.clear()
             self.fig.set_layout_engine("constrained")
-            self.ax = self.fig.add_subplot()
-            if self.kind == "curve":
-                self.model = self._units_apart(self.model)
-                self._setup_curves()
-            else:
-                self._setup_map()
+            self.ax = self.view.make_axes()
+            self.view.setup()
             self.visible = [True] * (len(self.model.lines) if self.kind == "curve" else 0)
             self.base_scales = (self.ax.get_xscale(), self.ax.get_yscale())
             self.full = self._full_view()
             self.ax.set_xlim(*self.full[0])
             self.ax.set_ylim(*self.full[1])
-            self._lay_out()
+            self.view.lay_out()
         self.highlight: Optional[int] = None
         self.last_lines: Optional[List[Tuple[np.ndarray, np.ndarray]]] = None
 
@@ -555,16 +553,8 @@ class ExploreSession:
             self.settings = {}                           # a new figure: every setting again
         with rnd.RENDER_LOCK, matplotlib.rc_context(self.style.to_rcparams()):
             self._check_open()
-            if self.kind == "curve":
-                per = len(self.data.axes[axis].data) if axis else 1
-                if self.base_kind != "curve" or len(self.model.lines) != len(self.base_model.lines):
-                    per, chosen = 1, None                # other traces after an operation: all shown
-                self.visible = [chosen is None or k % per in chosen for k in range(len(self.model.lines))]
-                for artist, shown in zip(self.lines, self.visible):
-                    artist.set_visible(shown)
             self.log_refused: List[str] = []
-            if self.kind != "curve":
-                self._apply_map(settings, chosen if self.base_kind == "heatmap" else None, clim)
+            self.view.apply(settings, chosen, clim)
             for key, which, base in (("xscale", "horizontal", self.base_scales[0]),
                                      ("yscale", "vertical", self.base_scales[1])):
                 want = settings.get(key, base)
@@ -659,9 +649,20 @@ class ExploreSession:
                     "it so (e.g. Normalize of a constant trace); change them, or turn them off for the stored data.")
         return f"Nothing to show: no {what} of the data shown has a value (they are all missing)."
 
+    def _apply_curves(self, chosen: Optional[set]) -> None:
+        axis = self.spec.get("series") if self.base_kind == "curve" else self.spec.get("y")
+        per = len(self.data.axes[axis].data) if axis else 1
+        if self.base_kind != "curve" or len(self.model.lines) != len(self.base_model.lines):
+            per, chosen = 1, None                        # other traces after an operation: all shown
+        self.visible = [chosen is None or k % per in chosen for k in range(len(self.model.lines))]
+        for artist, shown in zip(self.lines, self.visible):
+            artist.set_visible(shown)
+
     def _apply_ops(self, ops: List[Dict[str, Any]], chosen: Optional[set], eqs: Dict[str, str]) -> bool:
         """Run the operations (on the chosen traces), then the equations, when any of them or the
         choice changed; True when the figure was set up again for another model."""
+        if (ops or eqs) and not self.view.operations:
+            raise ExploreError("Operations aren't available on this plot")
         key = json.dumps([ops, sorted(chosen) if chosen is not None else None, eqs])
         if key == self.ops_key:
             return False
@@ -810,20 +811,25 @@ class ExploreSession:
     def _full_view(self) -> Tuple[Tuple[float, float], Tuple[float, float]]:
         """The limits that show all the data drawn now (the chosen traces; on a log axis the
         positive part only)."""
+        return self.view.limits()
+
+    @staticmethod
+    def _range(arrays: Sequence[Any], log: bool) -> Tuple[float, float]:
+        arrays = [np.asarray(a, dtype=float) for a in arrays]
+        if log:
+            arrays = [a[a > 0] for a in arrays]
+        lo, hi = _finite_range(arrays)
+        if log and lo <= 0:                              # one value (or none): a decade around it
+            return (hi / 10, hi * 10) if hi > 0 else (0.1, 10.0)
+        return lo, hi
+
+    def _map_limits(self) -> Tuple[Tuple[float, float], Tuple[float, float]]:
         xlog, ylog = self.ax.get_xscale() == "log", self.ax.get_yscale() == "log"
+        return (self._range([self.x_edges], xlog), self._range([self.y_edges], ylog))
 
-        def rng(arrays, log):
-            arrays = [np.asarray(a, dtype=float) for a in arrays]
-            if log:
-                arrays = [a[a > 0] for a in arrays]
-            lo, hi = _finite_range(arrays)
-            if log and lo <= 0:                          # one value (or none): a decade around it
-                return (hi / 10, hi * 10) if hi > 0 else (0.1, 10.0)
-            return lo, hi
-
-        if self.kind == "heatmap":
-            xe, ye = self.x_edges, self.y_edges
-            return (rng([xe], xlog), rng([ye], ylog))
+    def _curve_limits(self) -> Tuple[Tuple[float, float], Tuple[float, float]]:
+        xlog, ylog = self.ax.get_xscale() == "log", self.ax.get_yscale() == "log"
+        rng = self._range
         shown = [k for k, v in enumerate(self.visible) if v] or list(range(len(self.model.lines)))
         x = rng([self.model.xs[k] for k in shown], xlog)
         m = self.model
@@ -962,6 +968,54 @@ class ExploreSession:
             self.ax.set_ylim(*self.full[1])
             self._lay_out()
 
+    def _curve_picture(self, pxe: np.ndarray, draft: bool, w: int, h: int) -> Tuple[str, bool]:
+        """The curves for these pixel edges: (the note, whether they are reduced)."""
+        if self._fast_picture(pxe, w, h, draft):
+            return "lowest and highest point per pixel column", True
+        full_w = self._plot_area()[2]
+        self.spans = None
+        ys = [y for y, _ in self.model.lines]
+        lines: List[Tuple[np.ndarray, np.ndarray]] = [None] * len(ys)   # type: ignore[list-item]
+        reduced = unsorted = thinned = False
+        for x, ks, is_sorted in self.x_groups:
+            for k in ks:                         # left-out traces: nothing to draw
+                lines[k] = (x[:0], ys[k][:0])
+            ks = [k for k in ks if self.visible[k]]
+            if not ks:
+                continue
+            if is_sorted and id(x) in self.pyramids and len(ks) == len(self._group(x)):
+                out, red = self.pyramids[id(x)].minmax(pxe)
+                reduced |= red
+            elif self.summarised:                # some traces of summarised curves
+                out, red = self.pyramids[id(x)].minmax(pxe, rows=ks)
+                reduced |= red
+            elif is_sorted:
+                out, red = curve_minmax(x, [ys[k] for k in ks], pxe)
+                reduced |= red
+            else:
+                unsorted = True
+                if x.size > UNSORTED_LIMIT:              # thinned in stored order (drawing only)
+                    out = [thin_in_order(x, ys[k], 4 * full_w) for k in ks]
+                    thinned = True
+                else:
+                    out = [(x, ys[k]) for k in ks]
+            for k, xy in zip(ks, out):
+                lines[k] = xy
+        shown = [k for k, v in enumerate(self.visible) if v]
+        as_picture = len(shown) > RASTER_ABOVE
+        for k, (artist, (x, y)) in enumerate(zip(self.lines, lines)):
+            artist.set_data(x, y)
+            artist.set_visible(self.visible[k] and not as_picture)
+        self.line_image.set_visible(as_picture)
+        if as_picture:
+            self._raster(lines, shown, w, h, 0.5 if draft else 1.0)
+        self.last_lines = lines
+        note = "lowest and highest point per pixel column" if reduced else "every point shown"
+        if unsorted:
+            note += ("; x is not sorted: drawn in stored order, thinned to the lowest and highest "
+                     "point of each stretch" if thinned else "; x is not sorted: drawn as stored")
+        return note, reduced
+
     def render(self, xlim: Optional[Tuple[float, float]], ylim: Optional[Tuple[float, float]],
                stat: str = "max", fmt: str = "raw", draft: bool = False,
                _again: bool = False) -> Tuple[bytes, Dict[str, Any]]:
@@ -983,66 +1037,17 @@ class ExploreSession:
             self._check_open()
             t1 = time.perf_counter()
             self.last_used = time.monotonic()
-            self.ax.set_xlim(*xlim)
-            self.ax.set_ylim(*ylim)
-            self._plain_tick_numbers()
+            self.view.frame(xlim, ylim)
             left, top, w, h = self._plot_area()
             dw, dh = (max(w // 2, 1), max(h // 2, 1)) if draft else (w, h)
             pxe, pye = self._pixel_edges(dw, dh)
-            if self.kind == "heatmap":
-                r = self.pyramid.raster(pxe, pye, stat)
-                self.image.set_data(r.image)
-                note, reduced = r.note(), r.reduced
-            elif self._fast_picture(pxe, dw, dh, draft):
-                note, reduced = "lowest and highest point per pixel column", True
-            else:
-                self.spans = None
-                ys = [y for y, _ in self.model.lines]
-                lines: List[Tuple[np.ndarray, np.ndarray]] = [None] * len(ys)   # type: ignore[list-item]
-                reduced = unsorted = thinned = False
-                for x, ks, is_sorted in self.x_groups:
-                    for k in ks:                         # left-out traces: nothing to draw
-                        lines[k] = (x[:0], ys[k][:0])
-                    ks = [k for k in ks if self.visible[k]]
-                    if not ks:
-                        continue
-                    if is_sorted and id(x) in self.pyramids and len(ks) == len(self._group(x)):
-                        out, red = self.pyramids[id(x)].minmax(pxe)
-                        reduced |= red
-                    elif self.summarised:                # some traces of summarised curves
-                        out, red = self.pyramids[id(x)].minmax(pxe, rows=ks)
-                        reduced |= red
-                    elif is_sorted:
-                        out, red = curve_minmax(x, [ys[k] for k in ks], pxe)
-                        reduced |= red
-                    else:
-                        unsorted = True
-                        if x.size > UNSORTED_LIMIT:              # thinned in stored order (drawing only)
-                            out = [thin_in_order(x, ys[k], 4 * w) for k in ks]
-                            thinned = True
-                        else:
-                            out = [(x, ys[k]) for k in ks]
-                    for k, xy in zip(ks, out):
-                        lines[k] = xy
-                shown = [k for k, v in enumerate(self.visible) if v]
-                as_picture = len(shown) > RASTER_ABOVE
-                for k, (artist, (x, y)) in enumerate(zip(self.lines, lines)):
-                    artist.set_data(x, y)
-                    artist.set_visible(self.visible[k] and not as_picture)
-                self.line_image.set_visible(as_picture)
-                if as_picture:
-                    self._raster(lines, shown, dw, dh, 0.5 if draft else 1.0)
-                self.last_lines = lines
-                note = "lowest and highest point per pixel column" if reduced else "every point shown"
-                if unsorted:
-                    note += ("; x is not sorted: drawn in stored order, thinned to the lowest and highest "
-                             "point of each stretch" if thinned else "; x is not sorted: drawn as stored")
+            note, reduced = self.view.picture(pxe, pye, stat, draft, dw, dh)
             t2 = time.perf_counter()
             self.fig.canvas.draw()
             if not _again and self._spills():
                 # Text that still doesn't fit (rare: the layout leaves room for wide tick labels):
                 # lay out again, once.
-                self._lay_out()
+                self.view.lay_out()
                 left, top, w, h = self._plot_area()
                 if (w, h) != (len(pxe) - 1, len(pye) - 1):        # the plot area changed size
                     return self.render(xlim, ylim, stat, fmt, draft, _again=True)
@@ -1068,7 +1073,7 @@ class ExploreSession:
             "full": [list(self.full[0]), list(self.full[1])],
             "note": note, "reduced": reduced, "stat": stat, "draft": draft, "ops": self.ops_info(),
             "hidden": hidden, "empty": empty, "sync": self.sync_keys(),
-            "crange": self.crange_state(),
+            "crange": self.crange_state(), **self.view.meta(),
             "ms": {"wait": round((t1 - t0) * 1000, 1), "reduce": round((t2 - t1) * 1000, 1),
                    "draw": round((t3 - t2) * 1000, 1), "encode": round((t4 - t3) * 1000, 1)},
         }
@@ -1078,6 +1083,8 @@ class ExploreSession:
         """What panels must share to follow each other's zoom (plan 4): the horizontal axis as
         drawn (its label, unit prefix included: an equation or an FFT changes it), and the
         vertical axis (maps: its label; curves: its unit, prefix included)."""
+        if not self.view.syncs:
+            return {}
         ylabel = self.ax.get_ylabel()
         if self.kind == "heatmap":
             y = ylabel
@@ -1098,11 +1105,7 @@ class ExploreSession:
         self.last_used = time.monotonic()
         with rnd.RENDER_LOCK:
             self._check_open()
-            disp = (px, self.fig.bbox.height - py)
-            xd, yd = self.ax.transData.inverted().transform([disp])[0]
-            if self.kind == "heatmap":
-                return self._pick_cell(xd, yd)
-            return self._pick_curve(px, py)
+            return self.view.pick(px, py)
 
     def _pick_cell(self, xd: float, yd: float) -> Optional[Dict[str, Any]]:
         m = self.model

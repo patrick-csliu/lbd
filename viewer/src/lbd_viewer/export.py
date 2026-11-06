@@ -56,6 +56,11 @@ def options(s: "ExploreSession") -> Dict[str, Optional[str]]:
 def session_table(s: "ExploreSession", numbers: str = "shown", view: Optional[Dict[str, Any]] = None) -> Table:
     """The table of what a panel shows, in the stored units. `view`: {"xlim", "ylim"} in plot
     units (the zoomed range), None: everything."""
+    return s.view.table(numbers, view)
+
+
+def grid_table(s: "ExploreSession", numbers: str = "shown", view: Optional[Dict[str, Any]] = None) -> Table:
+    """A panel of curves or a map as a table: its model's rows and columns."""
     why = options(s).get(numbers) if numbers != "shown" else None
     if why:
         raise ExploreError(why)
