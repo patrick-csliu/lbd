@@ -106,11 +106,14 @@ class HistModel:
 
 @dataclass
 class Counted:
-    """What counting gives, in stored units: `counts` per series, on the same `edges`."""
+    """What counting gives, in stored units: `counts` per series, on the same `edges`. `shown`:
+    (label, unit) when operations made the numbers something else than the values."""
 
     edges: np.ndarray
     counts: List[np.ndarray]
     left_out: int = 0
+    shown: Optional[Tuple[str, str]] = None
+    ops: Optional[Dict[str, Any]] = None        # LBD Viewer: what the operations did
 
 
 class Span:
@@ -256,7 +259,7 @@ def prepare(d: Any, spec: Dict[str, Any], style: Style, big: Optional[Counted] =
     counted = big if big is not None else count(d, spec)
     first = d.values[spec["values"][0]]
     xs, ys = style.axis_style("x"), style.axis_style("y")
-    shown = [_shown(d.values[n], spec["complex"]) for n in spec["values"]]
+    shown = [counted.shown] if counted.shown else [_shown(d.values[n], spec["complex"]) for n in spec["values"]]
     labels = {label for label, _ in shown}
     unit = shown[0][1]
     q = find_quantity(style, first.name, first.label, spec["complex"] if first.dtype.startswith("complex") else None)

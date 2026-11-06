@@ -21,7 +21,8 @@ class Interaction:
     kind = ""
     model: Optional[type] = None
     cursor_types: Tuple[str, ...] = ("cross", "vertical", "horizontal")
-    operations: Any = False       # False: not available; True: all; "shape": those that keep the shape
+    # False: not available; True: all; "shape": those that keep the shape; "before": the type runs them
+    operations: Any = False
     strips: Optional[str] = None  # None, "cuts" or "histograms"
     syncs = True                  # False: a panel without x and y to share (`meta.sync` is empty)
     log_x = True                  # False: the horizontal axis stays linear
@@ -101,6 +102,10 @@ class Interaction:
     def hidden(self) -> Tuple[List[str], Optional[str]]:
         """Notes the page keeps on screen, and why nothing is shown when nothing can be."""
         return [], None
+
+    def ops_info(self) -> Dict[str, Any]:
+        """A type with `operations = "before"`: what the page shows about its operations."""
+        raise NotImplementedError
 
     def notes(self) -> List[str]:
         """Notes for the user, added to the frame's."""

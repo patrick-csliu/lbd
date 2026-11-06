@@ -6,11 +6,17 @@ Few numbers are counted at once. More are counted in the background, with `crang
 first pass finds the bins, a second counts into them, so only the bins and one block are held. The
 picture shows the counts so far (`meta["crange"]` says how far), and the page asks again until they
 are complete. A slider moved meanwhile stops the old count.
+
+With operations or equations on, the numbers come from a private session drawing curves (`_op_blocks`):
+operations work on curves, so the longest All axis is the curves' x, the next one a curve per step,
+and each other All axis and Colour by step is taken in turn.
 """
 
+import itertools
 import json
 import sys
 import threading
+import warnings
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional, Set, Tuple
@@ -22,11 +28,14 @@ from lbd.plot import histogram as hist
 from lbd.plot import render as rnd
 
 from .. import crange, memory
+from .. import operations as ops_mod
 from . import Interaction
 
 QUICK = 2_000_000         # up to this many numbers are counted at once
+OPS_QUICK = 100_000       # after operations: up to this many, in at most OPS_QUICK_DRAWS drawings
+OPS_QUICK_DRAWS = 16
+MOST_DRAWS = 20_000       # drawings a private session is asked for: more would take very long
 KEEP = 32                 # results kept (least recently used dropped)
-NUMBER_SETTINGS = ("ops", "ops_on", "equations", "select")     # the view settings that change the numbers
 SPEC_NUMBERS = ("values", "complex", "color", "all", "index")
 
 
@@ -37,6 +46,8 @@ class Job(crange.Job):
         super().__init__(total)
         self.partial: Optional[hist.Counted] = None
         self.sessions: Set[str] = set()
+        self.shown: Optional[Tuple[str, str]] = None         # after operations: what the numbers are
+        self.ops: Optional[Dict[str, Any]] = None            # the private session's `ops_info`
 
     def info(self) -> Dict[str, Any]:
         return {**super().info(), "from": "histogram"}
@@ -46,14 +57,36 @@ _lock = threading.Lock()
 _results: "OrderedDict[str, hist.Counted]" = OrderedDict()
 _jobs: Dict[str, Job] = {}
 _session_job: Dict[str, str] = {}          # session id: the key of the count it waits for
+_names: "OrderedDict[str, Any]" = OrderedDict()   # what equations can use, per file and value
 
 
 def key_of(s: Any, settings: Dict[str, Any]) -> str:
     """What the counts depend on: path, version, which numbers, the bins, what is done to them."""
     spec = {k: s.spec.get(k) for k in SPEC_NUMBERS}
-    shown = {k: settings.get(k) for k in NUMBER_SETTINGS}
-    return json.dumps([str(Path(s.path).resolve()), s.version, spec, s.spec["options"]["bins"], shown],
+    return json.dumps([str(Path(s.path).resolve()), s.version, spec, s.spec["options"]["bins"], changes(settings)],
                       sort_keys=True, default=str)
+
+
+def changes(settings: Dict[str, Any]) -> Dict[str, Any]:
+    """The operations and equations on, as settings for a private session ({}: the stored numbers)."""
+    if settings.get("ops_on") is False:
+        return {}
+    out: Dict[str, Any] = {}
+    ops = ops_mod.check(settings.get("ops"))
+    if any(op["on"] for op in ops):
+        out["ops"] = ops                                 # those off too: each has its note
+    equations = {k: v for k, v in (settings.get("equations") or {}).items() if v.strip()}
+    if equations:
+        out["equations"] = equations
+    return out
+
+
+def refusal(settings: Dict[str, Any]) -> Optional[str]:
+    """Why the numbers can't be counted after these operations."""
+    if any(op["op"] == "iq_histogram" and op["on"] for op in changes(settings).get("ops", [])):
+        return ("The I/Q histogram makes a map of its own, so a histogram can't count it: turn that operation off, "
+                "or show this plot as a map")
+    return None
 
 
 def numbers_in(d: Any, spec: Dict[str, Any]) -> int:
@@ -65,6 +98,23 @@ def numbers_in(d: Any, spec: Dict[str, Any]) -> int:
         fixed.pop(spec.get("color"), None)
         total += int(np.prod([n for a, n in zip(v.axes, v.shape) if a not in fixed], dtype=np.int64))
     return total
+
+
+def draws_in(d: Any, spec: Dict[str, Any]) -> int:
+    """How many drawings a private session makes for one pass."""
+    return sum(int(np.prod([n for _, n in _taken_in_turn(d.values[name], spec)], dtype=np.int64))
+               for name in spec["values"])
+
+
+def _whole(v: Any, spec: Dict[str, Any]) -> List[str]:
+    """The All axes of a value, longest first."""
+    return sorted((a for a in v.axes if a in spec["all"]), key=lambda a: -v.shape[v.axes.index(a)])
+
+
+def _taken_in_turn(v: Any, spec: Dict[str, Any]) -> List[Tuple[str, int]]:
+    """The axes a private session steps through: (name, steps). The two longest All axes are drawn."""
+    axes = _whole(v, spec)[2:] + ([spec["color"]] if spec["color"] in v.axes else [])
+    return [(a, v.shape[v.axes.index(a)]) for a in axes]
 
 
 def block_size() -> int:
@@ -107,28 +157,96 @@ def get(s: Any, settings: Dict[str, Any]) -> Tuple[Optional[hist.Counted], Optio
             return counted, None
         job = _jobs.get(key)
         total = numbers_in(s.data, s.spec)
-        if job is None and total > QUICK:
+        wanted = changes(settings)
+        if job is None and wanted:
+            _check_operated(s.data, s.spec)
+        if job is None and (total > OPS_QUICK or draws_in(s.data, s.spec) > OPS_QUICK_DRAWS if wanted else total > QUICK):
             job = _jobs[key] = Job(2 * total)                  # two passes
-            threading.Thread(target=_work, args=(key, job, s.path, s.spec), daemon=True,
+            threading.Thread(target=_work, args=(key, job, s.path, s.version, s.spec, s.style, wanted), daemon=True,
                              name="lbd-histogram").start()
         if job is not None:
             job.sessions.add(s.id)
             _session_job[s.id] = key
             return None, job
-    counted = _two_passes(Job(2 * total), lambda: hist.blocks(s.data, s.spec, block_size()), s.data, s.spec)
+    now = Job(2 * total)
+    source = ((lambda: _op_blocks(now, s.path, s.version, s.spec, s.style, wanted)) if wanted else
+              (lambda: hist.blocks(s.data, s.spec, block_size())))
+    counted = _two_passes(now, source, s.data, s.spec, wanted)
     with _lock:
         _keep(key, counted)
     return counted, None
 
 
-def _work(key: str, job: Job, path: Any, spec: Dict[str, Any]) -> None:
+def _check_operated(d: Any, spec: Dict[str, Any]) -> None:
+    from ..explore import ExploreError
+
+    for name in spec["values"]:
+        if not _whole(d.values[name], spec):
+            raise ExploreError("operations work along an axis: make one of the axes All, or turn the operations off")
+    n = draws_in(d, spec)
+    if n > MOST_DRAWS:
+        raise ExploreError(f"operations here would need {n:,} drawings, which would take very long: make some axes "
+                           "sliders, or turn the operations off")
+
+
+def _op_blocks(job: Job, path: Any, version: str, spec: Dict[str, Any], style: Any,
+               wanted: Dict[str, Any]) -> Iterator[Tuple[int, np.ndarray]]:
+    """(series number, numbers), the operations and equations `wanted` done, from a private session."""
+    from ..explore import ExploreError, ExploreSession
+
+    header = rnd.flat(lbd.info(path))
+
+    def curves(name: str, steps: Dict[str, int]) -> Dict[str, Any]:
+        axes = _whole(header.values[name], spec)
+        return {"kind": "curve", "values": [name], "x": axes[0], "series": axes[1] if len(axes) > 1 else "none",
+                "complex": spec["complex"], "index": {**spec["index"], **steps}}
+
+    ws = None
+    first = 0
+    try:
+        for name in spec["values"]:
+            v = header.values[name]
+            turns = _taken_in_turn(v, spec)
+            for positions in itertools.product(*[range(n) for _, n in turns]):
+                if job.cancelled:
+                    return
+                steps = {a: i for (a, _), i in zip(turns, positions)}
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", rnd.RenderWarning)
+                    if ws is None:
+                        ws = ExploreSession(Path(path), version, curves(name, steps), style, 200, 150, 1.0,
+                                            saved_view=False, bare=True)
+                    else:
+                        ws.set_spec(curves(name, steps))
+                    ws.apply(wanted)
+                if ws.kind != "curve":
+                    raise ExploreError("these operations don't give curves, so there is nothing to count")
+                if ws.summarised:
+                    raise ExploreError("these curves are larger than the memory free now, and operations need "
+                                       "them whole: make some axes sliders")
+                info = ws.ops_info()
+                job.ops = info
+                if info["applied"]:
+                    job.shown = (info.get("shows") or name, info.get("unit") or "")
+                m = ws.model
+                numbers = np.concatenate([np.ravel(np.asarray(y, dtype=float)) / m.yf for y, _ in m.lines])
+                yield first + steps.get(spec["color"], 0), numbers
+            first += v.shape[v.axes.index(spec["color"])] if spec["color"] in v.axes else 1
+    finally:
+        if ws is not None:
+            ws.close()
+
+
+def _work(key: str, job: Job, path: Any, version: str, spec: Dict[str, Any], style: Any, wanted: Dict[str, Any]) -> None:
     try:
         with crange._running:
             if job.cancelled:
                 return
             d = rnd.flat(lbd.open(path, hold=False))
             try:
-                counted = _two_passes(job, lambda: hist.blocks(d, spec, block_size()), d, spec)
+                source = ((lambda: _op_blocks(job, path, version, spec, style, wanted)) if wanted else
+                          (lambda: hist.blocks(d, spec, block_size())))
+                counted = _two_passes(job, source, d, spec, wanted)
             finally:
                 d.close()
         if counted is None:
@@ -143,7 +261,7 @@ def _work(key: str, job: Job, path: Any, spec: Dict[str, Any]) -> None:
 
 
 def _two_passes(job: Job, blocks: Callable[[], Iterator[Tuple[int, np.ndarray]]], d: Any,
-                spec: Dict[str, Any]) -> Optional[hist.Counted]:
+                spec: Dict[str, Any], wanted: Optional[Dict[str, Any]] = None) -> Optional[hist.Counted]:
     """The bins from a first pass over `blocks()`, then the counts from a second. None: cancelled."""
     span = hist.Span()
     for _, numbers in blocks():
@@ -151,9 +269,9 @@ def _two_passes(job: Job, blocks: Callable[[], Iterator[Tuple[int, np.ndarray]]]
             return None
         span.add(numbers)
         job.done += numbers.size
-    edges = span.edges(spec["options"]["bins"], hist.is_integer(d, spec))
+    edges = span.edges(spec["options"]["bins"], not wanted and hist.is_integer(d, spec))
     counts = [np.zeros(edges.size - 1, dtype=np.int64) for _ in hist.series_of(d, spec)]
-    job.partial = hist.Counted(edges, counts, span.left_out)
+    job.partial = hist.Counted(edges, counts, span.left_out, job.shown, job.ops)
     for k, numbers in blocks():
         if job.cancelled:
             return None
@@ -176,6 +294,7 @@ def forget() -> None:
         _results.clear()
         _jobs.clear()
         _session_job.clear()
+        _names.clear()
 
 
 crange.others.append(sys.modules[__name__])
@@ -195,7 +314,38 @@ def _shown(s: Any, counted: Optional[hist.Counted], job: Optional[Job]) -> hist.
     part = job.partial if job is not None and not job.error else None
     if part is None:
         return _nothing_yet(s)
-    return hist.Counted(part.edges, [c.copy() for c in part.counts], part.left_out)
+    return hist.Counted(part.edges, [c.copy() for c in part.counts], part.left_out, part.shown)
+
+
+def names_for_equations(s: Any) -> Optional[Any]:
+    """What equations can use here, from a private session on one curve of the first value."""
+    key = json.dumps([str(s.path), s.version, s.spec["values"][0], s.spec["complex"]])
+    with _lock:
+        if key in _names:
+            return _names[key]
+    names = None
+    spec = next(iter(s.spec["values"]))
+    axes = _whole(s.data.values[spec], s.spec) or list(s.data.values[spec].axes)
+    if axes:
+        from ..explore import ExploreError, ExploreSession
+
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", rnd.RenderWarning)
+                ws = ExploreSession(Path(s.path), s.version, {"kind": "curve", "values": [spec], "x": axes[0], "series": "none",
+                                                              "complex": s.spec["complex"], "index": s.spec["index"]},
+                                    s.style, 200, 150, 1.0, saved_view=False, bare=True)
+            try:
+                names = ws.ops_info().get("names")
+            finally:
+                ws.close()
+        except (ExploreError, ValueError):               # no legend then; the equations still work
+            names = None
+    with _lock:
+        _names[key] = names
+        while len(_names) > KEEP:
+            _names.popitem(last=False)
+    return names
 
 
 class Histogram(Interaction):
@@ -212,7 +362,8 @@ class Histogram(Interaction):
 
     @classmethod
     def prepare(cls, s: Any) -> hist.HistModel:
-        counted, job = get(s, getattr(s, "settings", None) or {})
+        settings = getattr(s, "settings", None) or {}
+        counted, job = get(s, {} if refusal(settings) else settings)
         s.crange_info = job.info() if job else None
         s.hist_counted = counted
         return hist.prepare(s.data, s.spec, s.style, big=_shown(s, counted, job))
@@ -223,9 +374,15 @@ class Histogram(Interaction):
         self.showing = (id(s.model), s.ax.get_yscale() == "log")
 
     def apply(self, settings: Dict[str, Any], chosen: Optional[set], clim: Any) -> None:
+        from ..explore import ExploreError
+
         s = self.s
+        why = refusal(settings)
+        if why:
+            raise ExploreError(why)
         counted, job = get(s, settings)
         s.crange_info = job.info() if job else None
+        s.hist_ops = getattr(counted, "ops", None) or (job.ops if job else None)
         if counted is not None and counted is s.hist_counted:
             return
         s.hist_counted = counted
@@ -266,6 +423,16 @@ class Histogram(Interaction):
 
     def meta(self) -> Dict[str, Any]:
         return {"crange": self.s.crange_info}
+
+    def ops_info(self) -> Dict[str, Any]:
+        """As the session's: from the private session that ran them, or the plain plot's names."""
+        s = self.s
+        ops = s.ops_list
+        done = getattr(s, "hist_ops", None)
+        if done is not None and len(done["notes"]) == len(ops):
+            return done
+        return {"notes": [None if op["on"] else "off" for op in ops], "applied": 0, "equations": {},
+                "names": names_for_equations(s)}
 
 
 INTERACTION = Histogram

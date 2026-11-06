@@ -754,6 +754,8 @@ class ExploreSession:
     def ops_info(self) -> Dict[str, Any]:
         """For the page: each operation's state (None: applied, "off", or why not), each equation
         field's (error or note), what is shown, and the names equations can use (the legend)."""
+        if self.view.operations == "before":
+            return self.view.ops_info()
         r = self.ops_result
         if getattr(self, "eq_legend", None) is None and not self.summarised and self.view.operations is True:
             # the legend of the plain plot

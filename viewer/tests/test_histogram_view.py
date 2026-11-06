@@ -14,7 +14,7 @@ import mock_values
 from lbd.plot import histogram as hist
 from lbd.plot import render as rnd
 from lbd_viewer import crange
-from lbd_viewer.explore import ExploreSession
+from lbd_viewer.explore import ExploreError, ExploreSession
 from lbd_viewer.kinds import histogram as kind
 
 WHOLE = {"kind": "histogram", "values": ["I"], "color": "none", "all": ["shot"]}
@@ -316,3 +316,91 @@ def test_memory_stays_small(tmp_path, monkeypatch):
         tracemalloc.stop()
     assert counted.counts[0].sum() == n
     assert peak < n * 8 / 3
+
+
+# -- after operations and equations ----------------------------------------------------------------
+
+ONE = {"kind": "histogram", "values": ["I"], "color": "none", "all": ["shot"], "index": {"readout_power": 1, "state": 0}}
+
+
+def test_operations_come_first(iq):
+    s = session(iq, ONE)
+    finished(s)
+    raw = s.model.edges.copy()
+    meta = finished(s, {"ops": [{"op": "normalize"}]})
+    i = lbd.load(iq).values["I"].data[1, 0]
+    assert not np.array_equal(raw, s.model.edges)
+    assert s.model.edges[0] / s.model.xf == pytest.approx(((i - i.mean()) / i.std()).min(), rel=0.02)
+    assert counts(s)[0].sum() == 200 and meta["ops"]["applied"] == 1
+    assert meta["ops"]["notes"] == [None]
+    assert "mean" in s.ax.get_xlabel()
+    meta = finished(s, {"ops": [{"op": "normalize", "on": False}]})           # off: the stored numbers
+    assert np.array_equal(raw, s.model.edges) and meta["ops"]["notes"] == ["off"]
+
+
+def test_equation_comes_first(iq):
+    s = session(iq, ONE)
+    finished(s)
+    top = s.model.edges[-1] / s.model.xf
+    meta = finished(s, {"equations": {"y": "y * 2"}})
+    assert s.model.edges[-1] / s.model.xf == pytest.approx(2 * top)
+    assert meta["ops"]["equations"]["y"] == {} or "error" not in meta["ops"]["equations"]["y"]
+
+
+def test_the_page_has_the_names_for_equations(iq):
+    meta = picture(session(iq, ONE))
+    assert any(n["name"] == "y" for n in meta["ops"]["names"]) and meta["ops"]["applied"] == 0
+
+
+def test_an_iq_histogram_operation_is_refused(iq):
+    s = session(iq, {**ONE, "values": ["IQ"]})
+    with pytest.raises(ExploreError, match="I/Q histogram makes a map"):
+        s.apply({"ops": [{"op": "iq_histogram", "bins": 20}]})
+    s.apply({"ops": [{"op": "iq_histogram", "bins": 20, "on": False}]})
+
+
+def test_a_chain_on_all_steps_equals_each_step_counted(iq):
+    ops = {"ops": [{"op": "subtract_mean"}]}
+    s = session(iq, {**ONE, "color": "state", "all": ["shot", "readout_power"], "index": {}, "options": {"bins": 9}})
+    finished(s, ops)
+    assert [int(c.sum()) for c in counts(s)] == [400, 400]
+    data = lbd.load(iq).values["I"].data
+    edges = s.model.edges / s.model.xf
+    for state in (0, 1):
+        want = sum(np.histogram(data[p, state] - data[p, state].mean(), edges)[0] for p in range(2))
+        assert np.abs(counts(s)[state] - want).sum() <= 2                # (numbers exactly on an edge may round)
+
+
+def test_operations_in_the_background_equal_at_once(iq, monkeypatch):
+    ops = {"ops": [{"op": "subtract_mean"}]}
+    spec = {**ONE, "all": ["shot", "state"], "index": {"readout_power": 0}}
+    s = session(iq, spec)
+    finished(s, ops)
+    want = counts(s)[0].copy()
+    kind.forget()
+    monkeypatch.setattr(kind, "OPS_QUICK", 0)
+    other = session(iq, spec)
+    meta = picture(other, ops)
+    assert meta["crange"] is None or meta["crange"]["from"] == "histogram"
+    finished(other, ops)
+    assert np.array_equal(counts(other)[0], want)
+
+
+def test_operations_need_an_axis_all(iq):
+    s = session(iq, {**ONE, "all": [], "color": "none", "index": {"readout_power": 0, "state": 0, "shot": 3}})
+    with pytest.raises(ExploreError, match="make one of the axes All"):
+        s.apply({"ops": [{"op": "normalize"}]})
+
+
+def test_too_many_drawings_are_refused_with_a_reason(iq, monkeypatch):
+    monkeypatch.setattr(kind, "MOST_DRAWS", 1)
+    s = session(iq, {**ONE, "all": ["shot", "state", "readout_power"], "index": {}})
+    with pytest.raises(ExploreError, match="would take very long"):
+        s.apply({"ops": [{"op": "normalize"}]})
+
+
+def test_an_operation_that_fails_says_why(iq, monkeypatch):
+    s = session(iq, ONE)
+    finished(s)
+    meta = finished(s, {"equations": {"y": "nonsense + 1"}})
+    assert "error" in meta["ops"]["equations"]["y"]
