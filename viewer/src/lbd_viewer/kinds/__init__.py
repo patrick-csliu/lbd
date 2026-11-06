@@ -24,10 +24,16 @@ class Interaction:
     operations: Any = False       # False: not available; True: all; "shape": those that keep the shape
     strips: Optional[str] = None  # None, "cuts" or "histograms"
     syncs = True                  # False: a panel without x and y to share (`meta.sync` is empty)
+    log_x = True                  # False: the horizontal axis stays linear
 
     def __init__(self, session: Any):
         self.s = session
         self.line_options: Dict[str, Any] = {}    # every, at_line, limit: what reading.cursors was asked
+
+    @classmethod
+    def prepare(cls, s: Any) -> Any:
+        """The model for session `s`, after `set_spec` (curves and maps have their own path)."""
+        return plot_kinds.KINDS[s.base_kind].prepare(s.data, s.spec, s.style)
 
     def make_axes(self) -> Any:
         kind = plot_kinds.KINDS.get(self.kind or self.name)
@@ -87,6 +93,14 @@ class Interaction:
         from .. import export
 
         return export.grid_table(self.s, numbers, view)
+
+    def has_positive(self, which: str) -> bool:
+        """Whether a log scale on this axis ("horizontal", "vertical") can show anything."""
+        return True
+
+    def hidden(self) -> Tuple[List[str], Optional[str]]:
+        """Notes the page keeps on screen, and why nothing is shown when nothing can be."""
+        return [], None
 
     def notes(self) -> List[str]:
         """Notes for the user, added to the frame's."""

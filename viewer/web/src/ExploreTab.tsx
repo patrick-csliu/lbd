@@ -1178,14 +1178,15 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
       <Section name="data" title="Data" open={!!sections.data} onToggle={setSection}>
       <label className="field">
         <span>Plot</span>
-        <PlotKindSelect path={info.path} value={kind} first={first?.name} page="explore" onChoose={(k) => updateSpec({ kind: k, x: undefined, y: undefined, series: undefined })} />
+        <PlotKindSelect path={info.path} value={kind} first={first?.name} page="explore" onChoose={(k) => updateSpec({ kind: k, x: undefined, y: undefined, series: undefined, color: undefined, all: undefined, options: undefined })} />
       </label>
 
       <fieldset className="field">
         <legend>{kind === "heatmap" ? "Value" : "Values"}</legend>
         {plottable.map((v) => {
           const on = values.includes(v.name);
-          const fits = !first || v.name === first.name || (kind === "curve" && v.axes.includes(along ?? ""));
+          // a histogram overlays values of one unit
+          const fits = !first || v.name === first.name || (kind === "curve" && v.axes.includes(along ?? "")) || (kind === "histogram" && unitOf(v) === unitOf(first));
           // a panel shows two units (left and right axis); a third goes in another panel
           const third = kind === "curve" && !on && units.size >= 2 && !units.has(unitOf(v));
           return (
@@ -1201,9 +1202,10 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
                 type={kind === "heatmap" ? "radio" : "checkbox"}
                 name="explore-values"
                 checked={on}
-                disabled={(!fits && !on) || third}
+                disabled={(!fits && !on && kind !== "histogram") || third}
                 onChange={() => {
                   if (kind === "heatmap") updateSpec({ values: [v.name], x: undefined, y: undefined });
+                  else if (kind === "histogram" && !fits) updateSpec({ values: [v.name], color: undefined, all: undefined, index: undefined });
                   else if (on && values.length > 1) updateSpec({ values: values.filter((n) => n !== v.name) });
                   else if (!on) updateSpec({ values: [...values, v.name] });
                 }}
@@ -1216,7 +1218,7 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
       </fieldset>
 
       {/* the axes as one block: the same drop-downs in the same place for curves and maps */}
-      <div className={"field axes-field" + (kind === "heatmap" ? " two" : "")} role="group" aria-label="Axes">
+      {!kindOf(kind).noAxes && <div className={"field axes-field" + (kind === "heatmap" ? " two" : "")} role="group" aria-label="Axes">
         <span>Axes</span>
         <div className="axes-grid">
           <span className="axes-name">Horizontal</span>
@@ -1243,7 +1245,7 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
             </>
           )}
         </div>
-      </div>
+      </div>}
 
       {Controls && <Controls info={info} spec={r} resolved={r} update={updateSpec} settings={settings} updateSettings={updateSettings} page="explore" />}
 
@@ -1303,10 +1305,12 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
                badge={settings.xscale === "log" || settings.yscale === "log" || settings.cscale === "log" ? "log" : undefined}>
       <fieldset className="field">
         <legend>Scales</legend>
-        <label className="check">
-          <input type="checkbox" checked={settings.xscale === "log"} onChange={(e) => updateSettings({ xscale: e.target.checked ? "log" : "linear" })} />
-          Log horizontal
-        </label>
+        {kind !== "histogram" && (
+          <label className="check">
+            <input type="checkbox" checked={settings.xscale === "log"} onChange={(e) => updateSettings({ xscale: e.target.checked ? "log" : "linear" })} />
+            Log horizontal
+          </label>
+        )}
         <label className="check">
           <input type="checkbox" checked={settings.yscale === "log"} onChange={(e) => updateSettings({ yscale: e.target.checked ? "log" : "linear" })} />
           Log vertical

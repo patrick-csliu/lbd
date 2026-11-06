@@ -34,6 +34,7 @@ export interface PlotKind {
   axes: "2d" | "3d"; // 3d: no zoom box, pan or limits
   syncs: boolean; // shares its x and y with other panels
   findButtons: boolean; // Max, Min and Peak
+  noAxes?: boolean; // no Horizontal axis to choose: its controls say what is shown
 }
 
 const ALL_CURSORS: CursorType[] = ["cross", "vertical", "horizontal"];
