@@ -150,6 +150,7 @@ are still written as 1.2).
 - New plot type **Matrix**, in Explore and Figure: cells with their numbers, for two axes or a matrix in each data point. A click reads a cell; complex values show Re and Im side by side; the colour range can be fixed to 0 to 1 or −1 to 1.
 
 <!-- plan 15c -->
+- New plot type **3D bars**, in Explore and Figure, for the data of Matrix: a bar per cell, up to 64 × 64. Complex values show Re and Im side by side on one scale, or height the magnitude and colour the phase. In Explore a drag turns the picture, the wheel zooms, the arrow keys turn, and a click reads a bar; on the Figure page the angle is in boxes.
 
 <!-- plan 15d -->
 

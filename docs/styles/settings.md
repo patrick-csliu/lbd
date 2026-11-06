@@ -141,6 +141,10 @@ Scatter plots with more than 5000 points are stored as an image inside PDF/SVG f
 
 {{ style_table("BarsStyle") }}
 
+`figure.axes.bars3d` — 3D bars. `elev` and `azim` are the default angle.
+
+{{ style_table("Bars3dStyle") }}
+
 ### Image and colour bar
 
 `figure.axes.image` — heat maps, and colour scales in general (scatter colouring, long curve

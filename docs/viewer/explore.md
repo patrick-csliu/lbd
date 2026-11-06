@@ -219,6 +219,28 @@ Operations that keep the shape are available when the bars have one unit. There 
 
 ### 3D bars
 
+The data of [Matrix](#matrix), a bar per cell: the classic picture of a density matrix. Row 0 is at the
+back and column 0 on the left, so from the default angle it reads like the matrix. Numbers below zero
+go down from zero.
+
+- **Turning it:** drag on the plot; the server draws each new angle. **Elevation** and **Azimuth** show
+  the angle and can be typed in, and **Default angle** brings the style's back. The arrow keys turn by
+  5° (with Shift 15°), `Home`, `0` or a double-click go back. The wheel zooms. Above 32 × 32 bars a
+  quicker picture is shown while turning, and the sharp one follows when the mouse rests.
+- **Complex values** start as **Re and Im**, two pictures turning together on one vertical scale. The
+  other choice of this type is **Height |z|, colour the phase**, with a phase colour bar; the usual
+  complex choices give one picture.
+- **Reading values:** there are no cursor lines in 3D. A click picks the nearest bar top and shows its
+  row, column and value in the Cursors tab; where tops overlap, the one nearest you. A hidden bar can be
+  read in Matrix.
+- **Size:** up to 64 × 64; beyond that bars hide each other, and the Plot menu says so.
+
+The angle is remembered with the view, and **Open in Figure** takes it along. There are no cuts, limits
+or zoom box, and panels turn on their own; sliders still follow each other. Operations that keep the
+shape are available, as on Matrix.
+
+![3D bars of a density matrix, Re and Im side by side](img/bars3d.png)
+
 ### Histogram
 
 ### Scatter

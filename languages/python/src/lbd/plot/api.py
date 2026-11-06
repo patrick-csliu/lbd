@@ -567,7 +567,7 @@ def plot(data, kind: Optional[str] = None, values: Union[None, str, Sequence[str
     data : lbd.Dataset or path
         A dataset in memory (it never needs to be saved), or an `.lbd` file (only the needed
         values are read).
-    kind : {"auto", "curve", "scatter", "heatmap", "matrix", "bars"}, optional
+    kind : {"auto", "curve", "scatter", "heatmap", "matrix", "bars", "bars3d"}, optional
         The plot type. `None`/`"auto"`: curves, or a heat map when the value has two or more axes
         with more than one point.
     values : str or list of str, optional

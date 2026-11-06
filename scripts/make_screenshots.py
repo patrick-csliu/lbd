@@ -134,6 +134,7 @@ def make_files(folder: Path) -> None:
     import mock_values
 
     mock_values.rabi(small=False).save(folder / "rabi_readout.lbd")
+    mock_values.density_matrix(small=False).save(folder / "density_matrix.lbd")
 
     # a library of measurements over two years (the Library's list): the viewer tests' mock library
     import mock_library
@@ -338,6 +339,21 @@ def explore_operations(page: Page, url: str, ctx) -> None:
         (2, "main:not([hidden]) .explore-host", 0, "tr"),
     ])
     save(page, VIEWER_IMG / "operations.png")
+
+
+@shot
+def bars3d(page: Page, url: str, ctx) -> None:
+    """A density matrix as 3D bars, Re and Im side by side."""
+    fresh(page, url, "Explore")
+    page.locator(".row-label", has_text="density_matrix.lbd").first.dblclick()
+    plot = page.locator("main:not([hidden])").get_by_label("Plot type")
+    plot.wait_for()
+    page.wait_for_timeout(800)
+    plot.select_option("bars3d")
+    page.wait_for_timeout(1500)
+    page.locator("main:not([hidden]) .controls input[type=range]").fill("7")      # a step with an imaginary part
+    page.wait_for_timeout(2000)
+    save(page, VIEWER_IMG / "bars3d.png", region(page, "main:not([hidden]) .explore-stage", pad=0))
 
 
 @shot
