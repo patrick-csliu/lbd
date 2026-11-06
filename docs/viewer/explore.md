@@ -171,6 +171,8 @@ greyed, and says why.
 
 ### Map
 
+![A variable sweep as a map, each stored point in its own cell](img/explore_group_map.png)
+
 A value on two swept axes. A **variable sweep** (an axis group, where the inner points depend on the
 outer ones) is a map too, with its real coordinates:
 
@@ -256,6 +258,8 @@ shape are available, as on Matrix.
 
 ### Histogram
 
+![A histogram with one outline per state](img/explore_histogram.png)
+
 Counts how many numbers fall in each bin: the value along x, the count along y. It answers "how are
 these numbers spread?", for example single-shot readout, where the shots of each prepared state make
 a peak of their own.
@@ -303,6 +307,8 @@ series; it waits until the count is done. **Open in Figure** takes these choices
 histograms of the same quantity follow each other's zoom along x.
 
 ### Scatter
+
+![A scatter plot with histograms beside it](img/explore_scatter.png)
 
 A marker per point, for numbers whose relation matters more than their order: one value against
 another, or a complex value in the I/Q plane.

@@ -136,6 +136,7 @@ def make_files(folder: Path) -> None:
     mock_values.rabi(small=False).save(folder / "rabi_readout.lbd")
     mock_values.density_matrix(small=False).save(folder / "density_matrix.lbd")
     mock_values.single_shot_iq(small=False).save(folder / "single_shot_iq.lbd")
+    mock_values.variable_sweep(small=False).save(folder / "variable_sweep.lbd")
 
     # a library of measurements over two years (the Library's list): the viewer tests' mock library
     import mock_library
@@ -355,6 +356,16 @@ def bars3d(page: Page, url: str, ctx) -> None:
     page.locator("main:not([hidden]) .controls input[type=range]").fill("7")      # a step with an imaginary part
     page.wait_for_timeout(2000)
     save(page, VIEWER_IMG / "bars3d.png", region(page, "main:not([hidden]) .explore-stage", pad=0))
+
+
+@shot
+def explore_group_map(page: Page, url: str, ctx) -> None:
+    fresh(page, url, "Explore")
+    page.locator(".row-label", has_text="variable_sweep.lbd").first.dblclick()
+    area = page.locator("main:not([hidden])")
+    area.get_by_label("Plot type").select_option("heatmap")
+    page.wait_for_timeout(2000)
+    save(page, VIEWER_IMG / "explore_group_map.png", region(page, "main:not([hidden]) .explore-stage", pad=0))
 
 
 @shot
