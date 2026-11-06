@@ -63,3 +63,18 @@ def test_value_against_value(viewer, new_page):
     meta = frames(page, lambda: view.get_by_label("Horizontal axis").select_option("I"))
     expect(view.get_by_label("Horizontal axis")).to_have_value("I")
     assert meta["sync"]["x"].startswith("I (")
+
+
+def test_a_click_reads_a_point_and_vertical_isnt_offered(viewer, new_page):
+    shots(viewer)
+    page = new_page("Explore")
+    page.set_viewport_size({"width": 1600, "height": 900})
+    view, meta = open_scatter(page)
+    expect(view.get_by_role("button", name="Vertical")).to_have_count(0)
+    expect(view.get_by_role("button", name="Crosshair")).to_be_visible()
+    left, top, width, height = (v / meta["dpr"] for v in meta["plot"])
+    view.locator("canvas.explore-overlay").first.click(position={"x": left + width / 2, "y": top + height / 2})
+    numbers = view.locator(".cursor-numbers").first
+    expect(numbers).to_contain_text("stored at")
+    expect(numbers).to_contain_text("shot[")
+    expect(numbers).to_contain_text("Prepared state")

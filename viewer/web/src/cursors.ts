@@ -140,6 +140,7 @@ export function between(a: CursorRead, b: CursorRead): { role: string; label: st
 export const HELP: [string, string][] = [
   ["Click", "cursor 1 there, on the nearest stored point (maps: the cell)"],
   ["Shift + click", "cursor 2: a range, with differences and means"],
+  ["Arrow keys", "move the active cursor along the data (a scatter plot has no next point: they do nothing)"],
   ["Drag a cursor", "move it; a cursor on a trace stays on that trace"],
   ["Alt + click or drag", "a free position, not on the data"],
   ["Drag elsewhere", "zoom to a box (a flat box: one axis)"],

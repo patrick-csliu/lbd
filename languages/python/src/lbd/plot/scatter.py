@@ -52,6 +52,10 @@ class ScatterModel:
     equal: bool
     auto_axes: List[Tuple[str, str]]
     ylim: Optional[Tuple[Optional[float], Optional[float]]] = None
+    x_text: Tuple[str, str] = ("", "")          # what x, y and the colours are: label and stored unit
+    y_text: Tuple[str, str] = ("", "")
+    c_text: Tuple[str, str] = ("", "")
+    cf: float = 1.0                             # plot units of `cvals` per stored unit
 
 
 def _numbers(v: Any, points: Points, mode: str) -> Tuple[np.ndarray, str, str]:
@@ -107,6 +111,7 @@ def prepare_scatter(d: Any, spec: Dict[str, Any], style: Style, **kw: Any) -> Sc
         xq = _axis_quantity(style, d, x)
         yq = find_quantity(style, first.name, first.label, mode if first.dtype.startswith("complex") else None)
 
+    stored_x, stored_y = xunit, yunit
     all_x = np.concatenate([s[0] for s in raw])
     all_y = np.concatenate([s[1] for s in raw])
     if mode == "iq":  # one scale for both axes keeps the I/Q plane undistorted
@@ -125,6 +130,8 @@ def prepare_scatter(d: Any, spec: Dict[str, Any], style: Style, **kw: Any) -> Sc
 
     cvals = cnorm = cmap = groups = None
     clabel = ""
+    c_text = ("", "")
+    cf = 1.0
     c = spec.get("color")
     if c and c != "none":
         cq = _axis_quantity(style, d, c)
@@ -143,6 +150,7 @@ def prepare_scatter(d: Any, spec: Dict[str, Any], style: Style, **kw: Any) -> Sc
                 cname = c
                 cmode = cmode if cv.dtype.startswith("complex") else None
             q = find_quantity(style, cname, clab, cmode)
+            c_text = (clab, cunit)
             cf, cunit = _unit_scale(cvals, cunit, q, ys.label.auto_prefix and q.vmin is None and q.vmax is None)
             cvals = cvals * cf
             cnorm = _norm(q, cf)
@@ -162,7 +170,7 @@ def prepare_scatter(d: Any, spec: Dict[str, Any], style: Style, **kw: Any) -> Sc
         xf=xf, yf=yf, x_label=axis_label(spec.get("x_label") or xlab, xunit, xs.label.unit_format),
         y_label=axis_label(spec.get("y_label") or ylab, yunit, ys.label.unit_format), c_label=clabel,
         x_scale=spec["x_scale"], y_scale=y_scale, equal=(spec.get("options") or {}).get("equal", mode == "iq"),
-        auto_axes=auto_axes, ylim=ylim)
+        auto_axes=auto_axes, ylim=ylim, x_text=(xlab, stored_x), y_text=(ylab, stored_y), c_text=c_text, cf=cf)
 
 
 def draw_scatter(fig: Any, ax: Any, model: ScatterModel, d: Any, spec: Dict[str, Any], style: Style,

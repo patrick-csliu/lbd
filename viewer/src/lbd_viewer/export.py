@@ -44,6 +44,9 @@ def options(s: "ExploreSession") -> Dict[str, Optional[str]]:
     if s.kind == "histogram":
         why = "a histogram holds counts, not stored numbers: save it as shown"
         return {"stored": why, "both": why, "zoomed": None}
+    if s.kind == "scatter":
+        why = "a scatter plot saves its points as shown, with each one's stored index"
+        return {"stored": why, "both": why, "zoomed": None}
     stored = None
     if _operated(s) and (not s.ops_result.grid.one_to_one or s.kind != s.base_kind):
         stored = ("after these operations the points shown aren't the stored ones (e.g. an FFT or an "

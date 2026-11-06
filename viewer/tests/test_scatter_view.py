@@ -7,6 +7,7 @@ import lbd
 import lbd.plot as lp
 import mock_values
 from lbd.plot import scatter as sc
+from lbd_viewer import export, reading
 from lbd_viewer.explore import ExploreSession
 
 IQ = {"kind": "scatter", "values": ["IQ"], "complex": "iq", "color": "state", "all": ["shot"], "index": {"readout_power": 1}}
@@ -142,3 +143,93 @@ def test_a_preview_has_only_the_data(iq):
     s = session(iq, {"kind": "scatter", "values": ["Q"], "x": "I", "color": "shot"}, bare=True)
     frame(s)
     assert len(s.fig.axes) == 1
+
+
+# -- the cursor -------------------------------------------------------------------------------------
+
+def read(s, points, **kw):
+    meta = frame(s)
+    return reading.cursors(s, [{"x": x, "y": y} for x, y in points], "cross", {"xlim": meta["xlim"], "ylim": meta["ylim"]},
+                           meta["plot"][2:], **kw)
+
+
+def uneven(tmp_path):
+    """x in GHz and y in mV: units say nothing about the distance on the screen."""
+    d = lbd.Dataset()
+    d.add_axis("t", np.arange(3.0))
+    d.add_value("f", np.array([1.0e9, 1.001e9, 2.0e9]), axes="t", unit="Hz")
+    d.add_value("v", np.array([1.0e-3, 2.0e-3, 1.5e-3]), axes="t", unit="V")
+    d.save(tmp_path / "u.lbd")
+    return session(tmp_path / "u.lbd", {"kind": "scatter", "values": ["v"], "x": "f"})
+
+
+def test_a_cursor_reads_the_nearest_point_in_pixels(tmp_path):
+    s = uneven(tmp_path)
+    # 1.05 GHz, 1.9 mV: nearest the second point on the plot
+    c = read(s, [(1.05, 1.9)])["cursors"][0]
+    assert c["index"] == {"t": 1}
+    assert c["items"][0]["value"] == pytest.approx(1.001e9) and c["items"][0]["unit"] == "Hz"
+    assert c["items"][1]["value"] == pytest.approx(2.0e-3) and c["items"][1]["unit"] == "V"
+    assert "trace" not in c and "cell" not in c
+
+
+def test_it_reads_the_stored_index(iq):
+    s = session(iq, IQ)
+    meta = frame(s)
+    x, y = s.model.series[0][0][17], s.model.series[0][1][17]
+    c = read(s, [(float(x), float(y))])["cursors"][0]
+    want = {a: int(n[17]) for a, n in s.model.index[0].items()}
+    assert c["index"] == want and c["index"]["readout_power"] == 1
+    z = lbd.load(iq).values["IQ"].data[want["readout_power"], want["state"], want["shot"]]
+    assert c["items"][0]["value"] == pytest.approx(z.real) and c["items"][1]["value"] == pytest.approx(z.imag)
+    colour = c["items"][2]
+    assert colour["role"] == "series" and colour["text"] == "ground" and meta["equal"]
+
+
+def test_a_colour_value_is_read_in_stored_units(iq):
+    s = session(iq, {"kind": "scatter", "values": ["Q"], "x": "I", "color": "IQ", "complex": "abs", "all": ["shot", "state"],
+                     "index": {"readout_power": 1}})
+    c = read(s, [(float(s.model.series[0][0][3]), float(s.model.series[0][1][3]))])["cursors"][0]
+    want = abs(lbd.load(iq).values["IQ"].data[1, 0, 3])
+    assert c["items"][2]["role"] == "z" and c["items"][2]["value"] == pytest.approx(want)
+
+
+def test_two_cursors_have_delta_and_mean(iq):
+    s = session(iq, IQ)
+    a, b = (float(s.model.series[0][0][1]), float(s.model.series[0][1][1])), (float(s.model.series[0][0][9]), float(s.model.series[0][1][9]))
+    got = read(s, [a, b])
+    one, two = got["cursors"]
+    assert one["items"][0]["name"] == two["items"][0]["name"] and one["items"][0]["unit"] == two["items"][0]["unit"]
+    assert "between" not in got                         # no counts: differences come from the two readings
+
+
+def test_above_the_limit_it_still_reads_a_stored_point(many):
+    s = session(many, MANY)
+    c = read(s, [(5.0, 0.0)])["cursors"][0]
+    d = lbd.load(many)
+    assert d.values["x"].data[c["index"]["g"], c["index"]["t"]] == pytest.approx(c["items"][0]["value"])
+    assert c["items"][2]["text"] == "b"
+
+
+def test_a_cursor_keeps_to_the_points_in_view(iq):
+    s = session(iq, IQ)
+    frame(s)
+    xs = s.model.series[0][0]
+    lo, mid = float(xs.min()), float(np.median(xs))
+    (y0, y1) = s.full[1]
+    got = reading.cursors(s, [{"x": mid + 1e6, "y": 0.0}], "cross", {"xlim": [lo, mid], "ylim": [y0, y1]}, (500, 300))
+    assert got["cursors"][0]["x"] <= mid
+
+
+def test_table_has_every_shown_point(iq, tmp_path):
+    s = session(iq, IQ)
+    frame(s)
+    t = export.session_table(s)
+    assert export.column_names(t) == ["x", "IQ", "index_readout_power", "index_state", "index_shot"]
+    out = t.to_csv(tmp_path / "s.csv")
+    rows = np.loadtxt(out, delimiter=",", comments="#")
+    assert rows.shape == (400, 5) and np.allclose(rows[:, 0], s.model.series[0][0] / s.model.xf)
+    z = lbd.load(iq).values["IQ"].data
+    i = rows[:, 2:].astype(int)
+    assert np.allclose(z[i[:, 0], i[:, 1], i[:, 2]].imag, rows[:, 1])
+    assert export.options(s)["stored"] and export.options(s)["zoomed"] is None

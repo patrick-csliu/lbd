@@ -335,7 +335,7 @@ function PositionBox({ it, onSet }: { it: ReadItem; onSet: (v: number) => void }
 function CursorNumbers({ n, c, kind, type, actions }: { n: number; c: CursorRead; kind: string; type: CursorType; actions: MutableRefObject<ExploreActions | null> }) {
   const x = item(c, "x"), y = item(c, "y"), z = item(c, "z"), series = item(c, "series");
   // what can be typed: x always; y on maps and for a horizontal line; on curves y is the trace's value
-  const yEditable = kind === "heatmap" || type === "horizontal";
+  const yEditable = kind === "heatmap" || kind === "scatter" || type === "horizontal";
   const inTable = !!(c.table || c.crossings); // its value and its trace are in the table and the head
   return (
     <div className="cursor-numbers">
@@ -363,7 +363,7 @@ function CursorNumbers({ n, c, kind, type, actions }: { n: number; c: CursorRead
       )}
       {series && !inTable && (
         <div className="cursor-value muted small">
-          {series.label} = {si(series.value, series.unit)}
+          {series.label} = {series.text ?? si(series.value, series.unit)}
         </div>
       )}
       {c.stored && (

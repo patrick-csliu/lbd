@@ -2,11 +2,13 @@
 points in each pixel, counted again for each view so that zooming stays sharp.
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
 from lbd.plot import scatter as sc
+from lbd.plot import tables
+from lbd.plot.render import position_text
 
 from . import Interaction
 
@@ -79,6 +81,99 @@ class Scatter(Interaction):
         if self.bar is not None and s.model.cvals is None:
             self.bar.set_clim(1, max(int(found.total.max()), 2))
         return found.note, True
+
+    def _nearest(self, x: float, y: float, view: Dict[str, Any], size: Sequence[int]) -> Optional[Tuple[int, int]]:
+        """(series, point) of the point in view nearest (x, y) in pixels: in the numbers, not the
+        picture, so it is found above the limit too."""
+        from ..reading import nearest_point
+
+        xlo, xhi = sorted(view["xlim"])
+        ylo, yhi = sorted(view["ylim"])
+        best: Optional[Tuple[float, int, int]] = None
+        for k, (xs, ys, _) in enumerate(self.s.model.series):
+            with np.errstate(invalid="ignore"):
+                seen = np.flatnonzero((xs >= xlo) & (xs <= xhi) & (ys >= ylo) & (ys <= yhi))
+            i = nearest_point(xs[seen], ys[seen], x, y, view, size)
+            if i is None:
+                continue
+            i = int(seen[i])
+            far = self._pixels_away(xs[i], ys[i], x, y, view, size)
+            if best is None or far < best[0]:
+                best = (far, k, i)
+        return None if best is None else (best[1], best[2])
+
+    @staticmethod
+    def _pixels_away(px: float, py: float, x: float, y: float, view: Dict[str, Any], size: Sequence[int]) -> float:
+        from ..reading import _pixels
+
+        a = [_pixels(np.array([v, c], dtype=float), lim, view.get(scale, "linear"), n)
+             for v, c, lim, scale, n in ((px, x, view["xlim"], "xscale", size[0]), (py, y, view["ylim"], "yscale", size[1]))]
+        return float((a[0][0] - a[0][1]) ** 2 + (a[1][0] - a[1][1]) ** 2)
+
+    def _colour_item(self, k: int, i: int) -> Optional[Dict[str, Any]]:
+        s = self.s
+        m = s.model
+        c = s.spec.get("color")
+        if m.groups is not None:
+            step = int(m.index[k][c][i])
+            axis = s.data.axes[c]
+            return {"role": "series", "name": c, "label": axis.label or c, "unit": axis.unit, "index": step,
+                    "value": float(np.asarray(axis.data, dtype=float)[step]), "text": position_text(axis, step)}
+        if m.cvals is None:
+            return None
+        v = float(m.cvals[i])
+        return {"role": "z", "name": c, "label": m.c_text[0], "unit": m.c_text[1],
+                "value": v / m.cf if np.isfinite(v) else None}
+
+    def read(self, cursor: Dict[str, Any], kind: str, geo: Any) -> Optional[Dict[str, Any]]:
+        from ..reading import _check_point, _num
+
+        s = self.s
+        m = s.model
+        x, y = _check_point(cursor)
+        xlim, ylim, w, h, scales = geo
+        view = {"xlim": xlim, "ylim": ylim, "xscale": scales[0], "yscale": scales[1]}
+        found = self._nearest(x, y, view, (w, h))
+        if found is None:
+            return None
+        k, i = found
+        xs, ys, label = m.series[k]
+        px, py = float(xs[i]), float(ys[i])
+        items = [{"role": "x", "name": m.x_text[0], "label": m.x_text[0], "unit": m.x_text[1], "value": _num(px / m.xf)},
+                 {"role": "y", "name": m.y_text[0], "label": label if len(m.series) > 1 else m.y_text[0], "unit": m.y_text[1],
+                  "value": _num(py / m.yf)}]
+        colour = self._colour_item(k, i)
+        if colour is not None:
+            items.append(colour)
+        free = bool(cursor.get("free"))
+        return {"x": x if free else px, "y": y if free else py, "free": free, "items": items,
+                "index": {a: int(m.index[k][a][i]) for a in s.data.values[s.spec["values"][k]].axes}}
+
+    def room(self, cursor: Dict[str, Any]) -> List[Tuple[int, int]]:
+        return [(0, 0), (0, 0)]                          # no next point between scattered points
+
+    def table(self, numbers: str, view: Optional[Dict[str, Any]]) -> tables.Table:
+        """The points shown: x, each value, the colour, each point's stored index."""
+        s = self.s
+        m = s.model
+        x = m.series[0][0] / m.xf
+        same = [p for p in m.series if p[0].size == x.size]
+        columns: List[Tuple[tables.Column, tables.Rows]] = []
+        for n, (_, y, label) in enumerate(same):
+            name = s.spec["values"][n]
+            columns.append((tables.Column(name, label, m.y_text[1]), tables.Rows(y / m.yf)))
+        if m.cvals is not None:
+            columns.append((tables.Column("colour", m.c_text[0], m.c_text[1]), tables.Rows(m.cvals / m.cf)))
+        for axis in s.data.values[s.spec["values"][0]].axes:
+            columns.append((tables.Column(f"index_{axis}", f"Stored index of {axis}"), tables.Rows(m.index[0][axis].astype(float))))
+        t = tables.Table(x=x, x_col=tables.Column("x", m.x_text[0], m.x_text[1]), values=columns)
+        if view is not None:
+            ys = m.series[0][1]
+            (xlo, xhi), (ylo, yhi) = sorted(view["xlim"]), sorted(view["ylim"])
+            xs = m.series[0][0]
+            t.points = np.flatnonzero((xs >= xlo) & (xs <= xhi) & (ys >= ylo) & (ys <= yhi))
+        t.comments = tables._comments(s.data, s.spec, "shown", False)
+        return t
 
     def has_positive(self, which: str) -> bool:
         k = 0 if which == "horizontal" else 1
