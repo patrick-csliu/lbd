@@ -179,6 +179,52 @@ greyed, and says why.
 
 ### Histogram
 
+Counts how many numbers fall in each bin: the value along x, the count along y. It answers "how are
+these numbers spread?", for example single-shot readout, where the shots of each prepared state make
+a peak of their own.
+
+**Which numbers.** Every axis is either a slider (one step at a time) or **All** (all its points go in).
+One axis, or none, can be chosen under **Colour by**: an outline per step, with a legend, at most 32
+steps. To start with, a short axis with named positions gives the colours, the longest axis is All and
+the others are sliders. A variable sweep's points are always all counted: its levels have no slider
+and give no colours.
+
+**Several values** are overlaid as outlines, on the same bins, when they have the same unit. Ticking a
+value of another unit shows that value alone.
+
+**Bins.** Empty means Auto, chosen from the numbers (Freedman-Diaconis, at most 200 bins; whole numbers
+in a small range get a bin each). A number from 2 to 10000 is used as it is. Zooming shows part of the
+bins; it doesn't count again.
+
+| Control | Meaning |
+|---|---|
+| **Draw** | Filled **Bars** or an **Outline**. Several series are always outlines. |
+| **Vertical axis** | **Count**, **Fraction** of each series, or **Density** (per unit of x, so the area is 1). Changing it counts nothing again. |
+| **Log** | A logarithmic vertical axis; empty bins are left out. |
+| **Complex values** | Complex numbers are counted after this choice (magnitude, phase …). The two-dimensional count of the I/Q plane is the operation I/Q histogram. |
+
+Numbers that aren't finite are not counted, and a note says how many.
+
+**Large data.** Up to two million numbers are counted at once. More are counted in the background, part
+by part, so a file larger than memory works: a first pass finds the bins, a second counts into them,
+and the bars grow while *Counting…* says how far. Moving a slider meanwhile stops the old count. A
+result is kept, so going back to it, or another vertical axis, is immediate.
+
+**Operations and equations** come first: the numbers counted are those after them. They work on curves,
+so at least one axis must be All. The longest All axis runs along the curves, the next is a curve per
+step, and any other is taken step by step, which takes longer. The I/Q histogram makes a map, so it
+can't be counted, and is refused.
+
+**This is not the operation Histogram.** The [operation](#operations) is one step of a chain and turns
+each trace into its counts, as a curve or map you can go on working with. The plot type shows the
+numbers chosen above, with cursors made for it. Both count in the same way.
+
+**Cursors.** Only a vertical cursor: it snaps to a bin and reads the bin's range and each series' count
+and fraction, whatever the vertical axis shows. Two cursors also give the count and fraction between
+them, both end bins included. **Save as CSV** writes each bin's low and high edge and a count column per
+series; it waits until the count is done. **Open in Figure** takes these choices along. Panels of
+histograms of the same quantity follow each other's zoom along x.
+
 ### Scatter
 
 ## Reading values

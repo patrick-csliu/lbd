@@ -49,6 +49,11 @@ def test_one_number_widens_the_range():
     assert edges[0] == 2.5 and edges[-1] == 3.5 and counts.sum() == 2
 
 
+def test_numbers_differing_by_rounding_only_count_as_one():
+    edges, counts = count_bins([1.0, 1.0 + 2e-16, 1.0 + 4e-16], 14)
+    assert edges[0] == pytest.approx(0.5) and counts.sum() == 3
+
+
 def test_no_values_says_so():
     with pytest.raises(ValueError, match="no values to count"):
         count_bins([np.nan], 5)

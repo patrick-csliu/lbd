@@ -25,7 +25,7 @@ MOST_BINS = 10_000
 def count_bins(values: Any, bins: Any = 50, range: Optional[Tuple[float, float]] = None) -> Tuple[np.ndarray, np.ndarray]:
     """(edges, counts) of the finite numbers in `values`. `bins`: how many, or the edges themselves
     (then `range` is ignored, and blocks counted with the same edges simply add up). `range`: (lo, hi);
-    None: the numbers' own. lo == hi widens by 0.5 each way. As numpy: the last bin includes its
+    None: the numbers' own. lo == hi (up to rounding) widens by 0.5 each way. As numpy: the last bin includes its
     right edge; numbers outside aren't counted. Counts are int64."""
     numbers = np.asarray(values).ravel()
     if np.iscomplexobj(numbers):
@@ -40,7 +40,7 @@ def count_bins(values: Any, bins: Any = 50, range: Optional[Tuple[float, float]]
                 raise ValueError("no values to count")
             range = (float(numbers.min()), float(numbers.max()))
         lo, hi = float(range[0]), float(range[1])
-        if lo == hi:
+        if hi - lo <= 4 * bins * np.spacing(max(abs(lo), abs(hi))):      # (numbers differing by rounding only)
             lo, hi = lo - 0.5, hi + 0.5
         counts, edges = np.histogram(numbers, int(bins), (lo, hi))
     else:

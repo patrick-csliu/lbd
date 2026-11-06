@@ -134,6 +134,7 @@ def make_files(folder: Path) -> None:
     import mock_values
 
     mock_values.rabi(small=False).save(folder / "rabi_readout.lbd")
+    mock_values.single_shot_iq(small=False).save(folder / "single_shot_iq.lbd")
 
     # a library of measurements over two years (the Library's list): the viewer tests' mock library
     import mock_library
@@ -338,6 +339,22 @@ def explore_operations(page: Page, url: str, ctx) -> None:
         (2, "main:not([hidden]) .explore-host", 0, "tr"),
     ])
     save(page, VIEWER_IMG / "operations.png")
+
+
+@shot
+def explore_histogram(page: Page, url: str, ctx) -> None:
+    fresh(page, url, "Explore")
+    page.locator(".row-label", has_text="single_shot_iq.lbd").first.dblclick()
+    area = page.locator("main:not([hidden])")
+    area.get_by_label("Plot type").select_option("histogram")
+    page.wait_for_timeout(1200)
+    area.get_by_role("checkbox", name="I (V)", exact=True).check()
+    page.wait_for_timeout(1500)
+    mark(page, [
+        (1, "main:not([hidden]) .axes-choice", 0, "r"),
+        (2, "main:not([hidden]) .explore-host", 0, "tr"),
+    ])
+    save(page, VIEWER_IMG / "explore_histogram.png")
 
 
 @shot

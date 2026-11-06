@@ -27,7 +27,7 @@ Every change redraws the figure straight away. The same settings are available i
 
 | Control | Meaning |
 |---|---|
-| **Plot type** | **Curves** draws lines. **Scatter** draws markers (see [below](#common-tasks)). **Heat map** draws a colour map of a value with at least two axes that have more than one point. |
+| **Plot type** | **Curves** draws lines. **Scatter** draws markers (see [below](#common-tasks)). **Heat map** draws a colour map of a value with at least two axes that have more than one point. **Histogram** counts the values: see [below](#histogram). |
 | **Values** (curves, scatter) | Tick several values to draw them together; they share the horizontal axis. **On other axes** lists values measured over another axis; click one to plot it instead. **Numbers** lists the file's single numbers with their value. A single number isn't plotted: there is nothing to draw. A file with only single numbers shows the list instead of a figure. |
 | **Value** (heat map, I/Q scatter) | The value to show. Heat maps list values with two swept axes; the I/Q plane lists complex values. |
 | **Complex data as** | For complex values: magnitude, magnitude in dB (20·log₁₀), phase in radians or degrees, real part, imaginary part. For scatter also **I/Q plane**: real part against imaginary part, with equal scales. |
@@ -101,6 +101,17 @@ These changes are not saved until you use **Save this view to the file**
 | Quadrature against in-phase | Scatter; Values = `Q`, Horizontal axis = `I`. |
 | Readout I/Q blobs per prepared state | Scatter; Value = `IQ`, Complex data as = I/Q plane, Colour by = `prep`. |
 | Magnitude in dB | **Complex data as** → Magnitude (dB). |
+
+## Histogram
+
+**Histogram** counts how many numbers fall in each bin. It has the controls it has in Explore: **Colour by**
+(an outline per step of one axis, or None), **All of …** for each other axis (unticked: a slider), **Bins**
+(empty: Auto), **Draw** (Bars or Outline), **Vertical axis** (Count, Fraction or Density) and **Log**. Values
+of the same unit can be ticked together, as outlines. Complex values are counted after **Complex data as**.
+
+A large file is read part by part while the figure is drawn. The bars' opacity and the outlines' width are
+in the style (`figure.axes.histogram`). A saved view keeps all of this; a viewer older than this version
+says it can't draw the saved view and uses its own default plot.
 
 ## What happens when you change the plot type
 

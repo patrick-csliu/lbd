@@ -149,6 +149,13 @@ are still written as 1.2).
 <!-- plan 15c -->
 
 <!-- plan 15d -->
+- **A new plot type: Histogram, in Explore and Figure.** It counts how many numbers fall in each bin.
+  Each axis is a slider or All, one axis can give an outline per step (**Colour by**), and values of one
+  unit are overlaid. Bins Auto or a number, Bars or Outline, Count, Fraction or Density, linear or log.
+  Complex values are counted after the complex choice, and operations and equations come first. Large
+  files are counted part by part in the background, the bars growing. A cursor reads a bin's range and
+  counts; two cursors the count and fraction between them. Save as CSV and Open in Figure take it along.
+  The bars' opacity and the outlines' width are in the style.
 
 <!-- plan 15e -->
 

@@ -161,6 +161,26 @@ fig = lp.plot(d, "curve", "S21", complex="phase_deg", series="power")
 fig = lp.plot(d, "scatter", "S21", complex="iq", color="power", style="thesis")
 ```
 
+A histogram counts the numbers of a value. `all` lists the axes whose points all go in, `index` fixes
+the others, `color` gives an outline per step of one axis (or `"none"`), and `options` holds the bins
+(`"auto"` or a number), `hist_style` (`"bars"`, `"outline"`) and `hist_y` (`"count"`, `"fraction"`,
+`"density"`). A large file opened with `lbd.open` is counted part by part.
+
+```python
+fig = lp.plot(d, "histogram", "S21", complex="db", all=["freq"], index={"power": 0})
+fig = lp.plot(d, "histogram", "S21", complex="db", color="none", all=["freq", "power"],
+              options={"bins": 40, "hist_style": "outline", "hist_y": "density"})
+```
+
+To count numbers of your own, `count_bins` does what the plot does:
+
+```python
+from lbd.plot.histogram import auto_bins, count_bins
+
+numbers = np.abs(d["S21"].data).ravel()
+edges, counts = count_bins(numbers, auto_bins(numbers))
+```
+
 Annotations (lines, text, arrows, shapes) can be passed the same way, or stored in the file's
 saved view with `lbd.set_plot`, so the viewer draws them too. They use the units shown on the
 axes, so fix the prefix of those axes ([details](../styles/plot-settings.md#annotations)):
