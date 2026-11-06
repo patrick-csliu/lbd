@@ -55,6 +55,14 @@ def test_links_open_a_section_and_a_narrow_window_has_tabs(viewer, new_page):
     assert page.evaluate("document.querySelector('.settings-main').scrollWidth <= document.querySelector('.settings-main').clientWidth")
 
 
+def test_the_version_is_in_settings_not_the_header(new_page):
+    page = new_page()
+    expect(page.locator(".version")).to_have_count(0)
+    about = open_settings(page, "About")
+    expect(about.locator("[data-setting='about.version']")).to_contain_text(re.compile(r"\d+\.\d+"))
+    expect(about.locator("[data-setting='about.format']")).to_contain_text(re.compile(r"\d+\.\d+"))
+
+
 def test_the_limit_of_a_cursor_line_is_a_setting(new_page):
     page = new_page()
     box = open_settings(page, "Explore").get_by_label("Most traces marked at a cursor line")

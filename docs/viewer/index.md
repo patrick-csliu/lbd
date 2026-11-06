@@ -74,6 +74,7 @@ Esc, **×** or a click beside the dialog closes it. A link can open a section:
 | **Files sidebar** | What the [Files sidebar](folders-and-files.md#the-files-sidebar) of Explore and Figure can list besides the Library selection: Folders, Starred, Recent. |
 | **Explore** | How many visible traces a vertical or horizontal cursor marks at its line, at most (more can make each cursor move slow) |
 | **Memory** | How much memory to leave free for the rest of the computer, an optional most to use, and how much disk the summaries of large data may take ([Large files](../getting-started/large-files.md#large-files-in-lbd-viewer)). |
+| **About** | The viewer's version and the file format's. |
 | **Measurements** | What the status line of a file being measured shows (time left, percentage, points, the slow outer axes; or nothing), and a browser notification when a measurement finishes or stops while the viewer is in the background (off at first; the browser asks once) ([Writing while measuring](../getting-started/writing-while-measuring.md)). |
 
 The Library's own choices (its columns, the sidebar's layout) are made where they are used.

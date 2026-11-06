@@ -15,7 +15,7 @@ import { PreviewSettings } from "./LibraryPage";
 import { Segmented, Setting, SettingsGroup, Switch } from "./settingsUi";
 import { useToast } from "./toast";
 
-export type SettingsSection = "general" | "library" | "sidebar" | "explore" | "memory" | "measurements";
+export type SettingsSection = "about" | "general" | "library" | "sidebar" | "explore" | "memory" | "measurements";
 
 /** The sections, and for "Find a setting" every setting in them: its name and the words it is
  * found by (its help, and other words people use). */
@@ -69,6 +69,14 @@ export const SECTIONS: { id: SettingsSection; title: string; settings: { id: str
       { id: "measurements.points", name: "Points measured", words: "progress" },
       { id: "measurements.axes", name: "Slow axes", words: "progress power" },
       { id: "measurements.notify", name: "Notify me when a measurement ends", words: "notification finished stopped background browser" },
+    ],
+  },
+  {
+    id: "about",
+    title: "About",
+    settings: [
+      { id: "about.version", name: "LBD Viewer", words: "version release number" },
+      { id: "about.format", name: "File format", words: "version lbd format" },
     ],
   },
 ];
@@ -226,9 +234,11 @@ export function SettingsDialog({
               ))}
             </div>
           )}
+          {section !== "about" && (
           <button className="link small settings-reset" onClick={reset} disabled={!changed.has(section)} title={changed.has(section) ? undefined : "Every setting here is at its default"}>
             Reset this section…
           </button>
+          )}
         </nav>
         <div className="settings-main" ref={body} role="tabpanel" aria-label={title}>
           <h3>{title}</h3>
@@ -270,6 +280,16 @@ export function SettingsDialog({
           {section === "explore" && <ExploreSettings settings={state.explore} onSettings={onSettings} />}
           {section === "memory" && <MemorySettings settings={state.memory} onSettings={onSettings} />}
           {section === "measurements" && <MeasurementSettings settings={state.measurements} onSettings={onSettings} />}
+          {section === "about" && (
+            <SettingsGroup title="Versions">
+              <Setting id="about.version" name="LBD Viewer">
+                <span>{state.version}</span>
+              </Setting>
+              <Setting id="about.format" name="File format">
+                <span>{state.lbd_version}</span>
+              </Setting>
+            </SettingsGroup>
+          )}
         </div>
       </div>
       {confirm && <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />}

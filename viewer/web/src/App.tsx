@@ -885,7 +885,6 @@ function Shell() {
             </button>
           ))}
         </nav>
-        <div className="version">{state ? `v${state.version} · format ${state.lbd_version}` : ""}</div>
         <nav className="pages secondary" aria-label="Settings pages">
           {(
             [

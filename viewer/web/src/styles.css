@@ -88,7 +88,7 @@ textarea { font-family: var(--mono); font-size: 12.5px; width: 100%; resize: ver
 .pages { display: flex; gap: 2px; }
 .pages button { border: none; background: none; padding: 12px 10px; border-radius: 0; border-bottom: 2px solid transparent; color: var(--muted); }
 .pages button.active { color: var(--text); border-bottom-color: var(--accent); }
-.version { margin-left: auto; color: var(--muted); font-size: 12px; }
+.pages.secondary { margin-left: auto; }
 .page { flex: 1; display: grid; grid-template-columns: var(--sidebar-width, 300px) 1fr; min-height: 0; position: relative; }
 .page.single { display: block; overflow: auto; }
 .page.no-folders { grid-template-columns: 1fr; }
@@ -303,7 +303,6 @@ td.num { font-variant-numeric: tabular-nums; }
   .plot-area, .editor-body, .styles-page { grid-template-columns: 1fr; }
   .styles-page .styles-preview { position: static; }
   .topbar { gap: 8px; }
-  .version { display: none; }
 }
 
 /* ---- nested style form (Figure > Axes > ...) ---- */

@@ -133,6 +133,7 @@ are still written as 1.2).
 - **Library: a more useful Pictures view.** **Name** and **Date** sort the pictures (one order with
   the list), and **⋯** chooses what each picture shows: its title or file name, and any of the
   fields, such as sweep size, project or tags.
+- **The version is in Settings → About**, no longer in the header.
 - **Explore: the preview tab's name** (one click, in italics) is at the same height as the other
   tabs' names; it took the Library preview's margins before.
 - **Explore: a map's colours can mean the same at every slider position.** Display → Colour →
