@@ -50,7 +50,7 @@ from .library import LibraryIndex, writing_status  # noqa: E402
 from .previews import PreviewCache, PreviewError, Previewer  # noqa: E402
 from . import live, memory, reading, summaries  # noqa: E402
 from . import export as csv_export  # noqa: E402
-from .explore import ExploreClosed, ExploreError, ExploreSession, Sessions  # noqa: E402
+from .explore import KINDS as EXPLORE_KINDS, ExploreClosed, ExploreError, ExploreSession, Sessions  # noqa: E402
 from .pages import PageError, Pages, UnknownPage  # noqa: E402
 from .config import (MEMORY_DEFAULTS, Config, ConfigError, Style, StyleError, _same_path, from_dict,  # noqa: E402
                      previews_mode, section_defaults)
@@ -455,6 +455,11 @@ class ExploreSpecBody(_Body):
 class ExplorePickBody(_Body):
     x: float                              # a pixel of the last picture (top-left origin)
     y: float
+
+
+class KindsBody(_Body):
+    path: str
+    spec: Optional[Dict[str, Any]] = None
 
 
 class CursorsBody(_Body):
@@ -1307,6 +1312,25 @@ def create_app(state: AppState) -> FastAPI:
         except KeyError:
             raise HTTPException(404, "this Explore view was closed on the server (unused for a while, or the "
                                      "viewer restarted); it reopens by itself")
+
+    @app.post("/api/kinds")
+    def plot_kinds(body: KindsBody):
+        """The plot types for a file, from its header (no data is read): for each, `why` it can't
+        draw the first value (None: it can), the values it can draw, and whether Explore shows it."""
+        p = state.check_allowed(body.path)
+        if not p.is_file():
+            raise HTTPException(404, f"not a file: {body.path}")
+        d = rnd.flat(lbd.info(p))
+        names = list(d.values)
+        asked = (body.spec or {}).get("values") or []
+        first = next((n for n in asked if n in d.values), None) or next(
+            (n for n in names if len(d.values[n].shape) > 0), names[0] if names else None)
+        out = []
+        for k in rnd.kinds.KINDS.values():
+            why = k.fits(d, first) if first else "this file has no values"
+            out.append({"name": k.name, "title": k.title, "why": why, "explore": k.name in EXPLORE_KINDS,
+                        "values": [n for n in names if k.fits(d, n) is None]})
+        return {"kinds": out}
 
     @app.post("/api/explore")
     def explore_open(body: ExploreBody):

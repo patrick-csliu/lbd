@@ -1,3 +1,5 @@
+import { kindOf } from "./plotKinds";
+import { PlotKindSelect } from "./PlotKindSelect";
 import { MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, AxisValues, baseName, figurePng, FileInfo, formatBytes, Json, JsonObject, lastDownloadWarnings, PlotSpec, RenderResult, Slice, TabState, ValueInfo } from "./api";
 import { deepMerge, isEmptyObject } from "./util";
@@ -514,6 +516,7 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
   if (!resolved) return <div className="controls muted small">Preparing…</div>;
 
   const kind = resolved.kind ?? "auto";
+  const KindControls = kindOf(kind).controls;
   const valuesByName = Object.fromEntries(info.values.map((v) => [v.name, v]));
   const selected = resolved.values ?? [];
   const first = valuesByName[selected[0]];
@@ -547,10 +550,11 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
   // Another value on its own: it brings its own axes, so the axis choices start afresh.
   const fresh: PlotSpec = { x: undefined, y: undefined, series: undefined, color: undefined, index: {} };
   const switchTo = (name: string) => update({ ...fresh, values: [name] });
-  const chooseKind = (k: string) => {
+  const chooseKind = (k: string, drawable: string[] | null) => {
+    const can = (v: ValueInfo) => (drawable ? drawable.includes(v.name) : fits(v, k));
     const now = valuesByName[selected[0]];
-    const value = now && fits(now, k) ? undefined : info.values.find((v) => fits(v, k));
-    update(value ? { ...fresh, kind: k as PlotSpec["kind"], values: [value.name] } : { kind: k as PlotSpec["kind"] });
+    const value = now && can(now) ? undefined : info.values.find(can);
+    update(value ? { ...fresh, kind: k, values: [value.name] } : { kind: k });
   };
   const axisName = (v: ValueInfo) => v.axes.filter((a) => lengthOf(a) > 1).map((a) => info.axes.find((x) => x.name === a)?.label || a).join(" × ") || v.axes.join(", ");
 
@@ -605,11 +609,7 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
         </legend>
         <label className="field">
           <span>Plot type</span>
-          <select value={kind} onChange={(e) => chooseKind(e.target.value)}>
-            <option value="curve">Curves</option>
-            <option value="scatter">Scatter</option>
-            <option value="heatmap">Heat map</option>
-          </select>
+          <PlotKindSelect path={info.path} value={kind} first={selected[0]} page="figure" onChoose={chooseKind} />
         </label>
 
         {kind === "curve" || (kind === "scatter" && resolved.complex !== "iq") ? (
@@ -720,6 +720,7 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
             </select>
           </label>
         )}
+        {KindControls && <KindControls info={info} spec={resolved} resolved={resolved} update={update} page="figure" />}
         {kind !== "scatter" && firstAxes.length > 0 && (
           <label className="field">
             <span>Horizontal axis</span>

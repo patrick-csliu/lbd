@@ -67,3 +67,35 @@ def test_a_panel_without_axes_to_share_has_no_sync(tmp_path, monkeypatch):
     s = session(tmp_path, {"kind": "heatmap", "x": "a", "y": "b"})
     monkeypatch.setattr(type(s.view), "syncs", False)
     assert s.sync_keys() == {}
+
+
+def kinds_of(client, path, spec=None):
+    r = client.post("/api/kinds", json={"path": str(path), "spec": spec or {}})
+    r.raise_for_status()
+    return {k["name"]: k for k in r.json()["kinds"]}
+
+
+@pytest.fixture()
+def file_with_two(data_dir):
+    d = lbd.Dataset(title="two")
+    d.add_axis("a", [1.0, 2.0, 3.0])
+    d.add_axis("b", [1.0, 2.0])
+    d.add_value("line", [1.0, 2.0, 3.0], axes="a")
+    d.add_value("map", np.arange(6.0).reshape(3, 2), axes=["a", "b"])
+    d.save(data_dir / "two.lbd")
+    return data_dir / "two.lbd"
+
+
+def test_kinds_says_why_not(client, file_with_two):
+    k = kinds_of(client, file_with_two, {"values": ["line"]})
+    assert k["curve"]["why"] is None and "2 dimensions" in k["heatmap"]["why"]
+    assert k["curve"]["explore"] and not k["scatter"]["explore"]
+
+
+def test_kinds_lists_the_values_that_fit(client, file_with_two):
+    assert kinds_of(client, file_with_two)["heatmap"]["values"] == ["map"]
+
+
+def test_kinds_reads_no_data(client, file_with_two, monkeypatch):
+    monkeypatch.setattr(lbd, "load", lambda *a, **k: pytest.fail("data was read"))
+    kinds_of(client, file_with_two)

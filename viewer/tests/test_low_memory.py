@@ -46,7 +46,7 @@ def test_every_file_opens_and_previews_with_no_free_memory(monkeypatch, tmp_path
         try:
             s = open_quietly(p)
         except ExploreError as e:                       # a saved scatter view goes to Figure (on purpose)
-            assert "scatter" in str(e), (p, e)
+            assert "scatter" in str(e).lower(), (p, e)
             s = open_quietly(p, saved_view=False)
         assert not s.summarised, p
         assert s.take_notes() == [], p                 # nothing to tell about small files

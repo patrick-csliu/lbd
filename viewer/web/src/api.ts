@@ -494,7 +494,7 @@ export interface StyleFileInfo {
 }
 
 export interface PlotSpec {
-  kind?: "auto" | "curve" | "heatmap" | "scatter";
+  kind?: string; // auto, or a plot type (plotKinds.ts)
   values?: string[];
   complex?: string;
   x?: string;
@@ -511,6 +511,17 @@ export interface PlotSpec {
   /** Extra matplotlib drawing: {"method": "axvline", "args": [...], "kwargs": {...}} or {"patch": "Rectangle", ...} */
   annotations?: JsonObject[];
   slices?: Slice[];
+  all?: string[]; // axes whose points all go in (no slider)
+  options?: JsonObject; // a plot type's own choices
+}
+
+/** A plot type for a file (POST /api/kinds): `why` it can't draw the first value, the values it can. */
+export interface KindInfo {
+  name: string;
+  title: string;
+  why: string | null;
+  values: string[];
+  explore: boolean;
 }
 
 export interface RenderResult {
@@ -636,7 +647,7 @@ export type ReduceStat = "max" | "min" | "mean";
 export interface ExploreOpen {
   session: string;
   spec: PlotSpec;
-  kind: "curve" | "heatmap";
+  kind: string;
   preset: string;
   full: [[number, number], [number, number]]; // the whole data: x and y limits
   warnings: string[];
@@ -663,7 +674,8 @@ export interface ExploreFrameMeta {
   ops?: OpsInfo | null; // the operations' state (operations.py), when there are any
   hidden?: string[]; // what the scales hide (points ≤ 0 on a log scale, …): kept on screen
   empty?: string | null; // nothing can be shown, and why
-  sync?: SyncKeys; // what panels must share to follow each other's zoom
+  sync?: SyncKeys | Record<string, never>; // what panels must share to follow each other's zoom; empty: nothing to share
+  strips?: "cuts" | "histograms" | null; // beside the plot, for this picture
   /** A map with a slider: where its colour range comes from, and while every slice's range is
    *  worked out (crange.py) how far it is, or why it failed. */
   crange?: { from: "slice" | "all"; state?: "working" | "failed"; fraction?: number; slices?: number; error?: string | null } | null;
@@ -841,8 +853,8 @@ export const api = {
   exploreRender,
   exploreClose: (session: string) => call<{ ok: boolean }>("DELETE", `/api/explore/${encodeURIComponent(session)}`),
   /** Cursors snapped to the stored data, their read-outs and (maps) the cuts through cursor 1. */
-  exploreCursors: (
-    session: string,
+  kinds: (path: string, spec: PlotSpec) => call<{ kinds: KindInfo[] }>("POST", "/api/kinds", { path, spec }),
+  exploreCursors: (    session: string,
     body: { cursors: CursorAsk[]; type: CursorType; xlim: number[]; ylim: number[]; width: number; height: number; cuts: boolean; every: boolean; at_line: AtLine; together: boolean },
   ) => call<CursorsAnswer>("POST", `/api/explore/${encodeURIComponent(session)}/cursors`, body),
   /** Where the max, min or peak (farthest from the median) is, in a range of the stored data. */

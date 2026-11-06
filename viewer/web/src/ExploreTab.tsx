@@ -5,6 +5,8 @@ import { api, CursorsAnswer, ExploreFrameMeta, ExploreOpen, FileInfo, OpsInfo, P
 import Operations from "./Operations";
 import Contrast from "./Contrast";
 import CursorPanel, { OtherPanel } from "./CursorPanel";
+import { kindOf } from "./plotKinds";
+import { PlotKindSelect } from "./PlotKindSelect";
 import { CursorsState, NO_CURSORS } from "./cursors";
 import ExploreView, { ExploreActions, Follow, View, ViewSettings } from "./ExploreView";
 import ExportDialog, { ExportSource } from "./ExportDialog";
@@ -149,7 +151,7 @@ function startSpec(info: FileInfo): PlotSpec {
   const out: PlotSpec = {};
   const saved = info.plot ?? {};
   for (const k of START_KEYS) if (saved[k] !== undefined) (out as Record<string, unknown>)[k] = saved[k];
-  if (out.kind === "scatter" || out.kind === "auto") delete out.kind; // Explore shows curves and maps
+  if (out.kind === "auto" || !kindOf(out.kind).explore) delete out.kind; // the types Explore shows
   if (out.complex === "iq") delete out.complex;
   return out;
 }
@@ -1125,9 +1127,6 @@ function Section({ name, title, badge, open, onToggle, children }: { name: strin
   );
 }
 
-/** Axes of a value with more than one point (the ones that can be drawn along). */
-const swept = (info: FileInfo, v: ValueInfo) => v.axes.filter((a, i) => v.shape[i] > 1 && info.axes.some((x) => x.name === a));
-
 function ExploreControls({ heading, info, resolved, settings, updateSpec, updateSettings, children, contrast, listOpen, onListOpen, opsInfo, calculate, onValueMenu, stat, onStat, failed, onOpenInFigure, crange }: ControlsProps) {
   const [sections, setSection] = useSections();
   if (!resolved)
@@ -1142,6 +1141,7 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
     );
   const r = resolved.spec;
   const kind = resolved.kind;
+  const Controls = kindOf(kind).controls;
   const values = r.values ?? [];
   const first = info.values.find((v) => v.name === values[0]);
   const byName = new Map(info.values.map((v) => [v.name, v]));
@@ -1150,7 +1150,6 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
     return a ? a.label || a.name : name;
   };
   const plottable = info.values.filter((v) => v.shape.length > 0);
-  const canMap = !!first && swept(info, first).length >= 2;
   const anyComplex = values.some((n) => byName.get(n)?.complex);
   // a value's unit as plotted (complex values: as the complex mode makes it)
   const unitOf = (v: ValueInfo) => (v.complex ? `${r.complex ?? "abs"} of ${v.unit}` : v.unit);
@@ -1179,12 +1178,7 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
       <Section name="data" title="Data" open={!!sections.data} onToggle={setSection}>
       <label className="field">
         <span>Plot</span>
-        <select aria-label="Plot type" value={kind} onChange={(e) => updateSpec({ kind: e.target.value as PlotSpec["kind"], x: undefined, y: undefined, series: undefined })}>
-          <option value="curve">Curves</option>
-          <option value="heatmap" disabled={!canMap}>
-            Map{canMap ? "" : " (needs 2 swept axes)"}
-          </option>
-        </select>
+        <PlotKindSelect path={info.path} value={kind} first={first?.name} page="explore" onChoose={(k) => updateSpec({ kind: k, x: undefined, y: undefined, series: undefined })} />
       </label>
 
       <fieldset className="field">
@@ -1250,6 +1244,8 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
           )}
         </div>
       </div>
+
+      {Controls && <Controls info={info} spec={r} resolved={r} update={updateSpec} settings={settings} updateSettings={updateSettings} page="explore" />}
 
       {kind === "curve" && values.length === 1 && others.length > 0 && (
         <label className="field">

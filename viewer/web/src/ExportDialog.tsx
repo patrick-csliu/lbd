@@ -11,7 +11,7 @@ import { HelpLink } from "./help";
 export interface ExportSource {
   session: string;
   view: { xlim: number[]; ylim: number[] } | null;
-  kind: "curve" | "heatmap";
+  kind: string;
   file: string; // the data file: the Save dialog starts in its folder
   name?: string; // the panel's name, for "left out: ..."
   cut?: ExportCut; // a row, column or trace through the cursor, instead of what the panel shows

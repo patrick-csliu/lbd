@@ -18,7 +18,7 @@ import { ContextMenu, MenuAt, MenuEntry } from "./menu";
  */
 
 interface Props {
-  kind: "curve" | "heatmap";
+  kind: string;
   /** The horizontal axis' name, and the traces' axis (a map's vertical axis, or one curve per …). */
   xLabel: string;
   tracesLabel: string | null;
@@ -355,7 +355,7 @@ function PointsBox({ value, odd, onSet }: { value: number; odd: boolean; onSet: 
 
 /** The equation fields, after the operations, with the legend of names above them. */
 function Equations({ kind, equations, info, on, onChange }: {
-  kind: "curve" | "heatmap";
+  kind: string;
   equations: { x?: string; y?: string; z?: string };
   info: OpsInfo | null;
   on: boolean;

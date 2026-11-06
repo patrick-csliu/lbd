@@ -12,6 +12,7 @@ import {
   useState,
 } from "react";
 import NumberRange from "./NumberRange";
+import { kindOf } from "./plotKinds";
 import {
   api,
   ApiError,
@@ -67,6 +68,7 @@ type Lim = [number, number];
 export interface View {
   xlim: Lim;
   ylim: Lim;
+  [more: string]: unknown; // what a plot type adds to a view (3D bars: the angle)
 }
 
 /** How the data is shown, never what (explore.py `apply`): kept in LBD's database, not the file. */
@@ -133,8 +135,9 @@ function shiftRange(lim: Lim, by: number, scale: string): Lim {
   return [back(scale, fwd(scale, lim[0]) + by), back(scale, fwd(scale, lim[1]) + by)];
 }
 
+const moreOf = (v: View) => Object.fromEntries(Object.entries(v).filter(([k]) => k !== "xlim" && k !== "ylim"));
 const same = (a: View | null, b: View | null) =>
-  !!a && !!b && a.xlim[0] === b.xlim[0] && a.xlim[1] === b.xlim[1] && a.ylim[0] === b.ylim[0] && a.ylim[1] === b.ylim[1];
+  !!a && !!b && JSON.stringify(moreOf(a)) === JSON.stringify(moreOf(b)) && a.xlim[0] === b.xlim[0] && a.xlim[1] === b.xlim[1] && a.ylim[0] === b.ylim[0] && a.ylim[1] === b.ylim[1];
 
 
 interface Props {
@@ -338,7 +341,7 @@ export default function ExploreView({
   const onCrangeRef = useRef(onCrange);
   onCrangeRef.current = onCrange;
   const crangeTimer = useRef(0);
-  const kindRef = useRef<"curve" | "heatmap" | null>(null);
+  const kindRef = useRef<string | null>(null);
   kindRef.current = opened?.kind ?? null;
   const readingRef = useRef<CursorsAnswer | null>(null); // the cursors on screen: the last answer
   const answered = useRef(""); // cursorsKey of the last answer: an echo of it asks nothing
@@ -538,6 +541,7 @@ export default function ExploreView({
     api
       .exploreRender(sid, {
         ...view,
+        ...(v ? moreOf(v) : {}),
         stat: statRef.current,
         format: formatRef.current,
         settings: settingsRef.current,
@@ -574,7 +578,7 @@ export default function ExploreView({
         }
         onViewRef.current({ xlim: f.meta.xlim, ylim: f.meta.ylim });
         onOpsInfoRef.current(f.meta.ops ?? null);
-        if (f.meta.sync) onSyncRef.current?.({ ...f.meta.sync, full: f.meta.full });
+        if (f.meta.sync?.x !== undefined) onSyncRef.current?.({ ...(f.meta.sync as SyncKeys), full: f.meta.full });
         onCrangeRef.current?.(f.meta.crange ?? null);
         if (f.meta.crange?.state === "working" && !crangeTimer.current) {
           // every slice's colour range is being worked out: the same view again in a moment
@@ -637,7 +641,7 @@ export default function ExploreView({
   const askCursors = useCallback((at: CursorAsk[], m: Mapping): Promise<void> => {
     const sid = session.current, st = cursorsRef.current, gone = cursorsGone.current;
     if (!sid || !at.length) return Promise.resolve();
-    const cuts = st.cuts && kindRef.current === "heatmap";
+    const cuts = st.cuts && !!kindOf(kindRef.current).strips;
     return api
       .exploreCursors(sid, { cursors: at, type: st.type, xlim: m.view.xlim, ylim: m.view.ylim, width: m.plot[2], height: m.plot[3], cuts, every: st.every !== false, at_line: st.at_line ?? "interpolated", together: !!st.together })
       .then((a) => {
@@ -809,7 +813,8 @@ export default function ExploreView({
   // first, the picture half a second later). A picture that takes long doesn't hold it up.
   const firstValueNow = info.values.find((v) => v.name === (spec.values ?? [])[0]) ?? info.values.find((v) => v.shape.length > 0);
   const kindOfPanel = opened?.kind ?? spec.kind ?? (firstValueNow && firstValueNow.shape.filter((n) => n > 1).length >= 2 ? "heatmap" : "curve");
-  const wantCuts = kindOfPanel === "heatmap" && cursors.cuts && cursors.on;
+  const stripsNow = meta?.strips !== undefined && opened?.kind === kindOfPanel ? meta.strips : kindOf(kindOfPanel).strips;
+  const wantCuts = !!stripsNow && cursors.cuts && cursors.on;
   const [shownCuts, setShownCuts] = useState(wantCuts);
   const cutsChange = useRef<{ want: boolean; w: number; h: number; timer: number } | null>(null);
   const cutsKind = useRef(kindOfPanel);
@@ -1288,7 +1293,7 @@ export default function ExploreView({
       const ay = c ? c.y : back(m.yscale, (fwd(m.yscale, v.ylim[0]) + fwd(m.yscale, v.ylim[1])) / 2);
       setView({ xlim: zoomRange(v.xlim, ax, f, m.xscale), ylim: zoomRange(v.ylim, ay, f, m.yscale) });
     } else if (k === "Home" || k === "0") setView(null);
-    else if ((k === "c" || k === "C") && kindRef.current === "heatmap") onCursorsRef.current({ ...st, cuts: !st.cuts });
+    else if ((k === "c" || k === "C") && stripsNow) onCursorsRef.current({ ...st, cuts: !st.cuts });
     else if (k === "k" || k === "K") onCursorsRef.current({ ...st, on: !st.on });
     else if (k === "Escape") {
       if (box.current) {
@@ -1337,10 +1342,10 @@ export default function ExploreView({
             <Icon name="limits" />
           </button>
         )}
-        {opened?.kind === "heatmap" && (
+        {opened && stripsNow && (
           <button
             className="ib"
-            aria-label="Cuts"
+            aria-label={stripsNow === "histograms" ? "Histograms" : "Cuts"}
             aria-pressed={cursors.cuts}
             disabled={!cursors.on}
             onClick={() => onCursorsRef.current({ ...cursorsRef.current, cuts: !cursorsRef.current.cuts })}
@@ -1477,7 +1482,7 @@ export default function ExploreView({
             {meta.empty}
           </div>
         )}
-        <canvas ref={picture} className={"explore-picture " + (opened?.kind ?? "")} style={cssSize} />
+        <canvas ref={picture} className={"explore-picture " + (opened?.kind ?? "") + (opened && opened.kind !== "curve" && kindOf(opened.kind).darkInverted ? " curve" : "")} style={cssSize} />
         {mouse && <span className="mouse-at small">x = {fmt(mouse[0])}, y = {fmt(mouse[1])}</span>}
         <canvas
           ref={overlay}

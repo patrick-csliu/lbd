@@ -2,6 +2,7 @@ import { KeyboardEvent, MutableRefObject, useEffect, useState } from "react";
 import { api, ApiError, CursorRead, CursorsAnswer, CursorType, ReadItem, TraceStep } from "./api";
 import { between, columnSi, CursorsState, item, si } from "./cursors";
 import { ExploreActions } from "./ExploreView";
+import { kindOf } from "./plotKinds";
 import { Segmented } from "./settingsUi";
 import { useToast } from "./toast";
 
@@ -12,7 +13,7 @@ import { useToast } from "./toast";
  */
 
 interface Props {
-  kind: "curve" | "heatmap";
+  kind: string;
   cursors: CursorsState;
   onCursors: (c: CursorsState) => void;
   reading: CursorsAnswer | null;
@@ -380,7 +381,7 @@ export default function CursorPanel({ kind, cursors, onCursors, reading, actions
   // on the plot then does nothing); choosing a type brings the same cursors back.
   const types = (
     <div className="segmented" role="group" aria-label="Cursor type">
-      {TYPES.map(([t, text, tip]) => {
+      {TYPES.filter(([t]) => kindOf(kind).cursorTypes.includes(t)).map(([t, text, tip]) => {
         const chosen = cursors.on && cursors.type === t;
         return (
           <button
@@ -465,7 +466,7 @@ export default function CursorPanel({ kind, cursors, onCursors, reading, actions
         </table>
       )}
       {c1 && others.length > 0 && <OtherPanels others={others} two={!!c2} />}
-      <div className="cursor-find" role="group" aria-label="Move cursor 1 to the highest, lowest or farthest value">
+      {kindOf(kind).findButtons && <div className="cursor-find" role="group" aria-label="Move cursor 1 to the highest, lowest or farthest value">
         <span className="small">Move cursor 1 to:</span>
         <span className="cursor-find-buttons">
           <button onClick={act((a) => a.find("max"))} title="The highest stored value. Key M">
@@ -482,7 +483,7 @@ export default function CursorPanel({ kind, cursors, onCursors, reading, actions
           {c1 && c2 ? "Between the cursors" : "In what is in view"}
           {kind === "curve" && c1 ? `, on ${c1.label ?? "the cursor's trace"}` : ""}. Peak: farthest from the median, a dip or a spike.
         </div>
-      </div>
+      </div>}
       {kind === "heatmap" && (
         <>
           <div className="row-controls">
