@@ -520,13 +520,13 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
   const valuesByName = Object.fromEntries(info.values.map((v) => [v.name, v]));
   const selected = resolved.values ?? [];
   const first = valuesByName[selected[0]];
-  const firstAxes = first?.axes ?? [];
+  const firstAxes = resolved.levels?.slice(-2) ?? first?.axes ?? []; // a variable sweep's map: its two inner levels
   const anyComplex = selected.some((n) => valuesByName[n]?.complex);
   // values with exactly the same axes as the first one: usable point by point in scatter plots
   const sameShape = info.values.filter((v) => v.axes.length > 0 && v.axes.join(",") === firstAxes.join(","));
   const axisLabel = (name: string) => {
     const a = info.axes.find((x) => x.name === name);
-    return a ? `${a.label}${a.unit ? ` (${a.unit})` : ""}` : name;
+    return a ? `${a.label.replace(/ \(point number\)$/, resolved.levels ? "" : " (point number)")}${a.unit ? ` (${a.unit})` : ""}` : name;
   };
 
   const toggleValue = (name: string, checked: boolean) => {

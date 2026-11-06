@@ -24,6 +24,8 @@ interface Props {
   others?: OtherPanel[];
   /** Save the row, column or trace through cursor 1 as CSV. */
   onSaveCut: (which: "row" | "column" | "trace") => void;
+  /** A map of a variable sweep: its rows and columns aren't whole lines of a grid. */
+  noCutOut?: boolean;
   /** The data file: where the table at a cursor line says it comes from. */
   file: { path: string; name: string; id?: string | null };
 }
@@ -368,7 +370,8 @@ function CursorNumbers({ n, c, kind, type, actions }: { n: number; c: CursorRead
   );
 }
 
-export default function CursorPanel({ kind, cursors, onCursors, reading, actions, onBack, others = [], onSaveCut, file }: Props) {
+export default function CursorPanel({ kind, cursors, onCursors, reading, actions, onBack, others = [], onSaveCut, noCutOut = false, file }: Props) {
+  const later = noCutOut ? "Not on a variable sweep yet" : "";
   const list = reading?.cursors ?? [];
   const [c1, c2] = [list[0] ?? null, list[1] ?? null];
   const act = (fn: (a: ExploreActions) => void) => () => actions.current && fn(actions.current);
@@ -487,18 +490,18 @@ export default function CursorPanel({ kind, cursors, onCursors, reading, actions
       {kind === "heatmap" && (
         <>
           <div className="row-controls">
-            <button disabled={!c1} onClick={act((a) => a.showCut("row"))} title="This tab then shows the row as a curve">
+            <button disabled={!c1 || noCutOut} onClick={act((a) => a.showCut("row"))} title={later || "This tab then shows the row as a curve"}>
               Row as curve
             </button>
-            <button disabled={!c1} onClick={act((a) => a.showCut("column"))} title="This tab then shows the column as a curve">
+            <button disabled={!c1 || noCutOut} onClick={act((a) => a.showCut("column"))} title={later || "This tab then shows the column as a curve"}>
               Column as curve
             </button>
           </div>
           <div className="row-controls">
-            <button disabled={!c1} onClick={() => onSaveCut("row")} title="The row through the cursor as a CSV file">
+            <button disabled={!c1 || noCutOut} onClick={() => onSaveCut("row")} title={later || "The row through the cursor as a CSV file"}>
               Save row as CSV…
             </button>
-            <button disabled={!c1} onClick={() => onSaveCut("column")} title="The column through the cursor as a CSV file">
+            <button disabled={!c1 || noCutOut} onClick={() => onSaveCut("column")} title={later || "The column through the cursor as a CSV file"}>
               Save column as CSV…
             </button>
           </div>

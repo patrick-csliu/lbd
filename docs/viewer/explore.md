@@ -171,6 +171,19 @@ greyed, and says why.
 
 ### Map
 
+A value on two swept axes. A **variable sweep** (an axis group, where the inner points depend on the
+outer ones) is a map too, with its real coordinates:
+
+- **Rows:** each outer point is a strip, and each stored point in it owns a cell reaching halfway to
+  its neighbours. Nothing is drawn where nothing was measured.
+- **Nearest point:** for scattered points, each pixel shows the nearest stored point inside their
+  outline. There are no rows, so no cuts.
+- **Smooth:** shaded between the points. These colours are worked out, not stored.
+
+**Cells** chooses; **Automatic** takes Rows when most rows have a few points of their own. A cursor sits
+on a stored point and reads its own coordinates. Across the rows of a cut, each entry says where it
+really is. Operations and **Row as curve** aren't available on such a map yet.
+
 ### Matrix
 
 ### Bars

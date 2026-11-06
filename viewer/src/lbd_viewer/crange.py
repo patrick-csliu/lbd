@@ -68,6 +68,8 @@ def sliders(s) -> List[Tuple[str, int]]:
     position (name, number of positions)."""
     if s.base_kind != "heatmap":
         return []
+    if s.spec.get("levels"):                          # a variable sweep: its own list of sliders
+        return [(sl["axis"], sl["length"]) for sl in s.spec.get("slices", []) if sl["length"] > 1]
     v = s.header.values[s.spec["values"][0]]
     drawn = {s.spec["x"], s.spec["y"]}
     return [(a, len(s.data.axes[a].data)) for a in v.axes if a not in drawn and a in s.data.axes

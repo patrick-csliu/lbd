@@ -33,10 +33,11 @@ Finally, add `docs/languages/<id>.md`. The full checklist and the manifest refer
 
 ## Add a plot kind or plot-spec key
 1. `languages/python/src/lbd/plot/render.py`:
-   - allow it in `KINDS`;
-   - resolve its defaults in `resolve_spec`, which must also work on header-only datasets from
-     `lbd.info`;
-   - draw it in `build_figure`.
+   - give it a file in `lbd/plot/` ending with `KIND = kinds.Kind(...)` (`lbd/plot/kinds.py`: what it
+     can draw, its settings, `prepare` and `draw`), which must also work on header-only datasets
+     from `lbd.info`;
+   - for Explore, a file in `lbd_viewer/kinds/` ending with `INTERACTION = ...`, and its controls and
+     row in a `*Controls.tsx` (`viewer/web/src/plotKinds.ts`).
 2. A new plot-spec key also goes into `SPEC_KEYS` in `lbd/plot/api.py`, so `lbd.plot.plot()`
    accepts it.
 3. Add controls to `PlotControls` in `viewer/web/src/FileView.tsx` and the field to `PlotSpec`

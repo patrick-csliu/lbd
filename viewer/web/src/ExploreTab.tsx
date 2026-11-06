@@ -769,6 +769,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
   const cursorPanel = resolved && (
     <CursorPanel
       kind={resolved.kind}
+      noCutOut={!!resolved.spec.levels}
       cursors={act.cursors}
       onCursors={actApi.onCursors}
       reading={actLive.reading}
@@ -1147,7 +1148,7 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
   const byName = new Map(info.values.map((v) => [v.name, v]));
   const label = (name: string) => {
     const a = info.axes.find((x) => x.name === name) ?? byName.get(name);
-    return a ? a.label || a.name : name;
+    return a ? (a.label || a.name).replace(/ \(point number\)$/, r.levels ? "" : " (point number)") : name;
   };
   const plottable = info.values.filter((v) => v.shape.length > 0);
   const anyComplex = values.some((n) => byName.get(n)?.complex);
@@ -1157,7 +1158,7 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
   // x: an axis of the plotted value, or (curves) a real value with the same axes
   const xChoices = first
     ? [
-        ...first.axes.map((a) => ({ name: a, text: label(a) })),
+        ...(r.levels?.slice(-2) ?? first.axes).map((a) => ({ name: a, text: label(a) })),
         ...(kind === "curve"
           ? info.values
               .filter((v) => !values.includes(v.name) && !v.complex && v.shape.length > 0 && v.axes.join() === first.axes.join())
@@ -1166,7 +1167,8 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
       ]
     : [];
   const along = (r as PlotSpec & { along?: string }).along ?? r.x;
-  const others = first ? first.axes.filter((a) => a !== along) : [];
+  // a variable sweep's map: its two inner levels
+  const others = first ? (r.levels?.slice(-2) ?? first.axes).filter((a) => a !== along) : [];
   // the traces that can be chosen: one per position of the series axis (curves) or map row
   const traceAxis = kind === "curve" ? r.series : r.y;
   const clim = settings.clim ?? [null, null];
@@ -1178,7 +1180,7 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
       <Section name="data" title="Data" open={!!sections.data} onToggle={setSection}>
       <label className="field">
         <span>Plot</span>
-        <PlotKindSelect path={info.path} value={kind} first={first?.name} page="explore" onChoose={(k) => updateSpec({ kind: k, x: undefined, y: undefined, series: undefined })} />
+        <PlotKindSelect path={info.path} value={kind} first={first?.name} page="explore" onChoose={(k, fit) => updateSpec({ kind: k, x: undefined, y: undefined, series: undefined, ...(fit?.length && first && !fit.includes(first.name) ? { values: [fit[0]] } : {}) })} />
       </label>
 
       <fieldset className="field">
@@ -1365,7 +1367,7 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
           {contrast}
         </fieldset>
       )}
-      {kind === "heatmap" && (
+      {kind === "heatmap" && !r.levels && (
         <label className="field" title="When a screen pixel stands for several cells, what it shows">
           <span>Several cells per pixel</span>
           <select aria-label="Several cells per pixel" value={stat} onChange={(e) => onStat(e.target.value as ReduceStat)}>

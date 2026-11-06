@@ -22,6 +22,7 @@ class Interaction:
     model: Optional[type] = None
     cursor_types: Tuple[str, ...] = ("cross", "vertical", "horizontal")
     operations: Any = False       # False: not available; True: all; "shape": those that keep the shape
+    no_operations = "Operations aren't available on this plot"
     strips: Optional[str] = None  # None, "cuts" or "histograms"
     syncs = True                  # False: a panel without x and y to share (`meta.sync` is empty)
 

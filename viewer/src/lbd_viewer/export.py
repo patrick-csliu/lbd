@@ -47,6 +47,8 @@ def options(s: "ExploreSession") -> Dict[str, Optional[str]]:
                   "average); turn the operations off to save the stored numbers")
     elif _operated(s) and len(s.spec["values"]) > 1:
         stored = "with operations on several values, only the numbers as shown can be saved"
+    elif s.spec.get("levels") and s.spec.get("complex") and np.iscomplexobj(s.data.values[s.spec["values"][0]].data):
+        stored = "a complex value of a variable sweep is saved as shown here: use the whole file for the stored numbers"
     zoomed = None
     if s.kind == "curve" and s.spec["x"] in s.data.values and not _operated(s):
         zoomed = "each trace has its own x (a value), so a range of x can't be kept: save everything"

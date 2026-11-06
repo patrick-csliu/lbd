@@ -1584,7 +1584,10 @@ function cutValue(which: "row" | "column", e: { clientX: number; clientY: number
   if (!zi || !ai) return null;
   const zf = r.factors.z, af = r.factors[along];
   const value = (k: Cut, i: number) => `${zi.label} = ${si(k.z[i]! / zf, zi.unit)}`;
-  const place = `at ${ai.label} = ${si(cut.pos[best] / af, ai.unit)}`;
+  // across the rows of a variable sweep each entry has its own place on the other axis
+  const other = item(r.cursors[0], along === "x" ? "y" : "x");
+  const own = cut.at?.[best];
+  const place = `at ${ai.label} = ${si(cut.pos[best] / af, ai.unit)}` + (own !== undefined && other ? `, ${other.label} = ${si(own / r.factors[along === "x" ? "y" : "x"], other.unit)}` : "");
   const name = along === "x" ? "Row" : "Column";
   if (!cut2) return `${name}: ${value(cut, best)} ${place}`;
   const best2 = nearest(cut2);

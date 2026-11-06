@@ -197,6 +197,8 @@ class ExploreSession:
                 whole = crange_mod.peek(self, now) if now.get("crange") == "all" else None
                 self.zspan = (whole.lo, whole.hi) if whole is not None and np.isfinite(whole.lo) else None
                 self.base_model = rnd.prepare_map(self.data, self.spec, self.style, big=big, zspan=self.zspan)
+                if isinstance(self.base_model, rnd.groupmap.GroupMapModel) and summaries.too_big((self.base_model.z.size, 1)):
+                    raise ExploreError("too many points to draw as a map; show it as curves, or save a part")
         for v in self.data.values.values():           # a value read by part: the next slider positions
             if isinstance(v.data, memory.Cached):
                 v.data.read_ahead()
@@ -661,8 +663,8 @@ class ExploreSession:
     def _apply_ops(self, ops: List[Dict[str, Any]], chosen: Optional[set], eqs: Dict[str, str]) -> bool:
         """Run the operations (on the chosen traces), then the equations, when any of them or the
         choice changed; True when the figure was set up again for another model."""
-        if (ops or eqs) and not self.view.operations:
-            raise ExploreError("Operations aren't available on this plot")
+        if (any(op["on"] for op in ops) or eqs) and not self.view.operations:
+            raise ExploreError(self.view.no_operations)
         key = json.dumps([ops, sorted(chosen) if chosen is not None else None, eqs])
         if key == self.ops_key:
             return False
@@ -769,6 +771,10 @@ class ExploreSession:
                 z = z.copy()
                 z[[j for j in range(z.shape[0]) if j not in chosen], :] = np.nan
             self.pyramid = MapPyramid(z, cell_edges(self.model.x), cell_edges(self.model.y))
+        self._apply_colours(settings, clim)
+
+    def _apply_colours(self, settings: Dict[str, Any], clim) -> None:
+        """The colour map, its limits and scale, on the picture and the colour bar."""
         name = settings.get("cmap") or self.model.cmap
         if settings.get("invert"):
             name = name[:-2] if name.endswith("_r") else name + "_r"

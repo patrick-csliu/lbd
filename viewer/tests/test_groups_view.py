@@ -1,6 +1,6 @@
-"""Files with variable sweeps (axis groups, format 2.0, plan 6c) open in the viewer: values are
-drawn against their point number for now, with a notice; the file page and the Library show
-the group."""
+"""Files with variable sweeps (axis groups, format 2.0, plan 6c) open in the viewer: a value on two
+levels is a map (plan 15a), as curves it is drawn against its point number, with a notice; the file
+page and the Library show the group."""
 
 import lbd
 import pytest
@@ -35,10 +35,16 @@ def test_the_library_counts_the_points(client, files):
 
 def test_a_value_is_drawn_against_its_point_number_with_a_notice(files):
     with pytest.warns(rnd.RenderWarning, match="drawn against the point number"):
-        svg, spec = rnd.render_file(str(files["13 variable sweep.lbd"]), {"values": ["S21"], "complex": "db"},
+        svg, spec = rnd.render_file(str(files["13 variable sweep.lbd"]), {"values": ["S21"], "complex": "db", "kind": "curve"},
                                     Style(), fmt="svg")
     assert spec["kind"] == "curve" and spec["x"] == "freq"
     assert b"point number" in svg
+
+
+def test_a_two_level_value_opens_as_a_map(files):
+    svg, spec = rnd.render_file(str(files["13 variable sweep.lbd"]), {"values": ["S21"], "complex": "db"}, Style(), fmt="svg")
+    assert spec["kind"] == "heatmap" and spec["x"] == "freq" and spec["y"] == "power"
+    assert b"point number" not in svg
 
 
 def test_explore_opens_a_file_with_groups(client, files):
@@ -46,7 +52,7 @@ def test_explore_opens_a_file_with_groups(client, files):
         r = client.post("/api/explore", json={"path": str(files[name]), "width": 400, "height": 300, "dpr": 1})
         assert r.status_code == 200, r.text
         o = r.json()
-        assert any("point number" in m for m in o.get("warnings", [])), o.get("warnings")
+        assert o["kind"] == ("curve" if name.startswith("13") else "heatmap")     # 13's first value is on one level
         client.delete(f"/api/explore/{o['session']}")
 
 

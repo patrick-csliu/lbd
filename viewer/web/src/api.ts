@@ -512,6 +512,7 @@ export interface PlotSpec {
   annotations?: JsonObject[];
   slices?: Slice[];
   all?: string[]; // axes whose points all go in (no slider)
+  levels?: string[]; // answer: a variable sweep's levels, when drawn as a map
   options?: JsonObject; // a plot type's own choices
 }
 
@@ -794,6 +795,7 @@ export interface Cut {
   range: [number | null, number | null];
   fixed: string; // the axis held fixed
   index: number;
+  at?: number[]; // across the rows of a variable sweep: where each entry really is (plot units)
 }
 
 export interface CursorsAnswer {

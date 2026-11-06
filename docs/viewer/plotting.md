@@ -51,6 +51,9 @@ curve, you choose which point of the other axis to show:
 
 Scatter plots draw all points, so they have no sliders.
 
+A **variable sweep** (an axis group) is drawn as a heat map with its real coordinates: see
+[Plot types](explore.md#plot-types). The `options` setting `cells` chooses `rows`, `nearest` or `smooth`.
+
 <div style="clear: both"></div>
 
 ### Fixed parameters

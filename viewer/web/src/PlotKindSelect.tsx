@@ -26,8 +26,8 @@ export function PlotKindSelect({ path, value, first, page, onChoose }: { path: s
     <select aria-label="Plot type" value={value} onChange={(e) => onChoose(e.target.value, kinds?.find((k) => k.name === e.target.value)?.values ?? null)}>
       {names.map((name) => {
         const k = kinds?.find((x) => x.name === name);
-        // Figure takes another value when this one doesn't fit; Explore shows what is chosen
-        const off = !!k?.why && (page === "explore" || k.values.length === 0);
+        // when the value shown doesn't fit, another that does is taken; greyed: none does
+        const off = !!k?.why && k.values.length === 0;
         return (
           <option key={name} value={name} disabled={off} title={off ? k?.why ?? undefined : undefined}>
             {title(name, k)}

@@ -1344,7 +1344,7 @@ def create_app(state: AppState) -> FastAPI:
             style = cfg.resolve(preset=preset, file_style=header.style)
             s = ExploreSession(p, file_version(p), body.spec or {}, style, body.width, body.height, body.dpr)
         state.explore.add(s)
-        return {"session": s.id, "spec": s.spec, "kind": s.kind, "preset": preset,
+        return {"session": s.id, "spec": s.spec, "kind": s.kind, "cells": getattr(s.model, "cells", None), "preset": preset,
                 "full": [list(s.full[0]), list(s.full[1])], "warnings": notes + warns + s.take_notes()}
 
     @app.post("/api/explore/{session_id}/render")
@@ -1401,7 +1401,7 @@ def create_app(state: AppState) -> FastAPI:
         s = _session(session_id)
         with collect_warnings() as warns:
             s.set_spec(body.spec)
-        return {"session": s.id, "spec": s.spec, "kind": s.kind,
+        return {"session": s.id, "spec": s.spec, "kind": s.kind, "cells": getattr(s.model, "cells", None),
                 "full": [list(s.full[0]), list(s.full[1])], "warnings": warns + s.take_notes()}
 
     @app.post("/api/explore/{session_id}/pick")

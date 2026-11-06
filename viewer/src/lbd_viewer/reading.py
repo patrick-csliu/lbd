@@ -218,6 +218,9 @@ def cursors(s: "ExploreSession", items: List[Dict[str, Any]], kind: str, view: D
 
 def _room(s: "ExploreSession", c: Dict[str, Any]) -> List[Tuple[int, int]]:
     """How many stored points a cursor can step down and up: along x, and along y on a map."""
+    room = getattr(s.view, "room", None)
+    if room:
+        return room(c)
     m = s.model
     x, y = _check_point(c)
     if s.kind == "heatmap":

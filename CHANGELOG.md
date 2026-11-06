@@ -8,6 +8,7 @@ are still written as 1.2).
 
 **Changes to how things behave** (read these when upgrading)
 
+- **A value on two levels of an axis group opens as a map**, no longer against its point number.
 - **The Library's dates are in one time zone.** Date, the pictures and the Files sidebar show every
   file's time in this computer's time zone, so they can be compared; before, each date was as
   written in its file, with the file's zone when it differed. **Settings → Library → Show dates
@@ -142,7 +143,10 @@ are still written as 1.2).
 - **Explore: the Cuts button changes the plot in one go.** The strips, the plot and the picture change
   together when the new picture is here; before, the strips went first and the picture followed
   half a second later.
-<!-- plan 15a -->
+- **Variable sweeps are maps.** A value on two levels of an axis group draws with its real coordinates,
+  in Explore, on the Figure page and from scripts: as **Rows** (each stored point owns a cell, nothing
+  is drawn where nothing was measured) or **Nearest point** for scattered points, or **Smooth** when
+  asked for. Cursors read the stored points, rows have cuts, Save as CSV gives every point.
 
 <!-- plan 15b -->
 
