@@ -140,3 +140,34 @@ def test_no_row_sums_box_on_re_and_im(viewer, new_page):
     page = new_page("Explore")
     open_as(page, name, "matrix")
     expect(explore(page).get_by_label("Row sums")).to_be_disabled()
+
+
+def figure_shown(page: Page):
+    return page.locator(".tab-body:not([hidden]) .figure-host, .tab-body:not([hidden]) .figure").first
+
+
+def test_matrix_on_the_figure_page(viewer, new_page, tmp_path):
+    name, = files(viewer, mock.assignment_matrix)
+    page = new_page("Figure")
+    open_file(page, name)
+    with page.expect_response(lambda r: "/api/render" in r.url and r.ok):
+        plot_type(page).select_option("matrix")
+    body = page.locator(".tab-body:not([hidden])")
+    expect(body.get_by_label("Rows")).to_have_value("prepared")
+    with page.expect_response(lambda r: "/api/render" in r.url and r.ok):
+        body.get_by_label("Significant digits").select_option("2")
+    expect(body.get_by_label("Significant digits")).to_have_value("2")
+    expect(body.get_by_text("Log x")).to_have_count(0)
+
+
+def test_open_in_figure_keeps_the_matrix(viewer, new_page):
+    name, = files(viewer, mock.density_matrix)
+    page = new_page("Explore")
+    open_as(page, name, "matrix")
+    frames(page, lambda: explore(page).get_by_label("Colour range").select_option("unit"))
+    frames(page, lambda: explore(page).get_by_label("Significant digits").select_option("2"))
+    explore(page).get_by_role("button", name="Open in Figure").click()
+    body = page.locator(".tab-body:not([hidden])")
+    expect(plot_type(page)).to_have_value("matrix")
+    expect(body.get_by_label("Colour range")).to_have_value("unit")
+    expect(body.get_by_label("Significant digits")).to_have_value("2")

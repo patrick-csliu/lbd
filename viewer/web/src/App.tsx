@@ -2,7 +2,7 @@ import { setDateZone } from "./libraryColumns";
 import { CSSProperties, KeyboardEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DEFAULT_MEASUREMENTS, MeasurementsContext, notifyInBackground } from "./MeasuringStatus";
 import { onFinished } from "./watch";
-import { api, ApiError, AppState, baseName, fileKind, LibraryQuery, OpenDataIn, SidebarScope, OpenFilesIn, PageCommand, PageEntry, TabState, Theme, viewerUrl, Workspace } from "./api";
+import { api, ApiError, AppState, baseName, fileKind, LibraryQuery, OpenDataIn, SidebarScope, OpenFilesIn, PageCommand, PageEntry, PlotSpec, TabState, Theme, viewerUrl, Workspace } from "./api";
 import FilesSidebar from "./FilesSidebar";
 import { lastSection, SECTIONS, SettingsDialog, SettingsSection } from "./SettingsDialog";
 import { DRAWER_MEDIA, useMedia } from "./useMedia";
@@ -216,6 +216,7 @@ function Shell() {
   // Unsaved settings of each data tab (reported by FileView), and the ones moved-in tabs start with.
   const tabStates = useRef(new Map<string, TabState>());
   const initialStates = useRef(new Map<string, TabState>());
+  const [figureStarts, setFigureStarts] = useState<Record<string, number>>({}); // a new start: the figure is made anew
 
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -408,9 +409,15 @@ function Shell() {
 
   /** Open a file in a chosen workspace (menus, "Open in Explore" / "Open in Figure"). */
   const openIn = useCallback(
-    (path: string, where: "explore" | "figure") => {
+    (path: string, where: "explore" | "figure", spec?: PlotSpec) => {
       if (where === "explore") openExplore([path], true);
       else {
+        if (spec) {
+          // the plot shown in Explore: the figure starts from it, keeping its own preset and style
+          const now = tabStates.current.get(path) ?? initialStates.current.get(path);
+          initialStates.current.set(path, { preset: null, override: {}, ...now, spec });
+          setFigureStarts((old) => ({ ...old, [path]: (old[path] ?? 0) + 1 }));
+        }
         setPage("figure");
         openTab(path, true);
       }
@@ -1060,7 +1067,7 @@ function Shell() {
               <ExploreTab
                 path={t.path}
                 onTitle={(title) => setExploreTitles((old) => (old[t.path] === title ? old : { ...old, [t.path]: title }))}
-                onOpenInFigure={() => openIn(t.path, "figure")}
+                onOpenInFigure={(spec) => openIn(t.path, "figure", spec)}
                 onError={(m) => toast(m, "error")}
                 onMenu={(e) => {
                   e.preventDefault();
@@ -1142,6 +1149,7 @@ function Shell() {
                   />
                 ) : (
                   <FileView
+                    key={figureStarts[t.path] ?? 0}
                     path={t.path}
                     plotted={t.pinned}
                     onPlot={() => openFile(t.path)}
