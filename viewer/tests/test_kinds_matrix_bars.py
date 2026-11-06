@@ -182,3 +182,110 @@ def test_a_preview_has_only_the_cells(tmp_path):
     s.apply({})
     body, meta = s.render(None, None)
     assert meta["plot"] == [0, 0, 120, 90]
+
+
+def test_a_click_reads_the_bar(tmp_path):
+    s = session(tmp_path, mock.bars, {"kind": "bars", "values": ["population"]})
+    assert s.kind == "bars" and s.spec["x"] == "state"
+    c = read(s, 1.1, 0.05)
+    got = items(c)
+    assert got["x"]["text"] == "excited" and got["z"]["value"] == 0.24 and got["z"]["label"] == "Population"
+    assert c["index"] == {"state": 1}
+    assert c["cell"][1] == 0 and c["cell"][3] == pytest.approx(0.24)
+    assert read(s, c["x"], c["y"])["at"] == c["at"]         # asked again at its own place: the same bar
+
+
+def test_a_grouped_bar(tmp_path):
+    s = session(tmp_path, mock.bars, {"kind": "bars", "values": ["population", "error"]})
+    m = s.model
+    second = m.left[1, 2] + m.width / 2                     # 'error' in the third group
+    c = read(s, second, 0.0)
+    got = items(c)
+    assert got["series"]["text"] == "Error" and got["z"]["value"] == 0.01 and got["x"]["text"] == "second"
+    assert read(s, c["x"], c["y"], step=[-1, 0])["items"][-1]["value"] == 0.05      # the bar before it
+
+
+def test_a_stacked_bar(tmp_path):
+    s = session(tmp_path, mock.assignment_matrix, {"kind": "bars", "x": "prepared", "series": "measured",
+                                                   "options": {"layout": "stacked"}})
+    c = read(s, 0, 0.98)                                    # 'ground' row: 0.97, then 0.025, then 0.005
+    assert items(c)["z"]["value"] == 0.025 and c["index"] == {"prepared": 0, "measured": 1}
+
+
+def test_a_negative_bar(tmp_path):
+    def down(small):
+        d = lbd.Dataset(title="t")
+        d.add_axis("a", [0.0, 1.0])
+        d.add_value("v", [2.0, -3.0], axes="a")
+        return d
+
+    s = session(tmp_path, down, {"kind": "bars"})
+    c = read(s, 1, -1)
+    assert items(c)["z"]["value"] == -3.0 and c["cell"][1] == -3.0 and c["cell"][3] == 0.0
+
+
+def test_a_horizontal_level(tmp_path):
+    s = session(tmp_path, mock.bars, {"kind": "bars", "values": ["population", "lifetime"]})
+    c = read(s, 0.4, 0.355, "horizontal")
+    assert c["y"] == 0.355 and c["items"][0]["value"] == 0.355
+    assert c["items"][1]["unit"] == "s" and c["items"][1]["value"] == pytest.approx(20e-6)     # half the tallest
+
+
+def test_the_bars_table(tmp_path):
+    s = session(tmp_path, mock.bars, {"kind": "bars", "values": ["population", "error"]})
+    t = export.session_table(s)
+    t.to_csv(tmp_path / "t.csv")
+    rows = np.loadtxt(tmp_path / "t.csv", delimiter=",")
+    assert rows.tolist() == [[0, 0.71, 0.02], [1, 0.24, 0.03], [2, 0.05, 0.01]]
+    text = (tmp_path / "t.csv").read_text(encoding="utf-8")
+    assert text.startswith("# state,population,error") and "State: 0 = ground, 1 = excited, 2 = second" in text
+
+
+def test_single_numbers_table(tmp_path):
+    s = session(tmp_path, mock.bars, {"kind": "bars", "values": ["fidelity", "visibility"]})
+    assert s.spec["values"] == ["fidelity", "visibility"]
+    t = export.session_table(s)
+    t.to_csv(tmp_path / "t.csv")
+    assert np.loadtxt(tmp_path / "t.csv", delimiter=",").tolist() == [0, 0.982, 0.91]
+    assert (tmp_path / "t.csv").read_text(encoding="utf-8").startswith("# row,fidelity,visibility")
+
+
+def test_a_click_on_a_single_number(tmp_path):
+    s = session(tmp_path, mock.bars, {"kind": "bars", "values": ["fidelity", "visibility"]})
+    got = items(read(s, 1, 0.5))
+    assert got["x"]["text"] == "Visibility" and got["z"]["value"] == 0.91
+
+
+def test_operations_on_bars(tmp_path):
+    s = session(tmp_path, mock.bars, {"kind": "bars", "values": ["population"]})
+    s.apply({"ops": [{"op": "subtract_mean", "along": "x"}]})
+    s.render(None, None)
+    assert s.view.kind == "bars" and np.nansum(s.model.bars.raw) == pytest.approx(0)
+    assert read(s, 0, 0)["stored"]["value"] == 0.71
+
+
+def test_operations_need_one_unit(tmp_path):
+    s = session(tmp_path, mock.bars, {"kind": "bars", "values": ["population", "lifetime"]})
+    s.apply({"ops": [{"op": "subtract_mean", "along": "x"}]})
+    assert "one unit" in s.ops_info()["notes"][0]
+
+
+def test_a_log_vertical_scale(tmp_path):
+    s = session(tmp_path, mock.bars, {"kind": "bars", "values": ["population"]})
+    s.apply({"yscale": "log"})
+    _, meta = s.render(None, None)
+    assert meta["yscale"] == "log" and meta["ylim"][0] > 0
+
+
+def test_bars_have_no_cuts_or_sync(tmp_path):
+    s = session(tmp_path, mock.bars, {"kind": "bars", "values": ["population"]})
+    _, meta = s.render(None, None)
+    assert meta["strips"] is None and meta["sync"] == {}
+
+
+def test_a_preview_of_bars(tmp_path):
+    mock.bars(False).save(tmp_path / "x.lbd")
+    s = ExploreSession(tmp_path / "x.lbd", "v", {"kind": "bars", "values": ["population", "error", "lifetime"]},
+                       lp.load_style(), 120, 90, 1.0, bare=True)
+    s.apply({})
+    assert s.render(None, None)[1]["plot"] == [0, 0, 120, 90]
