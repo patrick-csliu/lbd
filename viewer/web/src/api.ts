@@ -742,6 +742,14 @@ export interface ReadItem {
 /** How a vertical or horizontal cursor reads a trace at its line: between stored points, or the nearest. */
 export type AtLine = "interpolated" | "stored";
 
+/** The step of the swept axis a table's row belongs to. */
+export interface TraceStep {
+  label: string;
+  unit: string;
+  value: number | null;
+  text?: string | null;
+}
+
 export interface CursorRead {
   x: number; // snapped position, plot units
   y: number;
@@ -750,9 +758,9 @@ export interface CursorRead {
   label?: string; // the trace's name
   index: Record<string, number>; // stored indices
   items: ReadItem[];
-  table?: { rows: { trace: number; label: string; value: number | null; unit?: string; x: number | null }[]; more: number; label: string; unit: string; mode: AtLine };
+  table?: { rows: { trace: number; label: string; series?: TraceStep | null; value: number | null; unit?: string; x: number | null }[]; more: number; label: string; unit: string; mode: AtLine };
   /** A horizontal cursor: where each visible trace crosses its height (x in stored units). */
-  crossings?: { rows: { trace: number; label: string; x: number[]; more: number }[]; more: number; x_label: string; x_unit: string; label: string; unit: string; y: number | null; mode: AtLine };
+  crossings?: { rows: { trace: number; label: string; series?: TraceStep | null; x: number[]; more: number }[]; more: number; x_label: string; x_unit: string; label: string; unit: string; y: number | null; mode: AtLine };
   points?: { x: number; y: number; trace: number; label: string; color: string }[]; // where the line meets the traces (plot units)
   line_note?: string; // why the traces aren't marked at the line
   line?: ([number, number] | null)[]; // the trace as drawn (plot units), to highlight it

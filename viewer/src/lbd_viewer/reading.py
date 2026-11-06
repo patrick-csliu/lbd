@@ -341,6 +341,17 @@ def _curve_cursor(s: "ExploreSession", c: Dict[str, Any], kind: str, geo, every:
     return out
 
 
+def _series_of(s: "ExploreSession", t: int) -> Optional[Dict[str, Any]]:
+    """The step of the swept axis a trace belongs to, for a table's rows; None when the traces
+    aren't simply one per step (several values in a panel, operations that made other traces)."""
+    series = s.spec.get("series")
+    if not series or s.base_kind != "curve" or len(s.model.lines) != len(s.base_model.lines) \
+            or len(s.model.lines) != _per_value(s):
+        return None
+    it = _axis_item(s, "series", series, t)
+    return {"label": it["label"], "unit": it["unit"], "value": it["value"], "text": it["text"]}
+
+
 def _lines_off(s: "ExploreSession", shown: List[int], limit: int) -> Optional[str]:
     """Why a cursor line doesn't mark every trace here (None: it does)."""
     if s.summarised:
@@ -412,8 +423,8 @@ def _crossings(s: "ExploreSession", k: int, i: int, y0: float, shown: List[int],
         if len(ys) and np.isfinite(d[-1]) and d[-1] == 0 and len(px) < CROSSINGS_SHOWN:
             px.append(float(xs[-1]))
             py.append(float(ys[-1]))
-        rows.append({"trace": int(t), "label": m.lines[t][1], "x": [p / m.xf for p in px], "px": px, "py": py,
-                     "more": max(len(found) - CROSSINGS_SHOWN, 0)})
+        rows.append({"trace": int(t), "label": m.lines[t][1], "series": _series_of(s, t), "x": [p / m.xf for p in px],
+                     "px": px, "py": py, "more": max(len(found) - CROSSINGS_SHOWN, 0)})
     xi, yi = _curve_x_item(s, k, i), _value_item(s, "y", _trace_value(s, k), y0, k)
     return {"rows": rows, "more": max(len(shown) - TABLE_LIMIT, 0), "x_label": xi["label"], "x_unit": xi["unit"],
             "label": yi["label"], "unit": yi["unit"], "y": yi["value"], "mode": at_line}
@@ -493,26 +504,30 @@ def _step_point(m, k: int, i: int, n: int) -> int:
 
 def _table(s: "ExploreSession", k: int, i: int, shown: List[int], at: Optional[float] = None,
            at_line: str = "stored", dots: bool = False, xlog: bool = False) -> Dict[str, Any]:
-    """A vertical cursor: every visible trace's value at the cursor's x (cursor's trace first):
-    its nearest stored point, or ("interpolated") its value at exactly `at` (plot units)."""
+    """A vertical cursor: every visible trace's value at the cursor's x, in the file's order: its
+    nearest stored point, or ("interpolated") its value at exactly `at` (plot units)."""
     m = s.model
     x0 = m.xs[k][i]
-    order = [k] + [t for t in shown if t != k]
+    order = shown if k in shown else sorted([k, *shown])
+    listed = order[:TABLE_LIMIT]
+    if k not in listed:
+        listed[-1] = k                                   # the cursor's own trace is always in the table
     rows = []
-    for t in order[:TABLE_LIMIT]:
+    for t in listed:
         xs = m.xs[t]
         if at_line == "interpolated":
             y = _at_x(xs, m.lines[t][0], float(at if at is not None else x0), xlog)
             row_item = _value_item(s, "y", _trace_value(s, t), np.nan if y is None else y, t)
-            rows.append({"trace": int(t), "label": m.lines[t][1], "value": row_item["value"], "unit": row_item["unit"],
+            rows.append({"trace": int(t), "label": m.lines[t][1], "series": _series_of(s, t),
+                         "value": row_item["value"], "unit": row_item["unit"],
                          "x": _num(float(at if at is not None else x0) / m.xf),
                          "px": float(at if at is not None else x0), "py": y})
             continue
         want = x0 if at is None else at                  # (a free cursor: its own x, not its nearest point's)
         it = i if xs is m.xs[k] and want == x0 else _nearest(xs, want)
         row_item = _value_item(s, "y", _trace_value(s, t), m.lines[t][0][it], t)
-        rows.append({"trace": int(t), "label": m.lines[t][1], "value": row_item["value"], "unit": row_item["unit"],
-                     "x": _num(xs[it] / m.xf)})
+        rows.append({"trace": int(t), "label": m.lines[t][1], "series": _series_of(s, t),
+                     "value": row_item["value"], "unit": row_item["unit"], "x": _num(xs[it] / m.xf)})
         if dots:
             rows[-1].update({"px": float(xs[it]), "py": _num(m.lines[t][0][it])})
     name = _trace_value(s, k)

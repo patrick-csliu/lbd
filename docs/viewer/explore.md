@@ -197,7 +197,8 @@ they share one badge.
 
 - **Crosshair** (the default): a point of one trace, or a cell.
 - **Vertical:** a line at one x; on curves, the Cursors tab lists **every visible trace's value
-  there**, the cursor's own trace first. With two cursors: both, and the difference (Δ) per trace.
+  there**, in the file's order, with the cursors' traces in bold and numbered. With two cursors:
+  both, and the difference (Δ) per trace.
 - **Horizontal:** a line at one height; on curves, the Cursors tab lists **where each trace
   crosses it**: every crossing (up to 10 per trace), or *doesn't cross*. When a trace crosses
   twice, the distance between them is shown, such as the width of a resonance at −3 dB.

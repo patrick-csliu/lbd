@@ -98,6 +98,21 @@ export function si(v: number | null | undefined, unit: string, digits = 7): stri
   return `${plain(v)} ${unit}`;
 }
 
+/** The numbers of one table column: a single unit with a single SI prefix (the largest number's),
+ * so their digits line up and the unit can go in the column's head. */
+export function columnSi(values: (number | null | undefined)[], unit: string, digits = 7): { unit: string; show: (v: number | null | undefined) => string } {
+  const top = Math.max(0, ...values.map((v) => (v !== null && v !== undefined && Number.isFinite(v) ? Math.abs(v) : 0)));
+  let [prefix, factor]: [string, number] = ["", 1];
+  if (unit && !NO_PREFIX.has(unit) && !unit.includes("/") && top > 0) {
+    const found = PREFIXES.find(([, f]) => top >= f * 0.9999999);
+    if (found) [prefix, factor] = found;
+  }
+  return {
+    unit: prefix + unit,
+    show: (v) => (v === null || v === undefined || !Number.isFinite(v) ? "empty" : Number((v / factor).toPrecision(digits)).toString().replace("-", "−")),
+  };
+}
+
 /** One read-out number: "Frequency = 5.12031 GHz". */
 export function readText(i: ReadItem): string {
   return `${i.label} = ${i.text ?? si(i.value, i.unit)}`;

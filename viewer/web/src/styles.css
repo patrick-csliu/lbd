@@ -478,9 +478,13 @@ details.group fieldset > .group-fields { margin-top: -4px; }
 .cursor-line { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .cursor-line-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; }
 .cursor-line-head button { padding: 2px 7px; }
-.cursor-table { max-height: 180px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius); padding: 2px 6px; }
-.cursor-table th { text-align: left; font-weight: normal; padding-right: 10px; }
-.cursor-table tr.on { font-weight: 700; }
+.cursor-table { max-height: 320px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+.cursor-table th, .cursor-table td { padding: 1px 3px; white-space: nowrap; font-size: 12px; font-weight: normal; color: var(--text); }
+.cursor-table td { font-variant-numeric: tabular-nums; }
+.cursor-table thead th { position: sticky; top: 0; background: var(--bg); color: var(--muted); font-weight: 600; white-space: normal; vertical-align: bottom; }
+.cursor-table.crossings td:nth-child(2) { white-space: normal; }
+.cursor-table tr.on th, .cursor-table tr.on td { font-weight: 700; }
+.cursor-table tbody th .cursor-tag { margin-left: 4px; }
 .segmented { display: inline-flex; }
 .segmented button { border-radius: 0; margin-left: -1px; }
 .segmented button:first-child { border-radius: var(--radius) 0 0 var(--radius); margin-left: 0; }
@@ -978,14 +982,17 @@ button.ib:disabled { opacity: 0.4; cursor: default; }
 .inspector-tabs [role=tab] { flex: 1; font: inherit; font-size: 13px; border: none; border-bottom: 2px solid transparent; background: none; padding: 7px 6px; cursor: pointer; color: var(--muted); white-space: nowrap; }
 .inspector-tabs [role=tab].on { color: var(--accent); border-bottom-color: var(--accent); background: var(--panel); font-weight: 600; }
 .inspector-fold { display: none !important; align-self: center; margin-right: 4px; }
-.inspector-body { min-height: 0; min-width: 0; overflow: auto; padding: 8px 10px 12px; }
+.inspector-body { min-height: 0; min-width: 0; overflow: auto; padding: 8px 10px 12px; container: inspector / inline-size; }
 .inspector-body .details h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); margin: 6px 0 4px; }
 .inspector-body .details table { font-size: 12px; width: 100%; }
 .inspector-body .cursor-panel { border: none; padding: 0; background: none; min-width: 0; }
 /* nothing in the inspector is wider than it (plan 10): numbers wrap instead of being cut */
 .inspector-body .cursor-panel * { min-width: 0; }
-.inspector-body .cursor-between, .inspector-body .cursor-others table { width: 100%; table-layout: fixed; }
-.inspector-body .cursor-between td, .inspector-body .cursor-others td, .inspector-body .cursor-between th, .inspector-body .cursor-others th { white-space: normal; overflow-wrap: anywhere; }
+.inspector-body .cursor-others table { width: 100%; table-layout: fixed; }
+.inspector-body .cursor-between { width: 100%; }
+.inspector-body .cursor-between td, .inspector-body .cursor-between th { padding: 2px 6px 2px 0; white-space: nowrap; }
+@container inspector (max-width: 270px) { .inspector-body .cursor-between td { white-space: normal; overflow-wrap: anywhere; } }
+.inspector-body .cursor-others td, .inspector-body .cursor-others th { white-space: normal; overflow-wrap: anywhere; }
 .inspector-body .segmented { flex-wrap: wrap; }
 .inspector-body .cursor-panel > legend { display: none; }
 .controls-toggle, .explore-scrim { display: none !important; }

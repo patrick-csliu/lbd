@@ -104,8 +104,44 @@ def test_a_vertical_cursor_lists_every_trace(sweep, new_page):
     explore(page).locator(".explore-overlay").scroll_into_view_if_needed()
     a = cursor_answer(page, lambda: page.mouse.click(*at(page, meta, 25, 2.1)))
     assert a["cursors"][0]["trace"] == 2 and len(a["cursors"][0]["table"]["rows"]) == 5
-    expect(explore(page).locator(".cursor-table tr")).to_have_count(5)
-    expect(explore(page).locator(".cursor-table tr.on")).to_contain_text("2")
+    expect(explore(page).locator(".cursor-table tbody tr")).to_have_count(5)
+    expect(explore(page).locator(".cursor-table tr.on")).to_have_count(1)
+
+
+def test_two_vertical_cursors_read_as_one_small_table(viewer, new_page):
+    """Units in the heads with one prefix per column, one line per trace, nothing cut off at the
+    panel's default width, the cursors' traces marked, the rows in the file's order."""
+    d = lbd.Dataset(title="Levels")
+    d.add_axis("power", np.arange(-60.0, 1.0, 5.0), unit="dBm", label="Power")
+    d.add_axis("f", np.linspace(6.99e9, 7.01e9, 41), unit="Hz", label="Frequency")
+    d.add_value("v", 1e-3 * (1.123456 + np.arange(13.0)[:, None] + np.linspace(0, 1, 41)[None, :]), axes=["power", "f"], unit="V", label="Level")
+    d.plot = {"kind": "curve", "x": "f", "series": "power"}
+    d.save(viewer.data / "levels.lbd")
+    page = new_page("Explore")
+    page.set_viewport_size({"width": 1600, "height": 1000})
+    meta = frames(page, lambda: row(page, "levels.lbd").dblclick())
+    panel = explore(page).locator(".cursor-panel")
+    explore(page).get_by_role("button", name="Vertical").click()
+    explore(page).locator(".explore-overlay").scroll_into_view_if_needed()
+    (x0, x1), (y0, y1) = meta["xlim"], meta["ylim"]
+    cursor_answer(page, lambda: page.mouse.click(*at(page, meta, x0 + 0.25 * (x1 - x0), y0 + 0.07 * (y1 - y0))))
+    page.keyboard.down("Shift")
+    a = cursor_answer(page, lambda: page.mouse.click(*at(page, meta, x0 + 0.75 * (x1 - x0), y0 + 0.93 * (y1 - y0))))
+    page.keyboard.up("Shift")
+    assert a["cursors"][0]["trace"] != a["cursors"][1]["trace"]
+    table = panel.locator(".cursor-table")
+    expect(panel).to_contain_text("Level (mV) at the cursors")
+    expect(table.locator("thead th")).to_have_text(["Power (dBm)", "1", "2", "Δ"])
+    expect(table.locator("tbody tr")).to_have_count(13)
+    expect(table.locator("tbody th").first).to_contain_text("−60")
+    expect(table.locator("tr.on")).to_have_count(2)
+    expect(table.locator("tr.on .cursor-tag")).to_have_text(["1", "2"])
+    assert table.evaluate("e => e.scrollWidth <= e.clientWidth")
+    heights = table.locator("tbody tr").evaluate_all("rows => rows.map(r => r.getBoundingClientRect().height)")
+    assert max(heights) < 26                                           # every row is one line
+    expect(panel.locator(".cursor-value")).to_have_count(0)            # no number twice
+    expect(panel).to_contain_text("stored at")
+    expect(panel.locator(".cursor-between")).to_contain_text("Frequency")
 
 
 def test_cursors_can_be_switched_off_and_back_on(small_map, new_page):

@@ -125,7 +125,8 @@ are still written as 1.2).
   background; **This slice** keeps each position's own range, as before (and for panels set up
   before). The Contrast histogram counts the same values.
 - **Explore: every trace at a cursor line.** On curves, a vertical or horizontal cursor marks where
-  it meets each visible trace and lists the numbers right under the cursor's: a vertical cursor
+  it meets each visible trace and lists the numbers in a table under the cursors, one line per
+  trace in the file's order, the cursors' traces marked: a vertical cursor
   each trace's value (with two cursors both and Δ), a horizontal cursor every crossing and, for
   two, the distance between them. **Interpolated** (default) or **Nearest stored point**; **Copy**
   and **Save as CSV…**; a tick box turns it off, and **Settings → Explore** sets how many traces

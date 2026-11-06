@@ -84,6 +84,21 @@ def test_a_cursor_stays_on_its_trace_and_steps_along_it(client, traces):
     assert c["index"]["t"] == 51
 
 
+def test_table_rows_say_which_step_they_are(client, traces):
+    o = open_view(client, traces, spec=SPEC)
+    rows = cursors(client, o, [{"x": 0.7, "y": 3.0}], kind="vertical")["cursors"][0]["table"]["rows"]
+    assert [(r["series"]["value"], r["series"]["unit"]) for r in rows] == [(-30.0, "dBm"), (-20.0, "dBm"), (-10.0, "dBm")]
+    rows = cursors(client, o, [{"x": 0.7, "y": 5.0}], kind="horizontal")["cursors"][0]
+    assert "crossings" in rows and all(r["series"] for r in rows["crossings"]["rows"])
+
+
+def test_the_cursors_own_trace_stays_in_a_cut_off_table(client, traces, monkeypatch):
+    monkeypatch.setattr(reading, "TABLE_LIMIT", 2)
+    o = open_view(client, traces, spec=SPEC)
+    t = cursors(client, o, [{"x": 0.7, "y": 19.0}], kind="vertical")["cursors"][0]["table"]
+    assert [r["trace"] for r in t["rows"]] == [0, 2] and t["more"] == 1
+
+
 def test_a_free_cursor_keeps_its_position_and_reads_the_nearest_point(client, traces):
     o = open_view(client, traces, spec=SPEC)
     c = cursors(client, o, [{"x": 0.304, "y": 14.0, "free": True}])["cursors"][0]
@@ -94,8 +109,8 @@ def test_a_vertical_cursor_lists_every_trace_at_its_x(client, traces):
     o = open_view(client, traces, spec=SPEC)
     c = cursors(client, o, [{"x": 0.7, "y": 3.0}], kind="vertical")["cursors"][0]
     rows = c["table"]["rows"]
-    assert c["trace"] == 1 and [r["trace"] for r in rows] == [1, 0, 2]   # its own trace first
-    assert [r["value"] for r in rows] == [4.0, 0.0, 20.0] and c["table"]["unit"] == "V"
+    assert c["trace"] == 1 and [r["trace"] for r in rows] == [0, 1, 2]   # in the file's order
+    assert [r["value"] for r in rows] == [0.0, 4.0, 20.0] and c["table"]["unit"] == "V"
 
 
 def test_unchosen_traces_are_not_snapped_to(client, traces):

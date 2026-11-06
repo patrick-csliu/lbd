@@ -1,6 +1,6 @@
 import { KeyboardEvent, MutableRefObject, useEffect, useState } from "react";
-import { api, ApiError, CursorRead, CursorsAnswer, CursorType, ReadItem } from "./api";
-import { between, CursorsState, item, si } from "./cursors";
+import { api, ApiError, CursorRead, CursorsAnswer, CursorType, ReadItem, TraceStep } from "./api";
+import { between, columnSi, CursorsState, item, si } from "./cursors";
 import { ExploreActions } from "./ExploreView";
 import { Segmented } from "./settingsUi";
 import { useToast } from "./toast";
@@ -27,45 +27,99 @@ interface Props {
   file: { path: string; name: string; id?: string | null };
 }
 
-/** A table of what a vertical or horizontal cursor reads at its line, as text and as numbers. */
-function lineRows(c1: CursorRead, c2: CursorRead | null): { title: string; head: string[]; rows: { key: number; on: boolean; cells: string[]; raw: (number | string)[] }[]; more: number; about: boolean } | null {
+interface LineRow {
+  key: number;
+  marks: number[]; // the cursors on this trace
+  cells: string[];
+  raw: (number | string)[];
+}
+
+interface LineData {
+  title: string;
+  head: string[];
+  tips: string[]; // a column's tooltip: which position it is at
+  rawHead: string[]; // Copy and the CSV: the numbers as stored, with their units
+  rows: LineRow[];
+  more: number;
+  about: boolean;
+  crossings: boolean;
+}
+
+const withUnit = (label: string, unit: string) => (unit ? `${label} (${unit})` : label);
+
+/** The first column: a trace by its step of the swept axis, its unit in the head, or by its name. */
+function traceColumn(rows: { label: string; series?: TraceStep | null }[]) {
+  const first = rows[0]?.series;
+  if (!first || !rows.every((r) => r.series)) {
+    return { head: "Trace", rawHead: "Trace", cell: (r: { label: string }) => r.label, raw: (r: { label: string }) => r.label };
+  }
+  const col = columnSi(rows.map((r) => r.series?.value), first.unit);
+  type Row = { label: string; series?: TraceStep | null };
+  return {
+    head: withUnit(first.label, first.unit && !rows.some((r) => r.series?.text) ? col.unit : ""),
+    rawHead: withUnit(first.label, first.unit),
+    cell: (r: Row) => r.series?.text ?? col.show(r.series?.value),
+    raw: (r: Row) => r.series?.text ?? r.series?.value ?? "",
+  };
+}
+
+/** A table of what a vertical or horizontal cursor reads at its line, as text and as numbers:
+ * one line per trace, in the file's order, the units in the heads. `n`: the cursor of a crossings table. */
+function lineRows(c1: CursorRead, c2: CursorRead | null, n: number): LineData | null {
   const about = (c1.table ?? c1.crossings)?.mode === "interpolated";
   if (c1.table) {
-    const x = item(c1, "x");
-    const t2 = c2?.table;
-    const unit = c1.table.unit;
+    const t = c1.table, t2 = c2?.table, trace = traceColumn(t.rows);
+    const x1 = item(c1, "x"), x2 = c2 ? item(c2, "x") : undefined;
+    const at = (x: ReadItem | undefined, row: number | null | undefined) => `${x?.label ?? "x"} = ${si(x?.value ?? row ?? null, x?.unit ?? "")}`;
+    const place1 = at(x1, t.rows[0]?.x), place2 = at(x2, t2?.rows[0]?.x);
+    const unitOf = (r: { unit?: string }) => r.unit ?? t.unit;
+    const oneUnit = new Set(t.rows.map(unitOf)).size === 1;
+    const stored = oneUnit ? unitOf(t.rows[0] ?? {}) : "";
+    const lines = t.rows.map((r) => {
+      const other = t2?.rows.find((q) => q.trace === r.trace);
+      const d = other && r.value !== null && other.value !== null ? other.value - r.value : null;
+      return { r, other, d };
+    });
+    const col = columnSi(lines.flatMap((l) => [l.r.value, l.other?.value, l.d]), stored);
+    const show = (v: number | null | undefined, r: { unit?: string }) => (oneUnit ? col.show(v) : si(v, unitOf(r)));
+    const valueHead = withUnit(t.label, oneUnit ? col.unit : "");
     return {
-      title: `Every trace at ${x?.label ?? "x"} = ${si(x?.value ?? c1.table.rows[0]?.x ?? null, x?.unit ?? "")}`,
-      head: t2 ? ["Trace", "Cursor 1", "Cursor 2", "Δ"] : ["Trace", c1.table.label],
+      title: t2 ? `${valueHead} at the cursors` : `Every trace at ${place1}`,
+      head: t2 ? [trace.head, "1", "2", "Δ"] : [trace.head, valueHead],
+      tips: t2 ? ["", `Cursor 1: ${place1}`, `Cursor 2: ${place2}`, "Cursor 2 − cursor 1, on the same trace"] : ["", place1],
+      rawHead: t2
+        ? [trace.rawHead, withUnit(`Cursor 1 at ${place1}`, stored), withUnit(`Cursor 2 at ${place2}`, stored), withUnit("Cursor 2 - cursor 1", stored)]
+        : [trace.rawHead, withUnit(`${t.label} at ${place1}`, stored)],
       about,
-      more: c1.table.more,
-      rows: c1.table.rows.map((r) => {
-        const u = r.unit ?? unit;
-        const other = t2?.rows.find((q) => q.trace === r.trace);
-        const d = other && r.value !== null && other.value !== null ? other.value - r.value : null;
-        return {
-          key: r.trace,
-          on: r.trace === c1.trace,
-          cells: t2 ? [r.label, si(r.value, u), si(other?.value ?? null, u), si(d, u)] : [r.label, si(r.value, u)],
-          raw: t2 ? [r.label, r.value ?? "", other?.value ?? "", d ?? ""] : [r.label, r.value ?? ""],
-        };
-      }),
+      more: t.more,
+      crossings: false,
+      rows: lines.map(({ r, other, d }) => ({
+        key: r.trace,
+        marks: [...(r.trace === c1.trace ? [1] : []), ...(c2 && r.trace === c2.trace ? [2] : [])],
+        cells: t2 ? [trace.cell(r), show(r.value, r), show(other?.value, r), show(d, r)] : [trace.cell(r), show(r.value, r)],
+        raw: t2 ? [trace.raw(r), r.value ?? "", other?.value ?? "", d ?? ""] : [trace.raw(r), r.value ?? ""],
+      })),
     };
   }
   if (c1.crossings) {
-    const k = c1.crossings;
+    const k = c1.crossings, trace = traceColumn(k.rows);
+    const widthOf = (r: { x: number[] }) => (r.x.length === 2 ? Math.abs(r.x[1] - r.x[0]) : null);
+    const xs = columnSi(k.rows.flatMap((r) => r.x), k.x_unit), ws = columnSi(k.rows.map(widthOf), k.x_unit);
     return {
       title: `Where the traces cross ${k.label} = ${si(k.y, k.unit)}`,
-      head: ["Trace", k.x_label, "Between"],
+      head: [trace.head, withUnit(k.x_label, xs.unit), withUnit("Width", ws.unit)],
+      tips: ["", "Every crossing of this trace", "Between a trace's two crossings"],
+      rawHead: [trace.rawHead, withUnit(k.x_label, k.x_unit), withUnit("Width", k.x_unit)],
       about,
       more: k.more,
+      crossings: true,
       rows: k.rows.map((r) => {
-        const width = r.x.length === 2 ? Math.abs(r.x[1] - r.x[0]) : null;
+        const width = widthOf(r);
         return {
           key: r.trace,
-          on: r.trace === c1.trace,
-          cells: [r.label, r.x.length ? r.x.map((v) => si(v, k.x_unit)).join(", ") + (r.more ? `, and ${r.more} more` : "") : "doesn't cross", width === null ? "" : `Δ ${si(width, k.x_unit)}`],
-          raw: [r.label, r.x.join(" "), width ?? ""],
+          marks: r.trace === c1.trace ? [n] : [],
+          cells: [trace.cell(r), r.x.length ? r.x.map((v) => xs.show(v)).join(", ") + (r.more ? `, and ${r.more} more` : "") : "doesn't cross", width === null ? "" : ws.show(width)],
+          raw: [trace.raw(r), r.x.join(" "), width ?? ""],
         };
       }),
     };
@@ -74,13 +128,13 @@ function lineRows(c1: CursorRead, c2: CursorRead | null): { title: string; head:
 }
 
 /** What a vertical or horizontal cursor reads on every trace, with Copy and Save as CSV. */
-function LineTable({ c1, c2, file }: { c1: CursorRead; c2: CursorRead | null; file: Props["file"] }) {
+function LineTable({ c1, c2, n = 1, file }: { c1: CursorRead; c2: CursorRead | null; n?: number; file: Props["file"] }) {
   const toast = useToast();
-  const t = lineRows(c1, c2);
+  const t = lineRows(c1, c2, n);
   if (!t) return null;
   const say = t.about ? " (≈ between stored points)" : " (the nearest stored points)";
   const copy = async () => {
-    const text = [t.head.join("\t"), ...t.rows.map((r) => r.raw.join("\t"))].join("\n");
+    const text = [t.rawHead.join("\t"), ...t.rows.map((r) => r.raw.join("\t"))].join("\n");
     try {
       await navigator.clipboard.writeText(text);
       toast("Copied: paste it into a spreadsheet or your notes.");
@@ -91,7 +145,7 @@ function LineTable({ c1, c2, file }: { c1: CursorRead; c2: CursorRead | null; fi
   const saveCsv = async () => {
     const quote = (v: number | string) => (typeof v === "string" && /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : String(v));
     const lines = [
-      `# ${t.head.join(",")}`,
+      `# ${t.rawHead.map(quote).join(",")}`,
       `# LBD export: ${file.name}`,
       `# id: ${file.id ?? "none (the file has no id; LBD gives it one when it next saves the file)"}`,
       `# ${t.title}${t.about ? ", interpolated between stored points" : ", the nearest stored points"}`,
@@ -123,21 +177,28 @@ function LineTable({ c1, c2, file }: { c1: CursorRead; c2: CursorRead | null; fi
           </button>
         </span>
       </div>
-      <div className="cursor-table small" aria-label={t.title}>
+      <div className={"cursor-table small" + (t.crossings ? " crossings" : "")} aria-label={t.title}>
         <table>
-          {t.head.length > 2 && (
-            <thead>
-              <tr>
-                {t.head.map((h) => (
-                  <th key={h}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-          )}
+          <thead>
+            <tr>
+              {t.head.map((h, i) => (
+                <th key={h} title={t.tips[i] || undefined}>
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
           <tbody>
             {t.rows.map((r) => (
-              <tr key={r.key} className={r.on ? "on" : ""}>
-                <th>{r.cells[0]}</th>
+              <tr key={r.key} className={r.marks.length ? "on" : ""}>
+                <th>
+                  {r.cells[0]}
+                  {r.marks.map((m) => (
+                    <span key={m} className={`cursor-tag c${m}`}>
+                      {m}
+                    </span>
+                  ))}
+                </th>
                 {r.cells.slice(1).map((v, i) => (
                   <td key={i}>{v}</td>
                 ))}
@@ -257,6 +318,7 @@ function CursorNumbers({ n, c, kind, type, actions }: { n: number; c: CursorRead
   const x = item(c, "x"), y = item(c, "y"), z = item(c, "z"), series = item(c, "series");
   // what can be typed: x always; y on maps and for a horizontal line; on curves y is the trace's value
   const yEditable = kind === "heatmap" || type === "horizontal";
+  const inTable = !!(c.table || c.crossings); // its value and its trace are in the table and the head
   return (
     <div className="cursor-numbers">
       <div className="cursor-head">
@@ -271,7 +333,7 @@ function CursorNumbers({ n, c, kind, type, actions }: { n: number; c: CursorRead
       </div>
       {x && type !== "horizontal" && <PositionBox it={x} onSet={(v) => actions.current?.typed(n - 1, "x", v)} />}
       {y && yEditable && <PositionBox it={y} onSet={(v) => actions.current?.typed(n - 1, "y", v)} />}
-      {y && !yEditable && (
+      {y && !yEditable && !inTable && (
         <div className="cursor-value">
           {y.label} = <strong>{y.text ?? si(y.value, y.unit)}</strong>
         </div>
@@ -281,7 +343,7 @@ function CursorNumbers({ n, c, kind, type, actions }: { n: number; c: CursorRead
           {z.label} = <strong>{z.text ?? si(z.value, z.unit)}</strong>
         </div>
       )}
-      {series && (
+      {series && !inTable && (
         <div className="cursor-value muted small">
           {series.label} = {si(series.value, series.unit)}
         </div>
@@ -381,7 +443,7 @@ export default function CursorPanel({ kind, cursors, onCursors, reading, actions
         </div>
       )}
       {c1 && (c1.table || c1.crossings) && <LineTable c1={c1} c2={c2} file={file} />}
-      {c2 && c2.crossings && <LineTable c1={c2} c2={null} file={file} />}
+      {c2 && c2.crossings && <LineTable c1={c2} c2={null} n={2} file={file} />}
       {c1?.line_note && <p className="muted small">{c1.line_note}</p>}
       {c1 && c2 && (
         <table className="cursor-between small">
