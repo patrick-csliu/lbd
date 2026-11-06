@@ -258,6 +258,19 @@ class BarsStyle(_Model):
 
 
 # plan 15c: 3D bars
+class Bars3dStyle(_Model):
+    """3D bars (`figure.axes.bars3d`).
+    """
+    width: float = Field(0.8, gt=0, le=1, description="Width of a bar, as a part of its cell")
+    edge_color: Color = Field("#00000040", description="Colour of the bars' edges")
+    edge_width_pt: float = Field(0.3, ge=0, le=5, description="Width of the bars' edges")
+    alpha: float = Field(1.0, ge=0, le=1, description="Opacity")
+    elev: float = Field(35.0, ge=-90, le=90, description="Default elevation, degrees")
+    azim: float = Field(-50.0, description="Default azimuth, degrees")
+    cmap: Optional[Cmap] = Field(None, description="Colour map of the heights (empty: the image's)")
+    phase_cmap: Cmap = Field("twilight", description="Colour map of a phase: a cyclic one")
+
+
 # plan 15d: histogram
 
 
@@ -281,6 +294,7 @@ class AxesStyle(_Model):
     matrix: MatrixStyle = Field(default_factory=MatrixStyle, description="Matrix: cells with their numbers")
     bars: BarsStyle = Field(default_factory=BarsStyle, description="Bars")
     # plan 15c: 3D bars
+    bars3d: Bars3dStyle = Field(default_factory=Bars3dStyle, description="3D bars")
     # plan 15d: histogram
     image: ImageStyle = Field(default_factory=ImageStyle, description="Heat maps and colour scales")
 
