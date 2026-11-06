@@ -240,6 +240,14 @@ class ImageStyle(_Model):
 
 
 # plan 15b: matrix and bars
+class MatrixStyle(_Model):
+    """Cells with their numbers (`figure.axes.matrix`).
+    """
+    cmap_signed: Cmap = Field("RdBu_r", description="Colour map of the range -1 to 1, white at zero")
+    number_size_pt: Optional[float] = Field(None, gt=0, le=40, description="Size of the numbers (empty: the figure's font)")
+    line_width_pt: float = Field(0.5, ge=0, le=5, description="Lines between the cells")
+    line_color: Color = Field("white", description="Colour of the lines between the cells")
+
 
 # plan 15c: 3D bars
 
@@ -263,6 +271,7 @@ class AxesStyle(_Model):
     lines: LinesStyle = Field(default_factory=LinesStyle, description="Curves")
     scatter: ScatterStyle = Field(default_factory=ScatterStyle, description="Scatter markers")
     # plan 15b: matrix and bars
+    matrix: MatrixStyle = Field(default_factory=MatrixStyle, description="Matrix: cells with their numbers")
     # plan 15c: 3D bars
     # plan 15d: histogram
     image: ImageStyle = Field(default_factory=ImageStyle, description="Heat maps and colour scales")

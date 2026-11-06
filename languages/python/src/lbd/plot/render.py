@@ -172,6 +172,8 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
 
     # complex
     def check_complex(m: Any) -> str:
+        if m == "re_im" and "re_im" in kinds.KINDS[kind].applies:
+            return m                                 # both parts side by side: read_grid, read_bars
         if m not in COMPLEX_MODES:
             raise RenderError(f"unknown complex mode {m!r}; use one of {COMPLEX_MODES}")
         if m == "iq" and kind != "scatter":
@@ -794,11 +796,16 @@ def apply_axis_text(ax, style: Style) -> None:
                        **common)
 
 
-def _colorbar(fig, mappable, ax, style: Style, label: str):
+def _colorbar(fig, mappable, ax, style: Style, label: str, beside: bool = False):
+    """`beside`: as tall as the axes box, for axes with equal cells (the layout doesn't know about those)."""
     cb_style = style.figure.axes.image.colorbar
     if not cb_style.visible:
         return
-    cb = fig.colorbar(mappable, ax=ax, fraction=cb_style.size_pct / 100, pad=cb_style.pad_pct / 100, label=label)
+    if beside:
+        cax = ax.inset_axes([1 + cb_style.pad_pct / 100, 0, cb_style.size_pct / 100, 1])
+        cb = fig.colorbar(mappable, cax=cax, label=label)
+    else:
+        cb = fig.colorbar(mappable, ax=ax, fraction=cb_style.size_pct / 100, pad=cb_style.pad_pct / 100, label=label)
     # Pin the colour bar's ticks like the plot's (see apply_axis_text).
     rc = style.to_rcparams()
     s = style.axis_style("y")
