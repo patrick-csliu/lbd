@@ -585,6 +585,7 @@ export default function ExploreView({
           crangeTimer.current = window.setTimeout(() => {
             crangeTimer.current = 0;
             dirty.current = true;
+            if (f.meta.crange?.from === "histogram") showAll.current = true; // the bars are growing
             if (session.current === sid) request();
           }, 700);
         }
@@ -921,7 +922,8 @@ export default function ExploreView({
         setOpened(o);
         onOpenedRef.current(o);
         if (o.warnings.length) onErrorRef.current(o.warnings.join(" "));
-        const keep = onlySlicesDiffer(before, specRef.current) && wanted.current;
+        // (a histogram's bins follow its numbers, so another slice has other limits)
+        const keep = onlySlicesDiffer(before, specRef.current) && o.kind !== "histogram" && wanted.current;
         wanted.current = keep || { xlim: o.full[0], ylim: o.full[1] };
         dirty.current = true; // the last picture shows the old settings, even where the view is the same
         request();

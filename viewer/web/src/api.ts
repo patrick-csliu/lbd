@@ -678,7 +678,7 @@ export interface ExploreFrameMeta {
   strips?: "cuts" | "histograms" | null; // beside the plot, for this picture
   /** A map with a slider: where its colour range comes from, and while every slice's range is
    *  worked out (crange.py) how far it is, or why it failed. */
-  crange?: { from: "slice" | "all"; state?: "working" | "failed"; fraction?: number; slices?: number; error?: string | null } | null;
+  crange?: { from: "slice" | "all" | "histogram"; state?: "working" | "failed"; fraction?: number; slices?: number; error?: string | null } | null;
 }
 
 /** A panel follows another's zoom along x (y) when these are the same (explore.py `sync_keys`). */
