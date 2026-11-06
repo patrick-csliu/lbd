@@ -676,6 +676,7 @@ export interface ExploreFrameMeta {
   empty?: string | null; // nothing can be shown, and why
   sync?: SyncKeys | Record<string, never>; // what panels must share to follow each other's zoom; empty: nothing to share
   strips?: "cuts" | "histograms" | null; // beside the plot, for this picture
+  equal?: boolean; // equal axes: xlim and ylim are what the server made of the view asked for
   /** A map with a slider: where its colour range comes from, and while every slice's range is
    *  worked out (crange.py) how far it is, or why it failed. */
   crange?: { from: "slice" | "all" | "histogram"; state?: "working" | "failed"; fraction?: number; slices?: number; error?: string | null } | null;

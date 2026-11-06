@@ -152,7 +152,7 @@ function startSpec(info: FileInfo): PlotSpec {
   const saved = info.plot ?? {};
   for (const k of START_KEYS) if (saved[k] !== undefined) (out as Record<string, unknown>)[k] = saved[k];
   if (out.kind === "auto" || !kindOf(out.kind).explore) delete out.kind; // the types Explore shows
-  if (out.complex === "iq") delete out.complex;
+  if (out.complex === "iq" && out.kind !== "scatter") delete out.complex;
   return out;
 }
 
@@ -971,11 +971,6 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
                       onUserView={(v) => onUserView(p.id, v)}
                       dataItems={() => dataItems(p.id)}
                       onOpenInFigure={openFigure}
-                      onShowCurves={() => {
-                        // the plot didn't open: a new one with the values as curves
-                        pa.updateSpec({ kind: "curve", x: undefined, y: undefined, series: undefined, complex: "abs" });
-                        restart(p.id);
-                      }}
                       panelItems={several ? () => panelEntries(i) : undefined}
                       title={
                         <div
@@ -1275,7 +1270,7 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
         <label className="field">
           <span>Complex values</span>
           <select aria-label="Complex values" value={r.complex ?? "abs"} onChange={(e) => updateSpec({ complex: e.target.value })}>
-            {COMPLEX_MODES.filter(([v]) => v !== "iq").map(([v, l]) => (
+            {COMPLEX_MODES.filter(([v]) => v !== "iq" || kind === "scatter").map(([v, l]) => (
               <option key={v} value={v}>
                 {l}
               </option>
@@ -1391,7 +1386,7 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
 
       <Section name="processing" title="Processing" open={!!sections.processing} onToggle={setSection}
                badge={opsCount ? `${opsCount} on` : undefined}>
-      <Operations
+      {kind === "scatter" ? <p className="muted small">Operations aren't available on a scatter plot yet.</p> : <Operations
         kind={kind}
         xLabel={label(along ?? r.x ?? "x")}
         tracesLabel={kind === "heatmap" ? label(r.y ?? "") : traceAxis && traceAxis !== "none" && values.length === 1 ? label(traceAxis) : null}
@@ -1410,7 +1405,7 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
             ...((e.z ?? "") !== (settings.equations?.z ?? "") ? { clim: undefined } : {}),
           })
         }
-      />
+      />}
 
       </Section>
       {children}

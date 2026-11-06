@@ -57,6 +57,10 @@ class Interaction:
         self.s.ax.set_ylim(*ylim)
         self.s._plain_tick_numbers()
 
+    def shown_limits(self, xlim: Tuple[float, float], ylim: Tuple[float, float]) -> Tuple[Any, Any]:
+        """The view really shown, after `frame` (equal axes may have widened it)."""
+        return xlim, ylim
+
     def apply(self, settings: Dict[str, Any], chosen: Optional[set], clim: Any) -> None:
         """View settings, on the artists."""
 

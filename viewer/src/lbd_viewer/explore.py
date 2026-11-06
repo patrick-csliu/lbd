@@ -1051,6 +1051,7 @@ class ExploreSession:
             t1 = time.perf_counter()
             self.last_used = time.monotonic()
             self.view.frame(xlim, ylim)
+            xlim, ylim = self.view.shown_limits(xlim, ylim)
             left, top, w, h = self._plot_area()
             dw, dh = (max(w // 2, 1), max(h // 2, 1)) if draft else (w, h)
             pxe, pye = self._pixel_edges(dw, dh)

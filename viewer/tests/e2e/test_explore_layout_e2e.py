@@ -102,8 +102,8 @@ def test_escape_closes_the_help_and_keeps_the_cursors(values_files, new_page):
     expect(readout).to_contain_text(" at ")
 
 
-def test_a_scatter_view_offers_figure_and_curves(viewer, new_page):
-    # a file whose saved view is a scatter plot (as the examples' I/Q readout): Figure draws it
+def test_a_saved_scatter_view_opens_as_scatter(viewer, new_page):
+    # a file whose saved view is a scatter plot (as the examples' I/Q readout)
     rng = np.random.default_rng(7)
     d = lbd.Dataset(title="Readout I/Q")
     d.add_axis("prep", [0.0, 1.0], label="Prepared state")
@@ -112,12 +112,10 @@ def test_a_scatter_view_offers_figure_and_curves(viewer, new_page):
     d.plot = {"kind": "scatter", "values": ["IQ"], "complex": "iq", "color": "prep"}
     d.save(viewer.data / "iq.lbd")
     page = new_page("Explore")
-    row(page, "iq.lbd").dblclick()
-    box = explore(page).locator(".explore-error")
-    expect(box).to_contain_text("Explore can't show this saved scatter view", timeout=15_000)
-    expect(box.get_by_role("button", name="Open in Figure")).to_be_visible()
-    frames(page, lambda: box.get_by_role("button", name="Show as curves").click())
+    meta = frames(page, lambda: row(page, "iq.lbd").dblclick())
+    expect(explore(page).get_by_label("Plot type")).to_have_value("scatter")
     expect(explore(page).locator(".explore-error")).to_have_count(0)
+    assert meta["note"] == "every point shown" and meta["equal"]
 
 
 def drag(page: Page, handle, dx: float, dy: float):

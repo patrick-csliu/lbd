@@ -43,7 +43,6 @@ const common = { explore: true, controls: null, cursorTypes: ALL_CURSORS, openIn
 const BUILT_IN: PlotKind[] = [
   { ...common, kind: "curve", strips: null, darkInverted: true },
   { ...common, kind: "heatmap", strips: "cuts", darkInverted: false },
-  { ...common, kind: "scatter", explore: false, strips: null, darkInverted: true },
 ];
 
 const OWN = [matrix, bars, bars3d, histogram, scatter].filter((k): k is PlotKind => k !== null);

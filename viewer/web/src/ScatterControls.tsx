@@ -1,4 +1,16 @@
 import type { PlotKind } from "./plotKinds";
 
-/** Scatter's controls and its row in plotKinds.ts: filled in by plan 15e. */
-export const kindRow: PlotKind | null = null;
+/** Scatter's row in plotKinds.ts. */
+export const kindRow: PlotKind = {
+  kind: "scatter",
+  explore: true,
+  controls: null,
+  cursorTypes: ["cross"],
+  strips: null,
+  darkInverted: true,
+  openInFigure: true,
+  cursorMark: "lines",
+  axes: "2d",
+  syncs: true,
+  findButtons: false,
+};

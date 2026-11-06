@@ -190,7 +190,6 @@ interface Props {
   onFailed?: (msg: string) => void;
   /** What a plot Explore can't draw offers instead: Figure, or the values as curves. */
   onOpenInFigure?: () => void;
-  onShowCurves?: () => void;
 }
 
 /** Limits pushed from another panel: x, y or both. */
@@ -268,7 +267,6 @@ export default function ExploreView({
   panelItems,
   onFailed,
   onOpenInFigure,
-  onShowCurves,
 }: Props) {
   const onFailedRef = useRef(onFailed);
   onFailedRef.current = onFailed;
@@ -576,6 +574,7 @@ export default function ExploreView({
           showAll.current = false;
           wanted.current = { xlim: f.meta.xlim, ylim: f.meta.ylim };
         }
+        if (f.meta.equal && same(wanted.current, v)) wanted.current = { xlim: f.meta.xlim, ylim: f.meta.ylim };
         onViewRef.current({ xlim: f.meta.xlim, ylim: f.meta.ylim });
         onOpsInfoRef.current(f.meta.ops ?? null);
         if (f.meta.sync?.x !== undefined) onSyncRef.current?.({ ...(f.meta.sync as SyncKeys), full: f.meta.full });
@@ -1437,22 +1436,15 @@ export default function ExploreView({
       </div>
       {error && (
         <div className="error-box explore-error" role="alert">
-          {/scatter/i.test(error) ? (
-            <>
-              <strong>Explore can't show this saved scatter view.</strong> Figure draws it; or show the values here as curves.
-              <div className="error-actions">
-                {onOpenInFigure && <button onClick={onOpenInFigure}>Open in Figure</button>}
-                {onShowCurves && <button onClick={onShowCurves}>Show as curves</button>}
-              </div>
-            </>
-          ) : (
-            <>
-              <strong>This plot can't be shown.</strong>
-              <details>
-                <summary>Details</summary>
-                <span className="small">{error.charAt(0).toUpperCase() + error.slice(1)}</span>
-              </details>
-            </>
+          <strong>This plot can't be shown.</strong>
+          <details>
+            <summary>Details</summary>
+            <span className="small">{error.charAt(0).toUpperCase() + error.slice(1)}</span>
+          </details>
+          {onOpenInFigure && (
+            <div className="error-actions">
+              <button onClick={onOpenInFigure}>Open in Figure</button>
+            </div>
           )}
         </div>
       )}
@@ -1472,7 +1464,7 @@ export default function ExploreView({
               onMouseMove={(e) => setCutHover(cutValue("row", e, "x", current(), reading))}
               onMouseLeave={() => setCutHover(null)}
             />
-            {!c1 && <span className="muted small">Click the map: its row shows here</span>}
+            {!c1 && stripsNow === "cuts" && <span className="muted small">Click the map: its row shows here</span>}
           </div>
         )}
         {showCuts && <div className="explore-cut-corner" />}
