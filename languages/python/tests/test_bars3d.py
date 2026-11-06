@@ -6,6 +6,8 @@ import pytest
 import lbd
 import lbd.plot as lp
 from lbd.plot import bars3d, matrix, render
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+from mpl_toolkits.mplot3d import proj3d
 
 
 def grid(values, name="v", elements=None):
@@ -74,6 +76,64 @@ def test_above_64_is_refused_with_the_reason():
     with pytest.raises(render.RenderError, match="at most 64 × 64"):
         render.resolve_spec(d, {"kind": "bars3d"})
     assert bars3d.fits(render.flat(grid(np.ones((64, 64)))), "v") is None
+
+
+ANGLES = [(35, -50), (35, 130), (20, 40), (60, -140)]
+
+
+def drawn_model(d, **spec):
+    resolved = render.resolve_spec(d, {"kind": "bars3d", **spec})
+    style = lp.load_style()
+    m = bars3d.prepare(d, resolved, style)
+    fig = render.new_figure(style)
+    FigureCanvasAgg(fig)
+    bars3d.draw(fig, bars3d.make_axes(fig, m), m, d, resolved, style)
+    fig.canvas.draw()
+    return fig, m
+
+
+@pytest.mark.parametrize("elev,azim", ANGLES)
+def test_bars_are_drawn_far_to_near(elev, azim):
+    _, m = drawn_model(grid(np.arange(16.0).reshape(4, 4) + 1), options={"elev": elev, "azim": azim})
+    a = m.axes[0]
+    x, y = (v.ravel() for v in np.meshgrid(m.x, m.y))
+    depth = proj3d.proj_transform(x, y, np.zeros(16), a.get_proj())[2]
+    ranks = [bar.get_zorder() for bar in m.bars[0]]
+    assert sorted(ranks) == list(range(1, 17))
+    assert [depth[k] for k in np.argsort(ranks)] == sorted(depth, reverse=True)
+
+
+def test_the_order_follows_a_new_angle():
+    fig, m = drawn_model(grid(np.ones((3, 3))))
+    before = [bar.get_zorder() for bar in m.bars[0]]
+    bars3d.set_angle(fig, 35, 130, 1.0)
+    fig.canvas.draw()
+    assert [bar.get_zorder() for bar in m.bars[0]] != before
+
+
+def test_a_near_tall_bar_hides_a_far_one():
+    """Seen from the front, a tall bar near the viewer covers the low bar behind it."""
+    fig, m = drawn_model(grid([[1.0, 1.0], [10.0, 1.0]]), options={"elev": 15, "azim": -90})
+    a = m.axes[0]
+    picture = np.asarray(fig.canvas.buffer_rgba())
+    x, y, _ = proj3d.proj_transform(0.0, 1.0, 1.0, a.get_proj())       # the far bar's top
+    px, py = a.transData.transform((x, y))
+    got = picture[picture.shape[0] - 1 - int(py), int(px), :3] / 255
+    tall, low = (m.bars[0][k].get_facecolor()[0][:3] for k in (2, 0))
+    assert np.abs(got - tall).sum() < np.abs(got - low).sum()
+
+
+def test_the_quick_picture_is_the_same_bars():
+    _, m = drawn_model(grid(np.arange(33.0 * 33).reshape(33, 33)))
+    a = m.axes[0]
+    assert m.quick[0] is not None and not m.quick[0].get_visible()
+    limits = a.get_xlim(), a.get_ylim(), a.get_zlim()
+    bars3d.set_draft(m, True)
+    assert m.quick[0].get_visible() and not m.bars[0][0].get_visible()
+    assert (a.get_xlim(), a.get_ylim(), a.get_zlim()) == limits
+    bars3d.set_draft(m, False)
+    assert m.bars[0][0].get_visible()
+    assert drawn_model(grid(np.ones((4, 4))))[1].quick == [None]        # few bars are quick anyway
 
 
 def test_a_wrong_angle_says_what_is_wrong():

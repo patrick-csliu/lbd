@@ -12,7 +12,9 @@ from typing import Any, Dict, List, Optional, Tuple
 import matplotlib
 import matplotlib.colors as mcolors
 import numpy as np
+from matplotlib.artist import Artist
 from matplotlib.cm import ScalarMappable
+from mpl_toolkits.mplot3d import proj3d
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
 from lbd.io import _warn
@@ -24,6 +26,7 @@ from .style import Style
 from .units import axis_label
 
 MOST = 64                  # 3D bars show at most this many rows and columns: bars hide each other beyond
+QUICK_ABOVE = 32 * 32      # with more bars, a quick picture is drawn while turning; fewer are quick anyway
 # The six faces of a box of size 1, and how light each is: `bar3d` works this out for every bar, and
 # with thousands of collections that is most of the time.
 BOX = np.array([[(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)], [(0, 0, 1), (1, 0, 1), (1, 1, 1), (0, 1, 1)],
@@ -98,6 +101,7 @@ class Bars3dModel:
     lines: Tuple = ()
     axes: List[Any] = field(default_factory=list)            # a 3D axes per panel
     bars: List[List[Any]] = field(default_factory=list)      # per panel, a collection per bar
+    quick: List[Any] = field(default_factory=list)           # per panel, all bars in one collection
 
 
 def _panels(d, spec, style: Style) -> Tuple[matrix.Grid, List[Panel]]:
@@ -170,6 +174,51 @@ def _draw_bars(ax, m: Bars3dModel, p: Panel, style: Style) -> List[Any]:
     return bars
 
 
+def _quick_bars(ax, m: Bars3dModel, p: Panel, style: Style) -> Any:
+    """All bars in one collection, for the moments of turning: quicker, its faces sorted one by one."""
+    s = style.figure.axes.bars3d
+    x, y = np.meshgrid(m.x, m.y)
+    ok = np.isfinite(p.height)
+    half = s.width / 2
+    quick = ax.bar3d(x[ok] - half, y[ok] - half, np.zeros(int(ok.sum())), s.width, s.width, p.height[ok],
+                     color=_bar_colours(m, p)[ok], edgecolor="none", alpha=s.alpha)
+    quick.set_visible(False)
+    return quick
+
+
+def order_bars(m: Bars3dModel) -> None:
+    """Far bars first: bars don't overlap, so whole bars drawn far to near are always right."""
+    for a, p, bars in zip(m.axes, m.panels, m.bars):
+        x, y = np.meshgrid(m.x, m.y)
+        ok = np.isfinite(p.height)
+        depth = proj3d.proj_transform(x[ok], y[ok], np.zeros(x[ok].size), a.get_proj())[2]
+        for rank, k in enumerate(np.argsort(-depth)):
+            bars[k].set_zorder(rank + 1)
+
+
+def set_draft(m: Bars3dModel, draft: bool) -> None:
+    """The quick picture while turning, where there is one."""
+    for bars, quick in zip(m.bars, m.quick):
+        if quick is not None:
+            quick.set_visible(draft)
+            for bar in bars:
+                bar.set_visible(not draft)
+
+
+class _InOrder(Artist):
+    """Puts the bars in order at each drawing, whatever the angle is by then, also for an export.
+    It belongs to the figure and comes first, so the axes sort their bars after it."""
+
+    def __init__(self, m: Bars3dModel):
+        super().__init__()
+        self.model = m
+        self.set_zorder(-1)
+        self.set_in_layout(False)
+
+    def draw(self, renderer) -> None:
+        order_bars(self.model)
+
+
 def set_angle(fig, elev: float, azim: float, zoom: float) -> None:
     """Every panel of the figure at one angle and zoom."""
     for ax in fig.axes:
@@ -184,9 +233,10 @@ def draw(fig, ax, m: Bars3dModel, d, spec, style: Style):
     if not m.axes:
         raise r.RenderError("3D bars need a figure of their own: leave out ax=")
     rows, columns = len(m.y), len(m.x)
-    m.bars = []
+    m.bars, m.quick = [], []
     for a, p in zip(m.axes, m.panels):
         m.bars.append(_draw_bars(a, m, p, style))
+        m.quick.append(_quick_bars(a, m, p, style) if rows * columns > QUICK_ABOVE else None)
         a.set_xlim(-0.5, columns - 0.5)
         a.set_ylim(-0.5, rows - 0.5)
         a.set_zlim(*m.zlim)
@@ -198,6 +248,7 @@ def draw(fig, ax, m: Bars3dModel, d, spec, style: Style):
         a.view_init(elev=m.elev, azim=m.azim)
         if p.title:
             a.text2D(0.5, 0.97, p.title, transform=a.transAxes, ha="center", va="top")
+    fig.add_artist(_InOrder(m))
     if m.note:
         _warn(m.note, r.RenderWarning)
     scale = ScalarMappable(norm=m.norm, cmap=m.cmap)
