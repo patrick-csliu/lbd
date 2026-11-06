@@ -76,6 +76,7 @@ class Panel:
     title: str                  # "", "Re" or "Im"
     height: np.ndarray          # (rows, columns), plot units
     raw: np.ndarray             # the same, stored units
+    colour: Optional[np.ndarray] = None    # what the colours show, when it isn't the height
 
 
 @dataclass
@@ -92,6 +93,7 @@ class Bars3dModel:
     x_label: str
     y_label: str
     z_label: str
+    colour_label: Optional[str]            # the colour bar, when the colours aren't the heights
     elev: float
     azim: float
     zoom: float
@@ -105,7 +107,12 @@ class Bars3dModel:
 
 
 def _panels(d, spec, style: Style) -> Tuple[matrix.Grid, List[Panel]]:
-    g = matrix.read_grid(d, spec, style)
+    """Re and Im side by side (two panels), or one. `abs_phase`: height the magnitude, colour the phase."""
+    if spec["complex"] == "abs_phase" and d.values[spec["values"][0]].dtype.startswith("complex"):
+        g = matrix.read_grid(d, {**spec, "complex": "abs"}, style)
+        phase = matrix.read_grid(d, {**spec, "complex": "phase"}, style).blocks[0].raw
+        return g, [Panel("", g.blocks[0].z, g.blocks[0].raw, colour=phase)]
+    g = matrix.read_grid(d, {**spec, "complex": "abs" if spec["complex"] == "abs_phase" else spec["complex"]}, style)
     return g, [Panel(b.title, b.z, b.raw) for b in g.blocks]
 
 
@@ -129,10 +136,13 @@ def prepare(d, spec, style: Style, **kw) -> Bars3dModel:
     q = r.find_quantity(style, g.value, v.label, spec["complex"] if v.dtype.startswith("complex") else None)
     xs, ys = style.axis_style("x"), style.axis_style("y")
     xa, ya = d.axes[spec["x"]], d.axes[spec["y"]]
+    phase = panels[0].colour is not None
+    norm = mcolors.Normalize(-np.pi, np.pi) if phase else mcolors.Normalize(low, high if high > low else low + 1)
+    cmap = a.bars3d.phase_cmap if phase else q.cmap or a.bars3d.cmap or a.image.cmap
+    colour_label = axis_label(f"arg {v.label}", "rad", ys.label.unit_format) if phase else None
     return Bars3dModel(
         grid=g, panels=panels, x=np.arange(columns, dtype=float), y=rows - 1.0 - np.arange(rows), z=panels[0].height,
-        zf=g.zf, zlim=zlim, norm=mcolors.Normalize(low, high if high > low else low + 1),
-        cmap=q.cmap or a.bars3d.cmap or a.image.cmap,
+        zf=g.zf, zlim=zlim, norm=norm, cmap=cmap, colour_label=colour_label,
         x_label=axis_label(spec.get("x_label") or xa.label, "" if xa.elements is not None else xa.unit, xs.label.unit_format),
         y_label=axis_label(spec.get("y_label") or ya.label, "" if ya.elements is not None else ya.unit, ys.label.unit_format),
         z_label=axis_label(spec.get("z_label") or g.label, g.unit, ys.label.unit_format),
@@ -153,7 +163,7 @@ def _ticks(places: np.ndarray, texts: List[str]) -> Tuple[np.ndarray, List[str]]
 
 def _bar_colours(m: Bars3dModel, p: Panel) -> np.ndarray:
     cmap = matplotlib.colormaps[m.cmap]
-    return cmap(m.norm(p.height))
+    return cmap(m.norm(p.height if p.colour is None else p.colour))
 
 
 def _draw_bars(ax, m: Bars3dModel, p: Panel, style: Style) -> List[Any]:
@@ -248,13 +258,17 @@ def draw(fig, ax, m: Bars3dModel, d, spec, style: Style):
         a.view_init(elev=m.elev, azim=m.azim)
         if p.title:
             a.text2D(0.5, 0.97, p.title, transform=a.transAxes, ha="center", va="top")
+        if m.colour_label or not style.figure.axes.image.colorbar.visible:     # the colour bar doesn't say the height
+            a.text2D(0.0, 1.0, m.z_label, transform=a.transAxes, ha="left", va="top")
     fig.add_artist(_InOrder(m))
     if m.note:
         _warn(m.note, r.RenderWarning)
     scale = ScalarMappable(norm=m.norm, cmap=m.cmap)
-    r._colorbar(fig, scale, m.axes, style, m.z_label)
+    bar = r._colorbar(fig, scale, m.axes, style, m.colour_label or m.z_label)
+    if bar is not None and m.colour_label:
+        bar.set_ticks([-np.pi, 0, np.pi], labels=["−π", "0", "π"])
     return scale
 
 
 KIND = Kind("bars3d", "3D bars", fits, resolve, prepare, draw,
-            frozenset({"x", "y", "index", "x_label", "y_label", "z_label", "re_im"}), make_axes=make_axes)
+            frozenset({"x", "y", "index", "x_label", "y_label", "z_label", "re_im", "abs_phase"}), make_axes=make_axes)

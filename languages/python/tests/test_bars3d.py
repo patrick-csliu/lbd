@@ -1,5 +1,6 @@
 """3D bars (lbd.plot.bars3d): the data of Matrix, a bar per cell."""
 
+import matplotlib
 import numpy as np
 import pytest
 
@@ -134,6 +135,44 @@ def test_the_quick_picture_is_the_same_bars():
     bars3d.set_draft(m, False)
     assert m.bars[0][0].get_visible()
     assert drawn_model(grid(np.ones((4, 4))))[1].quick == [None]        # few bars are quick anyway
+
+
+def complex_grid():
+    d = lbd.Dataset(title="t")
+    d.add_axis("a", [0.0, 1.0])
+    d.add_axis("b", [0.0, 1.0])
+    d.add_value("rho", [[1 + 0j, 1j], [-1 + 0j, -1j]], axes=["a", "b"], label="ρ")
+    return d
+
+
+def test_complex_starts_as_re_and_im_with_one_scale():
+    fig, m = drawn_model(complex_grid(), values="rho")
+    assert [p.title for p in m.panels] == ["Re", "Im"] and len(m.axes) == 2
+    assert m.axes[0].get_zlim() == m.axes[1].get_zlim()
+    assert m.zlim == (-1.0, 1.0)
+    assert sum(hasattr(a, "get_proj") for a in fig.axes) == 2
+
+
+def test_both_panels_share_the_angle():
+    fig, m = drawn_model(complex_grid(), values="rho")
+    bars3d.set_angle(fig, 20, 70, 1.5)
+    assert [(a.elev, a.azim) for a in m.axes] == [(20, 70), (20, 70)]
+
+
+def test_phase_colours_cover_minus_pi_to_pi():
+    _, m = drawn_model(complex_grid(), values="rho", complex="abs_phase")
+    assert len(m.panels) == 1 and np.allclose(m.panels[0].height, 1)
+    assert (m.norm.vmin, m.norm.vmax) == (-np.pi, np.pi) and m.cmap == "twilight"
+    got = bars3d._bar_colours(m, m.panels[0])
+    twilight = matplotlib.colormaps["twilight"]
+    for (i, j), phase in {(0, 0): 0.0, (0, 1): np.pi / 2, (1, 1): -np.pi / 2}.items():
+        assert np.allclose(got[i, j], twilight((phase + np.pi) / (2 * np.pi)), atol=0.01)
+    assert np.allclose(got[1, 0], twilight(1.0), atol=0.01)
+
+
+def test_a_usual_complex_choice_gives_one_panel():
+    _, m = drawn_model(complex_grid(), values="rho", complex="real")
+    assert len(m.panels) == 1 and m.panels[0].height.tolist() == [[1.0, 0.0], [-1.0, 0.0]]
 
 
 def test_a_wrong_angle_says_what_is_wrong():
