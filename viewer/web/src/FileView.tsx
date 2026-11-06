@@ -558,7 +558,8 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
     const can = (v: ValueInfo) => (drawable ? drawable.includes(v.name) : fits(v, k));
     const now = valuesByName[selected[0]];
     const value = now && can(now) ? undefined : info.values.find(can);
-    update(value ? { ...fresh, kind: k, values: [value.name], options: undefined } : { kind: k, color: undefined, all: undefined, options: undefined });
+    const starting = kindOf(k).starting?.(info, value ?? now);
+    update({ ...(value ? { ...fresh, values: [value.name] } : { color: undefined, all: undefined }), kind: k, options: undefined, ...starting });
   };
   const axisName = (v: ValueInfo) => v.axes.filter((a) => lengthOf(a) > 1).map((a) => info.axes.find((x) => x.name === a)?.label || a).join(" × ") || v.axes.join(", ");
 
@@ -690,30 +691,6 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
               </optgroup>
               {sameShape.length > 0 && (
                 <optgroup label="Values (point by point)">
-                  {sameShape.map((v) => (
-                    <option key={v.name} value={v.name}>
-                      {v.label}
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-            </select>
-          </label>
-        )}
-        {kind === "scatter" && (
-          <label className="field">
-            <span>Colour by</span>
-            <select value={resolved.color ?? "none"} onChange={(e) => update({ color: e.target.value })}>
-              <option value="none">— (series colours)</option>
-              <optgroup label="Axes">
-                {firstAxes.map((a) => (
-                  <option key={a} value={a}>
-                    {axisLabel(a)}
-                  </option>
-                ))}
-              </optgroup>
-              {sameShape.length > 0 && (
-                <optgroup label="Values">
                   {sameShape.map((v) => (
                     <option key={v.name} value={v.name}>
                       {v.label}

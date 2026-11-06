@@ -1,5 +1,6 @@
 """Plot spec resolution and drawing (lbd.plot.render): strict checks, warnings, every branch."""
 
+import hashlib
 import warnings
 
 import numpy as np
@@ -625,3 +626,17 @@ def test_histogram_export_formats(fmt):
     d.add_value("x", np.arange(5.0), axes="t")
     data, _ = rnd.render_dataset(d, {"kind": "histogram"}, Style(), fmt=fmt)
     assert len(data) > 500
+
+
+def test_old_saved_scatter_view_is_the_same_picture():
+    """A view saved before `all` existed draws every point: the same as all of them asked for."""
+    d = lbd.Dataset()
+    d.add_axis("g", [0.0, 1.0], elements=["a", "b"])
+    d.add_axis("t", np.arange(40.0))
+    rng = np.random.default_rng(2)
+    d.add_value("x", rng.normal(size=(2, 40)), axes=["g", "t"])
+    d.add_value("y", rng.normal(size=(2, 40)), axes=["g", "t"])
+    old = {"kind": "scatter", "values": ["y"], "x": "x", "color": "g"}
+    a, _ = rnd.render_dataset(d, old, Style(), fmt="png")
+    b, _ = rnd.render_dataset(d, {**old, "all": ["g", "t"]}, Style(), fmt="png")
+    assert hashlib.sha256(a).digest() == hashlib.sha256(b).digest()

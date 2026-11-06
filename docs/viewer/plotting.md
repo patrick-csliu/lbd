@@ -49,7 +49,9 @@ curve, you choose which point of the other axis to show:
    nearest measured point (−40 dBm) and shows that point's exact value. A value beyond the axis
    goes to its nearest end, with a note.
 
-Scatter plots draw all points, so they have no sliders.
+On a scatter plot each axis not drawn has a choice: **All of …** ticked, all its points go in; unticked,
+it has a slider. A new scatter plot starts with a short axis with named positions as the colours, the
+longest axis All and the others sliders. A figure saved before this choice keeps drawing all its points.
 
 <div style="clear: both"></div>
 

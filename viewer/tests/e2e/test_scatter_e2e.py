@@ -140,3 +140,17 @@ def test_hovering_a_strip_says_the_bin(viewer, new_page):
     expect(top).to_be_visible()
     top.hover()
     expect(view.get_by_text(re.compile(r" to .*points"))).to_be_visible()
+
+
+def test_figure_scatter_slider_and_all(viewer, new_page):
+    shots(viewer)
+    page = new_page()
+    rendered(page, lambda: row(page, "iq.lbd").dblclick())
+    answer = rendered(page, lambda: plot_type(page).select_option("scatter"))
+    assert answer["spec"]["complex"] == "iq" and answer["spec"]["color"] == "state" and answer["spec"]["all"] == ["shot"]
+    figure = page.locator("main:not([hidden]) .tab-body:not([hidden])")
+    expect(figure.get_by_label("Colour by")).to_have_value("state")
+    expect(figure.get_by_role("slider")).to_have_count(1)
+    answer = rendered(page, lambda: figure.get_by_role("checkbox", name="All of Readout power").click())
+    assert sorted(answer["spec"]["all"]) == ["readout_power", "shot"] and answer["spec"]["index"] == {}
+    expect(figure.get_by_role("slider")).to_have_count(0)
