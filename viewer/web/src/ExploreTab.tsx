@@ -1195,7 +1195,7 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
       <Section name="data" title="Data" open={!!sections.data} onToggle={setSection}>
       <label className="field">
         <span>Plot</span>
-        <PlotKindSelect path={info.path} value={kind} first={first?.name} page="explore" onChoose={(k, fit) => updateSpec({ kind: k, x: undefined, y: undefined, series: undefined, color: undefined, all: undefined, options: undefined, complex: r.complex === "iq" || r.complex === "re_im" ? undefined : r.complex, ...(fit?.length && first && !fit.includes(first.name) ? { values: [fit[0]] } : {}), ...kindOf(k).starting?.(info, first) })} />
+        <PlotKindSelect path={info.path} value={kind} first={first?.name} page="explore" onChoose={(k, fit) => updateSpec({ kind: k, x: undefined, y: undefined, series: undefined, color: undefined, all: undefined, options: undefined, ...(r.complex === "iq" || r.complex === "re_im" ? { complex: undefined } : {}), ...(fit?.length && first && !fit.includes(first.name) ? { values: [fit[0]] } : {}), ...kindOf(k).starting?.(info, first) })} />
       </label>
 
       {!row.ownData && (

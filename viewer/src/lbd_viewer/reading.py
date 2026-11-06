@@ -192,7 +192,7 @@ def cursors(s: "ExploreSession", items: List[Dict[str, Any]], kind: str, view: D
         kind = s.view.cursor_types[0]
     geo = (xlim, ylim, w, h, scales)
     m = s.model
-    if together and len(items) == 2 and s.kind in ("curve", "heatmap"):
+    if together and len(items) == 2 and (s.kind in ("curve", "heatmap") or s.view.room(items[0]) is not None):
         items = _same_steps(s, items)
     out: Dict[str, Any] = {"type": kind, "factors": {"x": m.xf, "y": m.yf, "z": getattr(m, "zf", 1.0)}}
     s.view.line_options = {"every": every, "at_line": at_line, "limit": limit}
