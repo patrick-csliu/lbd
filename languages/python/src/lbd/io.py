@@ -1942,6 +1942,7 @@ def _flat_view(d: Dataset) -> Dataset:
     if getattr(d, "_flat", False):
         return d
     flat = copy.copy(d)
+    flat._unflat = d                    # the real coordinates of a group's points
     flat.axes = dict(d.axes)
     for name, a in d.axes.items():
         if a.group is not None:

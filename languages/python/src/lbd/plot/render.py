@@ -88,6 +88,7 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
         spec = {}
     if not isinstance(spec, dict):
         raise RenderError(f"plot settings must be a dict, not {type(spec).__name__}")
+    spec = {k: v for k, v in spec.items() if k != "levels"}     # an answer of ours, sent back
     unknown = sorted(str(k) for k in spec if k not in SPEC_KEYS)
     if unknown:
         raise RenderError(f"unknown plot setting(s) {unknown}; allowed: {sorted(SPEC_KEYS)}")
@@ -162,7 +163,7 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
         if k not in KINDS:
             raise RenderError(f"unknown plot kind {k!r}; use one of {KINDS}")
         if k == "auto":
-            return "heatmap" if len(sweep) >= 2 else "curve"
+            return "heatmap" if len(sweep) >= 2 or _on_levels(d, first.name) else "curve"
         why = kinds.KINDS[k].fits(d, first.name)
         if why:
             raise RenderError(why)
@@ -249,6 +250,10 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
 def _resolve_curve_or_map(d, out, values, pick, spec, index_in, warn_unused, file_spec) -> Dict[str, Any]:
     """The rest of `resolve_spec` for curves and maps: axes, series and slices."""
     kind = out["kind"]
+    if kind == "heatmap" and _on_levels(d, values[0]):
+        from . import groupmap
+
+        return groupmap.resolve(d, out, values, pick, spec, index_in, warn_unused, file_spec)
     first = d.values[values[0]]
     swept = _swept(first)                  # its axes with more than one point
     sweep = [a for a in swept if not _is_point(d, a)]
@@ -530,6 +535,13 @@ def _single_number(v) -> str:
         return f"{v.name!r} ({complex(x):.6g} {v.unit})".replace(" )", ")")
     factor, unit = prefix_scale(x, v.unit, "auto", warn=False)
     return f"{v.name!r} ({float(x) * factor:.6g} {unit})".replace(" )", ")")
+
+
+def _on_levels(d, name: str) -> bool:
+    """A value on two levels or more of an axis group: it has its own way to be a map (groupmap.py)."""
+    from . import groupmap
+
+    return groupmap.levels(d, name) is not None
 
 
 def _swept(value) -> List[str]:
@@ -976,8 +988,13 @@ def prepare_map(d, spec, style: Style, big: Optional[Any] = None,
     summaries.BigMap): `big.range()` gives its lowest and highest drawn number, `big * factor`
     the same map scaled; the model's `z` is then `big` scaled, read part by part. `zspan`: the
     numbers the colour bar's unit prefix is chosen for, instead of this map's (LBD Viewer: the
-    range of every slider position, so the prefix stays while the slider moves)."""
+    range of every slider position, so the prefix stays while the slider moves). A value on an
+    axis group gives a groupmap.GroupMapModel."""
     d = flat(d)
+    if _on_levels(d, spec["values"][0]):
+        from . import groupmap
+
+        return groupmap.prepare(d, spec, style, zspan)
     a = style.figure.axes
     xs, ys = style.axis_style("x"), style.axis_style("y")
     name = spec["values"][0]
@@ -1021,6 +1038,10 @@ def draw_map(fig: Figure, ax, model: MapModel, d, spec, style: Style, image: Opt
     """Draw a MapModel. `image` replaces the cells by a picture of exactly the plot area's pixels
     (rows bottom to top, e.g. reduced by lbd.plot.reduce): it is placed on the axes box, whatever
     the limits and scales, so no pixel is resampled. Returns the drawn mappable."""
+    from . import groupmap
+
+    if isinstance(model, groupmap.GroupMapModel) and image is None:
+        return groupmap.draw(fig, ax, model, d, spec, style)
     if image is None:
         mappable = ax.pcolormesh(model.x, model.y, model.z, shading="nearest", norm=model.norm,
                                  cmap=model.cmap, rasterized=True)
@@ -1272,7 +1293,11 @@ def _fits_curve(d, name: str) -> Optional[str]:
 
 
 def _fits_map(d, name: str) -> Optional[str]:
+    from . import groupmap
+
     v = d.values[name]
+    if groupmap.levels(d, name):
+        return groupmap.fits(d, name)
     swept = _swept(v)
     if len(v.shape) < 2:
         return f"'{name}' is {len(v.shape)}-D; a heat map needs 2 dimensions"
@@ -1302,3 +1327,5 @@ kinds.register(kinds.Kind(
     frozenset({"x", "color", "index", "x_scale", "y_scale", "x_label", "y_label", "z_label", "annotations"})))
 kinds.load_types()
 KINDS = ("auto", *kinds.KINDS)
+
+from . import groupmap  # noqa: E402  (it uses this module; the session reaches its model through here)
