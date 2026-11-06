@@ -315,7 +315,34 @@ function PositionBox({ it, onSet }: { it: ReadItem; onSet: (v: number) => void }
   );
 }
 
+/** A chosen cell or bar: what it is and its number, nothing to type. */
+function CellNumbers({ n, c, actions }: { n: number; c: CursorRead; actions: MutableRefObject<ExploreActions | null> }) {
+  return (
+    <div className="cursor-numbers">
+      <div className="cursor-head">
+        <span className={`cursor-tag c${n}`}>{n}</span>
+        {n === 2 && (
+          <button className="ib cursor-remove" aria-label="Remove cursor 2" title="Remove cursor 2 (cursor 1 stays)" onClick={() => actions.current?.removeSecond()}>
+            ×
+          </button>
+        )}
+      </div>
+      {c.items.map((it) => (
+        <div key={it.role} className="cursor-value">
+          {it.label} = <strong>{it.text ?? si(it.value, it.unit)}</strong>
+        </div>
+      ))}
+      {c.stored && (
+        <div className="cursor-value muted small">
+          stored: {c.stored.label} = {si(c.stored.value, c.stored.unit)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CursorNumbers({ n, c, kind, type, actions }: { n: number; c: CursorRead; kind: string; type: CursorType; actions: MutableRefObject<ExploreActions | null> }) {
+  if (kindOf(kind).cursorMark === "cell" && type === "cross") return <CellNumbers n={n} c={c} actions={actions} />;
   const x = item(c, "x"), y = item(c, "y"), z = item(c, "z"), series = item(c, "series");
   // what can be typed: x always; y on maps and for a horizontal line; on curves y is the trace's value
   const yEditable = kind === "heatmap" || type === "horizontal";
@@ -417,10 +444,10 @@ export default function CursorPanel({ kind, cursors, onCursors, reading, actions
           Remove cursors
         </button>
       </div>
-      {!c1 && <p className="muted small">Click the plot for cursor 1, Shift+click for cursor 2.</p>}
+      {!c1 && <p className="muted small">{kindOf(kind).cursorMark === "cell" ? "Click a cell or bar to read it; Shift+click for a second." : "Click the plot for cursor 1, Shift+click for cursor 2."}</p>}
       {c1 && <CursorNumbers n={1} c={c1} kind={kind} type={cursors.type} actions={actions} />}
       {c2 && <CursorNumbers n={2} c={c2} kind={kind} type={cursors.type} actions={actions} />}
-      {c1 && c2 && (
+      {c1 && c2 && kindOf(kind).cursorMark === "lines" && (
         <label className="check" title="Dragging either cursor, or the arrow keys, moves both by the same amount; each stays on its own trace">
           <input type="checkbox" checked={!!cursors.together} onChange={(e) => onCursors({ ...cursors, together: e.target.checked })} />
           Move both cursors together

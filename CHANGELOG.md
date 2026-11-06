@@ -145,6 +145,7 @@ are still written as 1.2).
 <!-- plan 15a -->
 
 <!-- plan 15b -->
+- New plot type **Matrix**, in Explore and Figure: cells with their numbers, for two axes or a matrix in each data point. A click reads a cell; complex values show Re and Im side by side; the colour range can be fixed to 0 to 1 or −1 to 1.
 
 <!-- plan 15c -->
 

@@ -34,6 +34,9 @@ export interface PlotKind {
   axes: "2d" | "3d"; // 3d: no zoom box, pan or limits
   syncs: boolean; // shares its x and y with other panels
   findButtons: boolean; // Max, Min and Peak
+  ownData?: boolean; // its controls choose the values, axes and complex mode
+  scales?: ("x" | "y")[]; // the log scales it offers (missing: both)
+  shapeOps?: boolean; // only operations that keep the shape; no equations
 }
 
 const ALL_CURSORS: CursorType[] = ["cross", "vertical", "horizontal"];

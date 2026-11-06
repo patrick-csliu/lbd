@@ -175,7 +175,7 @@ interface Props {
   /** The user changed the view here (zoom, pan, typed limits; null: show everything). */
   onUserView?: (v: View | null) => void;
   /** With each picture: what this view must share with another to follow its zoom, and where all its data is. */
-  onSync?: (s: SyncKeys & { full: [Lim, Lim] }) => void;
+  onSync?: (s: (SyncKeys & { full: [Lim, Lim] }) | null) => void;
   /** With each picture of a map with a slider: where its colours come from (crange.py). */
   onCrange?: (c: ExploreFrameMeta["crange"]) => void;
   /** Getting data out (plan 5): the entries of this panel's Data menu (also in the right-click menu). */
@@ -405,7 +405,9 @@ export default function ExploreView({
       }
       ctx.stroke();
     });
-    const both = r && r.cursors.length === 2 && r.cursors[0] && r.cursors[1] ? [r.cursors[0], r.cursors[1]] : null;
+    // a chosen cell or bar is marked by its box, not by lines through it
+    const cellMark = kindOf(kindRef.current).cursorMark === "cell" && r?.type === "cross";
+    const both = !cellMark && r && r.cursors.length === 2 && r.cursors[0] && r.cursors[1] ? [r.cursors[0], r.cursors[1]] : null;
     if (both) {
       // the range between the two cursors
       const [ax, ay] = toPx(m, both[0].x, both[0].y);
@@ -437,7 +439,7 @@ export default function ExploreView({
       const [x, y] = places[i]!;
       const color = CURSOR_COLORS[i];
       const active = cursorsRef.current.active === i && r.cursors.length === 2;
-      edged(
+      if (!cellMark) edged(
         color,
         active ? 2 : 1.25,
         () => {
@@ -455,9 +457,9 @@ export default function ExploreView({
       if (c.cell && r.type === "cross") {
         const [ax, ay] = toPx(m, c.cell[0], c.cell[1]);
         const [bx, by] = toPx(m, c.cell[2], c.cell[3]);
-        if (Math.abs(bx - ax) > 8 && Math.abs(by - ay) > 8) edged(color, 1.25, () => ctx.rect(Math.min(ax, bx), Math.min(ay, by), Math.abs(bx - ax), Math.abs(by - ay)));
+        if (cellMark || (Math.abs(bx - ax) > 8 && Math.abs(by - ay) > 8)) edged(color, cellMark ? 2 : 1.25, () => ctx.rect(Math.min(ax, bx), Math.min(ay, by), Math.abs(bx - ax), Math.abs(by - ay)));
       }
-      if (r.type !== "horizontal" || kindRef.current === "heatmap") edged(color, 2, () => ctx.arc(x, y, 6, 0, 2 * Math.PI));
+      if (!cellMark && (r.type !== "horizontal" || kindRef.current === "heatmap")) edged(color, 2, () => ctx.arc(x, y, 6, 0, 2 * Math.PI));
     });
     // where a vertical or horizontal cursor meets each trace
     r?.cursors.forEach((c) =>
@@ -578,7 +580,7 @@ export default function ExploreView({
         }
         onViewRef.current({ xlim: f.meta.xlim, ylim: f.meta.ylim });
         onOpsInfoRef.current(f.meta.ops ?? null);
-        if (f.meta.sync?.x !== undefined) onSyncRef.current?.({ ...(f.meta.sync as SyncKeys), full: f.meta.full });
+        onSyncRef.current?.(f.meta.sync?.x !== undefined ? { ...(f.meta.sync as SyncKeys), full: f.meta.full } : null); // null: nothing to share
         onCrangeRef.current?.(f.meta.crange ?? null);
         if (f.meta.crange?.state === "working" && !crangeTimer.current) {
           // every slice's colour range is being worked out: the same view again in a moment
@@ -1244,9 +1246,13 @@ export default function ExploreView({
       { label: "Cursor 1 here", onClick: () => placeCursor(0, x, y, false, false) },
       { label: "Cursor 2 here", onClick: () => placeCursor(1, x, y, false, false), disabled: !c1 },
       "-",
-      { label: "Max", onClick: () => find("max") },
-      { label: "Min", onClick: () => find("min") },
-      { label: "Peak (farthest from the median)", onClick: () => find("peak") },
+      ...(kindOf(kindRef.current).findButtons
+        ? ([
+            { label: "Max", onClick: () => find("max") },
+            { label: "Min", onClick: () => find("min") },
+            { label: "Peak (farthest from the median)", onClick: () => find("peak") },
+          ] as MenuEntry[])
+        : []),
       { label: "Remove cursors", onClick: clearCursors, disabled: !c1 },
       "-",
       ...(map
@@ -1256,7 +1262,9 @@ export default function ExploreView({
             { label: "Save row as .lbd…", onClick: () => saveCut("row"), disabled: !c1 },
             { label: "Save column as .lbd…", onClick: () => saveCut("column"), disabled: !c1 },
           ] as MenuEntry[])
-        : ([{ label: "Save trace as .lbd…", onClick: () => saveCut("trace"), disabled: !c1 }] as MenuEntry[])),
+        : kindRef.current === "curve"
+          ? ([{ label: "Save trace as .lbd…", onClick: () => saveCut("trace"), disabled: !c1 }] as MenuEntry[])
+          : []),
       "-",
       ...(dataItems ? ([...dataItems(), "-"] as MenuEntry[]) : []),
       { label: "Show everything", onClick: () => setView(null) },
@@ -1283,9 +1291,9 @@ export default function ExploreView({
     if (k === "ArrowLeft" || k === "ArrowRight") step((k === "ArrowLeft" ? -1 : 1) * (e.shiftKey ? 10 : 1), 0);
     else if (k === "ArrowUp" || k === "ArrowDown") step(0, (k === "ArrowUp" ? 1 : -1) * (e.shiftKey ? 10 : 1));
     else if (k === "Tab" && now.length === 2) onCursorsRef.current({ ...st, active: st.active === 0 ? 1 : 0 });
-    else if (k === "m" || k === "M") find("max");
-    else if (k === "n" || k === "N") find("min");
-    else if (k === "p" || k === "P") find("peak");
+    else if ((k === "m" || k === "M") && kindOf(kindRef.current).findButtons) find("max");
+    else if ((k === "n" || k === "N") && kindOf(kindRef.current).findButtons) find("min");
+    else if ((k === "p" || k === "P") && kindOf(kindRef.current).findButtons) find("peak");
     else if (k === "[" || k === "]") onStepSlider(k === "[" ? -1 : 1);
     else if ((k === "+" || k === "=" || k === "-" || k === "_") && m && wanted.current) {
       const f = k === "-" || k === "_" ? 1.25 : 0.8, v = wanted.current, c = r?.cursors[0];

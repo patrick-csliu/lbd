@@ -561,7 +561,8 @@ class ExploreSession:
                 if want == "log" and not self._has_positive(which):
                     want = "linear"                      # nothing could be drawn on a log axis
                     self.log_refused.append(f"The {which} axis has no value above 0, so it stays linear.")
-                (self.ax.set_xscale if key == "xscale" else self.ax.set_yscale)(want)
+                if want != (self.ax.get_xscale if key == "xscale" else self.ax.get_yscale)():
+                    (self.ax.set_xscale if key == "xscale" else self.ax.set_yscale)(want)    # (this resets the ticks)
             self.full = self._full_view()
         self.settings = settings
         return notes

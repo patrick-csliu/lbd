@@ -173,6 +173,25 @@ greyed, and says why.
 
 ### Matrix
 
+For the numbers themselves: a density matrix, an assignment matrix, a covariance. Each cell shows its
+number, in dark or light text according to the colour behind it, with row 0 at the top as in a
+matrix. Choose **Matrix** in the Plot menu; it needs two axes, or a value with a matrix in each data
+point. The other axes get sliders.
+
+- **Columns** and **Rows** choose the axes. Their `elements` name the cells; otherwise the axes'
+  numbers do.
+- **Numbers** turns the numbers off, and **Significant digits** sets them. All cells share one unit
+  prefix, shown on the colour bar. The numbers are drawn up to 32 × 32; a larger matrix is drawn as
+  cells, and a note says so. A number that doesn't fit its cell is left out until you zoom in.
+- **Colour range**: Auto, 0 to 1, or −1 to 1 with white at zero. Matrices are only comparable with a
+  fixed range, so numbers without a unit start on one of those two when they fit in it.
+- **Complex values** start as **Re and Im** side by side, on one colour range; or the usual choices.
+- A click selects a cell: its row, column and value are in the Cursors tab, as stored.
+
+Operations that keep the shape are available (subtract the mean, normalize, the derivative, smooth,
+between traces); not on Re and Im, which is two numbers per cell. There are no cuts, and panels don't
+share their zoom: a matrix's columns are positions, not an axis.
+
 ### Bars
 
 ### 3D bars

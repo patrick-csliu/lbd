@@ -516,7 +516,9 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
   if (!resolved) return <div className="controls muted small">Preparing…</div>;
 
   const kind = resolved.kind ?? "auto";
-  const KindControls = kindOf(kind).controls;
+  const kindRow = kindOf(kind);
+  const KindControls = kindRow.controls;
+  const logScales = kindRow.scales ?? ["x", "y"];
   const valuesByName = Object.fromEntries(info.values.map((v) => [v.name, v]));
   const selected = resolved.values ?? [];
   const first = valuesByName[selected[0]];
@@ -554,7 +556,8 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
     const can = (v: ValueInfo) => (drawable ? drawable.includes(v.name) : fits(v, k));
     const now = valuesByName[selected[0]];
     const value = now && can(now) ? undefined : info.values.find(can);
-    update(value ? { ...fresh, kind: k, values: [value.name] } : { kind: k });
+    const complex = resolved.complex === "re_im" ? { complex: undefined } : {};
+    update(value ? { ...fresh, ...complex, kind: k, values: [value.name] } : { ...complex, kind: k, x: undefined, y: undefined, series: undefined });
   };
   const axisName = (v: ValueInfo) => v.axes.filter((a) => lengthOf(a) > 1).map((a) => info.axes.find((x) => x.name === a)?.label || a).join(" × ") || v.axes.join(", ");
 
@@ -612,7 +615,7 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
           <PlotKindSelect path={info.path} value={kind} first={selected[0]} page="figure" onChoose={chooseKind} />
         </label>
 
-        {kind === "curve" || (kind === "scatter" && resolved.complex !== "iq") ? (
+        {kindRow.ownData ? null : kind === "curve" || (kind === "scatter" && resolved.complex !== "iq") ? (
           <div className="field">
             <span>Values</span>
             <div className="checks">
@@ -660,7 +663,7 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
           </label>
         )}
 
-        {anyComplex && (
+        {anyComplex && !kindRow.ownData && (
           <label className="field">
             <span>Complex data as</span>
             <select value={resolved.complex ?? "abs"} onChange={(e) => update({ complex: e.target.value })}>
@@ -721,7 +724,7 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
           </label>
         )}
         {KindControls && <KindControls info={info} spec={resolved} resolved={resolved} update={update} page="figure" />}
-        {kind !== "scatter" && firstAxes.length > 0 && (
+        {kind !== "scatter" && !kindRow.ownData && firstAxes.length > 0 && (
           <label className="field">
             <span>Horizontal axis</span>
             <select value={resolved.x ?? ""} onChange={(e) => update({ x: e.target.value, y: undefined, series: undefined, index: {} })}>
@@ -782,16 +785,22 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
           ),
         )}
 
-        <div className="field inline">
-          <label className="check">
-            <input type="checkbox" checked={resolved.x_scale === "log"} onChange={(e) => update({ x_scale: e.target.checked ? "log" : "linear" })} />
-            Log x
-          </label>
-          <label className="check">
-            <input type="checkbox" checked={resolved.y_scale === "log"} onChange={(e) => update({ y_scale: e.target.checked ? "log" : "linear" })} />
-            Log y
-          </label>
-        </div>
+        {logScales.length > 0 && (
+          <div className="field inline">
+            {logScales.includes("x") && (
+              <label className="check">
+                <input type="checkbox" checked={resolved.x_scale === "log"} onChange={(e) => update({ x_scale: e.target.checked ? "log" : "linear" })} />
+                Log x
+              </label>
+            )}
+            {logScales.includes("y") && (
+              <label className="check">
+                <input type="checkbox" checked={resolved.y_scale === "log"} onChange={(e) => update({ y_scale: e.target.checked ? "log" : "linear" })} />
+                Log y
+              </label>
+            )}
+          </div>
+        )}
       </fieldset>
 
       <fieldset>
@@ -807,7 +816,7 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
                 ["title", "Title"],
                 ["x_label", "Horizontal axis label"],
                 ["y_label", "Vertical axis label"],
-                ...(kind === "heatmap" || (kind === "scatter" && resolved.color) ? [["z_label", "Colour bar label"]] : []),
+                ...(kind === "heatmap" || kind === "matrix" || (kind === "scatter" && resolved.color) ? [["z_label", "Colour bar label"]] : []),
               ] as [keyof PlotSpec, string][]
             ).map(([key, label]) => (
               // keyed on the current value so Reset refreshes the uncontrolled input
