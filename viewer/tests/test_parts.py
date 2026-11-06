@@ -28,7 +28,7 @@ def test_config_settings_roundtrip(tmp_path):
                                           "sidebar_fields": ["date", "sweep", "project", "tags"]},
                               "memory": {"reserve_gb": None, "maximum_gb": None, "summary_cache_gb": 20.0},
                               "measurements": {"progress": True, "time": True, "percent": True, "points": True,
-                                               "axes": True, "notify": False}, "explore": {"line_traces": 50}}
+                                               "axes": True, "notify": False}, "explore": {"line_traces": 20}}
     assert cfg.problems() == []
     # the Library's settings: checked, kept
     assert cfg.set_library({"read_headers": False, "columns": ["name", "values"]})["read_headers"] is False

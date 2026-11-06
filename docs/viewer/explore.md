@@ -209,7 +209,7 @@ points, so every row is at exactly the line (marked ≈); **Nearest stored point
 straight from the file, each at its own place. It matters for horizontal crossings, and for traces
 with different x points (a variable sweep). **Copy** puts the table on the clipboard for a
 spreadsheet; **Save as CSV…** saves it. Untick **Every trace at the line** to read only the
-cursor's own trace. Markers and crossings work up to 50 visible traces (**Settings → Explore**: a
+cursor's own trace. Markers and crossings work up to 20 visible traces (**Settings → Explore**: a
 high number can make every cursor move slow) and for curves that fit in memory; above that a note
 says so, and a vertical cursor still lists the nearest stored values.
 

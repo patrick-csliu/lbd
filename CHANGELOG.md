@@ -129,7 +129,7 @@ are still written as 1.2).
   each trace's value (with two cursors both and Δ), a horizontal cursor every crossing and, for
   two, the distance between them. **Interpolated** (default) or **Nearest stored point**; **Copy**
   and **Save as CSV…**; a tick box turns it off, and **Settings → Explore** sets how many traces
-  it marks at most (50).
+  it marks at most (20).
 - **Explore: cursors show on any map.** Their lines, circles and numbers have a white edge (a blue
   cursor on a blue map was lost), the numbers are small badges that keep apart when two cursors
   are close, and share one badge at the same point.

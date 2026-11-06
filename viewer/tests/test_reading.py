@@ -351,7 +351,7 @@ def test_many_traces_stop_the_markers(three):
 
 
 def test_the_limit_is_a_setting(client):
-    assert client.get("/api/state").json()["explore"]["line_traces"] == 50
+    assert client.get("/api/state").json()["explore"]["line_traces"] == 20
     assert client.put("/api/settings", json={"explore": {"line_traces": 5}}).json()["explore"]["line_traces"] == 5
     r = client.put("/api/settings", json={"explore": {"line_traces": -1}})
     assert r.status_code == 400 and "whole number" in r.text

@@ -162,7 +162,7 @@ def _nearest(arr: np.ndarray, v: float) -> int:
 
 def cursors(s: "ExploreSession", items: List[Dict[str, Any]], kind: str, view: Dict[str, Any],
             size: Sequence[int], cuts: bool = True, lines: bool = True, every: bool = True,
-            at_line: str = "interpolated", limit: int = 50) -> Dict[str, Any]:
+            at_line: str = "interpolated", limit: int = 20) -> Dict[str, Any]:
     """Snap each cursor to the stored data and read it out; with a map, the cuts through cursor 1.
 
     `items`: per cursor {x, y} in plot units, optionally `trace` (curves: stay on this trace),
@@ -278,7 +278,7 @@ def _cell_box(m, i: int, j: int) -> Tuple[float, float, float, float]:
 
 
 def _curve_cursor(s: "ExploreSession", c: Dict[str, Any], kind: str, geo, every: bool = True,
-                  at_line: str = "interpolated", limit: int = 50) -> Optional[Dict[str, Any]]:
+                  at_line: str = "interpolated", limit: int = 20) -> Optional[Dict[str, Any]]:
     m = s.model
     x, y = _check_point(c)
     shown = _visible(s)

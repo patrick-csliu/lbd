@@ -62,7 +62,7 @@ MEASUREMENTS_DEFAULTS: Dict[str, Any] = {"progress": True, "time": True, "percen
                                          "axes": True, "notify": False}
 # Explore (plan 13): a vertical or horizontal cursor marks every trace at its line for at most
 # this many visible traces (more makes each cursor move slow, and the plot unreadable).
-EXPLORE_DEFAULTS: Dict[str, Any] = {"line_traces": 50}
+EXPLORE_DEFAULTS: Dict[str, Any] = {"line_traces": 20}
 # The sections of the Settings dialog (SettingsDialog.tsx) and the settings in each, as
 # "key" (top level) or "group.key"; "Reset this section" puts these back to their defaults.
 GENERAL_DEFAULTS: Dict[str, Any] = {"theme": "system", "open_files_in": "viewer", "open_data_in": "explore"}
