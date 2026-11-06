@@ -30,22 +30,16 @@ import lbd
 from lbd.io import PLOT_SPEC_KEYS, _warn
 from lbd.io import _flat_view as flat   # drawing sees one axis per dimension (a data point's too)
 
+from . import kinds
 from .style import QuantityStyle, Style
 from .units import AUTO_UNITS, UnitWarning, axis_label, mathsafe, prefix_scale
 
-KINDS = ("auto", "curve", "heatmap", "scatter")
 COMPLEX_MODES = ("abs", "db", "phase", "phase_deg", "phase_unwrap", "phase_deg_unwrap", "real", "imag", "iq")
 SCALES = ("linear", "log")
 FORMATS = {"svg": "image/svg+xml", "pdf": "application/pdf", "png": "image/png", "jpg": "image/jpeg"}
 DISPLAY_RASTER_DPI = 200  # raster layers (heat-map pixels, dense scatter) in the on-screen SVG
 SCATTER_RASTER_ABOVE = 5000  # rasterize scatter plots with more points than this (vector files stay small)
 SPEC_KEYS = PLOT_SPEC_KEYS
-# Settings used by each plot type (kind, values, complex and title apply to all).
-_APPLIES = {
-    "curve": {"x", "series", "index", "x_scale", "y_scale", "x_label", "y_label", "annotations"},
-    "heatmap": {"x", "y", "index", "x_scale", "y_scale", "x_label", "y_label", "z_label", "annotations"},
-    "scatter": {"x", "color", "index", "x_scale", "y_scale", "x_label", "y_label", "z_label", "annotations"},
-}
 # Saved-view settings that mean the same for every plot type: kept when another type is chosen
 # (resolve_spec). Axes, series, colours, slices, axis labels and annotations belong to the plot
 # they were made for.
@@ -151,19 +145,15 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
 
     def fits(name: str, k: str) -> bool:
         """Whether this value can be drawn as plot kind k."""
-        v = d.values[name]
-        if k == "heatmap":
-            return len(_swept(v)) >= 2
-        return k == "auto" or len(v.shape) > 0
+        kind = kinds.KINDS.get(k)          # (an unknown kind is refused below, with its message)
+        return k == "auto" or (len(d.values[name].shape) > 0 and (kind is None or kind.fits(d, name) is None))
 
     if other_kind and not explicit("values") and not fits(values[0], spec["kind"]):
         # the saved values were for another kind of plot: the first value this kind can show
         values = [next((n for n in names if fits(n, spec["kind"])), default_value)]
     first = d.values[values[0]]
-    nd = len(first.shape)
-    swept = _swept(first)                  # its axes with more than one point
     # its sweep axes: not the axes of one data point (format 1.2), which become curves, not maps
-    sweep = [a for a in swept if not _is_point(d, a)]
+    sweep = [a for a in _swept(first) if not _is_point(d, a)]
 
     # kind
     def check_kind(k: Any) -> str:
@@ -173,12 +163,9 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
             raise RenderError(f"unknown plot kind {k!r}; use one of {KINDS}")
         if k == "auto":
             return "heatmap" if len(sweep) >= 2 else "curve"
-        if k == "heatmap" and nd < 2:
-            raise RenderError(f"'{first.name}' is {nd}-D; a heat map needs 2 dimensions")
-        if k == "heatmap" and len(swept) < 2:
-            fixed = [a for a in first.axes if a not in swept]
-            raise RenderError(f"a heat map needs 2 axes with more than one point; '{first.name}' has "
-                              f"{len(swept)} ({fixed} {'is' if len(fixed) == 1 else 'are'} a single point)")
+        why = kinds.KINDS[k].fits(d, first.name)
+        if why:
+            raise RenderError(why)
         return k
 
     kind = pick("kind", check_kind, check_kind("auto"))
@@ -230,14 +217,44 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
 
     index_in = {**pick_dict(file_spec, "index", check_index, d), **(check_index(spec["index"]) if explicit("index") else {})}
 
+    def check_all(v: Any) -> List[str]:
+        if not isinstance(v, (list, tuple)) or not all(isinstance(a, str) for a in v):
+            raise RenderError(f"all must be a list of axis names, not {v!r}")
+        wrong = [a for a in v if a not in first.axes]
+        if wrong:
+            raise RenderError(f"all: '{first.name}' has no axis {', '.join(map(repr, wrong))}; its axes: {list(first.axes)}")
+        return list(v)
+
+    def check_options(v: Any) -> Dict[str, Any]:
+        if not isinstance(v, dict):
+            raise RenderError(f"options must be a dict of a plot type's own choices, not {type(v).__name__}")
+        return dict(v)
+
+    whole = pick("all", check_all, [])
+    if whole:
+        out["all"] = whole
+    options = pick("options", check_options, {})
+    if options:
+        out["options"] = options
+
     if warn_unused:
-        unused = sorted(k for k in spec if explicit(k) and k not in {"kind", "values", "complex", "title"}
-                        and k not in _APPLIES[kind])
+        unused = sorted(k for k in spec if explicit(k) and k not in {"kind", "values", "complex", "title", "all", "options"}
+                        and k not in kinds.KINDS[kind].applies)
         if unused:
             _warn(f"{unused} {'is' if len(unused) == 1 else 'are'} not used by a {kind} plot; ignored", RenderWarning)
 
-    if kind == "scatter":
-        return _resolve_scatter(d, out, values, pick, spec, index_in, warn_unused)
+    return kinds.KINDS[kind].resolve(d, out, values, pick, spec, index_in, warn_unused, file_spec)
+
+
+def _resolve_curve_or_map(d, out, values, pick, spec, index_in, warn_unused, file_spec) -> Dict[str, Any]:
+    """The rest of `resolve_spec` for curves and maps: axes, series and slices."""
+    kind = out["kind"]
+    first = d.values[values[0]]
+    swept = _swept(first)                  # its axes with more than one point
+    sweep = [a for a in swept if not _is_point(d, a)]
+
+    def explicit(key: str) -> bool:
+        return spec.get(key) not in (None, "")
 
     axes = list(first.axes)
     # Curves may also take a value as x, as scatter plots do: one with the same axes as the
@@ -442,7 +459,7 @@ def pick_dict(file_spec: Dict[str, Any], key: str, check: Callable[[Any], Any], 
         return {k: v for k, v in raw.items() if k in d.axes} if isinstance(raw, dict) else {}
 
 
-def _resolve_scatter(d, out, values, pick, spec, index_in, warn_unused) -> Dict[str, Any]:
+def _resolve_scatter(d, out, values, pick, spec, index_in, warn_unused, file_spec=None) -> Dict[str, Any]:
     first = d.values[values[0]]
     axes = list(first.axes)
     same_shape = [n for n, v in d.values.items() if v.axes == axes]   # values usable point by point
@@ -741,16 +758,13 @@ def build_figure(d: "lbd.Dataset", spec: Dict[str, Any], style: Style,
     d = flat(d)
     if ax is None:
         fig = fig or new_figure(style)
-        ax = fig.add_subplot()
     else:
         fig = ax.figure
-    kind = spec["kind"]
-    if kind == "curve":
-        draw_curves(fig, ax, prepare_curves(d, spec, style), d, spec, style)
-    elif kind == "scatter":
-        _draw_scatter(fig, ax, d, spec, style)
-    else:
-        draw_map(fig, ax, prepare_map(d, spec, style), d, spec, style)
+    kind = kinds.KINDS[spec["kind"]]
+    model = kind.prepare(d, spec, style)
+    if ax is None:
+        ax = kind.make_axes(fig, model)
+    kind.draw(fig, ax, model, d, spec, style)
     if spec.get("title"):
         ax.set_title(mathsafe(spec["title"]))
     apply_axis_text(ax, style)
@@ -1228,6 +1242,9 @@ def needed_values(d: "lbd.Dataset", resolved: Dict[str, Any]) -> List[str]:
         n = resolved.get(key)
         if n and n in d.values and n not in names:
             names.append(n)
+    kind = kinds.KINDS.get(resolved.get("kind"))
+    if kind:
+        names += [n for n in kind.needs(resolved) if n not in names]
     return names
 
 
@@ -1245,3 +1262,42 @@ def metadata(fmt: str, d: "lbd.Dataset", creator: Optional[str] = None) -> Dict[
 
 def safe_filename(s: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", s).strip("_") or "figure"
+
+
+# ---- the plot types of this module (the others have a file of their own: kinds.load_types) -------
+
+def _fits_curve(d, name: str) -> Optional[str]:
+    return None if len(d.values[name].shape) > 0 else f"'{name}' is a single number"
+
+
+def _fits_map(d, name: str) -> Optional[str]:
+    v = d.values[name]
+    swept = _swept(v)
+    if len(v.shape) < 2:
+        return f"'{name}' is {len(v.shape)}-D; a heat map needs 2 dimensions"
+    if len(swept) < 2:
+        fixed = [a for a in v.axes if a not in swept]
+        return (f"a heat map needs 2 axes with more than one point; '{name}' has "
+                f"{len(swept)} ({fixed} {'is' if len(fixed) == 1 else 'are'} a single point)")
+    return None
+
+
+def _prepare_nothing(d, spec, style, **kw) -> None:
+    return None
+
+
+def _draw_scatter_kind(fig, ax, model, d, spec, style) -> None:
+    _draw_scatter(fig, ax, d, spec, style)
+
+
+kinds.register(kinds.Kind(
+    "curve", "Curves", _fits_curve, _resolve_curve_or_map, prepare_curves, draw_curves,
+    frozenset({"x", "series", "index", "x_scale", "y_scale", "x_label", "y_label", "annotations"})))
+kinds.register(kinds.Kind(
+    "heatmap", "Map", _fits_map, _resolve_curve_or_map, prepare_map, draw_map,
+    frozenset({"x", "y", "index", "x_scale", "y_scale", "x_label", "y_label", "z_label", "annotations"})))
+kinds.register(kinds.Kind(
+    "scatter", "Scatter", _fits_curve, _resolve_scatter, _prepare_nothing, _draw_scatter_kind,
+    frozenset({"x", "color", "index", "x_scale", "y_scale", "x_label", "y_label", "z_label", "annotations"})))
+kinds.load_types()
+KINDS = ("auto", *kinds.KINDS)

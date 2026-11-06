@@ -44,7 +44,7 @@ _ALLOWED_DTYPES = (
 _COMPRESS_MIN_SIZE = 1024
 # The keys a saved plot spec may have (see the "Plot settings" documentation page).
 PLOT_SPEC_KEYS = frozenset({"kind", "values", "complex", "x", "y", "series", "color", "index", "x_scale",
-                            "y_scale", "title", "x_label", "y_label", "z_label", "annotations"})
+                            "y_scale", "title", "x_label", "y_label", "z_label", "annotations", "all", "options"})
 _INT64 = np.iinfo(np.int64)
 
 PathLike = Union[str, "os.PathLike[str]"]
