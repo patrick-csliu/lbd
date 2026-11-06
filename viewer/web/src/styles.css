@@ -616,13 +616,14 @@ details.group fieldset > .group-fields { margin-top: -4px; }
 .path-line .path-folder { flex: 0 1 auto; min-width: 2ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .path-line .path-name { flex: 0 0 auto; max-width: calc(100% - 6ch); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .path-line .icon { flex: none; margin-left: 4px; padding: 0 4px; font-size: 12px; line-height: 18px; }
-.list-view-switch { margin-left: auto; display: inline-flex; }
+.list-view-tools { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; }
+.list-view-switch { display: inline-flex; }
 .list-view-switch button { padding: 1px 8px; font-size: 12px; border-radius: 0; }
 .list-view-switch button:first-child { border-radius: var(--radius) 0 0 var(--radius); }
 .list-view-switch button:last-child { border-radius: 0 var(--radius) var(--radius) 0; margin-left: -1px; }
 .list-view-switch button.on { background: var(--accent-soft); font-weight: 600; }
 .library-cards { position: relative; }
-.library-card { position: absolute; height: 206px; box-sizing: border-box; padding: 6px; cursor: default; border-radius: var(--radius); user-select: none; }
+.library-card { position: absolute; box-sizing: border-box; padding: 6px; cursor: default; border-radius: var(--radius); user-select: none; }
 .library-card:hover { background: var(--panel-2); }
 .library-card.selected { background: var(--accent-selected); box-shadow: inset 0 0 0 2px var(--accent); }
 .library-card.unreadable { color: var(--muted); font-style: italic; }
@@ -631,7 +632,7 @@ details.group fieldset > .group-fields { margin-top: -4px; }
 .library-card .card-picture img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .library-card .card-name { margin-top: 4px; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .library-card.starred .card-name { font-weight: 600; }
-.library-card .card-date { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.library-card .card-field { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 18px; }
 .library-card .mark-star { color: #c99a06; }
 .library-card .mark-conflict { color: var(--danger); }
 

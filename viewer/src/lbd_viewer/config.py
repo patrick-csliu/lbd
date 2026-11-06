@@ -52,7 +52,7 @@ LIBRARY_DEFAULTS: Dict[str, Any] = {"read_headers": True, "notice_seen": False, 
                                     "previews": "all", "list_view": "list", "sidebar_scopes": ["library"],
                                     "sidebar_layout": "two", "sidebar_main": "title",
                                     "sidebar_fields": ["date", "sweep", "project", "tags"],
-                                    "date_zone": "local"}
+                                    "date_zone": "local", "card_main": "title", "card_fields": ["date"]}
 # Memory for data (plan 6d, memory.py): what to leave free for the rest of the computer (None:
 # automatic, max(2 GB, 10% of RAM)), the most LBD may use (None: no maximum), and the disk cache
 # of large maps' and curves' summaries. In GB.
@@ -409,8 +409,12 @@ def _check_library(library: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(fields, list) or any(f not in SIDEBAR_FIELDS for f in fields):
         raise ConfigError(f"Library 'sidebar_fields' must be a list of {', '.join(SIDEBAR_FIELDS)}, not {fields!r}")
     library = {**library, "sidebar_fields": list(dict.fromkeys(fields))}             # once each, in the order chosen
+    fields = library.get("card_fields")
+    if not isinstance(fields, list) or any(f not in SIDEBAR_FIELDS for f in fields):
+        raise ConfigError(f"Library 'card_fields' must be a list of {', '.join(SIDEBAR_FIELDS)}, not {fields!r}")
+    library = {**library, "card_fields": list(dict.fromkeys(fields))}                # once each, in the order chosen
     for key, allowed in (("previews", PREVIEW_MODES), ("list_view", LIST_VIEWS), ("sidebar_layout", SIDEBAR_LAYOUTS),
-                         ("sidebar_main", SIDEBAR_MAIN)):
+                         ("sidebar_main", SIDEBAR_MAIN), ("card_main", SIDEBAR_MAIN)):
         if library.get(key) not in allowed:
             raise ConfigError(f"Library setting '{key}' must be one of {', '.join(allowed)}, not {library.get(key)!r}")
     zone = library.get("date_zone")     # "local", "file" or a zone's name: the page knows the names

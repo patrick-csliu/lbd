@@ -130,6 +130,9 @@ are still written as 1.2).
   past it, and the right pane scrolled sideways.
 - **Files tab: sort by name or date**, with two buttons in every layout (Explore and Figure); only
   the Columns layout could sort before. It never changes the Library's order.
+- **Library: a more useful Pictures view.** **Name** and **Date** sort the pictures (one order with
+  the list), and **⋯** chooses what each picture shows: its title or file name, and any of the
+  fields, such as sweep size, project or tags.
 - **Explore: the preview tab's name** (one click, in italics) is at the same height as the other
   tabs' names; it took the Library preview's margins before.
 - **Explore: a map's colours can mean the same at every slider position.** Display → Colour →

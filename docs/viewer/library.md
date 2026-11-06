@@ -156,7 +156,9 @@ is **the data only**: no axes, numbers, colour bar or legend (those are in the f
 next to it); it is drawn sharp enough for high-density (4K, Retina) screens. Step through
 the list with ↑ ↓ and the pictures follow at once: the files near the selection are drawn ahead.
 
-- **Pictures** (above the list, next to **List**) shows the files as a grid of pictures, with
+- **Pictures** (above the list, next to **List**): **Name** and **Date** beside it sort the
+  pictures, one order with the list, and **⋯** chooses what each picture shows: the title or file
+  name, and any of the fields. It shows the files as a grid of pictures, with
   their name, date and state (*measuring…*, *stopped*); click, select several, right-click and
   the keys work as in the list. The selected file on the right then leaves out its preview (the
   grid shows it). Point at "No preview" on a card to see why.

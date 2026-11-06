@@ -24,6 +24,7 @@ import {
 } from "./api";
 import { docsUrl } from "./help";
 import { FileDetails, FileFacts } from "./FileView";
+import { SortButtons } from "./SortButtons";
 import { ConfirmDialog, ConfirmRequest, ContextMenu, isMenuKey, MenuAt, menuAt, MenuEntry, useOutsideClose } from "./menu";
 import { copyPath, fileEntries } from "./fileActions";
 import { useToast } from "./toast";
@@ -33,7 +34,7 @@ import { Chip, LabelChip } from "./LabelChip";
 import { Setting } from "./settingsUi";
 import { labelPath, shortLabel } from "./labelText";
 import { LabelPathInput, usedMost, whereItGoes } from "./labelPath";
-import { cellText, chosenColumns as chosenColumnsOf, COLUMNS, createdText, createdTip, dateZoneName, DEFAULT_COLUMNS, writtenText, fittingColumns, gridTemplate, localTime, Widths } from "./libraryColumns";
+import { cellText, chosenColumns as chosenColumnsOf, COLUMNS, createdTip, dateZoneName, DEFAULT_COLUMNS, writtenText, fittingColumns, gridTemplate, localTime, Widths } from "./libraryColumns";
 import { reorder, startResize, useColumnMove } from "./columnDrag";
 import { DRAWER_MEDIA, ONE_PANE_MEDIA, useMedia } from "./useMedia";
 import { useResizable, widestContent } from "./resizable";
@@ -81,7 +82,7 @@ interface Props {
 }
 
 const ROW_H = 28; // px: every row has this height (the list is windowed)
-const CARD_W = 220, CARD_H = 206; // px: a picture of the picture view, with its name and date (at least this wide)
+const CARD_W = 220, CARD_BASE = 188, CARD_LINE = 18; // px: a picture of the picture view with its name (at least this wide), and each line under it
 const NEAR = 5; // rows above and below the selection whose previews are drawn ahead
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 export const NOTICE =
@@ -246,7 +247,9 @@ export default function LibraryPage(props: Props) {
   // rows, or pictures in a grid: how many items per line, and a line's height
   const pictures = settings.list_view === "pictures";
   const perLine = pictures ? Math.max(1, Math.floor(view.width / CARD_W)) : 1;
-  const lineH = pictures ? CARD_H : ROW_H;
+  const cardFields = settings.card_fields ?? ["date"];
+  const cardH = CARD_BASE + CARD_LINE * cardFields.length; // the same for every card: only those in view are drawn
+  const lineH = pictures ? cardH : ROW_H;
   const head = pictures ? 0 : ROW_H; // the column titles above the rows
   const columns = fittingColumns(chosenColumns, view.width, widths);
   const hiddenColumns = chosenColumns.filter((c) => !columns.includes(c)).map((c) => c.title);
@@ -544,6 +547,23 @@ export default function LibraryPage(props: Props) {
     setLibraryColumns({ column_widths: rest });
   };
 
+  /** ⋯ in the picture view: what each picture shows (a setting: the same in every browser tab) */
+  const cardMenu = (e: MouseEvent) => {
+    const tick = (on: boolean, label: string) => `${on ? "✓" : "\u2003"} ${label}`;
+    const main = settings.card_main ?? "title", fields = settings.card_fields ?? ["date"];
+    setMenu(
+      menuAt(e, [
+        { label: tick(main === "title", "Name: the title"), onClick: () => setLibraryColumns({ card_main: "title" }) },
+        { label: tick(main === "file", "Name: the file name"), onClick: () => setLibraryColumns({ card_main: "file" }) },
+        "-",
+        { label: "Fields", onClick: () => undefined, disabled: true },
+        ...COLUMNS.filter((c) => c.id !== "name").map((c) => ({
+          label: tick(fields.includes(c.id), c.id === "star" ? "★ Star" : c.title),
+          onClick: () => setLibraryColumns({ card_fields: fields.includes(c.id) ? fields.filter((x) => x !== c.id) : [...fields, c.id] }),
+        })),
+      ]),
+    );
+  };
   const columnMenu = (e: MouseEvent) => {
     e.preventDefault();
     const at = (e.target as HTMLElement).closest<HTMLElement>("[data-col]")?.dataset.col as LibraryColumn | undefined;
@@ -769,6 +789,13 @@ export default function LibraryPage(props: Props) {
               Drawing previews {status.previews.drawn.toLocaleString()} of {status.previews.total.toLocaleString()}…
             </span>
           )}
+          <span className="list-view-tools">
+          {pictures && <SortButtons sort={sort} order={order} onSort={sortBy} />}
+          {pictures && (
+            <button className="icon subtle" title="What each picture shows: the name, and which fields" aria-label="What each picture shows" onClick={cardMenu}>
+              ⋯
+            </button>
+          )}
           <span className="list-view-switch" role="group" aria-label="Show the files as">
             <button className={pictures ? "" : "on"} aria-pressed={!pictures} onClick={() => setListView("list")} title="The files as rows">
               List
@@ -776,6 +803,7 @@ export default function LibraryPage(props: Props) {
             <button className={pictures ? "on" : ""} aria-pressed={pictures} onClick={() => setListView("pictures")} title="The files as pictures">
               Pictures
             </button>
+          </span>
           </span>
           {status && status.errors.length > 0 && (
             <span className="warn" title={status.errors.map((e) => `${e.path}: ${e.error}`).join("\n")}>
@@ -812,14 +840,14 @@ export default function LibraryPage(props: Props) {
           aria-rowcount={total ?? undefined}
         >
           {pictures ? (
-            <div className="library-cards" style={{ height: Math.ceil((total ?? 0) / perLine) * CARD_H }}>
+            <div className="library-cards" style={{ height: Math.ceil((total ?? 0) / perLine) * cardH }}>
               {Array.from({ length: Math.max(0, Math.min(total ?? 0, (lastPage + 1) * PAGE) - firstPage * PAGE) }, (_, k) => {
                 const i = firstPage * PAGE + k;
-                const top = Math.floor(i / perLine) * CARD_H;
-                if (top + CARD_H < view.top - CARD_H || top > view.top + view.height + CARD_H) return null;
+                const top = Math.floor(i / perLine) * cardH;
+                if (top + cardH < view.top - cardH || top > view.top + view.height + cardH) return null;
                 const width = view.width / perLine;
                 const r = rowAt(i);
-                if (!r) return <div key={`empty-${i}`} className="library-card loading" style={{ top, left: (i % perLine) * width, width }} />;
+                if (!r) return <div key={`empty-${i}`} className="library-card loading" style={{ top, left: (i % perLine) * width, width, height: cardH }} />;
                 const on = r.path === selected || chosen.includes(r.path);
                 return (
                   <PictureCard
@@ -827,7 +855,9 @@ export default function LibraryPage(props: Props) {
                     row={r}
                     generation={generation}
                     selected={on}
-                    style={{ top, left: (i % perLine) * width, width }}
+                    main={settings.card_main ?? "title"}
+                    fields={cardFields}
+                    style={{ top, left: (i % perLine) * width, width, height: cardH }}
                     onClick={(e) => {
                       clickRow(e, r);
                       scroller.current?.focus({ preventScroll: true });
@@ -1667,11 +1697,13 @@ function PreviewBox({ path, version }: { path: string; version: string }) {
   );
 }
 
-/** A file in the picture view: its preview, name, date and marks. */
+/** A file in the picture view: its preview, name, the chosen fields and marks. */
 function PictureCard({
   row,
   generation,
   selected,
+  main,
+  fields,
   style,
   onClick,
   onDoubleClick,
@@ -1680,13 +1712,15 @@ function PictureCard({
   row: LibraryRow;
   generation: number;
   selected: boolean;
+  main: "title" | "file";
+  fields: LibraryColumn[];
   style: React.CSSProperties;
   onClick: (e: MouseEvent) => void;
   onDoubleClick: () => void;
   onContextMenu: (e: MouseEvent) => void;
 }) {
   const { preview, url } = usePreview(row.path, `${row.size}-${row.mtime}-${generation}`, false);
-  const name = row.title || row.name;
+  const name = main === "file" ? row.name : row.title || row.name;
   return (
     <div
       className={"library-card" + (selected ? " selected" : "") + (row.error ? " unreadable" : "") + (row.conflict ? " conflict" : "")}
@@ -1713,7 +1747,14 @@ function PictureCard({
         {name}
         {row.writing ? <WritingMark writing={row.writing} /> : null}
       </div>
-      <div className="card-date muted small" title={createdTip(row)}>{createdText(row)}</div>
+      {fields.map((f) => {
+        const text = cellText(row, f);
+        return (
+          <div key={f} className="card-field muted small" title={f === "date" ? createdTip(row) : text || undefined}>
+            {text || "\u00a0"}
+          </div>
+        );
+      })}
     </div>
   );
 }

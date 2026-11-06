@@ -57,6 +57,41 @@ def test_the_picture_view_shows_the_files_as_pictures(viewer, new_page):
     expect(row(page, "a.lbd")).to_be_visible()
 
 
+def test_the_picture_view_sorts_and_shows_the_chosen_fields(viewer, new_page):
+    """Plan 14: Name and Date sort the pictures (and the list: one order); ⋯ chooses the name and
+    the lines under each picture, and the cards make room for them."""
+    for title in ("Zebra Bravo", "Zebra Alpha", "Zebra Charlie"):
+        d = lbd.Dataset(title=title)
+        d.add_axis("t", [0.0, 1.0])
+        d.add_value("v", [1.0, 2.0], axes="t")
+        d.save(viewer.data / f"file {title}.lbd")
+    page = new_page("Library")
+    page.get_by_role("button", name="Pictures", exact=True).click()
+    page.get_by_label("Search the files").fill("Zebra")
+    names = page.locator(".library-card .card-name")
+    expect(names).to_have_count(3)
+    order = page.get_by_role("group", name="Sort the files by")
+    order.get_by_role("button", name="Name").click()
+    expect(names).to_have_text(["Zebra Alpha", "Zebra Bravo", "Zebra Charlie"])
+    order.get_by_role("button", name="Name").click()
+    expect(names).to_have_text(["Zebra Charlie", "Zebra Bravo", "Zebra Alpha"])
+    card = page.locator(".library-card").first
+    height = card.bounding_box()["height"]
+    fields = card.locator(".card-field")
+    expect(fields).to_have_count(1)                                    # the date
+    page.get_by_role("button", name="What each picture shows").click()
+    page.get_by_role("menuitem", name="Sweep size").click()
+    expect(fields).to_have_count(2)
+    assert card.bounding_box()["height"] > height
+    page.get_by_role("button", name="What each picture shows").click()
+    page.get_by_role("menuitem", name="Name: the file name").click()
+    expect(names.first).to_contain_text("file Zebra Charlie.lbd")
+    page.reload()
+    expect(page.locator(".library-card").first.locator(".card-field")).to_have_count(2)
+    page.get_by_role("button", name="List", exact=True).click()
+    assert "▾" in page.locator("[role=columnheader][data-col=name]").inner_text()   # the list keeps the order
+
+
 def test_with_previews_off_a_click_draws_one_and_every_file_needs_headers(viewer, new_page):
     put_settings(viewer, {"previews": "off"})
     page = new_page("Library")

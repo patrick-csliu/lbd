@@ -25,12 +25,17 @@ def test_config_settings_roundtrip(tmp_path):
                               "library": {"read_headers": True, "notice_seen": False, "columns": ["name", "date", "sweep"],
                                           "column_widths": {}, "previews": "all", "list_view": "list", "sidebar_scopes": ["library"],
                                           "sidebar_layout": "two", "sidebar_main": "title",
-                                          "sidebar_fields": ["date", "sweep", "project", "tags"], "date_zone": "local"},
+                                          "sidebar_fields": ["date", "sweep", "project", "tags"], "date_zone": "local", "card_main": "title", "card_fields": ["date"]},
                               "memory": {"reserve_gb": None, "maximum_gb": None, "summary_cache_gb": 20.0},
                               "measurements": {"progress": True, "time": True, "percent": True, "points": True,
                                                "axes": True, "notify": False}, "explore": {"line_traces": 20}}
     assert cfg.problems() == []
     # the Library's settings: checked, kept
+    assert cfg.set_library({"card_main": "file", "card_fields": ["sweep", "tags"], "date_zone": "Europe/Paris"})["card_fields"] == ["sweep", "tags"]
+    assert cfg.set_library({"card_main": "title", "card_fields": ["date"], "date_zone": "local"})["date_zone"] == "local"
+    for bad in ({"card_fields": ["name"]}, {"card_main": "x"}, {"date_zone": ""}):
+        with pytest.raises(ConfigError):
+            cfg.set_library(bad)
     assert cfg.set_library({"read_headers": False, "columns": ["name", "values"]})["read_headers"] is False
     assert cfg.settings()["library"]["columns"] == ["name", "values"]
     with pytest.raises(ConfigError, match="columns"):

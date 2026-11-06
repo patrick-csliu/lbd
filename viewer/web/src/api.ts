@@ -151,6 +151,10 @@ export interface LibrarySettings {
   sidebar_fields: LibraryColumn[];
   /** dates in the lists: this computer's time zone ("local"), as written in the file ("file"), or a zone's name */
   date_zone: string;
+  /** the picture view's name: the file's title, or its file name */
+  card_main: "title" | "file";
+  /** the lines under each picture */
+  card_fields: LibraryColumn[];
 }
 
 /** What the Files sidebar lists: the Library's list with this tab's filters, the folder tree,
