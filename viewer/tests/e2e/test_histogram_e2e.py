@@ -93,3 +93,17 @@ def test_click_reads_the_bin_and_two_cursors_the_count_between(viewer, new_page)
     between = view.get_by_label("Between the cursors")
     expect(between.locator("tbody tr")).to_have_count(2)
     expect(between.locator("tbody tr").nth(1)).to_contain_text("excited")
+
+
+def test_open_in_figure_keeps_the_choices(viewer, new_page):
+    shots(viewer)
+    page = new_page("Explore")
+    view, _ = open_histogram(page)
+    frames(page, lambda: view.get_by_label("Bins").fill("7"))
+    frames(page, lambda: view.get_by_label("Vertical axis").select_option("fraction"))
+    view.get_by_role("button", name="Open in Figure").first.click()
+    figure = page.locator("main:not([hidden]) .tab-body:not([hidden])")
+    expect(figure.get_by_label("Plot type")).to_have_value("histogram")
+    expect(figure.get_by_label("Colour by")).to_have_value("state")
+    expect(figure.get_by_label("Bins")).to_have_value("7")
+    expect(figure.get_by_label("Vertical axis")).to_have_value("fraction")

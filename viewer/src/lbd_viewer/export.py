@@ -41,6 +41,9 @@ def _chosen(s: "ExploreSession") -> Optional[List[int]]:
 
 def options(s: "ExploreSession") -> Dict[str, Optional[str]]:
     """Each choice of the dialog that can't be made for this panel, with why (None: possible)."""
+    if s.kind == "histogram":
+        why = "a histogram holds counts, not stored numbers: save it as shown"
+        return {"stored": why, "both": why, "zoomed": None}
     stored = None
     if _operated(s) and (not s.ops_result.grid.one_to_one or s.kind != s.base_kind):
         stored = ("after these operations the points shown aren't the stored ones (e.g. an FFT or an "

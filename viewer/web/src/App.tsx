@@ -2,7 +2,7 @@ import { setDateZone } from "./libraryColumns";
 import { CSSProperties, KeyboardEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DEFAULT_MEASUREMENTS, MeasurementsContext, notifyInBackground } from "./MeasuringStatus";
 import { onFinished } from "./watch";
-import { api, ApiError, AppState, baseName, fileKind, LibraryQuery, OpenDataIn, SidebarScope, OpenFilesIn, PageCommand, PageEntry, TabState, Theme, viewerUrl, Workspace } from "./api";
+import { api, ApiError, AppState, baseName, fileKind, LibraryQuery, OpenDataIn, SidebarScope, OpenFilesIn, PageCommand, PageEntry, PlotSpec, TabState, Theme, viewerUrl, Workspace } from "./api";
 import FilesSidebar from "./FilesSidebar";
 import { lastSection, SECTIONS, SettingsDialog, SettingsSection } from "./SettingsDialog";
 import { DRAWER_MEDIA, useMedia } from "./useMedia";
@@ -408,9 +408,10 @@ function Shell() {
 
   /** Open a file in a chosen workspace (menus, "Open in Explore" / "Open in Figure"). */
   const openIn = useCallback(
-    (path: string, where: "explore" | "figure") => {
+    (path: string, where: "explore" | "figure", spec?: PlotSpec) => {
       if (where === "explore") openExplore([path], true);
       else {
+        if (spec) initialStates.current.set(path, { ...(tabStates.current.get(path) ?? initialStates.current.get(path)), spec } as TabState);
         setPage("figure");
         openTab(path, true);
       }
@@ -1060,7 +1061,7 @@ function Shell() {
               <ExploreTab
                 path={t.path}
                 onTitle={(title) => setExploreTitles((old) => (old[t.path] === title ? old : { ...old, [t.path]: title }))}
-                onOpenInFigure={() => openIn(t.path, "figure")}
+                onOpenInFigure={(spec) => openIn(t.path, "figure", spec)}
                 onError={(m) => toast(m, "error")}
                 onMenu={(e) => {
                   e.preventDefault();

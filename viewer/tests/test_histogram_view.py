@@ -13,7 +13,7 @@ import lbd.plot as lp
 import mock_values
 from lbd.plot import histogram as hist
 from lbd.plot import render as rnd
-from lbd_viewer import crange, reading
+from lbd_viewer import crange, export, reading
 from lbd_viewer.explore import ExploreError, ExploreSession
 from lbd_viewer.kinds import histogram as kind
 
@@ -481,3 +481,49 @@ def test_keys_step_by_a_bin_and_together_stop_at_the_edge(iq):
     both = [{"x": e[0], "y": 0.0, "step": [-3, 0]}, {"x": e[4], "y": 0.0, "step": [-3, 0]}]
     got = reading.cursors(s, both, "vertical", view, (500, 300), together=True)
     assert [c["index"]["bin"] for c in got["cursors"]] == [0, 4]
+
+
+# -- Save as CSV, panels ----------------------------------------------------------------------------
+
+def test_csv_is_what_is_shown(iq, tmp_path):
+    s = session(iq, SPLIT)
+    picture(s)
+    t = export.session_table(s)
+    assert export.options(s)["stored"] and export.options(s)["zoomed"] is None
+    assert export.column_names(t) == ["bin_low", "bin_high", "count_ground", "count_excited"]
+    out = t.to_csv(tmp_path / "h.csv")
+    text = out.read_text(encoding="utf-8")
+    assert "counted: all of Shot, Readout power at step 1, a column per step of Prepared state, 10 bins" in text
+    assert "I, bin low (V)" in text
+    rows = np.loadtxt(out, delimiter=",", comments="#")
+    assert rows.shape == (10, 4)
+    assert rows[:, 2:].sum() == 400 and np.allclose(rows[:, 1], s.model.edges[1:] / s.model.xf)
+    assert np.array_equal(rows[:, 2], counts(s)[0])
+
+
+def test_csv_of_a_zoomed_view_keeps_the_bins_in_it(iq):
+    s = session(iq, SPLIT)
+    picture(s)
+    e = s.model.edges
+    t = export.session_table(s, view={"xlim": [e[2], e[5]], "ylim": [0, 1]})
+    assert list(t.points) == [2, 3, 4]
+
+
+def test_csv_while_counting_says_so(big, monkeypatch):
+    gate = Gate(monkeypatch)
+    s = session(big, BIG)
+    assert gate.reached.wait(30)
+    picture(s)
+    with pytest.raises(ExploreError, match="still being counted"):
+        export.session_table(s)
+    gate.open.set()
+    finished(s)
+    export.session_table(s)
+
+
+def test_panels_sync_x(iq):
+    a = picture(session(iq, SPLIT))["sync"]
+    b = picture(session(iq, {**SPLIT, "index": {"readout_power": 0}}))["sync"]
+    assert a["x"].startswith("I (") and a["y"] != b["y"]
+    other = picture(session(iq, {**SPLIT, "values": ["Q"]}))["sync"]
+    assert other["x"] != a["x"]

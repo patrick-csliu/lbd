@@ -40,7 +40,7 @@ import { MeasuringStatus } from "./MeasuringStatus";
 
 interface Props {
   path: string;
-  onOpenInFigure: () => void;
+  onOpenInFigure: (spec?: PlotSpec) => void; // `spec`: what a plot type of its own shows
   onError: (msg: string) => void;
   onMenu?: (e: MouseEvent) => void;
   /** The file's title, once read (its tab shows it). */
@@ -675,6 +675,13 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
   const several = n > 1;
   const act = rec.panels[rec.active] ?? rec.panels[0];
   const actLive = live[act.id] ?? NO_LIVE;
+  // curves and maps start from the file's own figure; another plot type goes with its choices
+  const openFigure = () => {
+    const r = actLive.resolved;
+    if (!r || r.kind === "curve" || r.kind === "heatmap") return onOpenInFigure();
+    const { kind, values, complex, x, color, all, index, options } = r.spec;
+    onOpenInFigure({ kind, values, complex, x, color, all, index, options, y_scale: act.settings.yscale ?? r.spec.y_scale });
+  };
   const actApi = panelApi(act.id);
   const actActions = actionsOf(act.id);
   const resolved = actLive.resolved;
@@ -805,7 +812,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
         </button>
         {/\.lbd\.writing$/i.test(info.path) && <MeasuringStatus path={info.path} />}
         <span className="explore-head-actions">
-          <button className="primary" onClick={onOpenInFigure} title="Make a figure of this file: styles and export">
+          <button className="primary" onClick={openFigure} title="Make a figure of this file: styles and export">
             Open in Figure
           </button>
           <button className="ib" aria-label="Show in folder" title="Show in folder" onClick={() => api.reveal(info.path).catch((e) => onError(e.message))}>
@@ -855,7 +862,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
               listOpen={act.listOpen}
               opsInfo={actLive.opsInfo}
               failed={actLive.failed}
-              onOpenInFigure={onOpenInFigure}
+              onOpenInFigure={openFigure}
               calculate={(what, index) => actActions.current?.calculate(what, index) ?? Promise.reject(new Error("the plot isn't open yet"))}
               onListOpen={actApi.onListOpen}
               updateSpec={actApi.updateSpec}
@@ -963,7 +970,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
                       follow={follows[p.id] ?? null}
                       onUserView={(v) => onUserView(p.id, v)}
                       dataItems={() => dataItems(p.id)}
-                      onOpenInFigure={onOpenInFigure}
+                      onOpenInFigure={openFigure}
                       onShowCurves={() => {
                         // the plot didn't open: a new one with the values as curves
                         pa.updateSpec({ kind: "curve", x: undefined, y: undefined, series: undefined, complex: "abs" });

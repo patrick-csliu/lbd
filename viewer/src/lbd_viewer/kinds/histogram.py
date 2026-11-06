@@ -26,6 +26,7 @@ import numpy as np
 import lbd
 from lbd.plot import histogram as hist
 from lbd.plot import render as rnd
+from lbd.plot import tables
 
 from .. import crange, memory
 from .. import operations as ops_mod
@@ -348,6 +349,26 @@ def names_for_equations(s: Any) -> Optional[Any]:
     return names
 
 
+def _column(label: str) -> str:
+    return "count_" + "".join(c if c.isalnum() else "_" for c in label).strip("_") if label else "count"
+
+
+def _which_numbers(s: Any, m: hist.HistModel) -> str:
+    """For a saved table: which numbers were counted, and how."""
+    parts = []
+    for a in s.spec["all"]:
+        parts.append(f"all of {s.data.axes[a].label or a}")
+    for sl in s.spec["slices"]:
+        parts.append(f"{sl['label'] or sl['axis']} at step {sl['index']}")
+    if s.spec["color"] != "none":
+        parts.append(f"a column per step of {s.data.axes[s.spec['color']].label or s.spec['color']}")
+    bins = s.spec["options"]["bins"]
+    parts.append(f"{m.edges.size - 1} bins" + (" (auto)" if bins == "auto" else ""))
+    if m.left_out:
+        parts.append(f"{m.left_out} numbers not finite: not counted")
+    return "counted: " + ", ".join(parts)
+
+
 class Histogram(Interaction):
     name = kind = "histogram"
     model = hist.HistModel
@@ -457,7 +478,31 @@ class Histogram(Interaction):
         return hist.notes_of(s.model), empty
 
     def meta(self) -> Dict[str, Any]:
-        return {"crange": self.s.crange_info}
+        # panels share x when they count the same thing in the same unit; the counts are their own
+        return {"crange": self.s.crange_info, "sync": {"x": self.s.ax.get_xlabel(), "y": f"counts of {self.s.id}"}}
+
+    def table(self, numbers: str, view: Optional[Dict[str, Any]]) -> tables.Table:
+        """What is shown: each bin's low and high edge (stored units), a count column per series."""
+        from ..explore import ExploreError
+
+        s = self.s
+        m = s.model
+        info = s.crange_info
+        if info:
+            raise ExploreError("the histogram is still being counted: save it when the count is done" if info["state"] == "working"
+                               else info["error"])
+        low, high = m.edges[:-1] / m.xf, m.edges[1:] / m.xf
+        names = [_column(c.label) for c in m.series]
+        columns: List[Tuple[tables.Column, tables.Rows]] = [
+            (tables.Column("bin_high", f"{m.label}, bin high", m.unit), tables.Rows(high))]
+        columns += [(tables.Column(n, f"Count: {c.label}" if len(m.series) > 1 else "Count"), tables.Rows(c.counts.astype(float)))
+                    for n, c in zip(names, m.series)]
+        t = tables.Table(x=low, x_col=tables.Column("bin_low", f"{m.label}, bin low", m.unit), values=columns)
+        if view is not None:
+            lo, hi = view["xlim"]
+            t.points = np.flatnonzero((m.edges[1:] > lo) & (m.edges[:-1] < hi))
+        t.comments = tables._comments(s.data, s.spec, "shown", False) + [_which_numbers(s, m)]
+        return t
 
     def ops_info(self) -> Dict[str, Any]:
         """As the session's: from the private session that ran them, or the plain plot's names."""
