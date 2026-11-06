@@ -204,6 +204,23 @@ def test_two_cursors_are_read_without_cutting(values_files, new_page, size):
         assert cut["rows"] == 0, cut
 
 
+def test_values_and_axes_are_a_list_in_a_narrow_inspector(values_files, new_page):
+    """Plan 14: at the inspector's default width each value and axis is a small block, nothing
+    needs sideways scrolling and To is in view; a wide inspector shows the tables."""
+    page = new_page("Explore")
+    page.set_viewport_size({"width": 1920, "height": 1080})
+    frames(page, lambda: row(page, "7 spectroscopy 3d.lbd").dblclick())
+    explore(page).get_by_role("tab", name="Values & axes").click()
+    body = explore(page).locator(".inspector-body")
+    expect(body.locator("thead").first).to_be_hidden()
+    to = body.locator("td[data-label='To']").first
+    expect(to).to_be_visible()
+    assert to.bounding_box()["x"] + to.bounding_box()["width"] <= body.bounding_box()["x"] + body.bounding_box()["width"]
+    assert body.evaluate("e => e.scrollWidth <= e.clientWidth")
+    drag(page, explore(page).get_by_label("Width of the inspector"), -300, 0)
+    expect(body.locator("thead").first).to_be_visible()
+
+
 def test_max_min_and_peak_are_on_one_line(values_files, new_page):
     """Plan 11: at the inspector's default width the text and the three search buttons are one
     line, with one cursor and with two; at the narrowest inspector the three buttons stay together."""

@@ -117,6 +117,8 @@ are still written as 1.2).
   `.lbd` cut is in the plot's right-click menu, and asks where with the Save dialog too.
 - **Explore: the sync toggles are explained**: their tooltips say what each links and between
   which panels (sliders: what a slider is), and *Explore → Sync* in the Help has examples.
+- **Explore: Values & axes as a list.** In the narrow side panel each value and axis is a small
+  block of lines, so nothing needs sideways scrolling (a wide panel keeps the tables).
 - **Explore: the preview tab's name** (one click, in italics) is at the same height as the other
   tabs' names; it took the Library preview's margins before.
 - **Explore: a map's colours can mean the same at every slider position.** Display → Colour →

@@ -985,6 +985,16 @@ button.ib:disabled { opacity: 0.4; cursor: default; }
 .inspector-body { min-height: 0; min-width: 0; overflow: auto; padding: 8px 10px 12px; container: inspector / inline-size; }
 .inspector-body .details h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); margin: 6px 0 4px; }
 .inspector-body .details table { font-size: 12px; width: 100%; }
+/* a narrow panel: each value and axis as a small block, so nothing needs sideways scrolling */
+@container inspector (max-width: 420px) {
+  .inspector-body .details table, .inspector-body .details tbody, .inspector-body .details tr { display: block; }
+  .inspector-body .details thead { display: none; }
+  .inspector-body .details tr { padding: 4px 0; border-bottom: 1px solid var(--border); }
+  .inspector-body .details td { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 6px; padding: 1px 0; border: none; overflow-wrap: anywhere; }
+  .inspector-body .details td:first-child { display: block; font-weight: 600; }
+  .inspector-body .details td[data-label]::before { content: attr(data-label); color: var(--muted); }
+  .inspector-body .details td:empty { display: none; }
+}
 .inspector-body .cursor-panel { border: none; padding: 0; background: none; min-width: 0; }
 /* nothing in the inspector is wider than it (plan 10): numbers wrap instead of being cut */
 .inspector-body .cursor-panel * { min-width: 0; }

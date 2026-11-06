@@ -1045,11 +1045,11 @@ export function FileDetails({ info, metaFilter = false, layout = "explore", part
           {info.values.map((v) => (
             <tr key={v.name}>
               <td><code>{v.name}</code></td>
-              {vCols.label && <td>{v.label}</td>}
-              {vCols.unit && <td>{v.unit}</td>}
-              <td>{v.axes.join(", ") || "—"}</td>
-              <td className="num">{v.shape.length ? v.shape.join(" × ") : `single number: ${v.text ?? "?"}`}</td>
-              <td>{v.dtype}</td>
+              {vCols.label && <td data-label="Label">{v.label}</td>}
+              {vCols.unit && <td data-label="Unit">{v.unit}</td>}
+              <td data-label="Axes">{v.axes.join(", ") || "—"}</td>
+              <td className="num" data-label="Shape">{v.shape.length ? v.shape.join(" × ") : `single number: ${v.text ?? "?"}`}</td>
+              <td data-label="Type">{v.dtype}</td>
             </tr>
           ))}
         </tbody>
@@ -1071,24 +1071,24 @@ export function FileDetails({ info, metaFilter = false, layout = "explore", part
           {info.axes.map((a) => (
             <tr key={a.name}>
               <td><code>{a.name}</code></td>
-              {aCols.label && <td>
+              {aCols.label && <td data-label="Label">
                 {a.label}
                 {a.role === "point" && <span className="muted small"> (inside each data point)</span>}
                 {a.group && info.groups?.[a.group] && (
                   <span className="muted small"> (variable sweep {info.groups[a.group].join(" → ")}: points, numbered)</span>
                 )}
               </td>}
-              {aCols.unit && <td>{a.unit}</td>}
-              <td className="num">{a.length}</td>
+              {aCols.unit && <td data-label="Unit">{a.unit}</td>}
+              <td className="num" data-label="Points">{a.length}</td>
               {a.elements ? (
-                <td colSpan={2} title={a.elements.join(", ")}>
+                <td colSpan={2} data-label="Elements" title={a.elements.join(", ")}>
                   {a.elements.slice(0, 6).join(", ")}
                   {a.elements.length > 6 ? ", …" : ""}
                 </td>
               ) : (
                 <>
-                  <td className="num">{fmt(a.min)}</td>
-                  <td className="num">{fmt(a.max)}</td>
+                  <td className="num" data-label="From">{fmt(a.min)}</td>
+                  <td className="num" data-label="To">{fmt(a.max)}</td>
                 </>
               )}
             </tr>
