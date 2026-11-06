@@ -328,7 +328,8 @@ def _resolve_curve_or_map(d, out, values, pick, spec, index_in, warn_unused, fil
         unused_idx = [a for a in spec["index"] if a in keep or a not in all_axes]
         if unused_idx:
             _warn(f"index for {unused_idx} is ignored: those axes are drawn, not sliced", RenderWarning)
-    out["index"], out["slices"] = _slices(d, [a for a in all_axes if a not in keep], index_in, spec)
+    whole = out.get("all", [])                    # all their points go in: no slider
+    out["index"], out["slices"] = _slices(d, [a for a in all_axes if a not in keep and a not in whole], index_in, spec)
     variable = [a for a in all_axes if getattr(d.axes[a], "group", None) is not None]
     if variable:
         _warn(f"{_where(d)}{', '.join(variable)} {'is' if len(variable) == 1 else 'are'} part of a variable sweep "
@@ -507,7 +508,7 @@ def _resolve_scatter(d, out, values, pick, spec, index_in, warn_unused, file_spe
     elif warn_unused and spec.get("z_label") not in (None, ""):
         _warn("z_label is the colour bar label; it is ignored without color=", RenderWarning)
     # Scatter plots use every point; only axes fixed explicitly in `index` are sliced.
-    fixed = [a for a in axes if a in index_in]
+    fixed = [a for a in axes if a in index_in and a not in out.get("all", [])]
     for role, name in (("horizontal axis", out.get("x")), ("colour", color)):
         if name in fixed:
             raise RenderError(f"index fixes '{name}', which is the {role} of this scatter plot; remove it "
