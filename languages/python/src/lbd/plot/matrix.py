@@ -49,6 +49,7 @@ class Grid:
     blocks: List[GridBlock]     # one, or two for re_im (same shape, same factor)
     label: str
     unit: str                   # with the prefix, e.g. "S", "mV"
+    raw_unit: str               # without it
     zf: float                   # plot units per stored unit, shared by the blocks
 
 
@@ -93,7 +94,8 @@ def read_grid(d, spec, style: Style) -> Grid:
     zf, shown_unit = r._unit_scale(np.concatenate([np.ravel(a) for _, a in raws]), unit, q, auto)
     return Grid(value=name, row_axis=spec["y"], col_axis=spec["x"],
                 row_labels=position_labels(d.axes[spec["y"]]), col_labels=position_labels(d.axes[spec["x"]]),
-                blocks=[GridBlock(title, a * zf, a) for title, a in raws], label=label, unit=shown_unit, zf=zf)
+                blocks=[GridBlock(title, a * zf, a) for title, a in raws], label=label, unit=shown_unit,
+                raw_unit=unit, zf=zf)
 
 
 def _whole_digits(v: Any) -> bool:

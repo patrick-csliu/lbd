@@ -663,6 +663,8 @@ class ExploreSession:
         choice changed; True when the figure was set up again for another model."""
         if (ops or eqs) and not self.view.operations:
             raise ExploreError("Operations aren't available on this plot")
+        if self.view.operations == "shape":
+            return self.view.apply_ops(ops, eqs)
         key = json.dumps([ops, sorted(chosen) if chosen is not None else None, eqs])
         if key == self.ops_key:
             return False
