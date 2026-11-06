@@ -1,3 +1,4 @@
+import { flushSync } from "react-dom";
 import {
   CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
@@ -6,6 +7,7 @@ import {
   ReactNode,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -590,6 +592,16 @@ export default function ExploreView({
         const sctx = src.getContext("2d")!;
         if (f.image instanceof ImageData) sctx.putImageData(f.image, 0, 0);
         else sctx.drawImage(f.image, 0, 0);
+        // the cuts coming or going: strips, box and picture change in one frame (see the cuts' effect)
+        const change = cutsChange.current;
+        if (change && Math.abs(f.meta.width / f.meta.dpr - change.w) <= 1 && Math.abs(f.meta.height / f.meta.dpr - change.h) <= 1) {
+          window.clearTimeout(change.timer);
+          cutsChange.current = null;
+          flushSync(() => {
+            setShownCuts(change.want);
+            setMeta(f.meta);
+          });
+        }
         paint();
         setMeta(f.meta);
         setError(null);
@@ -791,6 +803,45 @@ export default function ExploreView({
       window.clearTimeout(timer);
     };
   }, []);
+
+  // Cuts on or off: the strips take room from the plot. The picture for the new room is asked for at
+  // once and the old layout stays until it is here, so everything changes together (not the strips
+  // first, the picture half a second later). A picture that takes long doesn't hold it up.
+  const firstValueNow = info.values.find((v) => v.name === (spec.values ?? [])[0]) ?? info.values.find((v) => v.shape.length > 0);
+  const kindOfPanel = opened?.kind ?? spec.kind ?? (firstValueNow && firstValueNow.shape.filter((n) => n > 1).length >= 2 ? "heatmap" : "curve");
+  const wantCuts = kindOfPanel === "heatmap" && cursors.cuts && cursors.on;
+  const [shownCuts, setShownCuts] = useState(wantCuts);
+  const cutsChange = useRef<{ want: boolean; w: number; h: number; timer: number } | null>(null);
+  const cutsKind = useRef(kindOfPanel);
+  useLayoutEffect(() => {
+    const sameKind = cutsKind.current === kindOfPanel;
+    cutsKind.current = kindOfPanel;
+    const waiting = cutsChange.current;
+    if (waiting) {
+      window.clearTimeout(waiting.timer);
+      cutsChange.current = null;
+    }
+    const box = stage.current, plot = host.current;
+    if (wantCuts === shownCuts) {
+      if (waiting && plot) setSize({ w: plot.clientWidth, h: plot.clientHeight }); // changed back meanwhile
+      return;
+    }
+    if (!sameKind || !frame.current || !box) {
+      setShownCuts(wantCuts);
+      return;
+    }
+    // the strips' sizes, as in styles.css (.explore-tab .explore-stage.with-cuts)
+    const W = box.clientWidth, H = box.clientHeight;
+    const w = wantCuts ? W - Math.min(96, 0.22 * W) : W;
+    const h = wantCuts ? H - Math.min(96, Math.max(36, 0.22 * H)) : H;
+    const timer = window.setTimeout(() => {
+      cutsChange.current = null;
+      setShownCuts(wantCuts);
+    }, 1000);
+    cutsChange.current = { want: wantCuts, w: Math.round(w), h: Math.round(h), timer };
+    setSize({ w: Math.round(w), h: Math.round(h) });
+  }, [wantCuts, shownCuts, kindOfPanel]);
+  useEffect(() => () => window.clearTimeout(cutsChange.current?.timer), []);
 
   const specKey = JSON.stringify(spec);
   const openedSpecKey = useRef<string | null>(null); // the plot settings the session shows
@@ -1262,11 +1313,7 @@ export default function ExploreView({
   // ---- layout
 
   const cssSize: CSSProperties = meta ? { width: meta.width / meta.dpr, height: meta.height / meta.dpr } : {};
-  // A map's cuts take their room from the start (guessed from the plot settings until the server
-  // says), so the plot doesn't shrink once it has been drawn.
-  const firstValue = info.values.find((v) => v.name === (spec.values ?? [])[0]) ?? info.values.find((v) => v.shape.length > 0);
-  const kindNow = opened?.kind ?? spec.kind ?? (firstValue && firstValue.shape.filter((n) => n > 1).length >= 2 ? "heatmap" : "curve");
-  const showCuts = kindNow === "heatmap" && cursors.cuts && cursors.on;
+  const showCuts = shownCuts;
   const plotCss = meta ? meta.plot.map((v) => v / meta.dpr) : null;
   const c1 = reading?.cursors[0] ?? null, c2 = reading?.cursors[1] ?? null;
 

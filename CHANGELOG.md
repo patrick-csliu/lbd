@@ -139,6 +139,9 @@ are still written as 1.2).
 - **Explore: move two cursors together.** The tick box **Move both cursors together** in the Cursors
   tab: dragging either cursor, or the arrow keys, moves both by the same amount, each on its own
   trace, and both stop at the data's edge, so the distance between them stays.
+- **Explore: the Cuts button changes the plot in one go.** The strips, the plot and the picture change
+  together when the new picture is here; before, the strips went first and the picture followed
+  half a second later.
 - **Explore: the preview tab's name** (one click, in italics) is at the same height as the other
   tabs' names; it took the Library preview's margins before.
 - **Explore: a map's colours can mean the same at every slider position.** Display → Colour →

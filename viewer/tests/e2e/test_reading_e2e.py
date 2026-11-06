@@ -173,6 +173,51 @@ def test_two_cursors_show_two_cuts_and_move_together(small_map, new_page):
     assert c["cursors"][1]["x"] < b["cursors"][1]["x"] and c["cursors"][0]["x"] <= b["cursors"][0]["x"]
 
 
+RECORD_FRAMES = """() => { window.__mismatch = []; const end = performance.now() + 1400;
+  const host = document.querySelector('main:not([hidden]) .explore-host');
+  const pic = host.querySelector('.explore-picture');
+  const look = () => { const b = host.getBoundingClientRect(), p = pic.getBoundingClientRect();
+    if (Math.abs(b.width - p.width) > 2 || Math.abs(b.height - p.height) > 2) window.__mismatch.push([b.width, b.height, p.width, p.height]);
+    if (performance.now() < end) requestAnimationFrame(look); };
+  requestAnimationFrame(look); }"""
+
+
+def test_the_cuts_come_and_go_in_one_change(small_map, new_page):
+    """Plan 14: on no frame is the plot's box another size than its picture (strips first, the
+    picture later was two visible changes): with the button and the key, both ways."""
+    page = new_page("Explore")
+    page.set_viewport_size({"width": 1600, "height": 900})
+    frames(page, lambda: row(page, "small_map.lbd").dblclick())
+    cuts = explore(page).get_by_role("button", name="Cuts", exact=True)
+    expect(cuts).to_have_attribute("aria-pressed", "true")
+    for pressed, act in (("false", cuts.click), ("true", cuts.click), ("false", lambda: page.keyboard.press("c"))):
+        if act != cuts.click:
+            explore(page).locator(".explore-overlay").first.focus()
+        page.wait_for_timeout(700)                                     # (the last change has settled)
+        page.evaluate(RECORD_FRAMES)
+        act()
+        expect(cuts).to_have_attribute("aria-pressed", pressed)        # the button answers at once
+        page.wait_for_timeout(1500)
+        assert page.evaluate("window.__mismatch") == []
+    expect(explore(page).locator(".explore-cut-top")).to_have_count(0)
+
+
+def test_a_slow_picture_doesnt_hold_the_cuts_back(small_map, new_page):
+    page = new_page("Explore")
+    frames(page, lambda: row(page, "small_map.lbd").dblclick())
+    cuts = explore(page).get_by_role("button", name="Cuts", exact=True)
+    expect(explore(page).locator(".explore-cut-top")).to_have_count(1)
+
+    def slowly(route):
+        page.wait_for_timeout(2500)
+        route.continue_()
+
+    page.route("**/render*", slowly)
+    cuts.click()
+    expect(explore(page).locator(".explore-cut-top")).to_have_count(0, timeout=2000)
+    page.unroute_all(behavior="ignoreErrors")
+
+
 def test_cursors_can_be_switched_off_and_back_on(small_map, new_page):
     page = new_page("Explore")
     meta = frames(page, lambda: row(page, "small_map.lbd").dblclick())
