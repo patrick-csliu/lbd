@@ -36,6 +36,10 @@ going back to the [Library](library.md).
 
 The name is the file's title, or its file name (**⋯ → Name: the file name**).
 
+**Name** and **Date** above the list sort it, in every layout; a second click reverses the order.
+It is the sidebar's own order: the Library keeps its own, and until you choose one the sidebar
+follows the Library's.
+
 **⚙ Settings → Files sidebar** adds other lists, chosen with a menu at the top of the sidebar
 (Explore and Figure show the same one):
 

@@ -2,6 +2,7 @@ import { CSSProperties, KeyboardEvent, MouseEvent, ReactNode, useCallback, useEf
 import type React from "react";
 import { api, AppState, baseName, LibraryColumn, LibraryQuery, LibraryRow, LibrarySettings, SidebarScope } from "./api";
 import { cellText, COLUMNS, createdText } from "./libraryColumns";
+import { SortButtons } from "./SortButtons";
 import { reorder, startResize, useColumnMove } from "./columnDrag";
 import { ConfirmDialog, ConfirmRequest, ContextMenu, isMenuKey, MenuAt, menuAt, MenuEntry } from "./menu";
 import { fileEntries } from "./fileActions";
@@ -139,10 +140,10 @@ function LibraryList(props: Props & { showFilters: boolean }) {
   const [typed, words, setTyped] = useNarrowing();
   const { sidebar_layout: layout, sidebar_main: main, sidebar_fields: fields } = state.library;
   const ROW_H = layout === "two" ? 40 : 26;
-  // the columns layout sorts the sidebar only (per browser tab), never the Library
+  // the sidebar's own order (per browser tab), never the Library's; until one is chosen, the Library's
   const [ownSort, setOwnSort] = useState<{ sort: LibraryColumn; order: "asc" | "desc" } | null>(() => loadSort());
   useEffect(() => saveSort(ownSort), [ownSort]);
-  const sorted = layout === "columns" && ownSort ? { sort: ownSort.sort, order: ownSort.order } : {};
+  const sorted = ownSort ? { sort: ownSort.sort, order: ownSort.order } : {};
   // the sidebar's words narrow the Library's search (all words must match)
   const shownQuery: LibraryQuery = { ...(words ? { ...query, q: [query.q, words].filter(Boolean).join(" ") } : query), ...sorted };
   const [widths, setWidths] = useState<Record<string, number>>(() => loadWidths());
@@ -292,6 +293,9 @@ function LibraryList(props: Props & { showFilters: boolean }) {
         <button className="icon subtle" title="How each file is shown: one line, two lines or columns; which fields" aria-label="How the files are shown" onClick={layoutMenu}>
           ⋯
         </button>
+      </div>
+      <div className="files-sort small">
+        <SortButtons sort={ownSort?.sort} order={ownSort?.order} nameBy={main === "file" ? "file" : "name"} onSort={sortBy} />
       </div>
       {listError && <div className="error-box small">{listError}</div>}
       <div

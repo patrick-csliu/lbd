@@ -122,6 +122,12 @@ textarea { font-family: var(--mono); font-size: 12.5px; width: 100%; resize: ver
 .files-sidebar .files-head-end { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .files-sidebar .files-scope { min-width: 0; max-width: 160px; }
 .files-sidebar > .folders { flex: 1; min-height: 0; overflow: auto; padding-top: 0; }
+.files-sort { padding: 0 12px 4px; }
+.sort-buttons { display: inline-flex; }
+.sort-buttons button { padding: 1px 8px; font-size: 12px; border-radius: 0; }
+.sort-buttons button:first-child { border-radius: var(--radius) 0 0 var(--radius); }
+.sort-buttons button:last-child { border-radius: 0 var(--radius) var(--radius) 0; margin-left: -1px; }
+.sort-buttons button.on { background: var(--accent-soft); color: var(--accent); }
 .files-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 2px 12px; }
 .files-filters .chip { background: var(--panel-2); border-radius: 10px; padding: 1px 8px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .files-list { position: relative; flex: 1; min-height: 0; overflow: auto; outline: none; border-top: 1px solid var(--border); }

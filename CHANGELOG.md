@@ -128,6 +128,8 @@ are still written as 1.2).
   without lines between them; they looked like sections of their own.
 - **Library: the label pop-out stays inside the pane.** It moves left at the window's edge; it went
   past it, and the right pane scrolled sideways.
+- **Files tab: sort by name or date**, with two buttons in every layout (Explore and Figure); only
+  the Columns layout could sort before. It never changes the Library's order.
 - **Explore: the preview tab's name** (one click, in italics) is at the same height as the other
   tabs' names; it took the Library preview's margins before.
 - **Explore: a map's colours can mean the same at every slider position.** Display → Colour →

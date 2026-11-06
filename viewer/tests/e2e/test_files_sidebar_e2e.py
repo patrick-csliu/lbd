@@ -31,6 +31,31 @@ def library_search(page: Page, text: str):
     expect(page.locator(".library-status")).to_contain_text(f'"{text}"')
 
 
+def test_the_sidebar_sorts_by_name_and_date_in_every_layout(viewer, library_files, new_page):
+    """Plan 14: the Sort buttons sort the sidebar only, reversed by a second click, kept over a
+    reload; the list of files opened lately has no such order."""
+    page = new_page("Explore")
+    choose(page, "library")
+    order = sidebar(page).get_by_role("group", name="Sort the files by")
+    order.get_by_role("button", name="Name").click()
+    expect(order.get_by_role("button", name="Name ▴")).to_be_visible()
+    first = sidebar(page).locator(".files-row .files-name").first
+    expect(first).not_to_have_text("")
+    up = [n.removeprefix("⚠ ").removeprefix("★ ") for n in names(page)]
+    assert up == sorted(up, key=str.casefold)
+    order.get_by_role("button", name="Name").click()
+    expect(order.get_by_role("button", name="Name ▾")).to_be_visible()
+    expect(first).not_to_contain_text(up[0])
+    order.get_by_role("button", name="Date").click()
+    expect(order.get_by_role("button", name="Date ▾")).to_be_visible()
+    page.reload()
+    choose(page, "library")
+    expect(sidebar(page).get_by_role("group", name="Sort the files by").get_by_role("button", name="Date ▾")).to_be_visible()
+    page.get_by_role("tab", name="Library", exact=True).click()
+    expect(page.locator(".library-list [data-col=date] button, [role=columnheader][data-col=date] button").first).to_be_visible()
+    assert "▾" in page.locator("[role=columnheader][data-col=date]").inner_text()   # the Library's own order
+
+
 def test_the_library_selection_and_stepping_through_it(viewer, library_files, new_page):
     page = new_page("Library")
     library_search(page, "resonator")
