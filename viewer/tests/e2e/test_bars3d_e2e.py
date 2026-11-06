@@ -187,6 +187,33 @@ def test_two_panels_on_complex_data_turn_together(viewer, new_page):
     assert frames(page, lambda: drag(page, 50, 0))["angle"]["azim"] == -70
 
 
+def test_figure_has_3d_bars_with_angle_boxes(viewer, new_page):
+    files(viewer)
+    page = new_page("Figure")
+    open_file(page, "assign.lbd")
+    with page.expect_response(lambda r: "/api/render" in r.url and r.ok):
+        plot_type(page).select_option("bars3d")
+    body = page.locator(".tab-body:not([hidden])")
+    elevation = body.get_by_label("Elevation")
+    expect(elevation).to_have_value("35")
+    with page.expect_response(lambda r: "/api/render" in r.url and r.ok) as answer:
+        elevation.fill("10")
+        elevation.press("Enter")
+    assert answer.value.json()["spec"]["options"]["elev"] == 10
+    expect(body.get_by_text("Log x")).to_have_count(0)
+
+
+def test_open_in_figure_keeps_the_angle(viewer, new_page):
+    files(viewer)
+    page = new_page("Explore")
+    open_bars(page)
+    frames(page, lambda: drag(page, 100, 0))
+    explore(page).get_by_role("button", name="Open in Figure").click()
+    body = page.locator(".tab-body:not([hidden])")
+    expect(plot_type(page)).to_have_value("bars3d")
+    expect(body.get_by_label("Azimuth")).to_have_value("-90")
+
+
 def test_only_shape_keeping_operations(viewer, new_page):
     files(viewer)
     page = new_page("Explore")

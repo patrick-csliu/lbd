@@ -175,6 +175,46 @@ def test_a_usual_complex_choice_gives_one_panel():
     assert len(m.panels) == 1 and m.panels[0].height.tolist() == [[1.0, 0.0], [-1.0, 0.0]]
 
 
+def test_the_plot_stays_in_the_middle_of_its_box():
+    _, m = drawn_model(grid(np.ones((3, 3))))
+    assert m.axes[0].get_anchor() == "C"
+
+
+def test_a_script_draws_3d_bars(tmp_path):
+    grid(np.arange(9.0).reshape(3, 3) + 1).save(tmp_path / "m.lbd")
+    style = lp.load_style()
+    spec = {"kind": "bars3d", "options": {"elev": 20, "azim": 10}}
+    svg, resolved = render.render_file(tmp_path / "m.lbd", spec, style, "svg")
+    png, _ = render.render_file(tmp_path / "m.lbd", spec, style, "png")
+    assert b"<svg" in svg[:400] and png[:4] == b"\x89PNG"
+    assert resolved["options"] == {"elev": 20, "azim": 10}
+
+
+def test_the_saved_view_keeps_the_angle(tmp_path):
+    d = grid(np.ones((3, 3)))
+    d.plot = {"kind": "bars3d", "options": {"elev": 12, "azim": 34, "zoom": 1.5}}
+    d.save(tmp_path / "m.lbd")
+    back = lbd.load(tmp_path / "m.lbd")
+    fig = lp.plot(back)
+    assert (fig.axes[0].elev, fig.axes[0].azim) == (12, 34)
+
+
+def test_a_figure_is_always_the_ordered_picture():
+    fig = lp.plot(grid(np.ones((33, 33))), "bars3d")
+    ax = fig.axes[0]
+    shown = [c for c in ax.collections if c.get_visible()]
+    assert len(shown) == 33 * 33                            # never the quick one
+
+
+def test_an_axes_of_your_own_is_refused_with_the_reason():
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots()
+    with pytest.raises(render.RenderError, match="figure of their own"):
+        lp.plot(grid(np.ones((2, 2))), "bars3d", ax=ax)
+    plt.close(fig)
+
+
 def test_a_wrong_angle_says_what_is_wrong():
     with pytest.raises(render.RenderError, match="elev must be a number from -90 to 90"):
         render.resolve_spec(grid(np.ones((2, 2))), {"kind": "bars3d", "options": {"elev": 120}})

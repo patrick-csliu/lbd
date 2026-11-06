@@ -260,6 +260,8 @@ def draw(fig, ax, m: Bars3dModel, d, spec, style: Style):
     for a, p in zip(m.axes, m.panels):
         m.bars.append(_draw_bars(a, m, p, style))
         m.quick.append(_quick_bars(a, m, p, style) if rows * columns > QUICK_ABOVE else None)
+        if rows * columns > QUICK_ABOVE:
+            a.set_rasterization_zorder(rows * columns + 2)     # in a vector file: one picture, not megabytes of faces
         a.set_xlim(-0.5, columns - 0.5)
         a.set_ylim(-0.5, rows - 0.5)
         a.set_zlim(*m.zlim)
