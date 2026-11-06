@@ -119,6 +119,10 @@ are still written as 1.2).
   which panels (sliders: what a slider is), and *Explore → Sync* in the Help has examples.
 - **Explore: Values & axes as a list.** In the narrow side panel each value and axis is a small
   block of lines, so nothing needs sideways scrolling (a wide panel keeps the tables).
+- **Library: labels look like what they are.** Project, Users and Tags sit indented under **Labels**,
+  without lines between them; they looked like sections of their own.
+- **Library: the label pop-out stays inside the pane.** It moves left at the window's edge; it went
+  past it, and the right pane scrolled sideways.
 - **Explore: the preview tab's name** (one click, in italics) is at the same height as the other
   tabs' names; it took the Library preview's margins before.
 - **Explore: a map's colours can mean the same at every slider position.** Display → Colour →

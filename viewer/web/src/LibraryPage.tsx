@@ -1,5 +1,5 @@
 import type React from "react";
-import { CSSProperties, Dispatch, FormEvent, KeyboardEvent, MouseEvent, ReactNode, RefObject, SetStateAction, useCallback, useEffect, useRef, useState } from "react";
+import { CSSProperties, Dispatch, FormEvent, KeyboardEvent, MouseEvent, ReactNode, RefObject, SetStateAction, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   api,
   ApiError,
@@ -2205,6 +2205,27 @@ function LabelPicker({ nodes, first, placeholder, onPick, onClose, opener }: { n
   const onKeyDown = useOutsideClose(ref, onClose, opener);
   const [text, setText] = useState("");
   const most = [...(first ? [{ label: first, note: "this computer's user" }] : []), ...usedMost(nodes).map((l) => ({ label: l }))];
+  // Inside the pane: moved left until its right edge meets the pane's, however near the edge it opened.
+  useLayoutEffect(() => {
+    const fit = () => {
+      const box = ref.current;
+      if (!box) return;
+      const pane = box.closest<HTMLElement>(".library-detail");
+      const limit = pane?.getBoundingClientRect() ?? { left: 0, right: window.innerWidth };
+      const margin = 8;
+      const room = Math.min(limit.right, window.innerWidth) - limit.left - 2 * margin;
+      box.style.maxWidth = `${room}px`;
+      box.style.left = "0px";
+      if (pane) pane.scrollLeft = 0; // (the box's input took the focus: the pane may have scrolled to it)
+      const at = box.getBoundingClientRect();
+      const over = at.right - (Math.min(limit.right, window.innerWidth) - margin);
+      const shift = Math.min(Math.max(over, 0), at.left - limit.left - margin);
+      box.style.left = `${-Math.max(shift, 0)}px`;
+    };
+    fit();
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+  }, []);
   return (
     <div ref={ref} className="label-picker" role="dialog" aria-label="Pick a label" onKeyDown={onKeyDown}>
       <LabelPathInput nodes={nodes} value={text} onChange={setText} onPick={onPick} placeholder={placeholder} label="Label" first={most} />

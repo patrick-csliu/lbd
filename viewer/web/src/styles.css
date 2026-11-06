@@ -728,7 +728,8 @@ details.group fieldset > .group-fields { margin-top: -4px; }
 
 /* ---- labels on the left: headings with + New; where a dragged label or file would go ---- */
 /* Project / Users / Tags: section headings that stay at the top while their labels scroll by */
-.library-label-tree { border-top: 1px solid var(--border); margin-top: 6px; }
+/* under the Labels heading, not sections of their own: no lines between them, indented */
+.library-label-tree { margin-top: 2px; padding-left: 12px; }
 .label-tree-head { display: flex; align-items: center; justify-content: space-between; padding: 0 12px 0 0; position: sticky; top: -8px; z-index: 2;
   background: var(--panel); }
 .label-tree-head h3 { margin: 0; font-size: 13px; font-weight: 600; flex: 1; min-width: 0; }

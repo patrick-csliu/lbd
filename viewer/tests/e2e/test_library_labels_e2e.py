@@ -277,6 +277,37 @@ def test_the_label_sections_fold_and_line_up(viewer, library_files, new_page):
     eventually(lambda: len(rights()), 1)
 
 
+def test_project_users_and_tags_are_under_labels(viewer, library_files, new_page):
+    """Plan 14: indented under the heading, with no line above them like a section's."""
+    page = new_page("Library")
+    page.set_viewport_size({"width": 1600, "height": 900})
+    shows(page, every_file(viewer), 20_000)
+    heading = page.locator(".library-labels .panel-head h2")
+    title = page.locator(".label-tree-title").first
+    expect(title).to_be_visible()
+    assert title.locator(".twisty").bounding_box()["x"] > heading.bounding_box()["x"]
+    assert page.locator(".library-label-tree").first.evaluate("e => getComputedStyle(e).borderTopStyle") == "none"
+
+
+def test_the_label_pop_out_stays_inside_the_pane(viewer, library_files, new_page):
+    """Plan 14: the box opens at the right edge of the window: it moves left, the pane doesn't scroll."""
+    page = new_page("Library")
+    page.set_viewport_size({"width": 1920, "height": 1080})
+    shows(page, every_file(viewer), 20_000)
+    find(page, "Late resonator sweep")
+    pane = detail(page)
+    for button in ("Set the project", "Add a user", "Add a tag"):
+        pane.get_by_role("button", name=button).click()
+        box = page.locator(".label-picker")
+        expect(box).to_be_visible()
+        edge = pane.bounding_box()
+        b = box.bounding_box()
+        assert b["x"] + b["width"] <= edge["x"] + edge["width"] and b["x"] >= edge["x"]
+        assert pane.evaluate("e => e.scrollWidth <= e.clientWidth && e.scrollLeft === 0")
+        page.keyboard.press("Escape")
+        expect(box).to_have_count(0)
+
+
 def test_long_label_lists_are_typed_into_never_scrolled(viewer, many_labels_files, new_page):
     """Hundreds of users and tags: each level shows at most 12 (then Show N more), Find a label
     narrows the trees, and the New and Move dialogs and the pickers take a typed path with at
