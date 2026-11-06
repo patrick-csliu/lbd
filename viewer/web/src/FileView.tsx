@@ -544,17 +544,21 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
   // Values that can join the plot: they share its horizontal axis (scatter: or its exact axes).
   const x = resolved.x;
   const joins = (v: ValueInfo) =>
-    kind === "scatter" && !(x && firstAxes.includes(x)) ? v.axes.join(",") === firstAxes.join(",") : !!x && v.axes.includes(x);
+    kind === "histogram"
+      ? v.unit === first?.unit && v.complex === first?.complex // overlaid when they share a unit
+      : kind === "scatter" && !(x && firstAxes.includes(x))
+        ? v.axes.join(",") === firstAxes.join(",")
+        : !!x && v.axes.includes(x);
   const here = withAxes.filter(joins);
   const elsewhere = withAxes.filter((v) => !joins(v));
   // Another value on its own: it brings its own axes, so the axis choices start afresh.
-  const fresh: PlotSpec = { x: undefined, y: undefined, series: undefined, color: undefined, index: {} };
+  const fresh: PlotSpec = { x: undefined, y: undefined, series: undefined, color: undefined, all: undefined, index: {} };
   const switchTo = (name: string) => update({ ...fresh, values: [name] });
   const chooseKind = (k: string, drawable: string[] | null) => {
     const can = (v: ValueInfo) => (drawable ? drawable.includes(v.name) : fits(v, k));
     const now = valuesByName[selected[0]];
     const value = now && can(now) ? undefined : info.values.find(can);
-    update(value ? { ...fresh, kind: k, values: [value.name] } : { kind: k });
+    update(value ? { ...fresh, kind: k, values: [value.name], options: undefined } : { kind: k, color: undefined, all: undefined, options: undefined });
   };
   const axisName = (v: ValueInfo) => v.axes.filter((a) => lengthOf(a) > 1).map((a) => info.axes.find((x) => x.name === a)?.label || a).join(" × ") || v.axes.join(", ");
 
@@ -612,7 +616,7 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
           <PlotKindSelect path={info.path} value={kind} first={selected[0]} page="figure" onChoose={chooseKind} />
         </label>
 
-        {kind === "curve" || (kind === "scatter" && resolved.complex !== "iq") ? (
+        {kind === "curve" || kind === "histogram" || (kind === "scatter" && resolved.complex !== "iq") ? (
           <div className="field">
             <span>Values</span>
             <div className="checks">
@@ -721,7 +725,7 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
           </label>
         )}
         {KindControls && <KindControls info={info} spec={resolved} resolved={resolved} update={update} page="figure" />}
-        {kind !== "scatter" && firstAxes.length > 0 && (
+        {kind !== "scatter" && !kindOf(kind).noAxes && firstAxes.length > 0 && (
           <label className="field">
             <span>Horizontal axis</span>
             <select value={resolved.x ?? ""} onChange={(e) => update({ x: e.target.value, y: undefined, series: undefined, index: {} })}>
@@ -783,10 +787,12 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
         )}
 
         <div className="field inline">
+          {kind !== "histogram" && (
           <label className="check">
             <input type="checkbox" checked={resolved.x_scale === "log"} onChange={(e) => update({ x_scale: e.target.checked ? "log" : "linear" })} />
             Log x
           </label>
+          )}
           <label className="check">
             <input type="checkbox" checked={resolved.y_scale === "log"} onChange={(e) => update({ y_scale: e.target.checked ? "log" : "linear" })} />
             Log y

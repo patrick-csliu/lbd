@@ -590,3 +590,38 @@ def test_a_map_unwraps_along_its_horizontal_axis():
     r = resolve_spec(d, {"kind": "heatmap", "values": ["S21"], "complex": "phase_unwrap"})
     m = rnd.prepare_map(d, r, lp_style())
     assert np.all(np.abs(np.diff(m.z, axis=1)) < np.pi)            # no 2π jumps along frequency
+
+
+def test_histogram_saved_view_round_trip(tmp_path):
+    d = lbd.Dataset(title="Shots")
+    d.add_axis("state", [0.0, 1.0], elements=["ground", "excited"])
+    d.add_axis("shot", np.arange(50.0))
+    d.add_value("I", np.random.default_rng(1).normal(size=(2, 50)), axes=["state", "shot"], unit="V")
+    d.plot = {"kind": "histogram", "values": ["I"], "color": "state", "all": ["shot"],
+              "options": {"bins": 12, "hist_y": "fraction"}}
+    d.save(tmp_path / "h.lbd")
+    back = lbd.load(tmp_path / "h.lbd")
+    spec = rnd.resolve_spec(back, None)
+    assert spec["kind"] == "histogram" and spec["color"] == "state" and spec["all"] == ["shot"]
+    assert spec["options"] == {"bins": 12, "hist_style": "bars", "hist_y": "fraction"}
+    png, _ = rnd.render_dataset(back, None, Style(), fmt="png")
+    assert png[:4] == b"\x89PNG"
+
+
+def test_histogram_saved_view_with_a_wrong_choice_falls_back_with_a_warning(tmp_path):
+    d = lbd.Dataset()
+    d.add_axis("t", np.arange(5.0))
+    d.add_value("x", np.arange(5.0), axes="t")
+    d.plot = {"kind": "histogram", "options": {"bins": 1}}
+    with pytest.warns(RenderWarning, match="bins must be"):
+        spec = rnd.resolve_spec(d, None)
+    assert spec["options"]["bins"] == "auto"
+
+
+@pytest.mark.parametrize("fmt", ["svg", "pdf", "png", "jpg"])
+def test_histogram_export_formats(fmt):
+    d = lbd.Dataset()
+    d.add_axis("t", np.arange(5.0))
+    d.add_value("x", np.arange(5.0), axes="t")
+    data, _ = rnd.render_dataset(d, {"kind": "histogram"}, Style(), fmt=fmt)
+    assert len(data) > 500

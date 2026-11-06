@@ -527,3 +527,12 @@ def test_panels_sync_x(iq):
     assert a["x"].startswith("I (") and a["y"] != b["y"]
     other = picture(session(iq, {**SPLIT, "values": ["Q"]}))["sync"]
     assert other["x"] != a["x"]
+
+
+def test_a_chosen_view_makes_a_preview(iq):
+    d = lbd.load(iq)
+    d.plot = {"kind": "histogram", "values": ["I"], "all": ["shot"]}
+    d.save(iq)
+    s = session(iq, {}, saved_view=True, summarise=False, bare=True)
+    assert s.kind == "histogram"
+    assert picture(s)["empty"] is None

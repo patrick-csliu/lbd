@@ -107,3 +107,58 @@ def test_open_in_figure_keeps_the_choices(viewer, new_page):
     expect(figure.get_by_label("Colour by")).to_have_value("state")
     expect(figure.get_by_label("Bins")).to_have_value("7")
     expect(figure.get_by_label("Vertical axis")).to_have_value("fraction")
+
+
+def rendered(page, action, quiet_ms=500):
+    """Do `action` and return the answer of the last figure it brings."""
+    got = []
+
+    def collect(r):
+        if r.url.endswith("/api/render") and r.ok:
+            got.append(r)
+
+    page.on("response", collect)
+    try:
+        with page.expect_response(lambda r: r.url.endswith("/api/render")):
+            action()
+        seen = -1
+        while seen != len(got):
+            seen = len(got)
+            page.wait_for_timeout(quiet_ms)
+    finally:
+        page.remove_listener("response", collect)
+    return got[-1].json()
+
+
+def figure_of(page, name="iq.lbd"):
+    page.get_by_role("tab", name="Figure", exact=True).click()
+    rendered(page, lambda: row(page, name).dblclick())
+    answer = rendered(page, lambda: plot_type(page).select_option("histogram"))
+    assert answer["spec"]["kind"] == "histogram"
+    return page.locator("main:not([hidden]) .tab-body:not([hidden])")
+
+
+def test_histogram_on_the_figure_page(viewer, new_page):
+    shots(viewer)
+    page = new_page()
+    figure = figure_of(page)
+    expect(figure.get_by_label("Colour by")).to_have_value("state")
+    rendered(page, lambda: figure.get_by_label("Colour by").select_option("none"))
+    expect(figure.get_by_label("Draw", exact=True)).to_be_enabled()
+    rendered(page, lambda: figure.get_by_label("Bins").fill("5"))
+    answer = rendered(page, lambda: figure.get_by_label("Vertical axis").select_option("density"))
+    assert answer["spec"]["options"] == {"bins": 5, "hist_style": "bars", "hist_y": "density"}
+    assert answer["spec"]["color"] == "none"
+    expect(figure.get_by_label("Horizontal axis")).to_have_count(0)
+    expect(figure.get_by_text("Log x")).to_have_count(0)
+
+
+def test_style_changes_the_histogram(viewer, new_page):
+    shots(viewer)
+    page = new_page()
+    figure = figure_of(page)
+    rendered(page, lambda: figure.get_by_label("Colour by").select_option("none"))
+    figure.get_by_role("button", name="Style changes for this file (JSON)").click()
+    figure.locator("textarea").first.fill('{"figure": {"axes": {"histogram": {"fill_alpha": 0.25}}}}')
+    answer = rendered(page, lambda: figure.get_by_role("button", name="Apply").first.click())
+    assert "opacity: 0.25" in answer["svg"]
