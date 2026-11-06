@@ -51,7 +51,7 @@ class Job(crange.Job):
         self.ops: Optional[Dict[str, Any]] = None            # the private session's `ops_info`
 
     def info(self) -> Dict[str, Any]:
-        return {**super().info(), "from": "histogram"}
+        return {**super().info(), "from": "histogram", "grow": True}
 
 
 _lock = threading.Lock()

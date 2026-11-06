@@ -1,14 +1,26 @@
 """The plot type Scatter in Explore: the picture, the cursor, large files, the histograms beside it."""
 
+import time
+
 import numpy as np
 import pytest
 
 import lbd
 import lbd.plot as lp
 import mock_values
+from lbd.plot import histogram as hist
+from lbd.plot import render as rnd
 from lbd.plot import scatter as sc
-from lbd_viewer import export, reading
-from lbd_viewer.explore import ExploreSession
+from lbd_viewer import crange, export, memory, reading
+from lbd_viewer.explore import ExploreError, ExploreSession
+from lbd_viewer.kinds import scatter as kind
+
+
+@pytest.fixture(autouse=True)
+def fresh():
+    crange.forget()
+    yield
+    crange.forget()
 
 IQ = {"kind": "scatter", "values": ["IQ"], "complex": "iq", "color": "state", "all": ["shot"], "index": {"readout_power": 1}}
 
@@ -233,3 +245,81 @@ def test_table_has_every_shown_point(iq, tmp_path):
     i = rows[:, 2:].astype(int)
     assert np.allclose(z[i[:, 0], i[:, 1], i[:, 2]].imag, rows[:, 1])
     assert export.options(s)["stored"] and export.options(s)["zoomed"] is None
+
+
+# -- a file that doesn't fit memory -------------------------------------------------------------------
+
+@pytest.fixture()
+def tight(tmp_path, monkeypatch):
+    """Values read by part (fake memory), and 40 000 points: more than the room for them."""
+    rng = np.random.default_rng(9)
+    d = lbd.Dataset()
+    d.add_axis("g", [0.0, 1.0], elements=["a", "b"])
+    d.add_axis("t", np.arange(20_000.0))
+    d.add_value("x", rng.normal(size=(2, 20_000)) + np.array([[-3.0], [3.0]]), axes=["g", "t"], unit="V")
+    d.add_value("y", rng.normal(size=(2, 20_000)), axes=["g", "t"], unit="V")
+    d.add_value("c", rng.normal(size=(2, 20_000)), axes=["g", "t"], unit="s")
+    d.save(tmp_path / "tight.lbd")
+    cache = memory.PartCache(memory.Memory(always_whole=0, system=lambda: (4 * memory.GB, 100_000)))
+    monkeypatch.setitem(memory._shared, "cache", cache)
+    monkeypatch.setattr(hist, "BLOCK", 3000)
+    return tmp_path / "tight.lbd"
+
+
+TIGHT = {"kind": "scatter", "values": ["y"], "x": "x", "color": "g", "all": ["t"]}
+
+
+def done(s, **kw):
+    for _ in range(1200):
+        meta = frame(s, s.full[0], s.full[1], **kw)
+        if not (meta.get("crange") or {}).get("state") == "working":
+            return meta
+        time.sleep(0.05)
+    raise AssertionError("still counting")
+
+
+def test_a_big_file_is_counted_by_parts(tight):
+    s = session(tight, TIGHT)
+    assert s.view._big() and s.model.series[0][0].size == 0
+    meta = done(s)
+    assert meta["note"] == "40,000 points: each pixel shows how many are there" and meta["crange"] is None
+    assert s.full[0][0] < -3 < 3 < s.full[0][1]
+    # the same counts as from the points in memory
+    d = lbd.load(tight)
+    spec = rnd.resolve_spec(d, TIGHT, warn_unused=False)
+    m = sc.prepare_scatter(d, spec, s.style)
+    w, h = meta["plot"][2:]
+    pic = sc.density_image(m, sc.density(m, tuple(meta["xlim"]), tuple(meta["ylim"]), w, h, ("linear", "linear"), s.style.figure.axes.colors))
+    assert np.array_equal(np.asarray(s.view.image.get_array()), pic)
+
+
+def test_a_big_file_coloured_by_a_value(tight):
+    s = session(tight, {**TIGHT, "color": "c"})
+    done(s)
+    assert s.model.c_text[1] == "s" and s.model.cnorm.vmin < 0 < s.model.cnorm.vmax
+
+
+def test_a_big_view_is_kept_and_zooming_counts_again(tight):
+    s = session(tight, TIGHT)
+    done(s)
+    full = s.full
+    assert frame(s, full[0], full[1]).get("crange") is None
+    zoomed = frame(s, (-4.0, -2.0), (-1.0, 1.0))
+    assert zoomed["crange"]["state"] == "working" and zoomed["note"].startswith("counting")
+
+
+def test_cursor_says_why(tight):
+    s = session(tight, TIGHT)
+    meta = done(s)
+    assert "Cursors can't choose a point here" in meta["hidden"][0]
+    got = reading.cursors(s, [{"x": 0.0, "y": 0.0}], "cross", {"xlim": meta["xlim"], "ylim": meta["ylim"]}, (300, 200))
+    assert got["cursors"] == [None]
+    with pytest.raises(ExploreError, match="too many to list"):
+        export.session_table(s)
+
+
+def test_a_slice_of_a_big_file_shows_markers(tight, monkeypatch):
+    monkeypatch.setattr(kind, "BYTES_PER_POINT", 3)      # room for 33 000 points: not both groups
+    assert session(tight, TIGHT).view._big()
+    s = session(tight, {**TIGHT, "color": "none", "index": {"g": 0}})
+    assert not s.view._big() and frame(s)["note"] == "every point shown"

@@ -1251,7 +1251,7 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
       </div>}
 
       {Controls && <Controls info={info} spec={r} resolved={r} update={updateSpec} settings={settings} updateSettings={updateSettings} page="explore" />}
-      {crange?.from === "histogram" && crange.state === "working" && <p className="small muted">Counting… {Math.round((crange.fraction ?? 0) * 100)} %</p>}
+      {(crange?.from === "histogram" || crange?.from === "scatter") && crange.state === "working" && <p className="small muted">Counting… {Math.round((crange.fraction ?? 0) * 100)} %</p>}
 
       {kind === "curve" && values.length === 1 && others.length > 0 && (
         <label className="field">

@@ -584,7 +584,7 @@ export default function ExploreView({
           crangeTimer.current = window.setTimeout(() => {
             crangeTimer.current = 0;
             dirty.current = true;
-            if (f.meta.crange?.from === "histogram") showAll.current = true; // the bars are growing
+            if (f.meta.crange?.grow) showAll.current = true; // the plot's limits are still growing
             if (session.current === sid) request();
           }, 700);
         }

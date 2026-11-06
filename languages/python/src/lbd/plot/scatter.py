@@ -8,7 +8,7 @@ giving the colours is a slider.
 """
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 import matplotlib
 import matplotlib.colors as mcolors
@@ -18,7 +18,9 @@ from matplotlib.cm import ScalarMappable
 from lbd.io import _warn
 
 from . import kinds
-from .points import Points, points_of
+from .histogram import BLOCK, _parts
+from .points import Points, _fixed
+from .points import points_of as read_points
 from .render import (SCATTER_RASTER_ABOVE, RenderError, RenderWarning, _annotate, _auto_prefix, _axis_quantity, _check_log,
                      _colorbar, _fits_curve, _is_point, _legend, _legend_label, _norm, _slices, _swept, _unit_scale,
                      apply_complex, find_quantity, flat)
@@ -73,8 +75,79 @@ def _axis_of(d: Any, v: Any, name: str) -> Any:
     return d.axes[name]
 
 
-def prepare_scatter(d: Any, spec: Dict[str, Any], style: Style, **kw: Any) -> ScatterModel:
+@dataclass
+class Span:
+    """The lowest and highest x, y and colour number of points too many to hold (stored units)."""
+
+    x: Tuple[float, float] = (0.0, 1.0)
+    y: Tuple[float, float] = (0.0, 1.0)
+    c: Tuple[float, float] = (0.0, 1.0)
+
+
+def _no_points(v: Any) -> Points:
+    """No points, for a model made from a `Span`: its labels, units and colours, not its numbers."""
+    none = np.zeros(0, dtype=np.int64)
+    return Points(np.zeros(0, dtype=complex if v.dtype.startswith("complex") else float),
+                  {a: np.zeros(0) for a in v.axes}, {a: none for a in v.axes}, (0,))
+
+
+def _steps_of(v: Any, sel: Tuple[Any, ...], axis: str, shape: Tuple[int, ...]) -> np.ndarray:
+    """The stored index on `axis` of each number of the part `v[sel]`, 1-D."""
+    i = v.axes.index(axis)
+    at = np.arange(v.shape[i])[sel[i]]
+    if np.ndim(at) == 0:
+        return np.full(int(np.prod(shape, dtype=np.int64)), int(at))
+    kept = [j for j, s in enumerate(sel) if not isinstance(s, (int, np.integer))]
+    view = [1] * len(kept)
+    view[kept.index(i)] = at.size
+    return np.broadcast_to(at.reshape(view), shape).ravel()
+
+
+def iter_points(d: Any, spec: Dict[str, Any], block: int = BLOCK) -> Iterator[Tuple[int, np.ndarray, np.ndarray, Optional[np.ndarray], Optional[np.ndarray]]]:
+    """Every point shown, part by part, never a whole value: (series, x, y, Colour by step or None,
+    colour number or None), in stored units."""
     d = flat(d)
+    mode = spec["complex"]
+    colour = spec.get("color")
+    if colour == "none":
+        colour = None
+    for k, name in enumerate(spec["values"]):
+        v = d.values[name]
+        index = _fixed(v, spec)
+        kept = [i for i, a in enumerate(v.axes) if a not in index]
+        where = {i: index[a] for i, a in enumerate(v.axes) if a in index}
+        for part in _parts(v.shape, kept, where, block, False):
+            sel = tuple(part.get(i, slice(None)) for i in range(len(v.axes)))
+            arr = np.asarray(v._read(sel))
+
+            def shown(value: Any, how: str) -> np.ndarray:
+                return np.ravel(apply_complex(np.asarray(value._read(sel)), value.label, value.unit, how, axis=-1)[0])
+
+            if mode == "iq":
+                x, y = arr.real.ravel(), arr.imag.ravel()
+            else:
+                y = np.ravel(apply_complex(arr, v.label, v.unit, mode, axis=-1)[0])
+                if spec["x"] in d.values:
+                    x = shown(d.values[spec["x"]], mode)
+                else:
+                    x = np.asarray(d.axes[spec["x"]].data, dtype=float)[_steps_of(v, sel, spec["x"], arr.shape)]
+            step = number = None
+            if colour in d.values:
+                number = shown(d.values[colour], mode if mode != "iq" else "abs")
+            elif colour:
+                step = _steps_of(v, sel, colour, arr.shape)
+                number = np.asarray(d.axes[colour].data, dtype=float)[step]
+            yield k, x, y, step, number
+
+
+def prepare_scatter(d: Any, spec: Dict[str, Any], style: Style, big: Optional[Span] = None, **kw: Any) -> ScatterModel:
+    """`big`: the numbers' ends, for points too many to hold: the model has no points then (LBD
+    Viewer counts them per pixel, part by part)."""
+    d = flat(d)
+
+    def points_of(d_: Any, spec_: Dict[str, Any], name: str) -> Points:
+        return _no_points(d_.values[name]) if big is not None else read_points(d_, spec_, name)
+
     a = style.figure.axes
     xs, ys = style.axis_style("x"), style.axis_style("y")
     mode = spec["complex"]
@@ -112,8 +185,8 @@ def prepare_scatter(d: Any, spec: Dict[str, Any], style: Style, **kw: Any) -> Sc
         yq = find_quantity(style, first.name, first.label, mode if first.dtype.startswith("complex") else None)
 
     stored_x, stored_y = xunit, yunit
-    all_x = np.concatenate([s[0] for s in raw])
-    all_y = np.concatenate([s[1] for s in raw])
+    all_x = np.concatenate([s[0] for s in raw]) if big is None else np.asarray(big.x)
+    all_y = np.concatenate([s[1] for s in raw]) if big is None else np.asarray(big.y)
     if mode == "iq":  # one scale for both axes keeps the I/Q plane undistorted
         base = xunit
         both = xs.label.auto_prefix and ys.label.auto_prefix
@@ -151,9 +224,12 @@ def prepare_scatter(d: Any, spec: Dict[str, Any], style: Style, **kw: Any) -> Sc
                 cmode = cmode if cv.dtype.startswith("complex") else None
             q = find_quantity(style, cname, clab, cmode)
             c_text = (clab, cunit)
-            cf, cunit = _unit_scale(cvals, cunit, q, ys.label.auto_prefix and q.vmin is None and q.vmax is None)
+            cspan = cvals if big is None else np.asarray(big.c)
+            cf, cunit = _unit_scale(cspan, cunit, q, ys.label.auto_prefix and q.vmin is None and q.vmax is None)
             cvals = cvals * cf
             cnorm = _norm(q, cf)
+            if big is not None:
+                cnorm.autoscale_None(cspan * cf)
             cmap = q.cmap or a.image.cmap
             clabel = axis_label(spec.get("z_label") or clab, cunit, ys.label.unit_format)
 
@@ -276,9 +352,11 @@ def density(model: ScatterModel, xlim: Tuple[float, float], ylim: Tuple[float, f
         if sums is not None:
             good = np.isfinite(model.cvals[keep])
             sums += np.bincount(where[good], weights=model.cvals[keep][good], minlength=width * height)
-    points = sum(int(c.sum()) for c in counts)
-    return Density(counts, used, None if sums is None else sums.reshape(height, width),
-                   f"{points:,} points: each pixel shows how many are there")
+    return Density(counts, used, None if sums is None else sums.reshape(height, width), counted_note(counts))
+
+
+def counted_note(counts: List[np.ndarray]) -> str:
+    return f"{sum(int(c.sum()) for c in counts):,} points: each pixel shows how many are there"
 
 
 def _visibility(n: np.ndarray) -> np.ndarray:
