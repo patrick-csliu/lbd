@@ -460,67 +460,6 @@ def pick_dict(file_spec: Dict[str, Any], key: str, check: Callable[[Any], Any], 
         return {k: v for k, v in raw.items() if k in d.axes} if isinstance(raw, dict) else {}
 
 
-def _resolve_scatter(d, out, values, pick, spec, index_in, warn_unused, file_spec=None) -> Dict[str, Any]:
-    first = d.values[values[0]]
-    axes = list(first.axes)
-    same_shape = [n for n, v in d.values.items() if v.axes == axes]   # values usable point by point
-    if out["complex"] == "iq":
-        if not first.dtype.startswith("complex"):
-            raise RenderError(f"'{first.name}' is not complex; the I/Q plane needs complex data")
-        if warn_unused:
-            ignored = [k for k in ("x",) if spec.get(k) not in (None, "")]
-            if len(values) > 1:
-                ignored.append(f"values {values[1:]}")
-            if ignored:
-                _warn(f"the I/Q plane plots one complex value against itself; {', '.join(ignored)} ignored",
-                      RenderWarning)
-        out["values"] = values[:1]
-    else:
-        def check_x(x: Any) -> str:
-            if x not in axes and x not in same_shape:
-                raise RenderError(f"'{x}' can't be the horizontal axis: use one of the axes {axes} "
-                                  f"or a value with the same axes ({[n for n in same_shape if n not in values]})")
-            return x
-
-        x = pick("x", check_x, ([a for a in _swept(first) if not _is_point(d, a)] or _swept(first) or axes)[-1])
-        out["x"] = x
-        for name in values[1:]:
-            v = d.values[name]
-            ok = (x in v.axes) if x in axes else (v.axes == axes)
-            if not ok:
-                raise RenderError(f"'{name}' can't be plotted against '{x}' together with '{values[0]}'")
-
-    def check_color(c: Any) -> Optional[str]:
-        if c == "none":
-            return None
-        if c not in axes and c not in same_shape:
-            raise RenderError(f"'{c}' can't colour the points: use one of the axes {axes} "
-                              f"or a value with the same axes {same_shape}")
-        return c
-
-    color = pick("color", check_color, None)
-    if color:
-        for name in out["values"][1:]:
-            if d.values[name].axes != axes:
-                raise RenderError(f"colouring by '{color}' needs every value to have the axes {axes}; "
-                                  f"'{name}' has {d.values[name].axes}")
-        out["color"] = color
-    elif warn_unused and spec.get("z_label") not in (None, ""):
-        _warn("z_label is the colour bar label; it is ignored without color=", RenderWarning)
-    # Scatter plots use every point; only axes fixed explicitly in `index` are sliced.
-    fixed = [a for a in axes if a in index_in and a not in out.get("all", [])]
-    for role, name in (("horizontal axis", out.get("x")), ("colour", color)):
-        if name in fixed:
-            raise RenderError(f"index fixes '{name}', which is the {role} of this scatter plot; remove it "
-                              "from index or choose another axis")
-    if warn_unused and spec.get("index"):
-        unused_idx = [a for a in spec["index"] if a not in axes]
-        if unused_idx:
-            _warn(f"index for {unused_idx} is ignored: '{first.name}' has no such axes", RenderWarning)
-    out["index"], out["slices"] = _slices(d, fixed, index_in, spec)
-    return out
-
-
 def _single_number(v) -> str:
     """A single number (0-D value) for messages: "'T1' (21 µs)", or "'T1'" if it wasn't read."""
     if v.data is None:
@@ -646,21 +585,6 @@ def _take(v: "lbd.Value", keep: List[str], index: Dict[str, int]) -> np.ndarray:
     remaining = [a for a in v.axes if a in keep]
     order = [remaining.index(a) for a in keep if a in remaining]
     return np.transpose(arr, order) if len(order) > 1 else arr
-
-
-def _points(d, v: "lbd.Value", index: Dict[str, int]) -> Tuple[np.ndarray, List[str]]:
-    """All points of a value (only axes in `index` are fixed), and the axes left."""
-    idx = tuple(index[a] if a in index else slice(None) for a in v.axes)
-    arr = np.asarray(v._read(idx if v.axes else ()))
-    return arr, [a for a in v.axes if a not in index]
-
-
-def _coords(d, axis: str, axes_left: List[str], shape: Tuple[int, ...]) -> np.ndarray:
-    """Coordinates of `axis` broadcast to the shape of the points."""
-    data = np.asarray(d.axes[axis].data, dtype=float)
-    view = [1] * len(axes_left)
-    view[axes_left.index(axis)] = len(data)
-    return np.broadcast_to(data.reshape(view), shape)
 
 
 def _unwrap(phase: np.ndarray, axis: int) -> np.ndarray:
@@ -1038,137 +962,6 @@ def draw_map(fig: Figure, ax, model: MapModel, d, spec, style: Style, image: Opt
     return mappable
 
 
-def _draw_scatter(fig: Figure, ax, d, spec, style: Style) -> None:
-    a = style.figure.axes
-    sc = a.scatter
-    xs, ys = style.axis_style("x"), style.axis_style("y")
-    index = spec["index"]
-    mode = spec["complex"]
-    first = d.values[spec["values"][0]]
-
-    # (x points, y points, legend label) for every series, plus axis labels and units
-    series: List[Tuple[np.ndarray, np.ndarray, str]] = []
-    if mode == "iq":
-        arr, shape_axes = _points(d, first, index)
-        arr = np.asarray(arr)
-        series.append((arr.real.ravel(), arr.imag.ravel(), first.label))
-        xlab, xunit, ylab, yunit = f"Re {first.label}", first.unit, f"Im {first.label}", first.unit
-        point_shape = arr.shape
-        xq = yq = find_quantity(style, first.name, first.label, "iq")
-    else:
-        x = spec["x"]
-        xlab = xunit = ylab = yunit = ""
-        labels, units = [], []
-        point_shape, shape_axes = None, None
-        for name in spec["values"]:
-            v = d.values[name]
-            arr, left = _points(d, v, index)
-            yarr, lab, unit = apply_complex(np.asarray(arr), v.label, v.unit, mode)
-            if x in d.axes:
-                xarr = _coords(d, x, left, yarr.shape)
-                xlab, xunit = d.axes[x].label, d.axes[x].unit
-            else:
-                xv = d.values[x]
-                xraw, _ = _points(d, xv, index)
-                xarr, xlab, xunit = apply_complex(np.asarray(xraw), xv.label, xv.unit, mode)
-            if point_shape is None:
-                point_shape, shape_axes = yarr.shape, left
-            series.append((np.ravel(xarr), np.ravel(yarr), lab))
-            labels.append(lab)
-            units.append(unit)
-        ylab = labels[0] if len(set(labels)) == 1 else "Value"
-        if len(set(units)) > 1:
-            _warn(f"the values have different units {sorted(set(units))}; the vertical axis shows no unit",
-                  RenderWarning)
-        yunit = units[0] if len(set(units)) == 1 else ""
-        xq = _axis_quantity(style, d, x)
-        yq = find_quantity(style, first.name, first.label, mode if np.iscomplexobj(first.data) else None)
-
-    all_x = np.concatenate([s[0] for s in series])
-    all_y = np.concatenate([s[1] for s in series])
-    if mode == "iq":  # one scale for both axes keeps the I/Q plane undistorted
-        base = xunit
-        xf, xunit = _unit_scale(np.concatenate([all_x, all_y]), xunit, xq,
-                                xs.label.auto_prefix and ys.label.auto_prefix)
-        yf, yunit = xf, xunit
-        auto_axes = ([(first.name, xunit)] if _auto_prefix(xq, base, xs.label.auto_prefix and ys.label.auto_prefix)
-                     else [])
-    else:
-        xbase, ybase = xunit, yunit
-        xf, xunit = _unit_scale(all_x, xunit, xq, xs.label.auto_prefix)
-        yf, yunit = _unit_scale(all_y, yunit, yq, ys.label.auto_prefix)
-        auto_axes = [(n, u) for n, q, unit, auto, u in ((spec["x"], xq, xbase, xs.label.auto_prefix, xunit),
-                                                       (first.name, yq, ybase, ys.label.auto_prefix, yunit))
-                     if _auto_prefix(q, unit, auto)]
-
-    # colour by a third quantity
-    cvals = None
-    cnorm = None
-    cmap = None
-    clabel = ""
-    groups = None      # colour by a short axis: one cycle colour and legend entry per point of it
-    if spec.get("color"):
-        c = spec["color"]
-        cq = _axis_quantity(style, d, c)
-        fixed_scale = cq.vmin is not None or cq.vmax is not None or cq.cmap is not None
-        if c in d.axes and len(d.axes[c].data) <= len(a.colors) and not fixed_scale:
-            ca = d.axes[c]
-            where = np.ravel(_coords(d, c, shape_axes, point_shape))
-            groups = [(where == val, _legend_label(ca, val, k)) for k, val in enumerate(ca.data)]
-        else:
-            if c in d.axes:
-                cvals = _coords(d, c, shape_axes, point_shape)
-                cname, clab, cunit = c, d.axes[c].label, d.axes[c].unit
-                cmode = None
-            else:
-                cv = d.values[c]
-                craw, _ = _points(d, cv, index)
-                cmode = mode if mode != "iq" else "abs"
-                cvals, clab, cunit = apply_complex(np.asarray(craw), cv.label, cv.unit, cmode)
-                cname = c
-                cmode = cmode if np.iscomplexobj(cv.data) else None
-            q = find_quantity(style, cname, clab, cmode)
-            cf, cunit = _unit_scale(cvals, cunit, q, ys.label.auto_prefix and q.vmin is None and q.vmax is None)
-            cvals = np.ravel(cvals) * cf
-            cnorm = _norm(q, cf)
-            cmap = q.cmap or a.image.cmap
-            clabel = axis_label(spec.get("z_label") or clab, cunit, ys.label.unit_format)
-
-    kw = dict(s=sc.size_pt ** 2, alpha=sc.alpha, marker=sc.marker, edgecolors=sc.edgecolor,
-              linewidths=sc.edgewidth_pt)
-    mappable = None
-    for xpts, ypts, lab in series:
-        raster = xpts.size > SCATTER_RASTER_ABOVE
-        if groups is not None:
-            for k, (mask, glab) in enumerate(groups):
-                ax.scatter(xpts[mask] * xf, ypts[mask] * yf, color=a.colors[k], rasterized=raster,
-                           label=glab if len(series) == 1 else f"{lab}, {glab}", **kw)
-        elif cvals is not None:
-            mappable = ax.scatter(xpts * xf, ypts * yf, c=cvals, cmap=cmap, norm=cnorm, label=lab,
-                                  rasterized=raster, **kw)
-        else:
-            ax.scatter(xpts * xf, ypts * yf, label=lab, rasterized=raster, **kw)
-
-    ax.set_xlabel(axis_label(spec.get("x_label") or xlab, xunit, xs.label.unit_format))
-    ax.set_ylabel(axis_label(spec.get("y_label") or ylab, yunit, ys.label.unit_format))
-    y_scale = "log" if yq.scale == "log" and mode != "iq" else spec["y_scale"]
-    if spec["x_scale"] == "log":
-        _check_log(all_x, "the horizontal axis")
-    if y_scale == "log":
-        _check_log(all_y, "the vertical axis")
-    ax.set_xscale(spec["x_scale"])
-    ax.set_yscale(y_scale)
-    if mode != "iq" and (yq.vmin is not None or yq.vmax is not None):
-        ax.set_ylim(None if yq.vmin is None else yq.vmin * yf, None if yq.vmax is None else yq.vmax * yf)
-    if mode == "iq":
-        ax.set_aspect("equal", adjustable="datalim")
-    _annotate(ax, d, spec, auto_axes)
-    if mappable is not None:
-        _colorbar(fig, mappable, ax, style, clabel)
-    else:
-        _legend(ax, a)
-
-
 # ---- output ---------------------------------------------------------------------
 
 
@@ -1283,22 +1076,11 @@ def _fits_map(d, name: str) -> Optional[str]:
     return None
 
 
-def _prepare_nothing(d, spec, style, **kw) -> None:
-    return None
-
-
-def _draw_scatter_kind(fig, ax, model, d, spec, style) -> None:
-    _draw_scatter(fig, ax, d, spec, style)
-
-
 kinds.register(kinds.Kind(
     "curve", "Curves", _fits_curve, _resolve_curve_or_map, prepare_curves, draw_curves,
     frozenset({"x", "series", "index", "x_scale", "y_scale", "x_label", "y_label", "annotations"})))
 kinds.register(kinds.Kind(
     "heatmap", "Map", _fits_map, _resolve_curve_or_map, prepare_map, draw_map,
     frozenset({"x", "y", "index", "x_scale", "y_scale", "x_label", "y_label", "z_label", "annotations"})))
-kinds.register(kinds.Kind(
-    "scatter", "Scatter", _fits_curve, _resolve_scatter, _prepare_nothing, _draw_scatter_kind,
-    frozenset({"x", "color", "index", "x_scale", "y_scale", "x_label", "y_label", "z_label", "annotations"})))
 kinds.load_types()
 KINDS = ("auto", *kinds.KINDS)

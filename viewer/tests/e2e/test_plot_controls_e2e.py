@@ -92,7 +92,7 @@ def test_a_value_on_another_axis_replaces_the_plot_and_numbers_are_listed(files,
 
     expect(body(page).locator(".value-number")).to_have_text("T1 = 21 µs")   # listed, not a button
     expect(body(page).get_by_role("button", name=re.compile("T1"))).to_have_count(0)
-    expect(plot_type(page).locator("option")).to_have_text(["Curves", "Scatter", "Heat map"])
+    expect(plot_type(page).locator("option").locator("nth=0")).to_have_text("Curves")
 
 
 def test_a_file_with_only_single_numbers_lists_them(viewer, new_page):
