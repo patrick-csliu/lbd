@@ -563,7 +563,8 @@ class ExploreSession:
                 if want == "log" and not self._has_positive(which):
                     want = "linear"                      # nothing could be drawn on a log axis
                     self.log_refused.append(f"The {which} axis has no value above 0, so it stays linear.")
-                (self.ax.set_xscale if key == "xscale" else self.ax.set_yscale)(want)
+                if want != (self.ax.get_xscale if key == "xscale" else self.ax.get_yscale)():
+                    (self.ax.set_xscale if key == "xscale" else self.ax.set_yscale)(want)    # (this resets the ticks)
             self.full = self._full_view()
         self.settings = settings
         return notes
@@ -665,6 +666,8 @@ class ExploreSession:
         choice changed; True when the figure was set up again for another model."""
         if (any(op["on"] for op in ops) or eqs) and not self.view.operations:
             raise ExploreError(self.view.no_operations)
+        if self.view.operations == "shape":
+            return self.view.apply_ops(ops, eqs)
         key = json.dumps([ops, sorted(chosen) if chosen is not None else None, eqs])
         if key == self.ops_key:
             return False
@@ -972,7 +975,7 @@ class ExploreSession:
             self.fig.set_size_inches(width / 96, height / 96)
             self.ax.set_xlim(*self.full[0])
             self.ax.set_ylim(*self.full[1])
-            self._lay_out()
+            self.view.lay_out()
 
     def _curve_picture(self, pxe: np.ndarray, draft: bool, w: int, h: int) -> Tuple[str, bool]:
         """The curves for these pixel edges: (the note, whether they are reduced)."""
@@ -1050,7 +1053,7 @@ class ExploreSession:
             note, reduced = self.view.picture(pxe, pye, stat, draft, dw, dh)
             t2 = time.perf_counter()
             self.fig.canvas.draw()
-            if not _again and self._spills():
+            if not _again and not getattr(self.view, "fixed_layout", False) and self._spills():
                 # Text that still doesn't fit (rare: the layout leaves room for wide tick labels):
                 # lay out again, once.
                 self.view.lay_out()

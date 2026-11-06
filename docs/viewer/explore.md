@@ -186,9 +186,73 @@ really is. Operations and **Row as curve** aren't available on such a map yet.
 
 ### Matrix
 
+For the numbers themselves: a density matrix, an assignment matrix, a covariance. Each cell shows its
+number, in dark or light text according to the colour behind it, with row 0 at the top as in a
+matrix. Choose **Matrix** in the Plot menu; it needs two axes, or a value with a matrix in each data
+point. The other axes get sliders.
+
+- **Columns** and **Rows** choose the axes. Their `elements` name the cells; otherwise the axes'
+  numbers do.
+- **Numbers** turns the numbers off, and **Significant digits** sets them. All cells share one unit
+  prefix, shown on the colour bar. The numbers are drawn up to 32 × 32; a larger matrix is drawn as
+  cells, and a note says so. A number that doesn't fit its cell is left out until you zoom in.
+- **Colour range**: Auto, 0 to 1, or −1 to 1 with white at zero. Matrices are only comparable with a
+  fixed range, so numbers without a unit start on one of those two when they fit in it.
+- **Complex values** start as **Re and Im** side by side, on one colour range; or the usual choices.
+- A click selects a cell: its row, column and value are in the Cursors tab, as stored.
+
+Operations that keep the shape are available (subtract the mean, normalize, the derivative, smooth,
+between traces); not on Re and Im, which is two numbers per cell. There are no cuts, and panels don't
+share their zoom: a matrix's columns are positions, not an axis.
+
 ### Bars
 
+For few named positions, where a line between them would mean nothing. Choose **Bars** in the Plot
+menu.
+
+| Data | Drawing |
+|---|---|
+| A value on one short axis | a bar per position, labelled by its `elements` or numbers |
+| A value on two short axes | **Groups** along the first; **Bars in a group** for the second |
+| Several values on one axis | a bar per value in each group |
+| A vector in each data point | a bar per element; the other axes get sliders |
+| Several single numbers | one bar each, named by the value |
+
+- Tick more **Values** to put them side by side. A value on other axes replaces what is shown.
+- **Bars** chooses Grouped or Stacked; stacked bars pile positive numbers up from zero and negative
+  ones down from it, and need one unit.
+- **Values on the bars** writes each number at the end of its bar, unless the bars are too narrow.
+- **Complex values:** the usual choices, or **Re and Im**, two bars side by side.
+- Two units get a second vertical axis, as curves do; a third is refused, saying which.
+- A click selects a bar: its group, name and value are in the Cursors tab. The **Horizontal** cursor
+  is a level to compare the bars with. Zero is always in the vertical axis; **Log vertical** is
+  under Display.
+
+Operations that keep the shape are available when the bars have one unit. There are no cuts.
+
 ### 3D bars
+
+The data of [Matrix](#matrix), a bar per cell: the classic picture of a density matrix. Row 0 is at the
+back and column 0 on the left, so from the default angle it reads like the matrix. Numbers below zero
+go down from zero.
+
+- **Turning it:** drag on the plot; the server draws each new angle. **Elevation** and **Azimuth** show
+  the angle and can be typed in, and **Default angle** brings the style's back. The arrow keys turn by
+  5° (with Shift 15°), `Home`, `0` or a double-click go back. The wheel zooms. Above 32 × 32 bars a
+  quicker picture is shown while turning, and the sharp one follows when the mouse rests.
+- **Complex values** start as **Re and Im**, two pictures turning together on one vertical scale. The
+  other choice of this type is **Height |z|, colour the phase**, with a phase colour bar; the usual
+  complex choices give one picture.
+- **Reading values:** there are no cursor lines in 3D. A click picks the nearest bar top and shows its
+  row, column and value in the Cursors tab; where tops overlap, the one nearest you. A hidden bar can be
+  read in Matrix.
+- **Size:** up to 64 × 64; beyond that bars hide each other, and the Plot menu says so.
+
+The angle is remembered with the view, and **Open in Figure** takes it along. There are no cuts, limits
+or zoom box, and panels turn on their own; sliders still follow each other. Operations that keep the
+shape are available, as on Matrix.
+
+![3D bars of a density matrix, Re and Im side by side](img/bars3d.png)
 
 ### Histogram
 

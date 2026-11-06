@@ -6,7 +6,7 @@ import pytest
 import lbd
 import lbd.plot as lp
 from lbd.plot import kinds, render
-from lbd.plot import matrix
+from lbd.plot import bars, bars3d, histogram, matrix, scatter
 
 
 def two_axes():
@@ -28,8 +28,12 @@ def test_a_name_can_be_registered_once():
         kinds.register(kinds.KINDS["curve"])
 
 
-def test_a_placeholder_adds_nothing():
-    assert matrix.KIND is None and "matrix" not in kinds.KINDS
+def test_a_placeholder_adds_nothing(monkeypatch):
+    monkeypatch.setattr(kinds, "KINDS", {})
+    for module in (matrix, bars, bars3d, histogram, scatter):
+        monkeypatch.setattr(module, "KIND", None)
+    kinds.load_types()
+    assert kinds.KINDS == {}
 
 
 def test_build_figure_goes_through_the_registry(monkeypatch):

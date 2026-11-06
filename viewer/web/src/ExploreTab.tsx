@@ -8,7 +8,7 @@ import CursorPanel, { OtherPanel } from "./CursorPanel";
 import { kindOf } from "./plotKinds";
 import { PlotKindSelect } from "./PlotKindSelect";
 import { CursorsState, NO_CURSORS } from "./cursors";
-import ExploreView, { ExploreActions, Follow, View, ViewSettings } from "./ExploreView";
+import ExploreView, { Angle, ExploreActions, Follow, View, ViewSettings } from "./ExploreView";
 import ExportDialog, { ExportSource } from "./ExportDialog";
 import { around, compose, copyPng, pageBackground, pictureChoice, rememberPictureChoice, savePng } from "./clipboard";
 import type { MenuEntry } from "./menu";
@@ -40,7 +40,7 @@ import { MeasuringStatus } from "./MeasuringStatus";
 
 interface Props {
   path: string;
-  onOpenInFigure: () => void;
+  onOpenInFigure: (spec?: PlotSpec) => void;
   onError: (msg: string) => void;
   onMenu?: (e: MouseEvent) => void;
   /** The file's title, once read (its tab shows it). */
@@ -154,6 +154,14 @@ function startSpec(info: FileInfo): PlotSpec {
   if (out.kind === "auto" || !kindOf(out.kind).explore) delete out.kind; // the types Explore shows
   if (out.complex === "iq") delete out.complex;
   return out;
+}
+
+/** What Open in Figure takes along: a plot type of its own and its choices (curves and maps: the file's view). */
+function figureSpec(opened: ExploreOpen | null, view?: View | null): PlotSpec | undefined {
+  if (!opened || opened.kind === "curve" || opened.kind === "heatmap") return undefined;
+  const { kind, values, complex, x, y, series, index, options } = opened.spec;
+  const angle = view?.angle as Angle | undefined; // a 3D plot's angle: in a figure, a setting
+  return { kind: opened.kind ?? kind, values, complex, x, y, series, index, options: angle ? { ...options, elev: angle.elev, azim: angle.azim, zoom: angle.zoom } : options };
 }
 
 /** A file's shape, to tell data added (same names and axes, longer) from a different file. */
@@ -502,7 +510,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
       const kind = liveRef.current[p.id]?.resolved?.kind;
       const values = liveRef.current[p.id]?.resolved?.spec.values ?? p.spec.values ?? [];
       if (values.includes(name)) return;
-      panelApi(p.id).updateSpec(kind === "heatmap" ? { values: [name], x: undefined, y: undefined } : { values: [...values, name] });
+      panelApi(p.id).updateSpec(kind === "heatmap" || kind === "matrix" ? { values: [name], x: undefined, y: undefined } : { values: [...values, name] });
       setActive(i);
     },
     [panelApi, setActive],
@@ -806,7 +814,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
         </button>
         {/\.lbd\.writing$/i.test(info.path) && <MeasuringStatus path={info.path} />}
         <span className="explore-head-actions">
-          <button className="primary" onClick={onOpenInFigure} title="Make a figure of this file: styles and export">
+          <button className="primary" onClick={() => onOpenInFigure(figureSpec(resolved, act.view))} title="Make a figure of this file: styles and export">
             Open in Figure
           </button>
           <button className="ib" aria-label="Show in folder" title="Show in folder" onClick={() => api.reveal(info.path).catch((e) => onError(e.message))}>
@@ -856,7 +864,9 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
               listOpen={act.listOpen}
               opsInfo={actLive.opsInfo}
               failed={actLive.failed}
-              onOpenInFigure={onOpenInFigure}
+              onOpenInFigure={() => onOpenInFigure()}
+              angle={act.view?.angle as Angle | undefined}
+              setAngle={(a) => actActions.current?.setAngle(a)}
               calculate={(what, index) => actActions.current?.calculate(what, index) ?? Promise.reject(new Error("the plot isn't open yet"))}
               onListOpen={actApi.onListOpen}
               updateSpec={actApi.updateSpec}
@@ -964,7 +974,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
                       follow={follows[p.id] ?? null}
                       onUserView={(v) => onUserView(p.id, v)}
                       dataItems={() => dataItems(p.id)}
-                      onOpenInFigure={onOpenInFigure}
+                      onOpenInFigure={() => onOpenInFigure()}
                       onShowCurves={() => {
                         // the plot didn't open: a new one with the values as curves
                         pa.updateSpec({ kind: "curve", x: undefined, y: undefined, series: undefined, complex: "abs" });
@@ -1090,6 +1100,8 @@ interface ControlsProps {
   /** The plot couldn't be opened: why. */
   failed?: string | null;
   onOpenInFigure: () => void;
+  angle?: Angle;
+  setAngle: (a: Partial<Angle> | null) => void;
 }
 
 /** The sections of the controls that are open (this browser); Data is open at first. */
@@ -1128,7 +1140,7 @@ function Section({ name, title, badge, open, onToggle, children }: { name: strin
   );
 }
 
-function ExploreControls({ heading, info, resolved, settings, updateSpec, updateSettings, children, contrast, listOpen, onListOpen, opsInfo, calculate, onValueMenu, stat, onStat, failed, onOpenInFigure, crange }: ControlsProps) {
+function ExploreControls({ heading, info, resolved, settings, updateSpec, updateSettings, children, contrast, listOpen, onListOpen, opsInfo, calculate, onValueMenu, stat, onStat, failed, onOpenInFigure, crange, angle, setAngle }: ControlsProps) {
   const [sections, setSection] = useSections();
   if (!resolved)
     return failed ? (
@@ -1170,7 +1182,9 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
   // a variable sweep's map: its two inner levels
   const others = first ? (r.levels?.slice(-2) ?? first.axes).filter((a) => a !== along) : [];
   // the traces that can be chosen: one per position of the series axis (curves) or map row
-  const traceAxis = kind === "curve" ? r.series : r.y;
+  const traceAxis = kind === "curve" ? r.series : kind === "heatmap" ? r.y : undefined;
+  const row = kindOf(kind);
+  const scales = row.scales ?? ["x", "y"];
   const clim = settings.clim ?? [null, null];
 
   const opsCount = (settings.ops ?? []).length + Object.values(settings.equations ?? {}).filter(Boolean).length;
@@ -1180,9 +1194,10 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
       <Section name="data" title="Data" open={!!sections.data} onToggle={setSection}>
       <label className="field">
         <span>Plot</span>
-        <PlotKindSelect path={info.path} value={kind} first={first?.name} page="explore" onChoose={(k, fit) => updateSpec({ kind: k, x: undefined, y: undefined, series: undefined, ...(fit?.length && first && !fit.includes(first.name) ? { values: [fit[0]] } : {}) })} />
+        <PlotKindSelect path={info.path} value={kind} first={first?.name} page="explore" onChoose={(k, fit) => updateSpec({ kind: k, x: undefined, y: undefined, series: undefined, ...(r.complex === "re_im" ? { complex: undefined } : {}), ...(fit?.length && first && !fit.includes(first.name) ? { values: [fit[0]] } : {}) })} />
       </label>
 
+      {!row.ownData && (
       <fieldset className="field">
         <legend>{kind === "heatmap" ? "Value" : "Values"}</legend>
         {plottable.map((v) => {
@@ -1216,8 +1231,10 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
           );
         })}
       </fieldset>
+      )}
 
       {/* the axes as one block: the same drop-downs in the same place for curves and maps */}
+      {!row.ownData && (
       <div className={"field axes-field" + (kind === "heatmap" ? " two" : "")} role="group" aria-label="Axes">
         <span>Axes</span>
         <div className="axes-grid">
@@ -1246,8 +1263,9 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
           )}
         </div>
       </div>
+      )}
 
-      {Controls && <Controls info={info} spec={r} resolved={r} update={updateSpec} settings={settings} updateSettings={updateSettings} page="explore" />}
+      {Controls && <Controls info={info} spec={r} resolved={r} update={updateSpec} settings={settings} updateSettings={updateSettings} page="explore" angle={angle} setAngle={setAngle} />}
 
       {kind === "curve" && values.length === 1 && others.length > 0 && (
         <label className="field">
@@ -1263,7 +1281,7 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
         </label>
       )}
 
-      {anyComplex && (
+      {anyComplex && !row.ownData && (
         <label className="field">
           <span>Complex values</span>
           <select aria-label="Complex values" value={r.complex ?? "abs"} onChange={(e) => updateSpec({ complex: e.target.value })}>
@@ -1301,18 +1319,23 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
 
       </Section>
 
+      {(scales.length > 0 || kind === "heatmap") && (
       <Section name="display" title="Display" open={!!sections.display} onToggle={setSection}
                badge={settings.xscale === "log" || settings.yscale === "log" || settings.cscale === "log" ? "log" : undefined}>
       <fieldset className="field">
         <legend>Scales</legend>
+        {scales.includes("x") && (
         <label className="check">
           <input type="checkbox" checked={settings.xscale === "log"} onChange={(e) => updateSettings({ xscale: e.target.checked ? "log" : "linear" })} />
           Log horizontal
         </label>
+        )}
+        {scales.includes("y") && (
         <label className="check">
           <input type="checkbox" checked={settings.yscale === "log"} onChange={(e) => updateSettings({ yscale: e.target.checked ? "log" : "linear" })} />
           Log vertical
         </label>
+        )}
         {kind === "heatmap" && (
           <label className="check">
             <input type="checkbox" checked={settings.cscale === "log"} onChange={(e) => updateSettings({ cscale: e.target.checked ? "log" : "linear" })} />
@@ -1378,13 +1401,15 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
         </label>
       )}
       </Section>
+      )}
 
       <Section name="processing" title="Processing" open={!!sections.processing} onToggle={setSection}
                badge={opsCount ? `${opsCount} on` : undefined}>
       <Operations
         kind={kind}
         xLabel={label(along ?? r.x ?? "x")}
-        tracesLabel={kind === "heatmap" ? label(r.y ?? "") : traceAxis && traceAxis !== "none" && values.length === 1 ? label(traceAxis) : null}
+        tracesLabel={r.y ? label(r.y) : traceAxis && traceAxis !== "none" && values.length === 1 ? label(traceAxis) : null}
+        shapeOnly={row.shapeOps}
         ops={settings.ops ?? []}
         on={settings.ops_on !== false}
         info={opsInfo}

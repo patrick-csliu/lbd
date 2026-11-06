@@ -240,8 +240,36 @@ class ImageStyle(_Model):
 
 
 # plan 15b: matrix and bars
+class MatrixStyle(_Model):
+    """Cells with their numbers (`figure.axes.matrix`).
+    """
+    cmap_signed: Cmap = Field("RdBu_r", description="Colour map of the range -1 to 1, white at zero")
+    number_size_pt: Optional[float] = Field(None, gt=0, le=40, description="Size of the numbers (empty: the figure's font)")
+    line_width_pt: float = Field(0.5, ge=0, le=5, description="Lines between the cells")
+    line_color: Color = Field("white", description="Colour of the lines between the cells")
+
+
+class BarsStyle(_Model):
+    """Bars with labels, grouped or stacked (`figure.axes.bars`).
+    """
+    width: float = Field(0.8, gt=0, le=1, description="Width of a group of bars, as a part of the room for it")
+    gap: float = Field(0.1, ge=0, lt=1, description="Gap between the bars of a group, as a part of a bar")
+    edge_width_pt: float = Field(0.0, ge=0, le=5, description="Line around each bar")
+
 
 # plan 15c: 3D bars
+class Bars3dStyle(_Model):
+    """3D bars (`figure.axes.bars3d`).
+    """
+    width: float = Field(0.8, gt=0, le=1, description="Width of a bar, as a part of its cell")
+    edge_color: Color = Field("#00000040", description="Colour of the bars' edges")
+    edge_width_pt: float = Field(0.3, ge=0, le=5, description="Width of the bars' edges")
+    alpha: float = Field(1.0, ge=0, le=1, description="Opacity")
+    elev: float = Field(35.0, ge=-90, le=90, description="Default elevation, degrees")
+    azim: float = Field(-50.0, description="Default azimuth, degrees")
+    cmap: Optional[Cmap] = Field(None, description="Colour map of the heights (empty: the image's)")
+    phase_cmap: Cmap = Field("twilight", description="Colour map of a phase: a cyclic one")
+
 
 # plan 15d: histogram
 
@@ -263,7 +291,10 @@ class AxesStyle(_Model):
     lines: LinesStyle = Field(default_factory=LinesStyle, description="Curves")
     scatter: ScatterStyle = Field(default_factory=ScatterStyle, description="Scatter markers")
     # plan 15b: matrix and bars
+    matrix: MatrixStyle = Field(default_factory=MatrixStyle, description="Matrix: cells with their numbers")
+    bars: BarsStyle = Field(default_factory=BarsStyle, description="Bars")
     # plan 15c: 3D bars
+    bars3d: Bars3dStyle = Field(default_factory=Bars3dStyle, description="3D bars")
     # plan 15d: histogram
     image: ImageStyle = Field(default_factory=ImageStyle, description="Heat maps and colour scales")
 

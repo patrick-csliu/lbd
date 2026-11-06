@@ -19,7 +19,7 @@ def session(tmp_path, spec, make=None):
 
 
 def test_the_two_kinds_have_their_class(tmp_path):
-    assert KINDS == ("curve", "heatmap")
+    assert {"curve", "heatmap"} <= set(KINDS)
     assert session(tmp_path, {"kind": "heatmap", "x": "a", "y": "b"}).view.kind == "heatmap"
     assert session(tmp_path, {"kind": "curve", "x": "a", "series": "b"}).view.kind == "curve"
 

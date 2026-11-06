@@ -1,6 +1,6 @@
 import type { ComponentType } from "react";
 import type { CursorType, FileInfo, PlotSpec } from "./api";
-import type { ViewSettings } from "./ExploreView";
+import type { Angle, ViewSettings } from "./ExploreView";
 import { kindRow as bars } from "./BarsControls";
 import { kindRow as bars3d } from "./Bars3dControls";
 import { GroupMapControls } from "./GroupMapControls";
@@ -21,6 +21,8 @@ export interface KindControlsProps {
   settings?: ViewSettings; // Explore's view settings
   updateSettings?: (patch: ViewSettings) => void;
   page: "explore" | "figure";
+  angle?: Angle | null; // a 3D plot in Explore: its view's angle
+  setAngle?: (a: Partial<Angle> | null) => void; // null: the default angle
 }
 
 export interface PlotKind {
@@ -35,6 +37,9 @@ export interface PlotKind {
   axes: "2d" | "3d"; // 3d: no zoom box, pan or limits
   syncs: boolean; // shares its x and y with other panels
   findButtons: boolean; // Max, Min and Peak
+  ownData?: boolean; // its controls choose the values, axes and complex mode
+  scales?: ("x" | "y")[]; // the log scales it offers (missing: both)
+  shapeOps?: boolean; // only operations that keep the shape; no equations
 }
 
 const ALL_CURSORS: CursorType[] = ["cross", "vertical", "horizontal"];

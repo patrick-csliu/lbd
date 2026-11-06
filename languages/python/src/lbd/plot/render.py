@@ -124,6 +124,12 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
             return default
 
     # values
+    asked_kind = kinds.KINDS.get(spec.get("kind") or file_spec.get("kind"))
+
+    def shows_it(name: str) -> bool:
+        """Single numbers aren't plotted, except by a plot type that takes them (Bars)."""
+        return len(d.values[name].shape) > 0 or (asked_kind is not None and asked_kind.fits(d, name) is None)
+
     def check_values(v: Any) -> List[str]:
         items = [v] if isinstance(v, str) else v
         if not isinstance(items, (list, tuple)) or not all(isinstance(x, str) for x in items) or not items:
@@ -131,14 +137,14 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
         missing = [x for x in items if x not in d.values]
         if missing:
             raise RenderError(f"no value named {', '.join(map(repr, missing))}; this file has {names}")
-        single = [x for x in items if len(d.values[x].shape) == 0]
+        single = [x for x in items if not shows_it(x)]
         if single:
             raise RenderError(f"{_single_number(d.values[single[0]])} is a single number; it can't be plotted "
                               f"(plot one of {plottable})")
         return list(items)
 
     # Single numbers (values without axes) aren't plotted; the viewer lists them with the values.
-    plottable = [n for n in names if len(d.values[n].shape) > 0]
+    plottable = [n for n in names if shows_it(n)]
     if not plottable:
         numbers_ = ", ".join(_single_number(v) for v in d.values.values())
         raise RenderError(f"this file has only single numbers ({numbers_}); there is nothing to plot")
@@ -147,11 +153,11 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
     def fits(name: str, k: str) -> bool:
         """Whether this value can be drawn as plot kind k."""
         kind = kinds.KINDS.get(k)          # (an unknown kind is refused below, with its message)
-        return k == "auto" or (len(d.values[name].shape) > 0 and (kind is None or kind.fits(d, name) is None))
+        return k == "auto" or (kind.fits(d, name) is None if kind else len(d.values[name].shape) > 0)
 
     if other_kind and not explicit("values") and not fits(values[0], spec["kind"]):
         # the saved values were for another kind of plot: the first value this kind can show
-        values = [next((n for n in names if fits(n, spec["kind"])), default_value)]
+        values = [next((n for n in names if fits(n, spec["kind"])), values[0])]
     first = d.values[values[0]]
     # its sweep axes: not the axes of one data point (format 1.2), which become curves, not maps
     sweep = [a for a in _swept(first) if not _is_point(d, a)]
@@ -173,6 +179,8 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
 
     # complex
     def check_complex(m: Any) -> str:
+        if m in ("re_im", "abs_phase") and m in kinds.KINDS[kind].applies:
+            return m                                 # modes of a plot type's own: read_grid, read_bars, bars3d
         if m not in COMPLEX_MODES:
             raise RenderError(f"unknown complex mode {m!r}; use one of {COMPLEX_MODES}")
         if m == "iq" and kind != "scatter":
@@ -806,11 +814,16 @@ def apply_axis_text(ax, style: Style) -> None:
                        **common)
 
 
-def _colorbar(fig, mappable, ax, style: Style, label: str):
+def _colorbar(fig, mappable, ax, style: Style, label: str, beside: bool = False):
+    """`beside`: as tall as the axes box, for axes with equal cells (the layout doesn't know about those)."""
     cb_style = style.figure.axes.image.colorbar
     if not cb_style.visible:
         return
-    cb = fig.colorbar(mappable, ax=ax, fraction=cb_style.size_pct / 100, pad=cb_style.pad_pct / 100, label=label)
+    if beside:
+        cax = ax.inset_axes([1 + cb_style.pad_pct / 100, 0, cb_style.size_pct / 100, 1])
+        cb = fig.colorbar(mappable, cax=cax, label=label)
+    else:
+        cb = fig.colorbar(mappable, ax=ax, fraction=cb_style.size_pct / 100, pad=cb_style.pad_pct / 100, label=label)
     # Pin the colour bar's ticks like the plot's (see apply_axis_text).
     rc = style.to_rcparams()
     s = style.axis_style("y")
@@ -821,6 +834,7 @@ def _colorbar(fig, mappable, ax, style: Style, label: str):
     cb.ax.tick_params(which="minor", length=s.minor.length_pt, width=rc["ytick.minor.width"], **common)
     if s.label.size_pt:
         cb.ax.yaxis.label.set_size(s.label.size_pt)
+    return cb
 
 
 def _axis_quantity(style: Style, d, name: str) -> QuantityStyle:

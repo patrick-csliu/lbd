@@ -32,6 +32,8 @@ interface Props {
   calculate: (what: "delay" | "rotation", index: number) => Promise<number>;
   equations: { x?: string; y?: string; z?: string };
   onEquations: (e: { x?: string; y?: string; z?: string }) => void;
+  /** Only operations that keep the shape of the data, no equations (Matrix, Bars). */
+  shapeOnly?: boolean;
 }
 
 /** The functions equations can use (equations.py FUNCTIONS, CONSTANTS), in groups for the legend. */
@@ -68,7 +70,9 @@ const KINDS: { op: OpName; name: string; tip: string; along: ("x" | "traces")[];
 ];
 const byOp = new Map(KINDS.map((k) => [k.op, k]));
 
-export default function Operations({ kind, xLabel, tracesLabel, ops, on, info, onChange, onOn, complexValues, calculate, equations, onEquations }: Props) {
+const KEEP_SHAPE: OpName[] = ["subtract_mean", "normalize", "derivative", "smooth", "subtract_first", "subtract_previous"];
+
+export default function Operations({ kind, xLabel, tracesLabel, ops, on, info, onChange, onOn, complexValues, calculate, equations, onEquations, shapeOnly }: Props) {
   const [menu, setMenu] = useState<MenuAt | null>(null);
   const [calcNote, setCalcNote] = useState<{ i: number; text: string } | null>(null);
   const runCalc = (i: number, what: "delay" | "rotation") => {
@@ -87,7 +91,7 @@ export default function Operations({ kind, xLabel, tracesLabel, ops, on, info, o
   const add = (e: MouseEvent) => {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const firstReal = ops.findIndex((o) => !isComplex(o));
-    const complexItems: MenuEntry[] = complexValues
+    const complexItems: MenuEntry[] = complexValues && !shapeOnly
       ? [
           ...COMPLEX.map((c) => ({
             label: c.name,
@@ -102,7 +106,7 @@ export default function Operations({ kind, xLabel, tracesLabel, ops, on, info, o
           "-" as const,
         ]
       : [];
-    const items: MenuEntry[] = [...complexItems, ...KINDS.map((k) => ({
+    const items: MenuEntry[] = [...complexItems, ...KINDS.filter((k) => !shapeOnly || KEEP_SHAPE.includes(k.op)).map((k) => ({
       label: k.name,
       disabled: !tracesLabel && !k.along.includes("x"), // across traces needs several traces
       onClick: () =>
@@ -263,13 +267,15 @@ export default function Operations({ kind, xLabel, tracesLabel, ops, on, info, o
         })}
       </ol>
       <button onClick={add}>+ Add operation ▾</button>
-      <Equations
-        kind={kind}
-        equations={equations}
-        info={info}
-        on={on}
-        onChange={onEquations}
-      />
+      {!shapeOnly && (
+        <Equations
+          kind={kind}
+          equations={equations}
+          info={info}
+          on={on}
+          onChange={onEquations}
+        />
+      )}
       {on && info?.shows && (
         <div className="small">
           The plot shows <strong>{info.shows}</strong>

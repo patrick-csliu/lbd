@@ -441,6 +441,7 @@ class ExploreRenderBody(_Body):
     width: Optional[int] = None           # the panel's size now, if it changed since opening
     height: Optional[int] = None
     dpr: Optional[float] = None
+    angle: Optional[Dict[str, Any]] = None      # a 3D plot: {elev, azim, zoom} of this picture
 
 
 class RememberBody(_Body):
@@ -1356,6 +1357,8 @@ def create_app(state: AppState) -> FastAPI:
         if body.width is not None and body.height is not None:
             s.resize(body.width, body.height, body.dpr if body.dpr is not None else s.dpr)
         notes = s.apply(body.settings) if body.settings is not None else []
+        if body.angle is not None and hasattr(s.view, "turn"):
+            s.view.turn(body.angle)
         data, meta = s.render(body.xlim, body.ylim, body.stat, body.format, body.draft)
         meta["notes"] = notes
         meta["ms"]["total"] = round((time.perf_counter() - started) * 1000, 1)   # all of it, on the server

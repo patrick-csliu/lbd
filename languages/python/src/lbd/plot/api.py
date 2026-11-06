@@ -567,12 +567,12 @@ def plot(data, kind: Optional[str] = None, values: Union[None, str, Sequence[str
     data : lbd.Dataset or path
         A dataset in memory (it never needs to be saved), or an `.lbd` file (only the needed
         values are read).
-    kind : {"auto", "curve", "scatter", "heatmap"}, optional
+    kind : {"auto", "curve", "scatter", "heatmap", "matrix", "bars", "bars3d"}, optional
         The plot type. `None`/`"auto"`: curves, or a heat map when the value has two or more axes
         with more than one point.
     values : str or list of str, optional
         The value(s) to plot. Default: the saved view's, else the first value with axes. Single
-        numbers (values without axes) can't be plotted.
+        numbers (values without axes) can only be drawn as bars.
     style : optional
         As for [`load_style`][lbd.plot.load_style]. `None` works like the viewer: the dataset's
         own preset (`style_name`) if it exists here, else the default preset.
