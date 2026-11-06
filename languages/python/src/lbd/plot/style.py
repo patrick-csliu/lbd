@@ -244,6 +244,11 @@ class ImageStyle(_Model):
 # plan 15c: 3D bars
 
 # plan 15d: histogram
+class HistogramStyle(_Model):
+    """Histograms (`figure.axes.histogram`).
+    """
+    fill_alpha: float = Field(0.8, ge=0, le=1, description="Opacity of filled bars")
+    line_width: float = Field(1.25, gt=0, description="Width of outlines, in points")
 
 
 class AxesStyle(_Model):
@@ -265,6 +270,7 @@ class AxesStyle(_Model):
     # plan 15b: matrix and bars
     # plan 15c: 3D bars
     # plan 15d: histogram
+    histogram: HistogramStyle = Field(default_factory=HistogramStyle, description="Histograms")
     image: ImageStyle = Field(default_factory=ImageStyle, description="Heat maps and colour scales")
 
     @field_validator("xaxis", "yaxis")
