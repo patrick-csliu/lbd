@@ -6,6 +6,7 @@ column 0 on the left, so that from the default angle it reads like the Matrix of
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -98,6 +99,7 @@ class Bars3dModel:
     azim: float
     zoom: float
     note: Optional[str]         # cells without a number
+    sums: Optional[np.ndarray] = None      # (a matrix's row sums aren't shown here)
     xf: float = 1.0
     yf: float = 1.0
     lines: Tuple = ()
@@ -148,6 +150,17 @@ def prepare(d, spec, style: Style, **kw) -> Bars3dModel:
         z_label=axis_label(spec.get("z_label") or g.label, g.unit, ys.label.unit_format),
         elev=options.get("elev", a.bars3d.elev), azim=options.get("azim", a.bars3d.azim), zoom=options.get("zoom", 1.0),
         note=f"{empty} cell{'s' * (empty != 1)} {'are' if empty != 1 else 'is'} empty" if empty else None)
+
+
+def operated(m: Bars3dModel, raw: np.ndarray, factor: float, unit: str, label: str, z_label: str) -> Bars3dModel:
+    """The same bars with other numbers (`raw` in stored units), for Explore's operations."""
+    height = raw * factor
+    finite = height[np.isfinite(height)]
+    low, high = (float(finite.min()), float(finite.max())) if finite.size else (0.0, 1.0)
+    grid = dataclasses.replace(m.grid, blocks=[matrix.GridBlock("", height, raw)], label=label, unit=unit, zf=factor)
+    return dataclasses.replace(m, grid=grid, panels=[Panel("", height, raw)], z=height, zf=factor, z_label=z_label,
+                               zlim=(min(low, 0.0), max(high, 0.0) or 1.0), colour_label=None,
+                               norm=mcolors.Normalize(low, high if high > low else low + 1), axes=[], bars=[], quick=[])
 
 
 def make_axes(fig, m: Bars3dModel):
