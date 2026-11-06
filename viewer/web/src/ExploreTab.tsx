@@ -1048,7 +1048,7 @@ const SYNC_TIPS = {
   x: "x: panels with the same horizontal axis (label and unit) zoom and pan together along it; their vertical axes stay their own",
   y: "y: panels with the same vertical axis zoom and pan together along it (curves: the same unit; maps: the same axis)",
   sliders:
-    "sliders: a slider chooses the step of an axis that isn't drawn (e.g. the power, while the plot shows flux × frequency). " +
+    "sliders: a slider chooses the step of an axis that isn't drawn. " +
     "Panels with a slider of the same axis show the same step: moving one moves the others (by stored step)",
   cursors: "cursors: panels with the same horizontal axis share the cursors' positions (each reads its own value there)",
 } as const;

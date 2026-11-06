@@ -11,7 +11,7 @@ const PARTS: [keyof Settings, string][] = [
   ["time", "Time left"],
   ["percent", "Percentage"],
   ["points", "Points measured"],
-  ["axes", "Slow axes (e.g. power 23 of 90)"],
+  ["axes", "Slow axes (e.g. 23 of 90)"],
 ];
 
 export function MeasurementSettings({ settings, onSettings }: { settings: Settings; onSettings: (s: AppState) => void }) {
