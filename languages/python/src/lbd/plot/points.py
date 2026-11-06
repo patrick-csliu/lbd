@@ -21,11 +21,12 @@ BLOCK = 2_000_000       # numbers per block of iter_points
 class Points:
     """`data`: 1-D, complex kept. `coords`: every kept axis's coordinate of each point (a group's
     outer axes too). `stored`: each point's index on every dimension of the value (flat view's
-    names), so that the point can be found again."""
+    names), so that the point can be found again. `shape`: of the part of the value they are."""
 
     data: np.ndarray
     coords: Dict[str, np.ndarray]
     stored: Dict[str, np.ndarray]
+    shape: Tuple[int, ...] = ()
 
 
 def _fixed(v: Any, spec: Dict[str, Any]) -> Dict[str, int]:
@@ -65,7 +66,7 @@ def points_of(d: Any, spec: Dict[str, Any], name: str) -> Points:
             coords.update({k: c[stored[a]] for k, c in on_groups[a].items()})
         else:
             coords[a] = np.asarray(f.axes[a].data)[stored[a]]
-    return Points(arr.ravel(), coords, stored)
+    return Points(arr.ravel(), coords, stored, arr.shape)
 
 
 def iter_points(d: Any, spec: Dict[str, Any], name: str, block: int = BLOCK) -> Iterator[Tuple[Optional[int], np.ndarray]]:

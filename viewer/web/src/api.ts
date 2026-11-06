@@ -679,9 +679,27 @@ export interface ExploreFrameMeta {
   strips?: "cuts" | "histograms" | null; // beside the plot, for this picture
   angle?: { elev: number; azim: number; zoom: number }; // a 3D plot: what was drawn
   default_angle?: { elev: number; azim: number; zoom: number };
+  sides?: Sides | null; // a scatter plot: histograms of the points in view
+  equal?: boolean; // equal axes: xlim and ylim are what the server made of the view asked for
   /** A map with a slider: where its colour range comes from, and while every slice's range is
    *  worked out (crange.py) how far it is, or why it failed. */
-  crange?: { from: "slice" | "all"; state?: "working" | "failed"; fraction?: number; slices?: number; error?: string | null } | null;
+  crange?: { from: "slice" | "all" | "histogram" | "scatter"; state?: "working" | "failed"; fraction?: number; slices?: number; error?: string | null; grow?: boolean } | null;
+}
+
+/** The points in view counted along one axis: bins in plot units, counts per group. */
+export interface SideBins {
+  edges: number[];
+  counts: number[][];
+  label: string;
+  unit: string; // stored
+  factor: number; // plot units per stored unit
+}
+
+export interface Sides {
+  x: SideBins;
+  y: SideBins;
+  labels: string[];
+  colours: string[];
 }
 
 /** A panel follows another's zoom along x (y) when these are the same (explore.py `sync_keys`). */
@@ -788,6 +806,14 @@ export interface CursorRead {
   stored?: { label: string; unit: string; value: number | null }; // with operations on: the stored value behind it
   cell?: [number, number, number, number]; // maps: the cell, x0 y0 x1 y1 (plot units)
   at?: [number, number]; // maps: the cell's column and row in the map as shown
+  bin?: { lo: number; hi: number; unit: string; rows: BinRow[] }; // a histogram: the bin at the cursor
+}
+
+/** A histogram's series in a bin, or between two cursors. `fraction`: of all the series' numbers. */
+export interface BinRow {
+  label: string;
+  count: number;
+  fraction: number | null;
 }
 
 /** A cut through a map: positions (plot units) and values (plot units) along one axis. */
@@ -820,6 +846,7 @@ export interface CursorsAnswer {
   cursors: (CursorRead | null)[];
   cuts?: { row?: Cut; column?: Cut; zf: number };
   cuts2?: { row?: Cut; column?: Cut; zf: number }; // through cursor 2
+  between?: { rows: BinRow[] }; // a histogram with two cursors: from the one's bin to the other's
 }
 
 export interface Histogram {

@@ -61,6 +61,7 @@ _lock = threading.Lock()
 _results: "OrderedDict[str, Range]" = OrderedDict()
 _jobs: Dict[str, Job] = {}
 _running = threading.Semaphore(WORKERS)
+others: List[Any] = []    # modules with background work of their own: `cancel_all` and `forget` reach them
 
 
 def sliders(s) -> List[Tuple[str, int]]:
@@ -123,6 +124,8 @@ def cancel_all() -> None:
     with _lock:
         for job in _jobs.values():
             job.cancelled = True
+    for module in others:
+        module.cancel_all()
 
 
 def forget() -> None:
@@ -131,6 +134,8 @@ def forget() -> None:
     with _lock:
         _results.clear()
         _jobs.clear()
+    for module in others:
+        module.forget()
 
 
 def _work(key: str, job: Job, path, version: str, spec: Dict[str, Any], style, axes, settings) -> None:

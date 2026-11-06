@@ -20,7 +20,7 @@ export function startingAxes(axes: ChoiceAxis[]): { color: string; all: string[]
   return { color: named ? named.name : "none", all: longest ? [longest.name] : [] };
 }
 
-export function AxesChoice({ axes, color, all, drawn = [], onChange }: { axes: ChoiceAxis[]; color: string; all: string[]; drawn?: string[]; onChange: (patch: { color: string; all: string[] }) => void }) {
+export function AxesChoice({ axes, color, all, drawn = [], values = [], onChange }: { axes: ChoiceAxis[]; color: string; all: string[]; drawn?: string[]; values?: { name: string; label: string }[]; onChange: (patch: { color: string; all: string[] }) => void }) {
   const free = axes.filter((a) => !drawn.includes(a.name));
   const colours = color === "none" ? null : color;
   return (
@@ -32,6 +32,11 @@ export function AxesChoice({ axes, color, all, drawn = [], onChange }: { axes: C
           {free.map((a) => (
             <option key={a.name} value={a.name}>
               {a.label}
+            </option>
+          ))}
+          {values.map((v) => (
+            <option key={v.name} value={v.name}>
+              {v.label}
             </option>
           ))}
         </select>

@@ -43,11 +43,7 @@ def test_every_file_opens_and_previews_with_no_free_memory(monkeypatch, tmp_path
     paths = files(tmp_path)
     no_free_memory(monkeypatch, tmp_path)
     for p in paths:
-        try:
-            s = open_quietly(p)
-        except ExploreError as e:                       # a saved scatter view goes to Figure (on purpose)
-            assert "scatter" in str(e).lower(), (p, e)
-            s = open_quietly(p, saved_view=False)
+        s = open_quietly(p)
         assert not s.summarised, p
         assert s.take_notes() == [], p                 # nothing to tell about small files
         heatmaps = [n for n, v in lbd.info(p).values.items() if len(v.shape) >= 2]

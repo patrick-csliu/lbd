@@ -1,5 +1,5 @@
 import type { ComponentType } from "react";
-import type { CursorType, FileInfo, PlotSpec } from "./api";
+import type { CursorType, FileInfo, PlotSpec, ValueInfo } from "./api";
 import type { Angle, ViewSettings } from "./ExploreView";
 import { kindRow as bars } from "./BarsControls";
 import { kindRow as bars3d } from "./Bars3dControls";
@@ -40,6 +40,8 @@ export interface PlotKind {
   ownData?: boolean; // its controls choose the values, axes and complex mode
   scales?: ("x" | "y")[]; // the log scales it offers (missing: both)
   shapeOps?: boolean; // only operations that keep the shape; no equations
+  noAxes?: boolean; // no Horizontal axis to choose: its controls say what is shown
+  starting?: (info: FileInfo, first: ValueInfo | undefined) => PlotSpec; // the settings a new plot starts with
 }
 
 const ALL_CURSORS: CursorType[] = ["cross", "vertical", "horizontal"];
@@ -48,7 +50,6 @@ const common = { explore: true, controls: null, cursorTypes: ALL_CURSORS, openIn
 const BUILT_IN: PlotKind[] = [
   { ...common, kind: "curve", strips: null, darkInverted: true },
   { ...common, kind: "heatmap", controls: GroupMapControls, strips: "cuts", darkInverted: false },
-  { ...common, kind: "scatter", explore: false, strips: null, darkInverted: true },
 ];
 
 const OWN = [matrix, bars, bars3d, histogram, scatter].filter((k): k is PlotKind => k !== null);

@@ -40,7 +40,7 @@ import { MeasuringStatus } from "./MeasuringStatus";
 
 interface Props {
   path: string;
-  onOpenInFigure: (spec?: PlotSpec) => void;
+  onOpenInFigure: (spec?: PlotSpec) => void; // `spec`: what a plot type of its own shows
   onError: (msg: string) => void;
   onMenu?: (e: MouseEvent) => void;
   /** The file's title, once read (its tab shows it). */
@@ -152,7 +152,7 @@ function startSpec(info: FileInfo): PlotSpec {
   const saved = info.plot ?? {};
   for (const k of START_KEYS) if (saved[k] !== undefined) (out as Record<string, unknown>)[k] = saved[k];
   if (out.kind === "auto" || !kindOf(out.kind).explore) delete out.kind; // the types Explore shows
-  if (out.complex === "iq") delete out.complex;
+  if (out.complex === "iq" && out.kind !== "scatter") delete out.complex;
   return out;
 }
 
@@ -683,6 +683,12 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
   const several = n > 1;
   const act = rec.panels[rec.active] ?? rec.panels[0];
   const actLive = live[act.id] ?? NO_LIVE;
+  // curves and maps start from the file's own figure; another plot type goes with its choices
+  const openFigure = () => {
+    const r = actLive.resolved;
+    if (!r || r.kind === "curve" || r.kind === "heatmap") return onOpenInFigure();
+    onOpenInFigure({ ...figureSpec(r, act.view), color: r.spec.color, all: r.spec.all, y_scale: act.settings.yscale ?? r.spec.y_scale });
+  };
   const actApi = panelApi(act.id);
   const actActions = actionsOf(act.id);
   const resolved = actLive.resolved;
@@ -814,7 +820,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
         </button>
         {/\.lbd\.writing$/i.test(info.path) && <MeasuringStatus path={info.path} />}
         <span className="explore-head-actions">
-          <button className="primary" onClick={() => onOpenInFigure(figureSpec(resolved, act.view))} title="Make a figure of this file: styles and export">
+          <button className="primary" onClick={openFigure} title="Make a figure of this file: styles and export">
             Open in Figure
           </button>
           <button className="ib" aria-label="Show in folder" title="Show in folder" onClick={() => api.reveal(info.path).catch((e) => onError(e.message))}>
@@ -864,7 +870,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
               listOpen={act.listOpen}
               opsInfo={actLive.opsInfo}
               failed={actLive.failed}
-              onOpenInFigure={() => onOpenInFigure()}
+              onOpenInFigure={openFigure}
               angle={act.view?.angle as Angle | undefined}
               setAngle={(a) => actActions.current?.setAngle(a)}
               calculate={(what, index) => actActions.current?.calculate(what, index) ?? Promise.reject(new Error("the plot isn't open yet"))}
@@ -974,12 +980,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
                       follow={follows[p.id] ?? null}
                       onUserView={(v) => onUserView(p.id, v)}
                       dataItems={() => dataItems(p.id)}
-                      onOpenInFigure={() => onOpenInFigure()}
-                      onShowCurves={() => {
-                        // the plot didn't open: a new one with the values as curves
-                        pa.updateSpec({ kind: "curve", x: undefined, y: undefined, series: undefined, complex: "abs" });
-                        restart(p.id);
-                      }}
+                      onOpenInFigure={openFigure}
                       panelItems={several ? () => panelEntries(i) : undefined}
                       title={
                         <div
@@ -1171,7 +1172,7 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
   const xChoices = first
     ? [
         ...(r.levels?.slice(-2) ?? first.axes).map((a) => ({ name: a, text: label(a) })),
-        ...(kind === "curve"
+        ...(kind === "curve" || kind === "scatter"
           ? info.values
               .filter((v) => !values.includes(v.name) && !v.complex && v.shape.length > 0 && v.axes.join() === first.axes.join())
               .map((v) => ({ name: v.name, text: `${v.label || v.name} (value)` }))
@@ -1194,7 +1195,7 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
       <Section name="data" title="Data" open={!!sections.data} onToggle={setSection}>
       <label className="field">
         <span>Plot</span>
-        <PlotKindSelect path={info.path} value={kind} first={first?.name} page="explore" onChoose={(k, fit) => updateSpec({ kind: k, x: undefined, y: undefined, series: undefined, ...(r.complex === "re_im" ? { complex: undefined } : {}), ...(fit?.length && first && !fit.includes(first.name) ? { values: [fit[0]] } : {}) })} />
+        <PlotKindSelect path={info.path} value={kind} first={first?.name} page="explore" onChoose={(k, fit) => updateSpec({ kind: k, x: undefined, y: undefined, series: undefined, color: undefined, all: undefined, options: undefined, complex: r.complex === "iq" || r.complex === "re_im" ? undefined : r.complex, ...(fit?.length && first && !fit.includes(first.name) ? { values: [fit[0]] } : {}), ...kindOf(k).starting?.(info, first) })} />
       </label>
 
       {!row.ownData && (
@@ -1202,7 +1203,8 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
         <legend>{kind === "heatmap" ? "Value" : "Values"}</legend>
         {plottable.map((v) => {
           const on = values.includes(v.name);
-          const fits = !first || v.name === first.name || (kind === "curve" && v.axes.includes(along ?? ""));
+          // a histogram overlays values of one unit
+          const fits = !first || v.name === first.name || (kind === "curve" && v.axes.includes(along ?? "")) || (kind === "histogram" && unitOf(v) === unitOf(first)) || (kind === "scatter" && r.complex !== "iq" && v.axes.join() === first.axes.join());
           // a panel shows two units (left and right axis); a third goes in another panel
           const third = kind === "curve" && !on && units.size >= 2 && !units.has(unitOf(v));
           return (
@@ -1218,9 +1220,11 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
                 type={kind === "heatmap" ? "radio" : "checkbox"}
                 name="explore-values"
                 checked={on}
-                disabled={(!fits && !on) || third}
+                disabled={(!fits && !on && kind !== "histogram" && kind !== "scatter") || third}
                 onChange={() => {
                   if (kind === "heatmap") updateSpec({ values: [v.name], x: undefined, y: undefined });
+                  else if (kind === "histogram" && !fits) updateSpec({ values: [v.name], color: undefined, all: undefined, index: undefined });
+                  else if (kind === "scatter" && !fits) updateSpec({ values: [v.name], x: undefined, color: undefined, all: undefined, index: undefined, complex: undefined, ...kindOf(kind).starting?.(info, v) });
                   else if (on && values.length > 1) updateSpec({ values: values.filter((n) => n !== v.name) });
                   else if (!on) updateSpec({ values: [...values, v.name] });
                 }}
@@ -1234,7 +1238,7 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
       )}
 
       {/* the axes as one block: the same drop-downs in the same place for curves and maps */}
-      {!row.ownData && (
+      {!row.ownData && !row.noAxes && r.complex !== "iq" && (
       <div className={"field axes-field" + (kind === "heatmap" ? " two" : "")} role="group" aria-label="Axes">
         <span>Axes</span>
         <div className="axes-grid">
@@ -1266,6 +1270,7 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
       )}
 
       {Controls && <Controls info={info} spec={r} resolved={r} update={updateSpec} settings={settings} updateSettings={updateSettings} page="explore" angle={angle} setAngle={setAngle} />}
+      {(crange?.from === "histogram" || crange?.from === "scatter") && crange.state === "working" && <p className="small muted">Counting… {Math.round((crange.fraction ?? 0) * 100)} %</p>}
 
       {kind === "curve" && values.length === 1 && others.length > 0 && (
         <label className="field">
@@ -1281,11 +1286,11 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
         </label>
       )}
 
-      {anyComplex && !row.ownData && (
+      {(anyComplex || r.complex === "iq") && !row.ownData && (
         <label className="field">
           <span>Complex values</span>
           <select aria-label="Complex values" value={r.complex ?? "abs"} onChange={(e) => updateSpec({ complex: e.target.value })}>
-            {COMPLEX_MODES.filter(([v]) => v !== "iq").map(([v, l]) => (
+            {COMPLEX_MODES.filter(([v]) => v !== "iq" || kind === "scatter").map(([v, l]) => (
               <option key={v} value={v}>
                 {l}
               </option>
@@ -1405,7 +1410,7 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
 
       <Section name="processing" title="Processing" open={!!sections.processing} onToggle={setSection}
                badge={opsCount ? `${opsCount} on` : undefined}>
-      <Operations
+      {kind === "scatter" ? <p className="muted small">Operations aren't available on a scatter plot yet.</p> : <Operations
         kind={kind}
         xLabel={label(along ?? r.x ?? "x")}
         tracesLabel={r.y ? label(r.y) : traceAxis && traceAxis !== "none" && values.length === 1 ? label(traceAxis) : null}
@@ -1425,7 +1430,7 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
             ...((e.z ?? "") !== (settings.equations?.z ?? "") ? { clim: undefined } : {}),
           })
         }
-      />
+      />}
 
       </Section>
       {children}

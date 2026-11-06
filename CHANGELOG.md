@@ -157,8 +157,26 @@ are still written as 1.2).
 - New plot type **3D bars**, in Explore and Figure, for the data of Matrix: a bar per cell, up to 64 × 64. Complex values show Re and Im side by side on one scale, or height the magnitude and colour the phase. In Explore a drag turns the picture, the wheel zooms, the arrow keys turn, and a click reads a bar; on the Figure page the angle is in boxes.
 
 <!-- plan 15d -->
+- **A new plot type: Histogram, in Explore and Figure.** It counts how many numbers fall in each bin.
+  Each axis is a slider or All, one axis can give an outline per step (**Colour by**), and values of one
+  unit are overlaid. Bins Auto or a number, Bars or Outline, Count, Fraction or Density, linear or log.
+  Complex values are counted after the complex choice, and operations and equations come first. Large
+  files are counted part by part in the background, the bars growing. A cursor reads a bin's range and
+  counts; two cursors the count and fraction between them. Save as CSV and Open in Figure take it along.
+  The bars' opacity and the outlines' width are in the style.
 
 <!-- plan 15e -->
+- **Explore: scatter plots.** A marker per point: an axis against a value, a value against a value, or the
+  I/Q plane. **Colour by** gives one axis's steps a colour each, every other axis is a slider or All, and
+  **Equal axes** keeps circles round. Above 200 000 points each pixel shows how many points are there, none
+  dropped, and a file larger than memory is counted part by part. A cursor chooses the nearest point on
+  the screen and reads its stored index; two cursors give the difference and mean.
+- **Explore: histograms beside a scatter plot.** The strips show histograms of the points in view, per group,
+  with the button **Histograms** or key C.
+- **Figure: scatter plots** have the same **Colour by** and a slider or All per axis, and an option
+  **Histograms beside the plot**.
+- **Changes to how things behave:** a file whose saved view is a scatter plot now opens as one in Explore,
+  instead of offering Figure or curves. A saved scatter view keeps drawing all its points in Figure.
 
 - **Explore: the preview tab's name** (one click, in italics) is at the same height as the other
   tabs' names; it took the Library preview's margins before.

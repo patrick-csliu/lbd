@@ -256,7 +256,93 @@ shape are available, as on Matrix.
 
 ### Histogram
 
+Counts how many numbers fall in each bin: the value along x, the count along y. It answers "how are
+these numbers spread?", for example single-shot readout, where the shots of each prepared state make
+a peak of their own.
+
+**Which numbers.** Every axis is either a slider (one step at a time) or **All** (all its points go in).
+One axis, or none, can be chosen under **Colour by**: an outline per step, with a legend, at most 32
+steps. To start with, a short axis with named positions gives the colours, the longest axis is All and
+the others are sliders. A variable sweep's points are always all counted: its levels have no slider
+and give no colours.
+
+**Several values** are overlaid as outlines, on the same bins, when they have the same unit. Ticking a
+value of another unit shows that value alone.
+
+**Bins.** Empty means Auto, chosen from the numbers (Freedman-Diaconis, at most 200 bins; whole numbers
+in a small range get a bin each). A number from 2 to 10000 is used as it is. Zooming shows part of the
+bins; it doesn't count again.
+
+| Control | Meaning |
+|---|---|
+| **Draw** | Filled **Bars** or an **Outline**. Several series are always outlines. |
+| **Vertical axis** | **Count**, **Fraction** of each series, or **Density** (per unit of x, so the area is 1). Changing it counts nothing again. |
+| **Log** | A logarithmic vertical axis; empty bins are left out. |
+| **Complex values** | Complex numbers are counted after this choice (magnitude, phase …). The two-dimensional count of the I/Q plane is the operation I/Q histogram. |
+
+Numbers that aren't finite are not counted, and a note says how many.
+
+**Large data.** Up to two million numbers are counted at once. More are counted in the background, part
+by part, so a file larger than memory works: a first pass finds the bins, a second counts into them,
+and the bars grow while *Counting…* says how far. Moving a slider meanwhile stops the old count. A
+result is kept, so going back to it, or another vertical axis, is immediate.
+
+**Operations and equations** come first: the numbers counted are those after them. They work on curves,
+so at least one axis must be All. The longest All axis runs along the curves, the next is a curve per
+step, and any other is taken step by step, which takes longer. The I/Q histogram makes a map, so it
+can't be counted, and is refused.
+
+**This is not the operation Histogram.** The [operation](#operations) is one step of a chain and turns
+each trace into its counts, as a curve or map you can go on working with. The plot type shows the
+numbers chosen above, with cursors made for it. Both count in the same way.
+
+**Cursors.** Only a vertical cursor: it snaps to a bin and reads the bin's range and each series' count
+and fraction, whatever the vertical axis shows. Two cursors also give the count and fraction between
+them, both end bins included. **Save as CSV** writes each bin's low and high edge and a count column per
+series; it waits until the count is done. **Open in Figure** takes these choices along. Panels of
+histograms of the same quantity follow each other's zoom along x.
+
 ### Scatter
+
+A marker per point, for numbers whose relation matters more than their order: one value against
+another, or a complex value in the I/Q plane.
+
+| Horizontal | Vertical | Example |
+|---|---|---|
+| An axis | A value | the points of a variable sweep, as measured |
+| A value | A value on the same axes | one quadrature against the other |
+| Re | Im of a complex value (**Complex values**: I/Q plane) | the I/Q plane |
+
+**Which points.** As for a histogram: every axis not drawn is a slider or **All**, and **Colour by** gives
+one axis's steps a colour each. A new plot starts with a short axis with named positions as the colours,
+the longest axis All and the others sliders, and a complex value in the I/Q plane. So single shots start as
+two clouds at one setting, and the slider moves them. A view saved in the file is shown as it was saved:
+before this choice existed, a scatter plot drew all its points.
+
+**Equal axes** gives both axes the same scale, so that a circle looks like a circle. It is on for the I/Q
+plane. Zooming then shows at least the box drawn, widened to keep the scale.
+
+**Many points.** Up to 200 000 points are drawn as markers. Above that, each pixel shows how many points
+are there, and a note says so. Every point is counted, and a pixel with a single point stays visible, so
+a rare outlier isn't lost. Without colours the colour bar says **Points per pixel**; groups mix their colours
+by each one's share of the pixel; colours from a long axis show the mean of the pixel. Zooming counts again,
+so the picture stays sharp.
+
+**A file larger than memory.** All of such a file can be shown: the points are counted into the pixels part by
+part, in the background, and zooming counts again from the file, which takes a moment. A cursor can't choose
+a point then, and Save as CSV can't list them; the note says so. Make some axes sliders to read points.
+
+**Cursors.** A click chooses the nearest point, measured in pixels on the screen, among those in view, and
+reads its x, y and colour with its stored index. This works above 200 000 points too: it looks in the numbers,
+not in the picture. Two cursors give the difference and mean. The arrow keys do nothing here: there is no next
+point between scattered points. Max, Min and Peak aren't offered.
+
+**Histograms.** The strips beside the plot (**Histograms** in the toolbar, key **C**) count the points in view
+along x and along y: zooming into a cloud shows its own histogram. Groups are outlines in their colours, one
+group is bars. On a log axis the bins are even in the logarithm, so read the height, not the area. Hovering
+over a strip gives the bin's range and how many points are in it. They need no cursor.
+
+**Save as CSV** writes x, each value, the colour and each point's stored index.
 
 ## Reading values
 

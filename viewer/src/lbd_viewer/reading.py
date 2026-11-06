@@ -188,6 +188,8 @@ def cursors(s: "ExploreSession", items: List[Dict[str, Any]], kind: str, view: D
     with rnd.RENDER_LOCK:
         s._check_open()
         scales = (s.ax.get_xscale(), s.ax.get_yscale())
+    if kind not in s.view.cursor_types:                  # chosen on another plot type
+        kind = s.view.cursor_types[0]
     geo = (xlim, ylim, w, h, scales)
     m = s.model
     if together and len(items) == 2 and s.kind in ("curve", "heatmap"):
@@ -218,9 +220,9 @@ def cursors(s: "ExploreSession", items: List[Dict[str, Any]], kind: str, view: D
 
 def _room(s: "ExploreSession", c: Dict[str, Any]) -> List[Tuple[int, int]]:
     """How many stored points a cursor can step down and up: along x, and along y on a map."""
-    room = getattr(s.view, "room", None)
-    if room:
-        return room(c)
+    room = s.view.room(c)
+    if room is not None:
+        return room
     m = s.model
     x, y = _check_point(c)
     if s.kind == "heatmap":

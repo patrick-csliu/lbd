@@ -189,7 +189,7 @@ class ExploreSession:
             if self.base_kind == "curve":
                 self.base_model = rnd.prepare_curves(self.data, self.spec, self.style, big=big)
             elif self.base_kind != "heatmap":
-                self.base_model = rnd.kinds.KINDS[self.base_kind].prepare(self.data, self.spec, self.style)
+                self.base_model = kinds.interactions()[self.base_kind].prepare(self)
             else:
                 # colours from every slider position (crange.py): the colour bar's prefix from
                 # that range too, so it stays while the slider moves
@@ -445,7 +445,8 @@ class ExploreSession:
         """The map or the curves are shown from their summary (too big for memory, summaries.py)."""
         if self.kind == "heatmap":
             return isinstance(self.model.z, summaries.BigMap)
-        return bool(self.model.lines) and isinstance(self.model.lines[0][0], summaries.BigTrace)
+        lines = getattr(self.model, "lines", None)
+        return bool(lines) and isinstance(lines[0][0], summaries.BigTrace)
 
     def _y_range(self, traces: Sequence[int]) -> Tuple[float, float]:
         """Summarised curves: the lowest and highest value of these traces (plot units, exact)."""
@@ -560,6 +561,8 @@ class ExploreSession:
             for key, which, base in (("xscale", "horizontal", self.base_scales[0]),
                                      ("yscale", "vertical", self.base_scales[1])):
                 want = settings.get(key, base)
+                if key == "xscale" and not self.view.log_x:
+                    want = "linear"
                 if want == "log" and not self._has_positive(which):
                     want = "linear"                      # nothing could be drawn on a log axis
                     self.log_refused.append(f"The {which} axis has no value above 0, so it stays linear.")
@@ -582,6 +585,8 @@ class ExploreSession:
 
     def _has_positive(self, which: str) -> bool:
         """Whether the data shown has a value above 0 along this axis (else a log scale shows nothing)."""
+        if self.kind not in ("curve", "heatmap"):
+            return self.view.has_positive(which)
         m = self.model
         if self.kind == "curve":
             shown = [k for k, v in enumerate(self.visible) if v]
@@ -597,6 +602,8 @@ class ExploreSession:
     def hidden(self) -> Tuple[List[str], Optional[str]]:
         """What the scales hide (points ≤ 0 on a log scale, …), and why nothing is shown when
         nothing can be: notes the page keeps on screen. Worked out once per model and scales."""
+        if self.kind not in ("curve", "heatmap"):
+            return self.view.hidden()
         key = (id(self.model), tuple(self.visible), self.ax.get_xscale(), self.ax.get_yscale(),
                self.settings.get("cscale"), tuple(getattr(self, "log_refused", [])))
         if key == getattr(self, "_hidden_key", None):
@@ -668,6 +675,9 @@ class ExploreSession:
             raise ExploreError(self.view.no_operations)
         if self.view.operations == "shape":
             return self.view.apply_ops(ops, eqs)
+        if self.view.operations == "before":             # the type runs them itself, on its numbers
+            self.ops_list = ops
+            return False
         key = json.dumps([ops, sorted(chosen) if chosen is not None else None, eqs])
         if key == self.ops_key:
             return False
@@ -749,8 +759,11 @@ class ExploreSession:
     def ops_info(self) -> Dict[str, Any]:
         """For the page: each operation's state (None: applied, "off", or why not), each equation
         field's (error or note), what is shown, and the names equations can use (the legend)."""
+        if self.view.operations == "before":
+            return self.view.ops_info()
         r = self.ops_result
-        if getattr(self, "eq_legend", None) is None and not self.summarised:   # the legend of the plain plot
+        if getattr(self, "eq_legend", None) is None and not self.summarised and self.view.operations is True:
+            # the legend of the plain plot
             self.eq_legend = equations.names_of(self, ops_mod.grid_of(self, None), arrays=False)[1]
         info: Dict[str, Any] = {"notes": r.notes if r else ["off"] * len(self.ops_list), "applied": r.applied if r else 0,
                                 "equations": getattr(self, "eq_state", {}), "names": self.eq_legend}
@@ -1047,6 +1060,7 @@ class ExploreSession:
             t1 = time.perf_counter()
             self.last_used = time.monotonic()
             self.view.frame(xlim, ylim)
+            xlim, ylim = self.view.shown_limits(xlim, ylim)
             left, top, w, h = self._plot_area()
             dw, dh = (max(w // 2, 1), max(h // 2, 1)) if draft else (w, h)
             pxe, pye = self._pixel_edges(dw, dh)

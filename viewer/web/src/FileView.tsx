@@ -546,18 +546,23 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
   // Values that can join the plot: they share its horizontal axis (scatter: or its exact axes).
   const x = resolved.x;
   const joins = (v: ValueInfo) =>
-    kind === "scatter" && !(x && firstAxes.includes(x)) ? v.axes.join(",") === firstAxes.join(",") : !!x && v.axes.includes(x);
+    kind === "histogram"
+      ? v.unit === first?.unit && v.complex === first?.complex // overlaid when they share a unit
+      : kind === "scatter" && !(x && firstAxes.includes(x))
+        ? v.axes.join(",") === firstAxes.join(",")
+        : !!x && v.axes.includes(x);
   const here = withAxes.filter(joins);
   const elsewhere = withAxes.filter((v) => !joins(v));
   // Another value on its own: it brings its own axes, so the axis choices start afresh.
-  const fresh: PlotSpec = { x: undefined, y: undefined, series: undefined, color: undefined, index: {} };
+  const fresh: PlotSpec = { x: undefined, y: undefined, series: undefined, color: undefined, all: undefined, index: {} };
   const switchTo = (name: string) => update({ ...fresh, values: [name] });
   const chooseKind = (k: string, drawable: string[] | null) => {
     const can = (v: ValueInfo) => (drawable ? drawable.includes(v.name) : fits(v, k));
     const now = valuesByName[selected[0]];
     const value = now && can(now) ? undefined : info.values.find(can);
+    const starting = kindOf(k).starting?.(info, value ?? now);
     const complex = resolved.complex === "re_im" ? { complex: undefined } : {};
-    update(value ? { ...fresh, ...complex, kind: k, values: [value.name] } : { ...complex, kind: k, x: undefined, y: undefined, series: undefined });
+    update({ ...(value ? { ...fresh, values: [value.name] } : { color: undefined, all: undefined, x: undefined, y: undefined, series: undefined }), ...complex, kind: k, options: undefined, ...starting });
   };
   const axisName = (v: ValueInfo) => v.axes.filter((a) => lengthOf(a) > 1).map((a) => info.axes.find((x) => x.name === a)?.label || a).join(" × ") || v.axes.join(", ");
 
@@ -615,7 +620,7 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
           <PlotKindSelect path={info.path} value={kind} first={selected[0]} page="figure" onChoose={chooseKind} />
         </label>
 
-        {kindRow.ownData ? null : kind === "curve" || (kind === "scatter" && resolved.complex !== "iq") ? (
+        {kindRow.ownData ? null : kind === "curve" || kind === "histogram" || (kind === "scatter" && resolved.complex !== "iq") ? (
           <div className="field">
             <span>Values</span>
             <div className="checks">
@@ -699,32 +704,8 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
             </select>
           </label>
         )}
-        {kind === "scatter" && (
-          <label className="field">
-            <span>Colour by</span>
-            <select value={resolved.color ?? "none"} onChange={(e) => update({ color: e.target.value })}>
-              <option value="none">— (series colours)</option>
-              <optgroup label="Axes">
-                {firstAxes.map((a) => (
-                  <option key={a} value={a}>
-                    {axisLabel(a)}
-                  </option>
-                ))}
-              </optgroup>
-              {sameShape.length > 0 && (
-                <optgroup label="Values">
-                  {sameShape.map((v) => (
-                    <option key={v.name} value={v.name}>
-                      {v.label}
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-            </select>
-          </label>
-        )}
         {KindControls && <KindControls info={info} spec={resolved} resolved={resolved} update={update} page="figure" />}
-        {kind !== "scatter" && !kindRow.ownData && firstAxes.length > 0 && (
+        {kind !== "scatter" && !kindRow.ownData && !kindRow.noAxes && firstAxes.length > 0 && (
           <label className="field">
             <span>Horizontal axis</span>
             <select value={resolved.x ?? ""} onChange={(e) => update({ x: e.target.value, y: undefined, series: undefined, index: {} })}>

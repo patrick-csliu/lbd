@@ -5,7 +5,7 @@ import pytest
 
 import lbd
 import lbd.plot as lp
-from lbd_viewer import kinds, reading
+from lbd_viewer import explore, kinds, reading
 from lbd_viewer.explore import KINDS, ExploreError, ExploreSession
 
 
@@ -24,7 +24,8 @@ def test_the_two_kinds_have_their_class(tmp_path):
     assert session(tmp_path, {"kind": "curve", "x": "a", "series": "b"}).view.kind == "curve"
 
 
-def test_a_placeholder_is_refused_with_a_reason(tmp_path):
+def test_a_placeholder_is_refused_with_a_reason(tmp_path, monkeypatch):
+    monkeypatch.setattr(explore, "KINDS", ("curve", "heatmap"))
     with pytest.raises(ExploreError, match="Explore can't show Scatter plots yet"):
         session(tmp_path, {"kind": "scatter", "x": "a"})
 
@@ -89,7 +90,7 @@ def file_with_two(data_dir):
 def test_kinds_says_why_not(client, file_with_two):
     k = kinds_of(client, file_with_two, {"values": ["line"]})
     assert k["curve"]["why"] is None and "2 dimensions" in k["heatmap"]["why"]
-    assert k["curve"]["explore"] and not k["scatter"]["explore"]
+    assert k["curve"]["explore"] and k["scatter"]["explore"]
 
 
 def test_kinds_lists_the_values_that_fit(client, file_with_two):

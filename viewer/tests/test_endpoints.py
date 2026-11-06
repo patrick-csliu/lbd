@@ -573,3 +573,16 @@ def test_a_settings_section_is_reset(client):
     assert state["theme"] == "system" and state["measurements"]["notify"] is True
     assert state["defaults"]["measurements"]["measurements.notify"] is False
     assert client.post("/api/settings/reset", json={"section": "nope"}).status_code == 400
+
+
+def test_figure_draws_a_histogram(client, data_dir):
+    d = lbd.Dataset()
+    d.add_axis("t", np.arange(5.0))
+    d.add_value("x", np.arange(5.0), axes="t", unit="V")
+    d.save(data_dir / "h.lbd")
+    r = client.post("/api/render", json={"path": str(data_dir / "h.lbd"), "spec": {"kind": "histogram", "options": {"bins": 3}}})
+    r.raise_for_status()
+    body = r.json()
+    assert body["spec"]["kind"] == "histogram" and body["svg"].startswith("<?xml") and not body["warnings"]
+    r = client.post("/api/render", json={"path": str(data_dir / "h.lbd"), "spec": {"kind": "histogram", "options": {"bins": 1}}})
+    assert r.status_code == 400 and "bins must be" in r.text

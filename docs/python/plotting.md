@@ -174,6 +174,35 @@ fig = lp.plot(m, "bars", "p", x="prepared", series="measured", options={"layout"
 fig = lp.plot(m, "bars3d", "p", options={"elev": 25, "azim": -60})
 ```
 
+A scatter plot takes all the points, unless `index` fixes an axis. With `all`, the axes listed keep all their
+points and the others not drawn are fixed; `options` holds `equal` (the same scale both ways) and `sides`
+(histograms of the points beside the plot):
+
+```python
+fig = lp.plot(d, "scatter", "S21", complex="iq", color="none", all=["freq"], index={"power": 0},
+              options={"sides": True})
+```
+
+A histogram counts the numbers of a value. `all` lists the axes whose points all go in, `index` fixes
+the others, `color` gives an outline per step of one axis (or `"none"`), and `options` holds the bins
+(`"auto"` or a number), `hist_style` (`"bars"`, `"outline"`) and `hist_y` (`"count"`, `"fraction"`,
+`"density"`). A large file opened with `lbd.open` is counted part by part.
+
+```python
+fig = lp.plot(d, "histogram", "S21", complex="db", all=["freq"], index={"power": 0})
+fig = lp.plot(d, "histogram", "S21", complex="db", color="none", all=["freq", "power"],
+              options={"bins": 40, "hist_style": "outline", "hist_y": "density"})
+```
+
+To count numbers of your own, `count_bins` does what the plot does:
+
+```python
+from lbd.plot.histogram import auto_bins, count_bins
+
+numbers = np.abs(d["S21"].data).ravel()
+edges, counts = count_bins(numbers, auto_bins(numbers))
+```
+
 Annotations (lines, text, arrows, shapes) can be passed the same way, or stored in the file's
 saved view with `lbd.set_plot`, so the viewer draws them too. They use the units shown on the
 axes, so fix the prefix of those axes ([details](../styles/plot-settings.md#annotations)):

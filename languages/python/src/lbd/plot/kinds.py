@@ -1,6 +1,6 @@
 """The plot types: one `Kind` each, in a registry, so a new type is one file.
 
-`render.py` registers curve, heatmap and scatter when it is imported, then `load_types()` adds the
+`render.py` registers curve and heatmap when it is imported, then `load_types()` adds the
 types with a file of their own. A file ends with `KIND = Kind(...)`, or `KIND = None` while it has
 nothing to offer. This module imports nothing from `render.py`.
 """

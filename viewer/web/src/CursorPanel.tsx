@@ -1,5 +1,5 @@
 import { KeyboardEvent, MutableRefObject, useEffect, useState } from "react";
-import { api, ApiError, CursorRead, CursorsAnswer, CursorType, ReadItem, TraceStep } from "./api";
+import { api, ApiError, BinRow, CursorRead, CursorsAnswer, CursorType, ReadItem, TraceStep } from "./api";
 import { between, columnSi, CursorsState, item, si } from "./cursors";
 import { ExploreActions } from "./ExploreView";
 import { kindOf } from "./plotKinds";
@@ -131,11 +131,11 @@ function lineRows(c1: CursorRead, c2: CursorRead | null, n: number): LineData | 
 }
 
 /** What a vertical or horizontal cursor reads on every trace, with Copy and Save as CSV. */
-function LineTable({ c1, c2, n = 1, file }: { c1: CursorRead; c2: CursorRead | null; n?: number; file: Props["file"] }) {
+function LineTable({ c1, c2 = null, n = 1, file, data }: { c1?: CursorRead; c2?: CursorRead | null; n?: number; file: Props["file"]; data?: LineData }) {
   const toast = useToast();
-  const t = lineRows(c1, c2, n);
+  const t = data ?? (c1 ? lineRows(c1, c2, n) : null);
   if (!t) return null;
-  const say = t.about ? " (≈ between stored points)" : " (the nearest stored points)";
+  const say = data ? "" : t.about ? " (≈ between stored points)" : " (the nearest stored points)";
   const copy = async () => {
     const text = [t.rawHead.join("\t"), ...t.rows.map((r) => r.raw.join("\t"))].join("\n");
     try {
@@ -151,7 +151,7 @@ function LineTable({ c1, c2, n = 1, file }: { c1: CursorRead; c2: CursorRead | n
       `# ${t.rawHead.map(quote).join(",")}`,
       `# LBD export: ${file.name}`,
       `# id: ${file.id ?? "none (the file has no id; LBD gives it one when it next saves the file)"}`,
-      `# ${t.title}${t.about ? ", interpolated between stored points" : ", the nearest stored points"}`,
+      `# ${t.title}${data ? "" : t.about ? ", interpolated between stored points" : ", the nearest stored points"}`,
       ...t.rows.map((r) => r.raw.map(quote).join(",")),
     ];
     try {
@@ -214,6 +214,23 @@ function LineTable({ c1, c2, n = 1, file }: { c1: CursorRead; c2: CursorRead | n
     </div>
   );
 }
+
+/** A histogram's numbers: always counts, whatever the vertical axis shows, with the fraction beside them. */
+function binTable(title: string, rows: BinRow[], marks: number[]): LineData {
+  const fraction = (f: number | null) => (f === null ? "" : Number(f.toPrecision(3)).toString());
+  return {
+    title,
+    head: ["", "Count", "Fraction"],
+    tips: ["", "How many numbers", "Of all the numbers of this row"],
+    rawHead: ["Series", "Count", "Fraction"],
+    about: false,
+    more: 0,
+    crossings: false,
+    rows: rows.map((r, key) => ({ key, marks, cells: [r.label, String(r.count), fraction(r.fraction)], raw: [r.label, r.count, r.fraction ?? ""] })),
+  };
+}
+
+const binTitle = (c: CursorRead) => `${si(c.bin?.lo, c.bin?.unit ?? "")} to ${si(c.bin?.hi, c.bin?.unit ?? "")}`;
 
 /** Another panel's read-out at the shared cursor. */
 export interface OtherPanel {
@@ -347,7 +364,7 @@ function CursorNumbers({ n, c, kind, type, actions }: { n: number; c: CursorRead
   if (kindOf(kind).cursorMark === "cell" && type === "cross") return <CellNumbers n={n} c={c} actions={actions} />;
   const x = item(c, "x"), y = item(c, "y"), z = item(c, "z"), series = item(c, "series");
   // what can be typed: x always; y on maps and for a horizontal line; on curves y is the trace's value
-  const yEditable = kind === "heatmap" || type === "horizontal";
+  const yEditable = kind === "heatmap" || kind === "scatter" || type === "horizontal";
   const inTable = !!(c.table || c.crossings); // its value and its trace are in the table and the head
   return (
     <div className="cursor-numbers">
@@ -375,7 +392,7 @@ function CursorNumbers({ n, c, kind, type, actions }: { n: number; c: CursorRead
       )}
       {series && !inTable && (
         <div className="cursor-value muted small">
-          {series.label} = {si(series.value, series.unit)}
+          {series.label} = {series.text ?? si(series.value, series.unit)}
         </div>
       )}
       {c.stored && (
@@ -383,7 +400,7 @@ function CursorNumbers({ n, c, kind, type, actions }: { n: number; c: CursorRead
           stored: {c.stored.label} = {si(c.stored.value, c.stored.unit)}
         </div>
       )}
-      {Object.keys(c.index).length > 0 ? (
+      {c.bin ? null : Object.keys(c.index).length > 0 ? (
         <div className="muted small">
           stored at{" "}
           {Object.entries(c.index)
@@ -412,7 +429,7 @@ export default function CursorPanel({ kind, cursors, onCursors, reading, actions
   const types = (
     <div className="segmented" role="group" aria-label="Cursor type">
       {TYPES.filter(([t]) => kindOf(kind).cursorTypes.includes(t)).map(([t, text, tip]) => {
-        const chosen = cursors.on && cursors.type === t;
+        const chosen = cursors.on && (kindOf(kind).cursorTypes.includes(cursors.type) ? cursors.type : kindOf(kind).cursorTypes[0]) === t;
         return (
           <button
             key={t}
@@ -452,8 +469,8 @@ export default function CursorPanel({ kind, cursors, onCursors, reading, actions
           {kindOf(kind).axes === "3d" ? "Click a bar to read it." : kindOf(kind).cursorMark === "cell" ? "Click a cell or bar to read it; Shift+click for a second." : "Click the plot for cursor 1, Shift+click for cursor 2."}
         </p>
       )}
-      {c1 && <CursorNumbers n={1} c={c1} kind={kind} type={cursors.type} actions={actions} />}
-      {c2 && <CursorNumbers n={2} c={c2} kind={kind} type={cursors.type} actions={actions} />}
+      {c1 && <CursorNumbers n={1} c={c1} kind={kind} type={reading?.type ?? cursors.type} actions={actions} />}
+      {c2 && <CursorNumbers n={2} c={c2} kind={kind} type={reading?.type ?? cursors.type} actions={actions} />}
       {c1 && c2 && kindOf(kind).cursorMark === "lines" && (
         <label className="check" title="Dragging either cursor, or the arrow keys, moves both by the same amount; each stays on its own trace">
           <input type="checkbox" checked={!!cursors.together} onChange={(e) => onCursors({ ...cursors, together: e.target.checked })} />
@@ -483,6 +500,9 @@ export default function CursorPanel({ kind, cursors, onCursors, reading, actions
           )}
         </div>
       )}
+      {c1?.bin && <LineTable data={binTable(binTitle(c1), c1.bin.rows, [1])} file={file} />}
+      {c2?.bin && <LineTable data={binTable(binTitle(c2), c2.bin.rows, [2])} file={file} />}
+      {reading?.between && <LineTable data={binTable("Between the cursors", reading.between.rows, [])} file={file} />}
       {c1 && (c1.table || c1.crossings) && <LineTable c1={c1} c2={c2} file={file} />}
       {c2 && c2.crossings && <LineTable c1={c2} c2={null} n={2} file={file} />}
       {c1?.line_note && <p className="muted small">{c1.line_note}</p>}
