@@ -198,11 +198,11 @@ class Scatter(Interaction):
 
     def setup(self) -> None:
         s = self.s
+        spec = {**s.spec, "options": {**(s.spec.get("options") or {}), "sides": False}}    # (here: the strips)
         if self._points() > sc.DENSITY_ABOVE or self._big():
-            self.image, self.bar = sc.draw_scatter(s.fig, s.ax, s.model, s.data, s.spec, s.style,
-                                                   image=np.zeros((2, 2, 4)))
+            self.image, self.bar = sc.draw_scatter(s.fig, s.ax, s.model, s.data, spec, s.style, image=np.zeros((2, 2, 4)))
         else:
-            sc.draw_scatter(s.fig, s.ax, s.model, s.data, s.spec, s.style)
+            sc.draw_scatter(s.fig, s.ax, s.model, s.data, spec, s.style)
         s.ax.set_aspect("auto")                          # equal axes: `frame` widens the view itself
 
     def lay_out(self) -> None:

@@ -154,3 +154,13 @@ def test_figure_scatter_slider_and_all(viewer, new_page):
     answer = rendered(page, lambda: figure.get_by_role("checkbox", name="All of Readout power").click())
     assert sorted(answer["spec"]["all"]) == ["readout_power", "shot"] and answer["spec"]["index"] == {}
     expect(figure.get_by_role("slider")).to_have_count(0)
+
+
+def test_histograms_beside_the_plot_on_the_figure_page(viewer, new_page):
+    shots(viewer)
+    page = new_page()
+    rendered(page, lambda: row(page, "iq.lbd").dblclick())
+    rendered(page, lambda: plot_type(page).select_option("scatter"))
+    figure = page.locator("main:not([hidden]) .tab-body:not([hidden])")
+    answer = rendered(page, lambda: figure.get_by_role("checkbox", name="Histograms beside the plot").click())
+    assert answer["spec"]["options"]["sides"] is True

@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 import matplotlib.colors as mcolors
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 import numpy as np
 import pytest
 
@@ -195,3 +196,61 @@ def test_the_density_picture_draws_with_its_colour_bar():
     image, bar = sc.draw_scatter(fig, ax, m, d, spec, Style(), image=sc.density_image(m, found), top=int(found.total.max()))
     assert image in ax.images and bar is not None
     assert fig.axes[1].get_ylabel() == "Points per pixel"
+
+
+# -- histograms beside the plot, in a figure -----------------------------------------------------------
+
+def figure(d, **spec):
+    resolved = rnd.resolve_spec(d, {"kind": "scatter", **spec}, warn_unused=False)
+    fig, ax = rnd.build_figure(d, resolved, Style())
+    fig.canvas.draw()
+    return fig, ax
+
+
+def test_sides_share_the_axes():
+    fig, ax = figure(shots(), values="Q", x="I", color="state", options={"sides": True})
+    top, right = ax.child_axes
+    assert top.get_shared_x_axes().joined(top, ax) and right.get_shared_y_axes().joined(right, ax)
+    assert top.get_xlim() == ax.get_xlim() and right.get_ylim() == ax.get_ylim()
+    assert len(top.patches) == 2 and not top.patches[0].get_fill()
+
+
+def test_sides_with_one_group_are_bars_of_the_points_in_the_limits():
+    d = shots()
+    fig, ax = figure(d, values="Q", x="I", options={"sides": True})
+    top = ax.child_axes[0]
+    assert len(top.patches) == 1 and top.patches[0].get_fill()
+    assert top.patches[0].get_data().values.sum() == d.values["I"].data.size
+
+
+def test_sides_with_a_colour_bar():
+    fig, ax = figure(shots(), values="Q", x="I", color="shot", options={"sides": True})
+    assert len(fig.axes) == 2 and fig.axes[1].get_ylabel().startswith("Shot")
+    assert len(ax.child_axes) == 2
+
+
+def test_sides_keep_equal_axes():
+    fig, ax = figure(shots(), values="IQ", complex="iq", color="state", options={"sides": True})
+    FigureCanvasAgg(fig).draw()                         # (with the figure's layout)
+    box = ax.get_window_extent()
+    per_x = box.width / np.ptp(ax.get_xlim())
+    assert per_x == pytest.approx(box.height / np.ptp(ax.get_ylim()), rel=0.01)
+
+
+@pytest.mark.parametrize("fmt", ["svg", "pdf", "png", "jpg"])
+def test_sides_in_every_format(fmt):
+    data, _ = rnd.render_dataset(shots(), {"kind": "scatter", "values": "Q", "x": "I", "options": {"sides": True}}, Style(), fmt=fmt)
+    assert len(data) > 1000
+
+
+def test_the_style_sizes_the_sides():
+    custom = Style.model_validate({"figure": {"axes": {"scatter": {"sides_size_mm": 30, "sides_alpha": 0.2}}}})
+    d = shots()
+    spec = rnd.resolve_spec(d, {"kind": "scatter", "values": "Q", "x": "I", "options": {"sides": True}}, warn_unused=False)
+    fig, ax = rnd.build_figure(d, spec, custom)
+    assert ax.child_axes[0].patches[0].get_alpha() == 0.2
+
+
+def test_a_legend_goes_under_the_sides():
+    fig, ax = figure(shots(), values="Q", x="I", color="state", options={"sides": True})
+    assert ax.get_legend() is None and len(fig.legends) == 1

@@ -35,6 +35,12 @@ function ScatterControls({ info, resolved, update, page }: KindControlsProps) {
         <input type="checkbox" checked={!!equal} onChange={(e) => update({ options: { ...(resolved.options ?? {}), equal: e.target.checked } })} />
         Equal axes
       </label>
+      {page === "figure" && (
+        <label className="check" title="Histograms of the points in the figure's limits, above and beside the plot">
+          <input type="checkbox" checked={!!resolved.options?.sides} onChange={(e) => update({ options: { ...(resolved.options ?? {}), sides: e.target.checked } })} />
+          Histograms beside the plot
+        </label>
+      )}
     </>
   );
 }

@@ -222,6 +222,8 @@ class ScatterStyle(_Model):
     alpha: float = Field(0.6, ge=0, le=1, description="Opacity")
     edgecolor: Color = Field("none", description="Marker edge colour, or none")
     edgewidth_pt: float = Field(0.0, ge=0, le=5, description="Marker edge width")
+    sides_size_mm: float = Field(14.0, gt=0, le=100, description="Height of the histograms beside the plot")
+    sides_alpha: float = Field(0.7, ge=0, le=1, description="Opacity of their bars")
 
 
 class ColorbarStyle(_Model):

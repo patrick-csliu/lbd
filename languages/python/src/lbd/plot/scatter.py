@@ -24,7 +24,7 @@ from .points import points_of as read_points
 from .render import (SCATTER_RASTER_ABOVE, RenderError, RenderWarning, _annotate, _auto_prefix, _axis_quantity, _check_log,
                      _colorbar, _fits_curve, _is_point, _legend, _legend_label, _norm, _slices, _swept, _unit_scale,
                      apply_complex, find_quantity, flat)
-from .style import Style
+from .style import MM, Style
 from .units import axis_label, mathsafe
 
 DENSITY_ABOVE = 200_000     # more points than this: LBD Viewer shows how many are in each pixel
@@ -277,6 +277,8 @@ def draw_scatter(fig: Any, ax: Any, model: ScatterModel, d: Any, spec: Dict[str,
         else:
             drawn.append(ax.scatter(x, y, label=lab, rasterized=raster, **kw))
     _finish(fig, ax, model, d, spec, style, mappable, model.c_label)
+    if (spec.get("options") or {}).get("sides"):
+        draw_sides(fig, ax, model, spec, style)
     return drawn
 
 
@@ -401,6 +403,52 @@ def sides(model: ScatterModel, xlim: Tuple[float, float], ylim: Tuple[float, flo
         labels.append(label)
         used.append(colour)
     return {"x": side_bins(xs, xlim, scales[0]), "y": side_bins(ys, ylim, scales[1]), "labels": labels, "colours": used}
+
+
+def draw_sides(fig: Any, ax: Any, model: ScatterModel, spec: Dict[str, Any], style: Style) -> Tuple[Any, Any]:
+    """Histograms of the points in the figure's limits, above and beside the plot, on its axes:
+    bars for one group, outlines for several. Returns the two axes."""
+    a = style.figure.axes
+    sc = a.scatter
+    if model.equal:                                      # (matplotlib: no datalim on axes shared both ways)
+        ax.set_aspect("equal", adjustable="box", anchor="SW")     # (the strips go above and to the right of it)
+    ax.apply_aspect()
+    found = sides(model, ax.get_xlim(), ax.get_ylim(), (ax.get_xscale(), ax.get_yscale()), a.colors)
+    width_mm, height_mm = (v / MM for v in fig.get_size_inches())
+    top = ax.inset_axes([0, 1.03, 1, sc.sides_size_mm / height_mm * 1.3], sharex=ax)
+    right = ax.inset_axes([1.03, 0, sc.sides_size_mm / width_mm * 1.3, 1], sharey=ax)
+    one = len(found["colours"]) == 1
+    for strip, bins, orientation in ((top, found["x"], "vertical"), (right, found["y"], "horizontal")):
+        for counts, colour, label in zip(bins["counts"], found["colours"], found["labels"]):
+            if one:
+                strip.stairs(counts, bins["edges"], orientation=orientation, fill=True, color=colour, alpha=sc.sides_alpha,
+                             linewidth=0)
+            else:
+                strip.stairs(counts, bins["edges"], orientation=orientation, color=colour, linewidth=a.lines.width_pt)
+    top.tick_params(labelbottom=False, labelleft=False, left=False, bottom=False, top=False, right=False, which="both")
+    right.tick_params(labelbottom=False, labelleft=False, left=False, bottom=False, top=False, right=False, which="both")
+    top.set_ylim(bottom=0)
+    right.set_xlim(left=0)
+    _make_room(fig, ax)
+    return top, right
+
+
+def _make_room(fig: Any, ax: Any) -> None:
+    """The strips take the room a legend and a colour bar had: the legend goes under the figure, a
+    colour bar a little away, and the top strip's frame stays inside the picture."""
+    legend = ax.get_legend()
+    if legend is not None:
+        handles, labels = ax.get_legend_handles_labels()
+        legend.remove()
+        short = [label.split(" = ", 1)[-1] for label in labels]      # (one row, under a narrow figure)
+        fig.legend(handles, short, loc="outside lower center", ncols=len(labels), markerscale=2)
+    for other in fig.axes:
+        info = getattr(other, "_colorbar_info", None)
+        if info:
+            info["pad"] = max(info["pad"], 0.04)
+    engine = fig.get_layout_engine()
+    if engine is not None and hasattr(engine, "set"):
+        engine.set(rect=(0, 0, 1, 0.95 if ax.get_aspect() != "auto" else 0.985))
 
 
 def _visibility(n: np.ndarray) -> np.ndarray:
