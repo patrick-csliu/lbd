@@ -249,8 +249,15 @@ class MatrixStyle(_Model):
     line_color: Color = Field("white", description="Colour of the lines between the cells")
 
 
-# plan 15c: 3D bars
+class BarsStyle(_Model):
+    """Bars with labels, grouped or stacked (`figure.axes.bars`).
+    """
+    width: float = Field(0.8, gt=0, le=1, description="Width of a group of bars, as a part of the room for it")
+    gap: float = Field(0.1, ge=0, lt=1, description="Gap between the bars of a group, as a part of a bar")
+    edge_width_pt: float = Field(0.0, ge=0, le=5, description="Line around each bar")
 
+
+# plan 15c: 3D bars
 # plan 15d: histogram
 
 
@@ -272,6 +279,7 @@ class AxesStyle(_Model):
     scatter: ScatterStyle = Field(default_factory=ScatterStyle, description="Scatter markers")
     # plan 15b: matrix and bars
     matrix: MatrixStyle = Field(default_factory=MatrixStyle, description="Matrix: cells with their numbers")
+    bars: BarsStyle = Field(default_factory=BarsStyle, description="Bars")
     # plan 15c: 3D bars
     # plan 15d: histogram
     image: ImageStyle = Field(default_factory=ImageStyle, description="Heat maps and colour scales")
