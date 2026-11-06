@@ -164,6 +164,23 @@ values (without a unit), so with them the panel has one axis.
   covariance) opens as one curve per element against the sweep; a matrix's second dimension gets
   a slider.
 
+## Plot types
+
+**Plot** in the Data section chooses how the data is drawn. A type that can't draw the chosen value is
+greyed, and says why.
+
+### Map
+
+### Matrix
+
+### Bars
+
+### 3D bars
+
+### Histogram
+
+### Scatter
+
 ## Reading values
 
 ![Two cursors on a map, with its cuts](img/reading.png)

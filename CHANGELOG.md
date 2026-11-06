@@ -142,6 +142,16 @@ are still written as 1.2).
 - **Explore: the Cuts button changes the plot in one go.** The strips, the plot and the picture change
   together when the new picture is here; before, the strips went first and the picture followed
   half a second later.
+<!-- plan 15a -->
+
+<!-- plan 15b -->
+
+<!-- plan 15c -->
+
+<!-- plan 15d -->
+
+<!-- plan 15e -->
+
 - **Explore: the preview tab's name** (one click, in italics) is at the same height as the other
   tabs' names; it took the Library preview's margins before.
 - **Explore: a map's colours can mean the same at every slider position.** Display → Colour →

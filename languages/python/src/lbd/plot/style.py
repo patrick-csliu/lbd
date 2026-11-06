@@ -239,6 +239,13 @@ class ImageStyle(_Model):
     colorbar: ColorbarStyle = Field(default_factory=ColorbarStyle, description="The colour bar next to heat maps")
 
 
+# plan 15b: matrix and bars
+
+# plan 15c: 3D bars
+
+# plan 15d: histogram
+
+
 class AxesStyle(_Model):
     """The plotting area, matplotlib's Axes (`figure.axes`): frame, axes, grid, legend, colours and plotted elements.
     """
@@ -255,6 +262,9 @@ class AxesStyle(_Model):
                                 description="Colour cycle (default: Okabe-Ito, ordered to differ in greyscale)")
     lines: LinesStyle = Field(default_factory=LinesStyle, description="Curves")
     scatter: ScatterStyle = Field(default_factory=ScatterStyle, description="Scatter markers")
+    # plan 15b: matrix and bars
+    # plan 15c: 3D bars
+    # plan 15d: histogram
     image: ImageStyle = Field(default_factory=ImageStyle, description="Heat maps and colour scales")
 
     @field_validator("xaxis", "yaxis")

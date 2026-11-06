@@ -32,6 +32,19 @@ def test_the_mock_files(tmp_path, small):
     assert np.all((fid > 0.5) & (fid <= 1)) and fid[-1] >= fid[0]     # better at higher power
 
 
+def test_the_files_for_the_plot_types(tmp_path):
+    paths = {p.name: p for p in mock_values.write_all(tmp_path, small=True)}
+    d = lbd.load(paths["16 density matrix.lbd"])
+    assert d.values["rho"].shape == (3, 4, 4) and d.axes["row"].elements == ["00", "01", "10", "11"]
+    assert np.iscomplexobj(d.values["rho"].data)
+    d = lbd.load(paths["17 assignment matrix.lbd"])
+    assert np.allclose(d.values["probability"].data.sum(axis=1), 1)
+    d = lbd.load(paths["18 bars.lbd"])
+    assert d.values["fidelity"].shape == () and d.axes["state"].elements[0] == "ground"
+    d = lbd.load(paths["19 curved grid.lbd"])
+    assert np.all(np.bincount(np.asarray(d.axes["x"].parent)) == 5)
+
+
 def test_the_old_record_is_todays_single_view():
     rec = mock_values.old_record()
     assert "version" not in rec and rec["spec"]["values"] == ["S21"]

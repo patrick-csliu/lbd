@@ -20,7 +20,8 @@ import lbd
 
 NAMES = ["6 rabi.lbd", "7 spectroscopy 3d.lbd", "8 mixed axes.lbd", "9 many values.lbd",
          "10 one value.lbd", "11 single shot iq.lbd", "12 tomography.lbd", "13 variable sweep.lbd",
-         "14 triangle.lbd", "15 adaptive map.lbd"]
+         "14 triangle.lbd", "15 adaptive map.lbd", "16 density matrix.lbd", "17 assignment matrix.lbd",
+         "18 bars.lbd", "19 curved grid.lbd"]
 
 
 def rabi(small: bool) -> lbd.Dataset:
@@ -220,8 +221,63 @@ def adaptive_map(small: bool) -> lbd.Dataset:
     return d
 
 
+def density_matrix(small: bool) -> lbd.Dataset:
+    """A complex 4 × 4 density matrix per drive amplitude: rows and columns named by the basis states."""
+    amps = np.linspace(0, 1, 3 if small else 11)
+    basis = ["00", "01", "10", "11"]
+    rho = np.zeros((amps.size, 4, 4), dtype=complex)
+    for k, a in enumerate(amps):
+        psi = np.array([np.cos(a * np.pi / 4), 0, 0, np.sin(a * np.pi / 4) * np.exp(0.4j)])
+        rho[k] = 0.95 * np.outer(psi, psi.conj()) + 0.05 * np.eye(4) / 4
+    d = lbd.Dataset(title="Density matrix", description="Mock data: a matrix per step, complex, with named rows and columns")
+    d.add_axis("amp", amps, unit="V", label="Drive amplitude")
+    d.add_axis("row", np.arange(4.0), label="State", elements=basis)
+    d.add_axis("col", np.arange(4.0), label="State", elements=basis)
+    d.add_value("rho", rho, axes=["amp", "row", "col"], label="ρ")
+    return d
+
+
+def assignment_matrix(small: bool) -> lbd.Dataset:
+    """Prepared against measured state: real, each row sums to 1."""
+    states = ["ground", "excited", "second"]
+    m = np.array([[0.97, 0.025, 0.005], [0.06, 0.92, 0.02], [0.03, 0.09, 0.88]])
+    d = lbd.Dataset(title="Assignment matrix", description="Mock data: prepared against measured state")
+    d.add_axis("prepared", np.arange(3.0), label="Prepared", elements=states)
+    d.add_axis("measured", np.arange(3.0), label="Measured", elements=states)
+    d.add_value("probability", m, axes=["prepared", "measured"], label="Probability")
+    return d
+
+
+def bars(small: bool) -> lbd.Dataset:
+    """Few named positions: a value and two more on them, and single numbers."""
+    states = ["ground", "excited", "second"]
+    d = lbd.Dataset(title="Bars", description="Mock data: values on named positions, and single numbers")
+    d.add_axis("state", np.arange(3.0), label="State", elements=states)
+    d.add_value("population", [0.71, 0.24, 0.05], axes="state", label="Population")
+    d.add_value("error", [0.02, 0.03, 0.01], axes="state", label="Error")
+    d.add_value("lifetime", [40e-6, 22e-6, 9e-6], axes="state", unit="s", label="Lifetime")
+    d.add_value("fidelity", 0.982, label="Fidelity")
+    d.add_value("visibility", 0.91, label="Visibility")
+    return d
+
+
+def curved_grid(small: bool) -> lbd.Dataset:
+    """A group with the same number of points in every row, moving from row to row: a bent grid."""
+    rows = np.linspace(0, 1, 6 if small else 20)
+    n = 5 if small else 30
+    d = lbd.Dataset(title="Curved grid", description="Mock data: every row has its own x, the same number of them")
+    d.add_group("grid")
+    d.add_axis("y", group="grid", unit="V", label="Gate")
+    d.add_axis("x", group="grid", unit="V", label="Bias")
+    d.add_value("g", axes=["y", "x"], label="Conductance")
+    for y in rows:
+        x = np.linspace(-1, 1, n) + 0.5 * y ** 2
+        d.write(y=y, x=x, g=np.exp(-((x - y) / 0.4) ** 2))
+    return d
+
+
 MAKERS = dict(zip(NAMES, [rabi, spectroscopy_3d, mixed_axes, many_values, one_value, single_shot_iq, tomography,
-                          variable_sweep, triangle, adaptive_map]))
+                          variable_sweep, triangle, adaptive_map, density_matrix, assignment_matrix, bars, curved_grid]))
 
 
 def write_all(folder: Path, small: bool = False) -> List[Path]:
