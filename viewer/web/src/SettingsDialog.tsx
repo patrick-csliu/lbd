@@ -10,6 +10,7 @@ import { ExploreSettings } from "./ExploreSettings";
 import { MemorySettings } from "./MemorySettings";
 import { MeasurementSettings } from "./MeasurementSettings";
 import { SidebarScopeSettings } from "./FilesSidebar";
+import { DateZoneSetting } from "./DateZoneSetting";
 import { PreviewSettings } from "./LibraryPage";
 import { Segmented, Setting, SettingsGroup, Switch } from "./settingsUi";
 import { useToast } from "./toast";
@@ -35,6 +36,7 @@ export const SECTIONS: { id: SettingsSection; title: string; settings: { id: str
       { id: "library.read_headers", name: "Read each file's details", words: "headers title date sweep values metadata cloud online onedrive dropbox download search" },
       { id: "library.previews", name: "Draw previews of", words: "pictures thumbnails images every file nearby" },
       { id: "library.cache", name: "Picture cache", words: "previews disk empty clear space" },
+      { id: "library.date_zone", name: "Show dates in", words: "time zone utc offset convert date column" },
     ],
   },
   {
@@ -258,6 +260,9 @@ export function SettingsDialog({
               </SettingsGroup>
               <SettingsGroup title="Previews">
                 <PreviewSettings settings={state.library} onSettings={onSettings} />
+              </SettingsGroup>
+              <SettingsGroup title="Dates">
+                <DateZoneSetting zone={state.library.date_zone} onSettings={onSettings} />
               </SettingsGroup>
             </>
           )}

@@ -149,6 +149,8 @@ export interface LibrarySettings {
   sidebar_main: "title" | "file";
   /** the sidebar's other fields (two lines: the second line; one line: the first on the right; columns) */
   sidebar_fields: LibraryColumn[];
+  /** dates in the lists: this computer's time zone ("local"), as written in the file ("file"), or a zone's name */
+  date_zone: string;
 }
 
 /** What the Files sidebar lists: the Library's list with this tab's filters, the folder tree,

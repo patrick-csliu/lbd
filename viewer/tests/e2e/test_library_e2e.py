@@ -9,6 +9,7 @@ import shutil
 import httpx
 import lbd
 import mock_library
+from pageui import open_settings
 from playwright.sync_api import Page, expect
 from test_explore_e2e import explore
 
@@ -48,10 +49,10 @@ def test_folders_dates_and_search_filter_the_list(viewer, library_files, new_pag
     dates.get_by_role("button", name="Unfold Mar 2026").click()
     dates.get_by_role("button", name="14 Mar 2026").click()
     expect(lib_row(page, "Late resonator sweep")).to_be_visible()
-    # the zone, shortened; not shown at all on a computer in that zone (the usual case)
-    here = page.evaluate("-new Date('2026-03-14T12:00:00').getTimezoneOffset()") == 480
-    expect(lib_row(page, "Late resonator sweep")).to_contain_text("2026-03-14 23:30" if here else "2026-03-14 23:30 +08")
-    expect(lib_row(page, "Late resonator sweep")).not_to_contain_text("+08:00")
+    # Date is in this computer's time zone, the same moment in any other (Settings → Show dates in)
+    here = page.evaluate("new Date('2026-03-14T23:30:00+08:00').toLocaleString('sv-SE').slice(0, 16)")
+    expect(lib_row(page, "Late resonator sweep")).to_contain_text(here)
+    expect(lib_row(page, "Late resonator sweep")).not_to_contain_text("+08")
     expect(status(page)).to_contain_text("2026 › Mar › 14")
     page.get_by_role("button", name="Any date").first.click()
     # search: words in the description, a metadata value
@@ -64,6 +65,36 @@ def test_folders_dates_and_search_filter_the_list(viewer, library_files, new_pag
     box.fill("alice")                                                     # meta: operator = Alice
     expect(status(page)).to_contain_text('"alice"')
     expect(rows(page).first).to_be_visible()
+
+
+def test_dates_are_in_one_time_zone_or_as_written(viewer, new_page):
+    """Plan 14: the same moment written in two zones shows the same; Settings changes the zone or
+    shows the dates as written; the tooltip gives the other form."""
+    for title, when in (("Written in UTC", "2026-03-14T15:30:00+00:00"), ("Written in Taipei", "2026-03-14T23:30:00+08:00")):
+        d = lbd.Dataset(title=title, created=when)
+        d.add_axis("t", [0.0, 1.0])
+        d.add_value("v", [1.0, 2.0], axes="t")
+        d.save(viewer.data / f"{title}.lbd")
+    page = new_page("Library")
+    expect(lib_row(page, "Written in UTC")).to_be_visible()
+    here = page.evaluate("new Date('2026-03-14T15:30:00Z').toLocaleString('sv-SE').slice(0, 16)")
+    expect(lib_row(page, "Written in UTC")).to_contain_text(here)
+    expect(lib_row(page, "Written in Taipei")).to_contain_text(here)
+    dialog = open_settings(page, "Library")
+    dialog.get_by_label("Show dates in").select_option(label="Another time zone")
+    dialog.get_by_label("Time zone", exact=True).select_option("Europe/Paris")
+    page.keyboard.press("Escape")
+    expect(lib_row(page, "Written in UTC")).to_contain_text("2026-03-14 16:30")
+    expect(lib_row(page, "Written in Taipei")).to_contain_text("2026-03-14 16:30")
+    dialog = open_settings(page, "Library")
+    dialog.get_by_label("Show dates in").select_option(label="As written in the file")
+    page.keyboard.press("Escape")
+    expect(lib_row(page, "Written in UTC")).to_contain_text("2026-03-14 15:30")
+    expect(lib_row(page, "Written in Taipei")).to_contain_text("2026-03-14 23:30")
+    dialog = open_settings(page, "Library")
+    dialog.get_by_label("Show dates in").select_option("local")
+    page.keyboard.press("Escape")
+    expect(lib_row(page, "Written in UTC").locator("[title*='in the file']")).to_have_attribute("title", re.compile(r"2026-03-14 15:30 \+00"))
 
 
 def test_columns_sorting_keyboard_and_the_selected_file(viewer, library_files, new_page):

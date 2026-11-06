@@ -62,7 +62,7 @@ When a file holds a lot (many values, axes or metadata), the side scrolls; nothi
 | Column | Shows |
 |---|---|
 | **Name** (shown) | the file's title; the file name when it has none |
-| **Date** (shown) | when the data was created, as written in the file; its time zone is shown short (`+08`) when it isn't your computer's |
+| **Date** (shown) | when the data was created, in the time zone of **Show dates in** (see [Dates](#dates)) |
 | **Sweep size** (shown) | the swept axes' points, e.g. `401×31`; empty for a file of single numbers |
 | **Values** | the names of the values in the file |
 | **Folder** | where the file is, below its open folder |
@@ -87,6 +87,19 @@ the program that made it, in the time zone it was made in. A measurement at 23:3
 on that day wherever you browse it from, and copying, syncing or renaming the file doesn't change
 it. A file whose date can't be read is dated by its file's modification time, shown greyed
 (point at it to see why).
+
+**⚙ → Library → Show dates in** sets how the Date column, the pictures and the Files sidebar show
+dates:
+
+- **This computer's time zone** (the default): every file's time converted, so files made in
+  different zones compare by eye.
+- **Another time zone**: the same, in a zone you choose.
+- **As written in the file**: the time in the zone it was made in, with that zone shown short
+  (`+08`) when it isn't your computer's.
+
+Point at a date for the other form. Sorting always goes by the real moment. A file's **Created**
+line, the date tree and the date filter stay as written in the file, so a file made at 23:30 at
+`+00` is under its own day there, though Date may show the next day.
 
 ## Keys and mouse
 

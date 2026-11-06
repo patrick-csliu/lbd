@@ -1,7 +1,7 @@
 import { CSSProperties, KeyboardEvent, MouseEvent, ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import type React from "react";
 import { api, AppState, baseName, LibraryColumn, LibraryQuery, LibraryRow, LibrarySettings, SidebarScope } from "./api";
-import { cellText, COLUMNS } from "./libraryColumns";
+import { cellText, COLUMNS, createdText } from "./libraryColumns";
 import { reorder, startResize, useColumnMove } from "./columnDrag";
 import { ConfirmDialog, ConfirmRequest, ContextMenu, isMenuKey, MenuAt, menuAt, MenuEntry } from "./menu";
 import { fileEntries } from "./fileActions";
@@ -444,7 +444,7 @@ function fieldText(r: LibraryRow, f: LibraryColumn): string {
 
 /** "03-14" this year, "2025-03-14" before: the file's own date, short. */
 function shortDate(r: LibraryRow): string {
-  const day = !r.date_from_file && r.created ? r.created.slice(0, 10) : new Date(r.mtime * 1000).toISOString().slice(0, 10);
+  const day = createdText(r).slice(0, 10);
   return day.startsWith(String(new Date().getFullYear())) ? day.slice(5) : day;
 }
 

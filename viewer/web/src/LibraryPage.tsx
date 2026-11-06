@@ -33,7 +33,7 @@ import { Chip, LabelChip } from "./LabelChip";
 import { Setting } from "./settingsUi";
 import { labelPath, shortLabel } from "./labelText";
 import { LabelPathInput, usedMost, whereItGoes } from "./labelPath";
-import { cellText, chosenColumns as chosenColumnsOf, COLUMNS, createdText, DEFAULT_COLUMNS, fittingColumns, gridTemplate, localTime, Widths } from "./libraryColumns";
+import { cellText, chosenColumns as chosenColumnsOf, COLUMNS, createdText, createdTip, dateZoneName, DEFAULT_COLUMNS, writtenText, fittingColumns, gridTemplate, localTime, Widths } from "./libraryColumns";
 import { reorder, startResize, useColumnMove } from "./columnDrag";
 import { DRAWER_MEDIA, ONE_PANE_MEDIA, useMedia } from "./useMedia";
 import { useResizable, widestContent } from "./resizable";
@@ -857,7 +857,7 @@ export default function LibraryPage(props: Props) {
                 className={(columnMove.dragging === c.id ? "col-dragging" : "") + (columnMove.drop === i ? " col-drop-before" : "") + (columnMove.drop === columns.length && i === columns.length - 1 ? " col-drop-after" : "")}
                 onPointerDown={(e) => columnMove.start(e, c.id)}
               >
-                <button className="link" onClick={() => !columnMove.wasDrag() && sortBy(c.id)}>
+                <button className="link" title={c.id === "date" ? (dateZoneName() ? `In ${dateZoneName()} (Settings → Library)` : "As written in each file (Settings → Library)") : undefined} onClick={() => !columnMove.wasDrag() && sortBy(c.id)}>
                   {c.title}
                   {sort === c.id ? (order === "asc" ? " ▴" : " ▾") : ""}
                 </button>
@@ -931,7 +931,7 @@ export default function LibraryPage(props: Props) {
                       key={c.id}
                       role="gridcell"
                       className={`cell-${c.id}` + (c.id === "date" && r.date_from_file ? " muted" : "")}
-                      title={c.id === "date" && r.date_from_file ? "The file's own date (the file has no date of its own)" : undefined}
+                      title={c.id === "date" ? (r.date_from_file ? `The file's own date (the file has no date of its own). ${createdTip(r)}` : createdTip(r)) : undefined}
                     >
                       {c.id === "name" && r.error ? (
                         <span className="mark-conflict" aria-label="can't be read">
@@ -1482,7 +1482,7 @@ function SelectedFile({
     // `generation`: a file read here (headers off) fills its row; asking again is cheap (indexed)
   }, [path, version, row === null ? generation : 0]);
   const shown = info && info.path === path ? info : null;
-  const date = row ? createdText(row, true) : shown?.created ?? "";
+  const date = row ? writtenText(row, true) : shown?.created ?? "";
   return (
     <div className="file-view library-file">
       <div className="library-file-head">
@@ -1713,7 +1713,7 @@ function PictureCard({
         {name}
         {row.writing ? <WritingMark writing={row.writing} /> : null}
       </div>
-      <div className="card-date muted small">{createdText(row)}</div>
+      <div className="card-date muted small" title={createdTip(row)}>{createdText(row)}</div>
     </div>
   );
 }

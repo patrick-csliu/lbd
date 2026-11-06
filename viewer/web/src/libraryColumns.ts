@@ -57,7 +57,7 @@ export function fittingColumns(chosen: typeof COLUMNS, width: number, widths: Wi
 
 /** "2026-03-14 23:30 +08": the date as written in the file, in its own time zone (shortened, see
  * shortZone; `fullZone`: "+08:00" as written). */
-export function createdText(r: LibraryRow, fullZone = false): string {
+export function writtenText(r: LibraryRow, fullZone = false): string {
   if (r.date_from_file || !r.created) return localTime(r.mtime);
   const m = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(?::\d{2}(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?$/i.exec(r.created);
   if (!m) return r.created;
@@ -75,6 +75,60 @@ export function shortZone(day: string, zone: string | undefined): string {
   const minutes = (z[1] === "-" ? -1 : 1) * (Number(z[2]) * 60 + Number(z[3]));
   if (-new Date(`${day}T12:00:00`).getTimezoneOffset() === minutes) return "";
   return z[3] === "00" ? `${z[1]}${z[2]}` : `${z[1]}${z[2]}:${z[3]}`;
+}
+
+/** Settings → Library → Show dates in, set by the app whenever the settings change. */
+let dateZone = "local";
+export function setDateZone(zone: string) {
+  dateZone = zone;
+}
+
+/** Whether this browser knows a time zone's name. */
+export function knownZone(zone: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: zone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The zone dates are converted to: the chosen one, this computer's if there is none (or this
+ * browser doesn't know the name; Settings says so). */
+const zoneNow = () => (dateZone === "local" || !knownZone(dateZone) ? undefined : dateZone);
+
+/** The zone's name for a tooltip, or null when the dates are shown as written. */
+export function dateZoneName(): string | null {
+  if (dateZone === "file") return null;
+  return zoneNow() ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+}
+
+/** The moment of a row's date (ms), or null when the text gives none: no zone, or not a date. */
+function moment(r: LibraryRow): number | null {
+  if (r.date_from_file || !r.created) return r.mtime * 1000;
+  if (!/(Z|[+-]\d{2}:?\d{2})$/i.test(r.created)) return null;
+  const t = Date.parse(r.created);
+  return Number.isNaN(t) ? null : t;
+}
+
+function zonedText(ms: number): string {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: zoneNow(), hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).formatToParts(ms);
+  const p = (t: string) => parts.find((x) => x.type === t)?.value ?? "";
+  return `${p("year")}-${p("month")}-${p("day")} ${p("hour")}:${p("minute")}`;
+}
+
+/** The date in the lists and on the cards, as Show dates in says. */
+export function createdText(r: LibraryRow): string {
+  const ms = dateZone === "file" ? null : moment(r);
+  return ms === null ? writtenText(r) : zonedText(ms);
+}
+
+/** The date's tooltip: the other form, so a converted date still says what the file says. */
+export function createdTip(r: LibraryRow): string {
+  const ms = moment(r);
+  if (ms === null) return writtenText(r, true);
+  if (dateZone === "file") return `${zonedText(ms)} in this computer's time zone`;
+  return r.date_from_file || !r.created ? `${zonedText(ms)} (${dateZoneName()}); the file's modified time` : `${zonedText(ms)} (${dateZoneName()}); in the file: ${writtenText(r, true)}`;
 }
 
 export function localTime(seconds: number): string {

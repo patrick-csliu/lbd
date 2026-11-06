@@ -25,7 +25,7 @@ def test_config_settings_roundtrip(tmp_path):
                               "library": {"read_headers": True, "notice_seen": False, "columns": ["name", "date", "sweep"],
                                           "column_widths": {}, "previews": "all", "list_view": "list", "sidebar_scopes": ["library"],
                                           "sidebar_layout": "two", "sidebar_main": "title",
-                                          "sidebar_fields": ["date", "sweep", "project", "tags"]},
+                                          "sidebar_fields": ["date", "sweep", "project", "tags"], "date_zone": "local"},
                               "memory": {"reserve_gb": None, "maximum_gb": None, "summary_cache_gb": 20.0},
                               "measurements": {"progress": True, "time": True, "percent": True, "points": True,
                                                "axes": True, "notify": False}, "explore": {"line_traces": 20}}

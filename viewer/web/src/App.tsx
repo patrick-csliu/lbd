@@ -1,3 +1,4 @@
+import { setDateZone } from "./libraryColumns";
 import { CSSProperties, KeyboardEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DEFAULT_MEASUREMENTS, MeasurementsContext, notifyInBackground } from "./MeasuringStatus";
 import { onFinished } from "./watch";
@@ -131,6 +132,7 @@ export default function App() {
 function Shell() {
   const toast = useToast();
   const [state, setState] = useState<AppState | null>(null);
+  if (state) setDateZone(state.library.date_zone); // before the lists draw their dates
   const [fatal, setFatal] = useState<string | null>(null);
   const [page, setPage] = useState<Page>(loadPage);
   useEffect(() => {

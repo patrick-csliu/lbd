@@ -51,7 +51,8 @@ LIBRARY_DEFAULTS: Dict[str, Any] = {"read_headers": True, "notice_seen": False, 
                                     "column_widths": {},
                                     "previews": "all", "list_view": "list", "sidebar_scopes": ["library"],
                                     "sidebar_layout": "two", "sidebar_main": "title",
-                                    "sidebar_fields": ["date", "sweep", "project", "tags"]}
+                                    "sidebar_fields": ["date", "sweep", "project", "tags"],
+                                    "date_zone": "local"}
 # Memory for data (plan 6d, memory.py): what to leave free for the rest of the computer (None:
 # automatic, max(2 GB, 10% of RAM)), the most LBD may use (None: no maximum), and the disk cache
 # of large maps' and curves' summaries. In GB.
@@ -412,6 +413,9 @@ def _check_library(library: Dict[str, Any]) -> Dict[str, Any]:
                          ("sidebar_main", SIDEBAR_MAIN)):
         if library.get(key) not in allowed:
             raise ConfigError(f"Library setting '{key}' must be one of {', '.join(allowed)}, not {library.get(key)!r}")
+    zone = library.get("date_zone")     # "local", "file" or a zone's name: the page knows the names
+    if not isinstance(zone, str) or not 1 <= len(zone) <= 64:
+        raise ConfigError(f"Library setting 'date_zone' must be local, file or a time zone's name, not {zone!r}")
     return {k: library[k] for k in LIBRARY_DEFAULTS}
 
 

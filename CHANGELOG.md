@@ -8,6 +8,11 @@ are still written as 1.2).
 
 **Changes to how things behave** (read these when upgrading)
 
+- **The Library's dates are in one time zone.** Date, the pictures and the Files sidebar show every
+  file's time in this computer's time zone, so they can be compared; before, each date was as
+  written in its file, with the file's zone when it differed. **Settings → Library → Show dates
+  in** chooses another zone or **As written in the file**, and a date's tooltip gives the other
+  form. A file's Created line, the date tree and the date filter stay as written.
 - **Saving asks where, with the system's Save dialog** (Explore's Save as CSV and Save picture as
   PNG; before: always next to the data file, or the browser's Downloads). Save as CSV has two
   steps: the choices, then **Next** shows the size, the columns and any warnings before **Save…**.
