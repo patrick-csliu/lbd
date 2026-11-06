@@ -1,5 +1,6 @@
 """The plot type Scatter in Explore: the picture, the cursor, large files, the histograms beside it."""
 
+import json
 import time
 
 import numpy as np
@@ -323,3 +324,53 @@ def test_a_slice_of_a_big_file_shows_markers(tight, monkeypatch):
     assert session(tight, TIGHT).view._big()
     s = session(tight, {**TIGHT, "color": "none", "index": {"g": 0}})
     assert not s.view._big() and frame(s)["note"] == "every point shown"
+
+
+# -- histograms of the points in view -----------------------------------------------------------------
+
+def test_sides_count_only_points_in_view(many):
+    s = session(many, MANY)
+    meta = frame(s, (-8.0, 0.0), (-4.0, 4.0))
+    sides = meta["sides"]
+    x, y = (lbd.load(many).values[n].data for n in "xy")
+    seen = (x >= -8) & (x <= 0) & (y >= -4) & (y <= 4)
+    assert [sum(c) for c in sides["x"]["counts"]] == [int(seen[0].sum()), int(seen[1].sum())]
+    assert sides["x"]["edges"][0] == pytest.approx(-8) and sides["x"]["edges"][-1] == pytest.approx(0, abs=1e-9)
+    assert sum(sides["y"]["counts"][0]) == int(seen[0].sum())
+    assert len(sides["x"]["edges"]) == len(sides["x"]["counts"][0]) + 1
+    json.dumps(sides)
+
+
+def test_sides_per_group(iq):
+    s = session(iq, IQ)
+    sides = frame(s)["sides"]
+    assert sides["labels"] == ["Prepared state = ground", "Prepared state = excited"] and len(sides["colours"]) == 2
+    assert sum(sides["x"]["counts"][0]) == 200 and sum(sides["x"]["counts"][1]) == 200
+    assert sides["x"]["unit"] == "V" and sides["x"]["factor"] == s.model.xf
+    one = frame(session(iq, {**IQ, "color": "none", "all": ["shot", "state"]}))["sides"]
+    assert len(one["x"]["counts"]) == 1
+
+
+def test_sides_above_the_limit_match(many):
+    s = session(many, MANY)
+    meta = frame(s)
+    assert meta["reduced"] and sum(sum(c) for c in meta["sides"]["x"]["counts"]) == 2000
+
+
+def test_sides_on_a_log_axis_have_log_bins(tmp_path):
+    d = lbd.Dataset()
+    d.add_axis("t", np.arange(1000.0))
+    d.add_value("x", 10 ** np.linspace(0, 3, 1000), axes="t")
+    d.add_value("y", np.ones(1000), axes="t")
+    d.save(tmp_path / "l.lbd")
+    s = session(tmp_path / "l.lbd", {"kind": "scatter", "values": ["y"], "x": "x"})
+    sides = frame(s, settings={"xscale": "log"})["sides"]
+    e = np.asarray(sides["x"]["edges"])
+    assert np.allclose(e[1:] / e[:-1], e[1] / e[0]) and sum(sides["x"]["counts"][0]) == 1000
+
+
+def test_sides_of_a_big_file_come_from_the_same_pass(tight):
+    s = session(tight, TIGHT)
+    meta = done(s)
+    assert sum(sum(c) for c in meta["sides"]["x"]["counts"]) == 40_000
+    assert len(meta["sides"]["x"]["counts"]) == 2 and meta["strips"] == "histograms"

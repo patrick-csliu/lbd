@@ -19,6 +19,7 @@ import lbd
 from lbd.plot import render as rnd
 from lbd.plot import scatter as sc
 from lbd.plot import tables
+from lbd.plot.histogram import count_bins
 from lbd.plot.render import position_text
 
 from .. import crange, memory
@@ -26,6 +27,7 @@ from . import Interaction
 from .histogram import block_size
 
 BYTES_PER_POINT = 48      # x, y and a stored index per dimension, about
+FILE_SIDE_BINS = 64       # the histograms beside a plot counted from the file: their bins come before the numbers
 KEEP = 16                 # results kept: each is the picture's pixels
 
 _lock = threading.Lock()
@@ -119,9 +121,12 @@ def _count_work(spec: Dict[str, Any], m: sc.ScatterModel, xlim: Any, ylim: Any, 
     """Every point in this view into its pixel, as `sc.density`, from the file."""
     groups = sc.groups_of(m, colours)
     per = len(m.groups) if m.groups is not None else 1
+    x_edges, y_edges = sc.side_edges(xlim, scales[0], FILE_SIDE_BINS), sc.side_edges(ylim, scales[1], FILE_SIDE_BINS)
 
     def work(d: Any, job: crange.Job) -> sc.Density:
         counts = [np.zeros(w * h, dtype=np.int64) for _ in groups]
+        x_side = [np.zeros(FILE_SIDE_BINS, dtype=np.int64) for _ in groups]
+        y_side = [np.zeros(FILE_SIDE_BINS, dtype=np.int64) for _ in groups]
         sums = np.zeros(w * h) if m.cvals is not None else None
         for k, x, y, step, number in sc.iter_points(d, spec, block_size()):
             if job.cancelled:
@@ -130,18 +135,22 @@ def _count_work(spec: Dict[str, Any], m: sc.ScatterModel, xlim: Any, ylim: Any, 
             ix, iy = sc._pixel(x * m.xf, xlim, w, scales[0]), sc._pixel(y * m.yf, ylim, h, scales[1])
             keep = (ix >= 0) & (iy >= 0)
             where = iy[keep] * w + ix[keep]
-            if m.groups is None:
-                counts[k] += np.bincount(where, minlength=w * h)
-            else:
-                steps = step[keep]
-                for g in range(per):
-                    counts[k * per + g] += np.bincount(where[steps == g], minlength=w * h)
+            xv, yv = x[keep] * m.xf, y[keep] * m.yf
+            steps = step[keep] if m.groups is not None else np.zeros(where.size, dtype=np.int64)
+            for g in range(per):
+                mine = steps == g
+                counts[k * per + g] += np.bincount(where[mine], minlength=w * h)
+                x_side[k * per + g] += count_bins(xv[mine], x_edges)[1]
+                y_side[k * per + g] += count_bins(yv[mine], y_edges)[1]
             if sums is not None:
                 c = number[keep] * m.cf
                 good = np.isfinite(c)
                 sums += np.bincount(where[good], weights=c[good], minlength=w * h)
         shaped = [c.reshape(h, w) for c in counts]
-        return sc.Density(shaped, [g[2] for g in groups], None if sums is None else sums.reshape(h, w), sc.counted_note(shaped))
+        sides = {"x": {"edges": x_edges, "counts": x_side}, "y": {"edges": y_edges, "counts": y_side},
+                 "labels": [g[3] for g in groups], "colours": [g[2] for g in groups]}
+        return sc.Density(shaped, [g[2] for g in groups], None if sums is None else sums.reshape(h, w),
+                          sc.counted_note(shaped), sides)
     return work
 
 
@@ -158,9 +167,11 @@ class Scatter(Interaction):
     name = kind = "scatter"
     model = sc.ScatterModel
     cursor_types = ("cross",)
+    strips = "histograms"
 
     def __init__(self, session: Any):
         super().__init__(session)
+        self.sides: Optional[Dict[str, Any]] = None          # of the points in the last picture's view
         self.image: Any = None        # the density picture; None: markers
         self.bar: Any = None          # its "Points per pixel" colour bar
 
@@ -244,11 +255,13 @@ class Scatter(Interaction):
 
     def picture(self, pxe: np.ndarray, pye: np.ndarray, stat: str, draft: bool, w: int, h: int) -> Tuple[str, bool]:
         s = self.s
-        if self.image is None:
-            return "every point shown", False
         scales = (s.ax.get_xscale(), s.ax.get_yscale())
         xlim, ylim = (float(pxe[0]), float(pxe[-1])), (float(pye[0]), float(pye[-1]))
         colours = s.style.figure.axes.colors
+        if not self._big():
+            self.sides = sc.sides(s.model, xlim, ylim, scales, colours)
+        if self.image is None:
+            return "every point shown", False
         if self._big():
             if s.scatter_span is None or draft:          # (while moving: the last picture, stretched)
                 return "counting the points…", True
@@ -256,6 +269,7 @@ class Scatter(Interaction):
                                           _count_work(dict(s.spec), s.model, xlim, ylim, w, h, scales, colours), _points_in(s), False)
             if found is None:
                 return "counting the points in this view…", True
+            self.sides = found.sides
         else:
             found = sc.density(s.model, xlim, ylim, w, h, scales, colours)
         self.image.set_data(sc.density_image(s.model, found))
@@ -386,9 +400,16 @@ class Scatter(Interaction):
         return notes, empty
 
     def meta(self) -> Dict[str, Any]:
+        m = self.s.model
         out: Dict[str, Any] = {"equal": True} if self._equal() else {}
         if self._big():
             out["crange"] = self.s.crange_info
+        if self.sides is not None:
+            out["sides"] = {
+                "labels": self.sides["labels"], "colours": self.sides["colours"],
+                **{a: {"edges": [float(e) for e in self.sides[a]["edges"]], "counts": [c.tolist() for c in self.sides[a]["counts"]],
+                       "label": text[0], "unit": text[1], "factor": f}
+                   for a, text, f in (("x", m.x_text, m.xf), ("y", m.y_text, m.yf))}}
         return out
 
 

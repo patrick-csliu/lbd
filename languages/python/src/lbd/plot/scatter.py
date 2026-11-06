@@ -18,7 +18,7 @@ from matplotlib.cm import ScalarMappable
 from lbd.io import _warn
 
 from . import kinds
-from .histogram import BLOCK, _parts
+from .histogram import BLOCK, _parts, auto_bins, count_bins
 from .points import Points, _fixed
 from .points import points_of as read_points
 from .render import (SCATTER_RASTER_ABOVE, RenderError, RenderWarning, _annotate, _auto_prefix, _axis_quantity, _check_log,
@@ -308,6 +308,7 @@ class Density:
     colours: List[str]
     sums: Optional[np.ndarray]
     note: str
+    sides: Optional[Dict[str, Any]] = None      # counted in the same pass, when from a file
 
     @property
     def total(self) -> np.ndarray:
@@ -357,6 +358,49 @@ def density(model: ScatterModel, xlim: Tuple[float, float], ylim: Tuple[float, f
 
 def counted_note(counts: List[np.ndarray]) -> str:
     return f"{sum(int(c.sum()) for c in counts):,} points: each pixel shows how many are there"
+
+
+# ---- histograms of the points in view ----------------------------------------------------------
+
+SIDE_BINS = 100             # the most bins of a side histogram (a strip is about this many pixels)
+
+
+def side_edges(lim: Tuple[float, float], scale: str, bins: int) -> np.ndarray:
+    """Bins over a view: on a log axis even in the logarithm, so a bar's height is what counts."""
+    if scale == "log":
+        return 10.0 ** count_bins([], bins, tuple(np.log10(lim)))[0]
+    return count_bins([], bins, lim)[0]
+
+
+def _in_log(v: np.ndarray, scale: str) -> np.ndarray:
+    return np.log10(v[v > 0]) if scale == "log" else v
+
+
+def side_bins(values: List[np.ndarray], lim: Tuple[float, float], scale: str) -> Dict[str, Any]:
+    """{edges, counts: per group} of numbers in view, in as many bins as suit them all."""
+    both = np.concatenate(values) if values else np.zeros(0)
+    span = tuple(np.log10(lim)) if scale == "log" else lim
+    bins = auto_bins(_in_log(both, scale), SIDE_BINS, span=span)
+    edges = side_edges(lim, scale, bins)
+    return {"edges": edges, "counts": [count_bins(v, edges)[1] for v in values]}
+
+
+def sides(model: ScatterModel, xlim: Tuple[float, float], ylim: Tuple[float, float], scales: Tuple[str, str],
+          colours: List[str]) -> Dict[str, Any]:
+    """Histograms of the points in view (both limits applied), per group: `x`, `y`, `labels`, `colours`."""
+    xs, ys, labels, used = [], [], [], []
+    (xlo, xhi), (ylo, yhi) = sorted(xlim), sorted(ylim)
+    for k, mask, colour, label in groups_of(model, colours):
+        x, y, _ = model.series[k]
+        with np.errstate(invalid="ignore"):
+            seen = (x >= xlo) & (x <= xhi) & (y >= ylo) & (y <= yhi)
+        if mask is not None:
+            seen &= mask
+        xs.append(x[seen])
+        ys.append(y[seen])
+        labels.append(label)
+        used.append(colour)
+    return {"x": side_bins(xs, xlim, scales[0]), "y": side_bins(ys, ylim, scales[1]), "labels": labels, "colours": used}
 
 
 def _visibility(n: np.ndarray) -> np.ndarray:

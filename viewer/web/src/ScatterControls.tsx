@@ -44,7 +44,7 @@ export const kindRow: PlotKind = {
   explore: true,
   controls: ScatterControls,
   cursorTypes: ["cross"],
-  strips: null,
+  strips: "histograms",
   darkInverted: true,
   openInFigure: true,
   cursorMark: "lines",

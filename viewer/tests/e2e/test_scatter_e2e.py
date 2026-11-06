@@ -78,3 +78,65 @@ def test_a_click_reads_a_point_and_vertical_isnt_offered(viewer, new_page):
     expect(numbers).to_contain_text("stored at")
     expect(numbers).to_contain_text("shot[")
     expect(numbers).to_contain_text("Prepared state")
+
+
+def test_histograms_replace_cuts_on_scatter(viewer, new_page):
+    shots(viewer)
+    page = new_page("Explore")
+    page.set_viewport_size({"width": 1600, "height": 900})
+    view, meta = open_scatter(page)
+    button = view.get_by_role("button", name="Histograms", exact=True).first
+    expect(button).to_have_attribute("aria-pressed", "true")
+    assert meta["sides"]["labels"] and meta["strips"] == "histograms"
+    top = view.locator(".explore-cut-top canvas, canvas.explore-cut-top").first
+    expect(top).to_be_visible()
+    inked = """c => c.getContext('2d').getImageData(0, 0, c.width, c.height).data.some((v, i) => i % 4 === 3 && v > 0)"""
+    assert top.evaluate(inked)
+    view.locator(".explore-overlay").first.focus()
+    frames(page, lambda: page.keyboard.press("c"))
+    expect(button).to_have_attribute("aria-pressed", "false")
+
+
+def test_zooming_counts_the_view(viewer, new_page):
+    shots(viewer)
+    page = new_page("Explore")
+    view, meta = open_scatter(page)
+    whole = sum(sum(c) for c in meta["sides"]["x"]["counts"])
+    left, top, width, height = (v / meta["dpr"] for v in meta["plot"])
+    overlay = view.locator("canvas.explore-overlay").first
+    box = overlay.bounding_box()
+
+    def zoom():
+        page.mouse.move(box["x"] + left + width * 0.05, box["y"] + top + height * 0.05)
+        page.mouse.down()
+        page.mouse.move(box["x"] + left + width * 0.4, box["y"] + top + height * 0.95, steps=4)
+        page.mouse.up()
+
+    after = frames(page, zoom)
+    assert sum(sum(c) for c in after["sides"]["x"]["counts"]) < whole
+
+
+def test_histograms_come_and_go_in_one_change(viewer, new_page):
+    shots(viewer)
+    page = new_page("Explore")
+    page.set_viewport_size({"width": 1600, "height": 900})
+    view, _ = open_scatter(page)
+    button = view.get_by_role("button", name="Histograms", exact=True).first
+    for pressed in ("false", "true"):
+        page.wait_for_timeout(700)
+        page.evaluate(RECORD_FRAMES)
+        button.click()
+        expect(button).to_have_attribute("aria-pressed", pressed)
+        page.wait_for_timeout(1500)
+        assert page.evaluate("window.__mismatch") == []
+
+
+def test_hovering_a_strip_says_the_bin(viewer, new_page):
+    shots(viewer)
+    page = new_page("Explore")
+    page.set_viewport_size({"width": 1600, "height": 900})
+    view, _ = open_scatter(page)
+    top = view.locator("canvas.explore-cut-top, .explore-cut-top canvas").first
+    expect(top).to_be_visible()
+    top.hover()
+    expect(view.get_by_text(re.compile(r" to .*points"))).to_be_visible()

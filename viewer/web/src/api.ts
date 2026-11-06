@@ -676,10 +676,27 @@ export interface ExploreFrameMeta {
   empty?: string | null; // nothing can be shown, and why
   sync?: SyncKeys | Record<string, never>; // what panels must share to follow each other's zoom; empty: nothing to share
   strips?: "cuts" | "histograms" | null; // beside the plot, for this picture
+  sides?: Sides | null; // a scatter plot: histograms of the points in view
   equal?: boolean; // equal axes: xlim and ylim are what the server made of the view asked for
   /** A map with a slider: where its colour range comes from, and while every slice's range is
    *  worked out (crange.py) how far it is, or why it failed. */
   crange?: { from: "slice" | "all" | "histogram" | "scatter"; state?: "working" | "failed"; fraction?: number; slices?: number; error?: string | null; grow?: boolean } | null;
+}
+
+/** The points in view counted along one axis: bins in plot units, counts per group. */
+export interface SideBins {
+  edges: number[];
+  counts: number[][];
+  label: string;
+  unit: string; // stored
+  factor: number; // plot units per stored unit
+}
+
+export interface Sides {
+  x: SideBins;
+  y: SideBins;
+  labels: string[];
+  colours: string[];
 }
 
 /** A panel follows another's zoom along x (y) when these are the same (explore.py `sync_keys`). */

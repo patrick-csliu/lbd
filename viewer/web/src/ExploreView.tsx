@@ -30,6 +30,8 @@ import {
   PlotSpec,
   ReduceStat,
   SyncKeys,
+  SideBins,
+  Sides,
 } from "./api";
 import { labelPlaces, between, CursorsState, HELP, item, readText, si } from "./cursors";
 import { ConfirmDialog, ConfirmRequest, ContextMenu, MenuAt, MenuEntry, Popover } from "./menu";
@@ -506,7 +508,9 @@ export default function ExploreView({
       ctx.fillRect(x, y, Math.abs(b.x1 - b.x0), Math.abs(b.y1 - b.y0));
       ctx.strokeRect(x + 0.5, y + 0.5, Math.abs(b.x1 - b.x0), Math.abs(b.y1 - b.y0));
     }
-    paintCuts(topCut.current, rightCut.current, m, readingRef.current);
+    const sides = frame.current?.meta.sides;
+    if (sides) paintSides(topCut.current, rightCut.current, m, sides, readingRef.current);
+    else paintCuts(topCut.current, rightCut.current, m, readingRef.current);
   }, [current]);
 
   const paint = useCallback(() => {
@@ -814,7 +818,7 @@ export default function ExploreView({
   const firstValueNow = info.values.find((v) => v.name === (spec.values ?? [])[0]) ?? info.values.find((v) => v.shape.length > 0);
   const kindOfPanel = opened?.kind ?? spec.kind ?? (firstValueNow && firstValueNow.shape.filter((n) => n > 1).length >= 2 ? "heatmap" : "curve");
   const stripsNow = meta?.strips !== undefined && opened?.kind === kindOfPanel ? meta.strips : kindOf(kindOfPanel).strips;
-  const wantCuts = !!stripsNow && cursors.cuts && cursors.on;
+  const wantCuts = !!stripsNow && cursors.cuts && (cursors.on || stripsNow === "histograms"); // histograms need no cursor
   const [shownCuts, setShownCuts] = useState(wantCuts);
   const cutsChange = useRef<{ want: boolean; w: number; h: number; timer: number } | null>(null);
   const cutsKind = useRef(kindOfPanel);
@@ -1348,9 +1352,9 @@ export default function ExploreView({
             className="ib"
             aria-label={stripsNow === "histograms" ? "Histograms" : "Cuts"}
             aria-pressed={cursors.cuts}
-            disabled={!cursors.on}
+            disabled={!cursors.on && stripsNow !== "histograms"}
             onClick={() => onCursorsRef.current({ ...cursorsRef.current, cuts: !cursorsRef.current.cuts })}
-            title="Cuts: the rows and columns through the cursors, beside the map (key C)"
+            title={stripsNow === "histograms" ? "Histograms of the points in view, beside the plot (key C)" : "Cuts: the rows and columns through the cursors, beside the map (key C)"}
           >
             <Icon name="cuts" />
           </button>
@@ -1461,7 +1465,7 @@ export default function ExploreView({
             <canvas
               ref={topCut}
               style={plotCss ? { left: plotCss[0], width: plotCss[2], height: "calc(100% - 6px)" } : {}}
-              onMouseMove={(e) => setCutHover(cutValue("row", e, "x", current(), reading))}
+              onMouseMove={(e) => setCutHover(frame.current?.meta.sides ? sideValue(e, "x", current(), frame.current.meta.sides) : cutValue("row", e, "x", current(), reading))}
               onMouseLeave={() => setCutHover(null)}
             />
             {!c1 && stripsNow === "cuts" && <span className="muted small">Click the map: its row shows here</span>}
@@ -1517,7 +1521,7 @@ export default function ExploreView({
             <canvas
               ref={rightCut}
               style={plotCss ? { top: plotCss[1], height: plotCss[3], width: "calc(100% - 6px)" } : {}}
-              onMouseMove={(e) => setCutHover(cutValue("column", e, "y", current(), reading))}
+              onMouseMove={(e) => setCutHover(frame.current?.meta.sides ? sideValue(e, "y", current(), frame.current.meta.sides) : cutValue("column", e, "y", current(), reading))}
               onMouseLeave={() => setCutHover(null)}
             />
           </div>
@@ -1588,6 +1592,98 @@ function cutValue(which: "row" | "column", e: { clientX: number; clientY: number
 /** Draw the cuts through the cursors: the rows above the map (along x), the columns beside it
  *  (along y), on exactly the map's axes, in the cursors' colours when there are two. Their value
  *  axis, shared by both, fits the part in view. */
+/** What is under the mouse in a strip of histograms: the bin's range and its points. */
+function sideValue(e: { clientX: number; clientY: number; currentTarget: HTMLCanvasElement }, along: "x" | "y", m: Mapping | null, sides: Sides): string | null {
+  if (!m) return null;
+  const rect = e.currentTarget.getBoundingClientRect();
+  const lim = along === "x" ? m.view.xlim : m.view.ylim, scale = along === "x" ? m.xscale : m.yscale;
+  const f = along === "x" ? (e.clientX - rect.left) / rect.width : 1 - (e.clientY - rect.top) / rect.height;
+  const at = back(scale, fwd(scale, lim[0]) + f * (fwd(scale, lim[1]) - fwd(scale, lim[0])));
+  const s = sides[along];
+  const i = s.edges.findIndex((edge, k) => k + 1 < s.edges.length && at >= edge && at <= s.edges[k + 1]);
+  if (i < 0) return null;
+  const range = `${s.label} ${si(s.edges[i] / s.factor, s.unit, 4)} to ${si(s.edges[i + 1] / s.factor, s.unit, 4)}`;
+  if (s.counts.length === 1) return `${range}: ${s.counts[0][i]} points`;
+  return `${range}: ${s.counts.map((c, g) => `${sides.labels[g]} ${c[i]}`).join(", ")} points`;
+}
+
+/** The histograms of the points in view, in the strips: on the plot's own axes, counts from 0. One
+ *  group as bars, several as outlines in their colours; the highest count is written, as a cut's range. */
+function paintSides(top: HTMLCanvasElement | null, right: HTMLCanvasElement | null, m: Mapping, sides: Sides, r: CursorsAnswer | null) {
+  const dpr = window.devicePixelRatio || 1;
+  const draw = (c: HTMLCanvasElement | null, s: SideBins, along: "x" | "y") => {
+    if (!c) return;
+    const w = c.clientWidth, h = c.clientHeight;
+    if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) {
+      c.width = Math.round(w * dpr);
+      c.height = Math.round(h * dpr);
+    }
+    const ctx = c.getContext("2d")!;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    const style = getComputedStyle(c);
+    const ink = style.color || "#222";
+    ctx.strokeStyle = style.borderColor || "#ccc";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
+    const lim = along === "x" ? m.view.xlim : m.view.ylim, scale = along === "x" ? m.xscale : m.yscale;
+    const a = fwd(scale, lim[0]), b = fwd(scale, lim[1]);
+    const len = along === "x" ? w : h, span = (along === "x" ? h : w) - 6;
+    const posPx = (p: number) => ((fwd(scale, p) - a) / (b - a)) * len;
+    const most = Math.max(1, ...s.counts.flat());
+    const point = (u: number, v: number): [number, number] => (along === "x" ? [u, h - 3 - v] : [3 + v, h - u]);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, w, h);
+    ctx.clip();
+    s.counts.forEach((counts, g) => {
+      const colour = /^#0{3,6}$/.test(sides.colours[g] ?? "") ? ink : sides.colours[g] ?? ink; // black: the page's ink (dark theme)
+      ctx.beginPath();
+      ctx.moveTo(...point(posPx(s.edges[0]), 0));
+      counts.forEach((n, i) => {
+        const v = (n / most) * span;
+        ctx.lineTo(...point(posPx(s.edges[i]), v));
+        ctx.lineTo(...point(posPx(s.edges[i + 1]), v));
+      });
+      ctx.lineTo(...point(posPx(s.edges[s.edges.length - 1]), 0));
+      if (s.counts.length === 1) {
+        ctx.fillStyle = colour;
+        ctx.globalAlpha = 0.7;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      } else {
+        ctx.strokeStyle = colour;
+        ctx.lineWidth = 1.25;
+        ctx.stroke();
+      }
+    });
+    r?.cursors.forEach((cr, i) => {
+      if (!cr) return;
+      const u = posPx(along === "x" ? cr.x : cr.y);
+      ctx.strokeStyle = CURSOR_COLORS[i];
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(...point(u, -3));
+      ctx.lineTo(...point(u, span + 3));
+      ctx.stroke();
+      ctx.setLineDash([]);
+    });
+    ctx.restore();
+    ctx.fillStyle = ink;
+    ctx.font = "10px system-ui, sans-serif";
+    if (along === "x") ctx.fillText(String(most), 4, 11);
+    else {
+      ctx.save();
+      ctx.translate(w - 3, h - 4);
+      ctx.rotate(-Math.PI / 2);
+      ctx.fillText(String(most), 0, 0);
+      ctx.restore();
+    }
+  };
+  draw(top, sides.x, "x");
+  draw(right, sides.y, "y");
+}
+
 function paintCuts(top: HTMLCanvasElement | null, right: HTMLCanvasElement | null, m: Mapping, r: CursorsAnswer | null) {
   const dpr = window.devicePixelRatio || 1;
   const draw = (c: HTMLCanvasElement | null, cut: Cut | undefined, cut2: Cut | undefined, along: "x" | "y") => {
