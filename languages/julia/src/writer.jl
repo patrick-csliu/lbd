@@ -731,8 +731,13 @@ Make a stopped `.writing` file into an `.lbd` file with everything it holds: cop
 written into `name.lbd` (or `name (2).lbd` … if that is taken), checks the copy, removes the
 `.writing` file, and returns the new file's path. Points never measured stay `NaN` (or masked).
 The file keeps its id. Refused while it is still measuring.
+
+Given a rescue file (`name.lbd.rescue`, written by `LBD.save` when the data can't make a valid
+file), returns everything it holds as a Dict (`title`, `meta`, `error`, and `axes` and
+`values` as name => Dict("data", "unit", "axes")), to fix and save as a new dataset.
 """
 function recover(path::AbstractString)
+    endswith(lowercase(path), RESCUE_SUFFIX) && return read_rescue(path)   # a save's rescue file: as a Dict
     src = writing_path_of(path)
     writing_status(src) == "measuring" &&
         throw(LBDError("$(basename(src)) is still being written (its writer holds it); recover it only after the measurement stopped"))

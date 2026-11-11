@@ -83,7 +83,7 @@ classdef Dataset < handle
         Lookups (1,1) struct = struct()
         % lbd.open: the file its values are read from (lbd.LazySource), or [] after lbd.load
         Source = []
-        % labels read from a file keep their time (Written)
+        % reading a file: its settings are taken as they are (no checks), its labels keep their time
         LabelsFromFile (1,1) logical = false
     end
 
@@ -103,6 +103,51 @@ classdef Dataset < handle
 
         function set.Labels(obj, v)
             obj.Labels = lbd_labels_check(v, obj.Labels, obj.LabelsFromFile); %#ok<MCSUP>
+        end
+
+        % Settings are checked when they are set, so a mistake shows before measuring (plan 17).
+        function set.Meta(obj, v)
+            if ~obj.LabelsFromFile, lbd_check_meta(v); end %#ok<MCSUP>
+            obj.Meta = v;
+        end
+        function set.Plot(obj, v)
+            if ~isempty(v) && ~obj.LabelsFromFile, lbd_to_json(v, "Plot"); end %#ok<MCSUP>
+            obj.Plot = v;
+        end
+        function set.Style(obj, v)
+            if ~isempty(v) && ~obj.LabelsFromFile, lbd_to_json(v, "Style"); end %#ok<MCSUP>
+            obj.Style = v;
+        end
+        function set.StyleName(obj, v)
+            if ~isempty(v) && ~obj.LabelsFromFile && (~isscalar(v) || strlength(v) == 0) %#ok<MCSUP>
+                error('lbd:invalid', 'StyleName must be one non-empty name (or empty to remove it)');
+            end
+            obj.StyleName = v;
+        end
+        function set.Created(obj, v)
+            if ~isempty(v) && ~obj.LabelsFromFile && ~(isstring(v) && strlength(v) == 0) %#ok<MCSUP>
+                lbd_created_text(v);
+            end
+            obj.Created = v;
+        end
+
+        function problems = check(obj)
+            %CHECK  What a save would refuse, without writing anything: a struct array with
+            %   Where, What and Fix, empty if everything can be saved. Never throws.
+            %   p = d.check(); if ~isempty(p), disp(struct2table(p)), end
+            problems = struct('Where', {}, 'What', {}, 'Fix', {});
+            try
+                obj.checkComplete();
+            catch err
+                problems(end+1) = struct('Where', "data", 'What', string(err.message), 'Fix', "fix it before saving");
+            end
+            try
+                lbd_check_meta(obj.Meta);
+                if ~isempty(obj.Plot), lbd_to_json(obj.Plot, "Plot"); end
+                if ~isempty(obj.Style), lbd_to_json(obj.Style, "Style"); end
+            catch err
+                problems(end+1) = struct('Where', "settings", 'What', string(err.message), 'Fix', "change or remove it");
+            end
         end
 
         function addTags(obj, tags)
@@ -540,7 +585,7 @@ classdef Dataset < handle
             obj.Id = lbd_uuid7();
         end
 
-        function path = save(obj, path, opts)
+        function [path, report] = save(obj, path, opts)
             %SAVE  Write the dataset to PATH (.lbd). Compression=true gzips large arrays.
             %   The file is written under a temporary name and then renamed, so a viewer
             %   never sees a half-written file. A dataset opened with lbd.open(..., Mode="r+"):
@@ -550,7 +595,9 @@ classdef Dataset < handle
                 obj
                 path (1,1) string = ""
                 opts.Compression (1,1) logical = false
+                opts.DryRun (1,1) logical = false
             end
+            report = struct('Path', path, 'Problems', struct('Where', {}, 'What', {}, 'Fix', {}));
             if ~isempty(obj.Source)
                 obj.Source.check("save");
                 if strlength(path) == 0 || lbd.Dataset.samePath(path, obj.Source.Path)
@@ -569,18 +616,18 @@ classdef Dataset < handle
             if lower(ext) ~= ".lbd"
                 warning('lbd:extension', '%s: LBD files should use the .lbd extension', path);
             end
-            anames = fieldnames(obj.Axes);
-            for i = 1:numel(anames)
-                if obj.Axes.(anames{i}).Grows && isempty(obj.Axes.(anames{i}).Data)
-                    error('lbd:invalid', 'the growing axis "%s" has no points yet; write some before saving', anames{i});
+            if opts.DryRun                          % nothing written: what a save would say
+                problems = obj.check();
+                folder = fileparts(char(path));
+                if isempty(folder), folder = pwd; end
+                if ~isfolder(folder)
+                    problems(end+1) = struct('Where', "path", 'What', "the folder " + string(folder) + ...
+                        " doesn't exist", 'Fix', "make it, or save elsewhere");
                 end
+                report.Problems = problems;
+                return
             end
-            vnames = fieldnames(obj.Values);
-            for i = 1:numel(vnames)
-                if isempty(obj.Values.(vnames{i}).Data) && prod(obj.Values.(vnames{i}).Shape) > 0
-                    error('lbd:invalid', 'value "%s" was not loaded; load the file fully to re-save it', vnames{i});
-                end
-            end
+            obj.checkComplete();
             % Check the saved view before anything is written.
             if ~isempty(obj.Plot), lbd_to_json(obj.Plot, "Plot"); end
             if ~isempty(obj.Style), lbd_to_json(obj.Style, "Style"); end
@@ -863,6 +910,7 @@ classdef Dataset < handle
             lbd_check_version(ver, base);
 
             d = lbd.Dataset(lbd_attr_or(fid, 'title', ""), lbd_attr_or(fid, 'description', ""));
+            d.LabelsFromFile = true;                % a file is read as it is
             d.Created = lbd_attr_or(fid, 'created', string.empty);
             d.Writer = lbd_attr_or(fid, 'writer', string.empty);
             d.LbdVersion = ver;
@@ -885,7 +933,6 @@ classdef Dataset < handle
                 if d.Matplotlib == "", d.Matplotlib = string.empty; end
                 H5G.close(gid);
             end
-            d.LabelsFromFile = true;
             d.Labels = lbd_labels_read(fid, base);
             d.LabelsFromFile = false;
 
@@ -1848,6 +1895,23 @@ classdef Dataset < handle
             obj.Source.run(@(fid) rewriteDescription(fid, obj));
             if lbd_labels_has(obj.Labels)
                 obj.LbdVersion = lbd_labels_version(obj.LbdVersion);
+            end
+        end
+
+        function checkComplete(obj)
+            %CHECKCOMPLETE  What makes a save impossible: a growing axis without points, a value
+            %   read without its data.
+            anames = fieldnames(obj.Axes);
+            for i = 1:numel(anames)
+                if obj.Axes.(anames{i}).Grows && isempty(obj.Axes.(anames{i}).Data)
+                    error('lbd:invalid', 'the growing axis "%s" has no points yet; write some before saving', anames{i});
+                end
+            end
+            vnames = fieldnames(obj.Values);
+            for i = 1:numel(vnames)
+                if isempty(obj.Values.(vnames{i}).Data) && prod(obj.Values.(vnames{i}).Shape) > 0
+                    error('lbd:invalid', 'value "%s" was not loaded; load the file fully to re-save it', vnames{i});
+                end
             end
         end
 

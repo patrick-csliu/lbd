@@ -135,6 +135,12 @@ def check_rplus(path: Path) -> None:
     assert d.labels.tags == ["kept"], d.labels
 
 
+def check_notsaved(path: Path) -> None:
+    d = lbd.load(path)
+    np.testing.assert_array_equal(d["y"].data, [1.0, 2.0])
+    assert dict(d.meta) == {"ok": 1}, d.meta
+
+
 def check_labels(path: Path) -> None:
     import re
 
@@ -153,7 +159,7 @@ root = Path(sys.argv[1])
 failed = False
 for name, test in (("fixture.lbd", check), ("live.lbd", check_live), ("groups.lbd", check_groups),
                    ("fixture.lbd", check_open), ("groups.lbd", check_open), ("rplus.lbd", check_rplus),
-                   ("labels.lbd", check_labels)):
+                   ("labels.lbd", check_labels), ("notsaved.lbd", check_notsaved)):
     for p in sorted(root.glob(f"*/{name}")):
         try:
             test(p)

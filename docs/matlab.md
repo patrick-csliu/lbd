@@ -321,6 +321,20 @@ for k = 1:numel(files)
 end
 ```
 
+## Checking before measuring
+
+`Meta`, `Plot`, `Style`, `StyleName` and `Created` are checked when they are set, so a mistake
+(metadata that can't be stored, a saved view that isn't a JSON object, a `Created` that isn't a
+date) shows at once, before the measurement starts. `d.check()` lists what a save would refuse
+(a struct array with `Where`, `What`, `Fix`; empty when it would go through), and
+`[~, report] = d.save(path, DryRun=true)` also checks the folder; neither writes anything.
+
+```matlab
+d = lbd.load("sweep.lbd");
+problems = d.check();                            % empty: a save would go through
+[~, report] = d.save("sweep.lbd", DryRun=true);  % nothing written
+```
+
 ## Labels
 
 A file can carry its labels: a star, a project, users, tags and a comment, as LBD Viewer's

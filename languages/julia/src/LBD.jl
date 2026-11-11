@@ -149,12 +149,24 @@ Dataset(title::AbstractString=""; description::AbstractString="", created=nothin
     nothing, nothing, nothing, nothing, Labels(), nothing, nothing, nothing, false, String[], Dict{String,Any}(), nothing,
 )
 
-# `d.labels = (tags=["calibration"],)`: checked at once, and the time they were set is now
+# Settings are checked when they are set, so a mistake shows before measuring (plan 17):
+# `d.labels = (tags=["calibration"],)` (the time they were set is now), `d.meta = Dict(...)`,
+# `d.plot = ...`, `d.style = ...`, `d.created = ...`. A file is read without these checks.
 function Base.setproperty!(d::Dataset, s::Symbol, x)
     if s === :labels
         l = as_labels(x)
         x isa Labels || setfield!(l, :written, label_time())   # also for nothing: removed now
         return setfield!(d, :labels, l)
+    elseif s === :meta
+        check_meta(x)
+        return setfield!(d, :meta, x isa OrderedDict{String,Any} ? x : OrderedDict{String,Any}(string(k) => v for (k, v) in x))
+    elseif s in (:plot, :style) && x !== nothing
+        x isa AbstractDict || throw(LBDError("$s must be a Dict, not $(typeof(x))"))
+        json_or_error(x, String(s))
+    elseif s === :created && x !== nothing
+        created_text(x)
+    elseif s === :style_name && x !== nothing
+        x isa AbstractString && !isempty(strip(x)) || throw(LBDError("style_name must be one non-empty name, or nothing"))
     end
     return setfield!(d, s, convert(fieldtype(Dataset, s), x))
 end
@@ -1107,7 +1119,7 @@ function save(d::Dataset)
     return save_in_place(d)
 end
 
-function save(path::AbstractString, d::Dataset; compression::Bool=false)
+function save(path::AbstractString, d::Dataset; compression::Bool=false, dry_run::Bool=false, report::Bool=false)
     if d.source !== nothing                      # opened with LBD.open
         check_change(d.source, "save")
         same_file(path, d.source.path) && return save_in_place(d)
@@ -1125,6 +1137,14 @@ function save(path::AbstractString, d::Dataset; compression::Bool=false)
     for v in values(d.values)
         v.data === nothing && throw(LBDError("value \"$(v.name)\" was not loaded; load the file without `values=` to re-save it"))
     end
+    dry_run && return LBD.dry_run(path, d)
+    problem = data_problem(d)
+    if problem !== nothing                # data that can't make a valid file: kept as it is, nothing lost
+        rescue = write_rescue(d, path, problem)
+        throw(LBDError("$(basename(path)) was not saved: $problem. Everything given is kept in $(basename(rescue)); " *
+                       "LBD.recover(\"$rescue\") reads it back, to fix and save."))
+    end
+    s = storable_settings(d)
     before = (d.id, d.parent_id)
     if d.id === nothing
         d.id = uuid7()
@@ -1134,7 +1154,13 @@ function save(path::AbstractString, d::Dataset; compression::Bool=false)
     tmp = "$path.tmp-$(getpid())"
     try
         h5open(tmp, "w") do f
-            write_file(f, d, compression)
+            write_file(f, d, compression; meta=s.meta, plot=s.plot, style=s.style)
+            if !isempty(s.left_out)                       # their text, so nothing is lost
+                g = create_group(create_group(f, "extra"), "not_saved")
+                for l in s.left_out
+                    write_str_attr(g, replace(l.where, "/" => "."), "$(l.value)  ($(l.reason))")
+                end
+            end
         end
         replace_file(tmp, path)
     catch
@@ -1144,7 +1170,9 @@ function save(path::AbstractString, d::Dataset; compression::Bool=false)
         isfile(tmp) && rm(tmp)
     end
     d.path = String(path)
-    return path
+    isempty(s.left_out) || @warn "$(basename(path)) was saved without $(join((l.where for l in s.left_out), ", ")): " *
+        join((l.reason for l in s.left_out), "; ") * ". What they held is in the file's /extra/not_saved; fix them and save again."
+    return report ? (path=String(path), left_out=s.left_out, problems=Problem[]) : path
 end
 
 # Put the finished temporary file in place of `path`. On Windows this fails while another
@@ -1165,7 +1193,9 @@ function replace_file(tmp::AbstractString, path::AbstractString)
     end
 end
 
-function write_file(f, d::Dataset, compression::Bool)
+function write_file(f, d::Dataset, compression::Bool; meta=d.meta,
+                    plot=d.plot === nothing ? nothing : JSON3.write(d.plot),
+                    style=d.style === nothing ? nothing : JSON3.write(d.style))
     # when the data was created: kept as set (also as read by `load`); not set: this first save
     d.created = d.created === nothing ? Dates.format(now(), dateformat"yyyy-mm-ddTHH:MM:SS") * utc_offset() :
         created_text(d.created)
@@ -1242,12 +1272,12 @@ function write_file(f, d::Dataset, compression::Bool)
         end
     end
 
-    write_meta(create_group(f, "meta"), d.meta, "meta")
+    write_meta(create_group(f, "meta"), meta, "meta")
 
-    if d.plot !== nothing || d.style !== nothing || d.style_name !== nothing
+    if plot !== nothing || style !== nothing || d.style_name !== nothing
         gp = create_group(f, "plot")
-        d.plot !== nothing && write_str_attr(gp, "spec", JSON3.write(d.plot))
-        d.style !== nothing && write_str_attr(gp, "style", JSON3.write(d.style))
+        plot !== nothing && write_str_attr(gp, "spec", plot)
+        style !== nothing && write_str_attr(gp, "style", style)
         d.style_name !== nothing && write_str_attr(gp, "style_name", d.style_name)
         d.matplotlib !== nothing && !isempty(d.matplotlib) && write_str_attr(gp, "matplotlib", d.matplotlib)
     end
@@ -1609,17 +1639,17 @@ function read_header(f, path)
     ver = attr_str(f, "lbd_version", "")
     check_version(ver, path)
     d = Dataset(attr_str(f, "title"); description=attr_str(f, "description"))
-    c = attr_str(f, "created"); d.created = isempty(c) ? nothing : c
+    c = attr_str(f, "created"); setfield!(d, :created, isempty(c) ? nothing : c)
     w = attr_str(f, "writer"); d.writer = isempty(w) ? nothing : w
     d.id = read_id(f, "id", path)
     d.parent_id = read_id(f, "parent_id", path)
     d.lbd_version = ver
     d.path = String(path)
-    haskey(f, "meta") && (d.meta = read_meta(f["meta"]))
+    haskey(f, "meta") && setfield!(d, :meta, read_meta(f["meta"]))
     if haskey(f, "plot")
         g = f["plot"]
-        d.plot = attr_json(g, "spec", path)
-        d.style = attr_json(g, "style", path)
+        setfield!(d, :plot, attr_json(g, "spec", path))
+        setfield!(d, :style, attr_json(g, "style", path))
         s = attr_str(g, "style_name"); d.style_name = isempty(s) ? nothing : s
         m = attr_str(g, "matplotlib"); d.matplotlib = isempty(m) ? nothing : m
     end
@@ -1752,6 +1782,7 @@ to_plain(x::JSON3.Object) = Dict{String,Any}(String(k) => to_plain(v) for (k, v)
 to_plain(x::JSON3.Array) = Any[to_plain(v) for v in x]
 to_plain(x) = x
 
+include("safety.jl")
 include("live.jl")
 include("writer.jl")
 include("lazy.jl")

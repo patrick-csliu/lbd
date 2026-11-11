@@ -186,10 +186,9 @@ def test_validation_errors(build, msg):
 
 def test_meta_none_rejected(tmp_path):
     d = lbd.Dataset()
-    d.meta["x"] = None
-    with pytest.raises(lbd.LBDError, match="None"):
-        d.save(tmp_path / "n.lbd")
-    assert not list(tmp_path.iterdir()), "failed save must not leave files behind"
+    with pytest.raises(lbd.LBDError, match="None"):     # at once, before measuring
+        d.meta["x"] = None
+    assert "x" not in d.meta
 
 
 def test_version_checks(tmp_path):
@@ -293,9 +292,9 @@ def test_a_created_that_is_no_date_and_time_says_so(tmp_path, bad):
     with pytest.raises(lbd.LBDError, match="created must be a date and time"):
         lbd.Dataset(created=bad)
     d = make_sweep()
-    d.created = bad
     with pytest.raises(lbd.LBDError, match="created must be a date and time"):
-        d.save(tmp_path / "a.lbd")
+        d.created = bad
+    assert d.created is None
 
 
 # ---- id: the measurement's identity (format 1.1) ---------------------------------------------

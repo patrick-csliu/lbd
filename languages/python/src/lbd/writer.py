@@ -33,7 +33,9 @@ import h5py
 import numpy as np
 
 from .io import (
+    RESCUE_SUFFIX,
     WRITING_SUFFIX,
+    _read_rescue,
     Axis,
     Dataset,
     Group,
@@ -259,8 +261,14 @@ def writing_status(path: PathLike) -> str:
     return "measuring" if _guard_held(p) else "stopped"
 
 
-def recover(path: PathLike, keep: bool = False) -> Path:
-    """Make a stopped `.writing` file into an `.lbd` file with everything it holds.
+def recover(path: PathLike, keep: bool = False) -> Any:
+    """Make a stopped `.writing` file into an `.lbd` file with everything it holds; or read
+    back a rescue file (`name.lbd.rescue`).
+
+    A rescue file is written by `Dataset.save` when the data can't make a valid file (a value
+    whose shape doesn't match its axes): everything given, as it was. `recover` returns it as a
+    dict (`title`, `meta`, `labels`, `error`, and `axes` and `values` as `{name: {"data",
+    "unit", "label", "axes"}}`), to fix and save as a new dataset.
 
     A Writer that stopped before finishing (a crash, a script ended without `close`) leaves
     `name.lbd.writing`; this copies what was written into `name.lbd` (or `name (2).lbd` … if
@@ -294,6 +302,8 @@ def recover(path: PathLike, keep: bool = False) -> Path:
     >>> lbd.recover("rabi.lbd.writing")
     WindowsPath('rabi.lbd')
     """
+    if str(path).lower().endswith(RESCUE_SUFFIX):
+        return _read_rescue(Path(path))
     import warnings
 
     from .io import LBDWarning

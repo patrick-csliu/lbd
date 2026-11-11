@@ -4,6 +4,8 @@ using Test
 using Dates
 using Random
 
+attr_string(obj, key) = String(read_attribute(obj, key))
+
 function make_sweep()
     f = collect(range(4e9, 8e9, 41))
     p = collect(-40.0:4:0)
@@ -150,9 +152,9 @@ end
         @test_throws LBDError add_value!(d, "x", [1, 2], "x")
         @test_throws LBDError add_value!(d, "v", ["a", "b"], "x")
         @test_throws LBDError add_value!(d, "v", [1im, 2im], "x"; dtype=Float64)
-        d.meta["bad"] = nothing
-        @test_throws LBDError LBD.save(joinpath(dir, "bad.lbd"), d)
-        @test !isfile(joinpath(dir, "bad.lbd"))
+        d.meta["bad"] = nothing                     # left out, with a warning; the rest saved
+        @test_logs (:warn, r"without meta/bad") LBD.save(joinpath(dir, "bad.lbd"), d)
+        @test !haskey(LBD.load(joinpath(dir, "bad.lbd")).meta, "bad")
     end
 
     @testset "created: filled at the first save, kept after, can be set" begin
@@ -855,4 +857,32 @@ end
     close(w)
     r = LBD.load(wp)
     @test r.lbd_version == "1.3" && r.labels.star && r.labels.tags == ["while measuring"] && r.labels.written == at
+end
+
+@testset "a save never loses the data (plan 17)" begin
+    dir = mktempdir()
+    d = make_sweep()
+    @test_throws LBDError (d.meta = Dict("x" => nothing))       # checked when set
+    @test_throws LBDError (d.created = "yesterday")
+    @test_throws LBDError (d.style_name = "")
+    @test isempty(LBD.check(d))
+    d.meta["ok"] = 1
+    d.meta["bad"] = nothing                                      # changed by hand: left out at save
+    p = joinpath(dir, "a.lbd")
+    r = @test_logs (:warn, r"saved without meta/bad.*/extra/not_saved") LBD.save(p, d; report=true)
+    @test r.path == p && [l.where for l in r.left_out] == ["meta/bad"]
+    e = LBD.load(p)
+    @test e["S21"].data == d["S21"].data && e.meta["ok"] == 1 && !haskey(e.meta, "bad")
+    @test occursin("nothing", h5open(f -> attr_string(f["extra/not_saved"], "meta.bad"), p))
+    @test [x.where for x in LBD.check(d)] == ["meta/bad"]
+    delete!(d.meta, "bad")
+    d.values["mag"].data = ones(3)                               # no longer fits its axes
+    @test [x.where for x in LBD.check(d)] == ["data"]
+    dr = LBD.save(joinpath(dir, "nowhere", "b.lbd"), d; dry_run=true)
+    @test [x.where for x in dr.problems] == ["data", "path"] && !isdir(joinpath(dir, "nowhere"))
+    err = try LBD.save(joinpath(dir, "b.lbd"), d); nothing catch x; x end
+    @test err isa LBDError && occursin("b.lbd.rescue", err.msg) && !isfile(joinpath(dir, "b.lbd"))
+    rescued = LBD.recover(joinpath(dir, "b.lbd.rescue"))
+    @test rescued["values"]["mag"]["data"] == ones(3) && occursin("size", rescued["error"])
+    @test rescued["axes"]["power"]["unit"] == "dBm" && rescued["values"]["S21"]["axes"] == ["power", "freq"]
 end

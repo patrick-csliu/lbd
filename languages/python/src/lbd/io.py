@@ -20,7 +20,7 @@ import uuid as _uuid
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, Iterator, List, Mapping, Optional, Sequence, Union
+from typing import Any, Dict, Iterable, Iterator, List, Mapping, NamedTuple, Optional, Sequence, Union
 
 import h5py
 import numpy as np
@@ -421,19 +421,19 @@ class Dataset:
     """
 
     def __init__(self, title: str = "", description: str = "", created: Any = None):
-        self.title = _check_text(title, "title")
-        self.description = _check_text(description, "description")
-        self.created: Optional[str] = None if created is None else _created_text(created)
+        self._title = _check_text(title, "title")
+        self._description = _check_text(description, "description")
+        self._created: Any = None if created is None else _created_text(created)
         self.writer: Optional[str] = None
         self.lbd_version: str = _GRID_VERSION
         self.axes: Dict[str, Axis] = {}
         self.groups: Dict[str, Group] = {}
         self.values: Dict[str, Value] = {}
-        self.meta: Dict[str, Any] = {}
+        self._meta = Meta()
         self._labels = Labels()
-        self.plot: Optional[Dict[str, Any]] = None
-        self.style: Optional[Dict[str, Any]] = None
-        self.style_name: Optional[str] = None
+        self._plot: Optional[Dict[str, Any]] = None
+        self._style: Optional[Dict[str, Any]] = None
+        self._style_name: Optional[str] = None
         self.matplotlib: Optional[str] = None
         self.path: Optional[Path] = None
         self._id: Optional[str] = None
@@ -452,6 +452,72 @@ class Dataset:
     def parent_id(self) -> Optional[str]:
         """The id of the file this one was made from, or None."""
         return self._parent_id
+
+    # ---- settings, each checked when it is set (a mistake shows before measuring) ----------
+
+    @property
+    def title(self) -> str:
+        return self._title
+
+    @title.setter
+    def title(self, value: str) -> None:
+        self._title = _check_text(value, "title")
+
+    @property
+    def description(self) -> str:
+        return self._description
+
+    @description.setter
+    def description(self, value: str) -> None:
+        self._description = _check_text(value, "description")
+
+    @property
+    def created(self) -> Any:
+        return self._created
+
+    @created.setter
+    def created(self, value: Any) -> None:
+        if value is not None:
+            _created_text(value)                       # refused now, not at the save
+        self._created = value
+
+    @property
+    def meta(self) -> "Meta":
+        return self._meta
+
+    @meta.setter
+    def meta(self, value: Mapping[str, Any]) -> None:
+        if not isinstance(value, Mapping):
+            raise LBDError(f"meta must be a dict, not {type(value).__name__}")
+        self._meta = Meta(value)
+
+    @property
+    def plot(self) -> Optional[Dict[str, Any]]:
+        return self._plot
+
+    @plot.setter
+    def plot(self, value: Optional[Dict[str, Any]]) -> None:
+        if value is not None:
+            _plot_json(value, "plot")
+        self._plot = value
+
+    @property
+    def style(self) -> Optional[Dict[str, Any]]:
+        return self._style
+
+    @style.setter
+    def style(self, value: Optional[Dict[str, Any]]) -> None:
+        if value is not None:
+            _style_json(value, "style")
+        self._style = value
+
+    @property
+    def style_name(self) -> Optional[str]:
+        return self._style_name
+
+    @style_name.setter
+    def style_name(self, value: Optional[str]) -> None:
+        self._style_name = None if value is None else _check_style_name(value)
 
     @property
     def labels(self) -> Labels:
@@ -1087,7 +1153,8 @@ class Dataset:
 
     # ---- saving ---------------------------------------------------------
 
-    def save(self, path: Optional[PathLike] = None, compression: Optional[str] = None) -> Path:
+    def save(self, path: Optional[PathLike] = None, compression: Optional[str] = None,
+             dry_run: bool = False) -> "SaveReport":
         """Write the dataset to an `.lbd` file.
 
         Everything is checked again first, also axes, values and attributes changed by hand
@@ -1108,19 +1175,28 @@ class Dataset:
         compression : {None, "gzip"}, optional
             `"gzip"` compresses arrays of 1024 elements or more (lossless, level 4). All readers
             decompress transparently.
+        dry_run : bool, optional
+            Write nothing: the report's `problems` list what `check` finds, and whether the
+            folder exists, can be written and has room.
 
         Returns
         -------
-        pathlib.Path
-            The path written.
+        SaveReport
+            The path written (a `pathlib.Path`), with `left_out`: the settings left out.
+
+        **A save never loses the data.** A setting that can't be stored (metadata changed by
+        hand to `None`, a `plot` changed to have unknown keys) is left out with an
+        `LBDWarning` naming it; everything else is saved, and its text is kept in the file's
+        `/extra/not_saved`. Data that can't make a valid file (a value whose shape no longer
+        matches its axes) is written as it is to `name.lbd.rescue`, and `LBDError` names that
+        file: [`lbd.recover`][lbd.recover] reads it back. Use [`check`][lbd.Dataset.check]
+        before measuring to see such problems early.
 
         Raises
         ------
         LBDError
-            Anything that breaks the format: metadata that can't be stored (e.g. `None`), a value
-            read without its data, a value whose shape no longer matches its axes, a `plot` with
-            unknown keys or NaN, a `style` that isn't a dict, an invalid `compression`, a
-            `created` that isn't a date and time.
+            Data that can't make a valid file (kept in `name.lbd.rescue`), a value read
+            without its data, an invalid `compression`.
         OSError
             File-system problems. On Windows, a file another program keeps open (e.g. LBD Viewer
             reading it, a sync client) can't be replaced: `save` waits up to 3 s for it, then
@@ -1151,16 +1227,24 @@ class Dataset:
             _warn(f"{path.name}: LBD files should use the .lbd extension")
         if compression not in (None, "gzip"):
             raise LBDError(f"compression must be None or 'gzip', not {compression!r}")
-        self._check_complete()
-        plot_json = None if self.plot is None else _plot_json(self.plot, "plot")
-        style_json = None if self.style is None else _style_json(self.style, "style")
-        style_name = None if self.style_name is None else _check_style_name(self.style_name)
+        if dry_run:
+            return self._dry_run(path)
+        try:
+            self._check_complete()
+        except (LBDError, TypeError) as e:
+            if not self._rescuable():
+                raise
+            rescue = _rescue(self, path, e)
+            raise LBDError(f"{path.name} was not saved: {e}. Everything given is kept in {rescue.name}; "
+                           f"lbd.recover({str(rescue)!r}) reads it back, to fix and save.") from e
+        s = self._settings()
+        left = s["left_out"]
+        plot_json, style_json, style_name = s["plot"], s["style"], s["style_name"]
         mpl = None
         if plot_json is not None or style_json is not None or style_name is not None:
             mpl = _matplotlib_version() or self.matplotlib
 
-        created = _created_text(self.created) if self.created is not None else \
-            _dt.datetime.now().astimezone().isoformat(timespec="seconds")
+        created = s["created"]
         writer = f"python lbd {__version__}"
         ident, parent = self._id, self._parent_id
         if ident is None:
@@ -1170,19 +1254,117 @@ class Dataset:
         tmp = path.with_name(f"{path.name}.tmp-{os.getpid()}")
         try:
             with h5py.File(tmp, "w") as f:
-                self._write(f, compression, created, writer, plot_json, style_json, style_name, mpl)
+                self._write(f, compression, created, writer, plot_json, style_json, style_name, mpl,
+                            meta=s["meta"], title=s["title"], description=s["description"])
                 f.attrs["id"] = ident
                 if parent is not None:
                     f.attrs["parent_id"] = parent
+                if left:                                   # their text, so nothing is lost
+                    g = f.require_group("extra").create_group("not_saved")
+                    for item in left:
+                        g.attrs[item.where.replace("/", ".")] = f"{item.value}  ({item.reason})"
             _replace(tmp, path)
         finally:
             if tmp.exists():
                 tmp.unlink()
+        if left:
+            _warn(f"{path.name} was saved without {', '.join(i.where for i in left)}: "
+                  + "; ".join(i.reason if i.reason.startswith(i.where) else f"{i.where}: {i.reason}" for i in left)
+                  + ". What they held is in the file's /extra/not_saved; fix them and save again.")
+        report = SaveReport(path)
+        report.left_out = left
         if self._source is not None:               # a copy of an opened file: this one stays as it is
-            return path
-        self.created, self.writer, self.path = created, writer, path
+            return report
+        self._created, self.writer, self.path = created, writer, path
         self._id, self._parent_id = ident, parent
-        return path
+        return report
+
+    def check(self) -> List["Problem"]:
+        """What a save would refuse or leave out, without writing anything: a list of problems
+        (`where`, `what`, `fix`), empty if everything can be saved. Never raises.
+
+        Run it before a long measurement, with the axes, values and settings given.
+
+        Examples
+        --------
+        >>> for p in d.check():
+        ...     print(p)
+        """
+        problems: List[Problem] = []
+        try:
+            self._check_complete()
+        except (LBDError, TypeError) as e:
+            problems.append(Problem("data", str(e), "fix it before saving; a save would keep the data in "
+                                    "name.lbd.rescue and raise"))
+        except Exception as e:                      # noqa: BLE001 - check() never raises
+            problems.append(Problem("data", f"{type(e).__name__}: {e}", "fix it before saving"))
+        for item in self._settings()["left_out"]:
+            problems.append(Problem(item.where, item.reason, "change or remove it; a save would leave it out"))
+        return problems
+
+    def _dry_run(self, path: Path) -> "SaveReport":
+        """save(dry_run=True): `check`, and whether the folder exists, can be written and has room."""
+        import shutil
+
+        problems = self.check()
+        folder = path.parent if str(path.parent) else Path(".")
+        if not folder.is_dir():
+            problems.append(Problem("path", f"the folder {folder} doesn't exist", "make it, or save elsewhere"))
+        elif not os.access(folder, os.W_OK):
+            problems.append(Problem("path", f"the folder {folder} can't be written", "save elsewhere"))
+        else:
+            need = sum(np.asarray(x.data).nbytes for x in [*self.axes.values(), *self.values.values()]
+                       if x.data is not None and not hasattr(x.data, "_source"))
+            free = shutil.disk_usage(folder).free
+            if free < need * 1.1 + 2**20:
+                problems.append(Problem("path", f"the disk has {free / 2**20:.0f} MB free; the file needs about "
+                                        f"{need / 2**20:.0f} MB", "free some room, or save elsewhere"))
+        report = SaveReport(path)
+        report.problems = problems
+        return report
+
+    def _rescuable(self) -> bool:
+        """Whether every axis and value has its data here (not a value read without it)."""
+        return all(getattr(x, "data", None) is not None and not hasattr(x.data, "_source")
+                   for x in [*self.axes.values(), *self.values.values()])
+
+    def _settings(self) -> Dict[str, Any]:
+        """The settings as they are written, each checked; those that can't be stored are left
+        out (`left_out`: where, their text, why)."""
+        left: List[LeftOut] = []
+
+        def text(where: str, value: Any, fallback: str) -> str:
+            if isinstance(value, str):
+                return value
+            left.append(LeftOut(where, _shown(value), f"{where} must be text, not {type(value).__name__}"))
+            return fallback
+
+        def checked(where: str, value: Any, check: Any) -> Any:
+            if value is None:
+                return None
+            try:
+                return check(value)
+            except (LBDError, TypeError) as e:
+                left.append(LeftOut(where, _shown(value), str(e)))
+                return None
+
+        out: Dict[str, Any] = {"title": text("title", self.title, ""),
+                               "description": text("description", self.description, "")}
+        created = checked("created", self.created, _created_text)
+        out["created"] = created or _dt.datetime.now().astimezone().isoformat(timespec="seconds")
+        out["plot"] = checked("plot", self.plot, lambda v: _plot_json(v, "plot"))
+        out["style"] = checked("style", self.style, lambda v: _style_json(v, "style"))
+        out["style_name"] = checked("style_name", self.style_name, _check_style_name)
+        with h5py.File(f"lbd-meta-check-{id(self)}", "w", driver="core", backing_store=False) as scratch, \
+                warnings.catch_warnings():
+            warnings.simplefilter("ignore", LBDWarning)        # said once, when the file is written
+            if isinstance(self.meta, Mapping):
+                out["meta"] = _storable_meta(self.meta, "meta", scratch.create_group("meta"), left)
+            else:
+                left.append(LeftOut("meta", _shown(self.meta), f"meta must be a dict, not {type(self.meta).__name__}"))
+                out["meta"] = {}
+        out["left_out"] = left
+        return out
 
     def _check_complete(self, live: bool = False) -> None:
         """Check the whole dataset before writing, including parts changed by hand (`live`: for
@@ -1303,12 +1485,13 @@ class Dataset:
 
     def _write(self, f: h5py.File, compression: Optional[str], created: str, writer: str,
                plot_json: Optional[str], style_json: Optional[str], style_name: Optional[str],
-               mpl: Optional[str] = None) -> None:
+               mpl: Optional[str] = None, meta: Optional[Mapping[str, Any]] = None,
+               title: Optional[str] = None, description: Optional[str] = None) -> None:
         f.attrs["lbd_format"] = "LBD"
         self.lbd_version = _version_needed(self)
         f.attrs["lbd_version"] = self.lbd_version
-        f.attrs["title"] = self.title
-        f.attrs["description"] = self.description
+        f.attrs["title"] = self.title if title is None else title
+        f.attrs["description"] = self.description if description is None else description
         f.attrs["created"] = created
         f.attrs["writer"] = writer
 
@@ -1360,7 +1543,7 @@ class Dataset:
                 _create_dataset(g_measured, name, np.asarray(m, dtype=np.uint8), compression,
                                 whole=len(self.values[name].point_shape))
 
-        _write_meta(f.create_group("meta"), self.meta, "meta")
+        _write_meta(f.create_group("meta"), self.meta if meta is None else meta, "meta")
 
         if plot_json is not None or style_json is not None or style_name is not None:
             g_plot = f.create_group("plot")
@@ -1887,7 +2070,7 @@ def _read_header(f: h5py.File, path: Path) -> Dataset:
     ver = _attr_str(f, "lbd_version", "", path)
     _check_version(ver, path)
     d = Dataset(title=_attr_str(f, "title", "", path), description=_attr_str(f, "description", "", path))
-    d.created = _attr_str(f, "created", "", path) or None
+    d._created = _attr_str(f, "created", "", path) or None
     d.writer = _attr_str(f, "writer", "", path) or None
     for attr in ("id", "parent_id"):
         text = _attr_str(f, attr, "", path)
@@ -1898,14 +2081,14 @@ def _read_header(f: h5py.File, path: Path) -> Dataset:
     d.lbd_version = ver
     d.path = path
     if "meta" in f:
-        d.meta = _read_meta(f["meta"], path, "/meta")
+        d._meta = Meta._unchecked(_read_meta(f["meta"], path, "/meta"))
     else:
         _warn(f"{path.name} has no /meta group (the format requires one); reading it without metadata")
     if "plot" in f:
         g = f["plot"]
-        d.plot = _attr_json(g, "spec", path)
-        d.style = _attr_json(g, "style", path)
-        d.style_name = _attr_str(g, "style_name", "", path) or None
+        d._plot = _attr_json(g, "spec", path)
+        d._style = _attr_json(g, "style", path)
+        d._style_name = _attr_str(g, "style_name", "", path) or None
         d.matplotlib = _attr_str(g, "matplotlib", "", path) or None
     if "labels" in f:
         d._labels = _labels.read(f["labels"], path)
@@ -2439,6 +2622,160 @@ def _chunk_shape(shape: Sequence[int], itemsize: int, whole: int = 0, size: int 
             chunk[i] = max(1, min(n, budget))
             budget = max(budget // chunk[i], 1) if chunk[i] == n else 1
     return tuple(chunk)
+
+
+class Meta(dict):
+    """`d.meta`: a dict whose items are checked when they are set, so metadata that can't be
+    stored (`None`, a list mixing text and numbers, an object) is refused at once, before
+    measuring. A nested dict becomes a `Meta` too."""
+
+    def __init__(self, items: Any = (), where: str = "meta"):
+        super().__init__()
+        self._where = where
+        self.update(items)
+
+    def __setitem__(self, key: Any, value: Any) -> None:
+        if not isinstance(key, str) or not key or "/" in key or key == ".":
+            raise LBDError(f"{self._where}: invalid meta key {key!r} (must be non-empty text without '/')")
+        where = f"{self._where}/{key}"
+        if isinstance(value, Mapping):
+            value = Meta(value, where)
+        else:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", LBDWarning)   # said when the file is written
+                _meta_to_attr(value, where)
+        dict.__setitem__(self, key, value)
+
+    def update(self, *args: Any, **kw: Any) -> None:
+        for key, value in dict(*args, **kw).items():
+            self[key] = value
+
+    def setdefault(self, key: Any, default: Any = None) -> Any:
+        if key not in self:
+            self[key] = default
+        return self[key]
+
+    @classmethod
+    def _unchecked(cls, items: Mapping[str, Any], where: str = "meta") -> "Meta":
+        """Metadata read from a file: kept as it is (a file is read whatever it holds)."""
+        m = cls.__new__(cls)
+        dict.__init__(m)
+        m._where = where
+        for key, value in items.items():
+            dict.__setitem__(m, key, cls._unchecked(value, f"{where}/{key}") if isinstance(value, dict) else value)
+        return m
+
+
+class LeftOut(NamedTuple):
+    """A setting a save left out: where it is (`"meta/vna/ifbw"`, `"plot"`), its text, and why."""
+    where: str
+    value: str
+    reason: str
+
+
+class Problem(NamedTuple):
+    """Something `Dataset.check` (or a dry run) found: where, what, and how to fix it."""
+    where: str
+    what: str
+    fix: str
+
+    def __str__(self) -> str:
+        return f"{self.where}: {self.what} ({self.fix})"
+
+
+class SaveReport(type(Path())):  # type: ignore[misc]
+    """What [`Dataset.save`][lbd.Dataset.save] returns: the path written (a `pathlib.Path`,
+    usable as one), with `left_out`, the settings it left out (a list of `LeftOut`: where, their
+    text, why; empty when everything was saved), and for a dry run `problems` (a list of
+    `Problem`)."""
+
+    left_out: List[LeftOut] = []
+    problems: List[Problem] = []
+
+
+def _shown(value: Any) -> str:
+    """A value as text for /extra/not_saved and messages (long values cut)."""
+    text = value if isinstance(value, str) else repr(value)
+    return text if len(text) <= 2000 else text[:2000] + " …"
+
+
+def _storable_meta(meta: Mapping[str, Any], where: str, scratch: h5py.Group, left: List[LeftOut]) -> Dict[str, Any]:
+    """The metadata that can be stored, tried item by item in a scratch file; the others are
+    added to `left`."""
+    out: Dict[str, Any] = {}
+    for key, val in meta.items():
+        w = f"{where}/{key}"
+        try:
+            if not isinstance(key, str) or not key or "/" in key or key == ".":
+                raise LBDError(f"invalid meta key {key!r} (must be non-empty text without '/')")
+            if isinstance(val, Mapping):
+                out[key] = _storable_meta(val, w, scratch.create_group(key), left)
+            else:
+                scratch.attrs[key] = _meta_to_attr(val, w)
+                out[key] = val
+        except (LBDError, TypeError, ValueError, OSError, RuntimeError) as e:
+            left.append(LeftOut(w, _shown(val), str(e)))
+    return out
+
+
+RESCUE_SUFFIX = ".rescue"
+
+
+def _rescue(d: "Dataset", path: Path, error: BaseException) -> Path:
+    """Write everything given to `name.lbd.rescue` as it is (no LBD rules), so a save that can't
+    make a valid file loses nothing; `lbd.recover` reads it back."""
+    target = path.with_name(path.name + RESCUE_SUFFIX)
+    k = 2
+    while target.exists():
+        target = path.with_name(f"{path.name}.{k}{RESCUE_SUFFIX}")
+        k += 1
+    with h5py.File(target, "w") as f:
+        f.attrs["lbd_rescue"] = 1
+        f.attrs["error"] = str(error)
+        for key in ("title", "description", "created", "style_name"):
+            f.attrs[key] = _shown(getattr(d, key))
+        for key in ("meta", "plot", "style"):
+            f.attrs[key] = json.dumps(getattr(d, key), default=repr, ensure_ascii=False)
+        f.attrs["labels"] = json.dumps(d.labels.as_dict(), ensure_ascii=False)
+        for kind, items in (("axes", d.axes), ("values", d.values)):
+            g = f.create_group(kind)
+            for i, (key, item) in enumerate(items.items()):
+                data = getattr(item, "data", None)
+                try:
+                    arr = np.asarray(data)
+                    if arr.dtype == object:
+                        raise ValueError("not an array")
+                    ds = g.create_dataset(str(i), data=arr)
+                except (ValueError, TypeError):
+                    ds = g.create_dataset(str(i), data=_shown(data))
+                ds.attrs["name"] = _shown(key)
+                for attr in ("unit", "label"):
+                    ds.attrs[attr] = _shown(getattr(item, attr, ""))
+                ds.attrs["axes"] = json.dumps(list(getattr(item, "axes", None) or []), default=str)
+    return target
+
+
+def _read_rescue(path: Path) -> Dict[str, Any]:
+    """A rescue file (`name.lbd.rescue`) as plain Python: title, description, created, meta,
+    plot, style, style_name, labels, error, and `axes` / `values` as {name: {data, unit,
+    label, axes}}."""
+    with h5py.File(path, "r") as f:
+        if not f.attrs.get("lbd_rescue"):
+            raise LBDError(f"{path.name} is not a rescue file written by lbd")
+        out: Dict[str, Any] = {k: _attr_str(f, k, "", path) for k in ("error", "title", "description", "created", "style_name")}
+        for key in ("meta", "plot", "style", "labels"):
+            out[key] = json.loads(_attr_str(f, key, "null", path))
+        for kind in ("axes", "values"):
+            items: Dict[str, Any] = {}
+            for i in sorted(f[kind], key=int):
+                ds = f[kind][i]
+                data = ds[()]
+                items[_attr_str(ds, "name", i, path)] = {
+                    "data": data.decode() if isinstance(data, bytes) else data,
+                    "unit": _attr_str(ds, "unit", "", path), "label": _attr_str(ds, "label", "", path),
+                    "axes": json.loads(_attr_str(ds, "axes", "[]", path))}
+            out[kind] = items
+    return out
 
 
 def _write_meta(group: h5py.Group, meta: Mapping[str, Any], where: str) -> None:

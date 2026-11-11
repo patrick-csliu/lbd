@@ -338,6 +338,33 @@ existing file is replaced.
 - `compression="gzip"` compresses arrays of 1024 elements or more. It is lossless, and every
   language reads it transparently.
 
+### If a save goes wrong
+
+A save never loses the measurement:
+
+- **Settings are checked when they are set.** `d.meta["x"] = None`, `d.plot = {"knd": ...}`, a
+  `created` that isn't a date: each raises at once, before the measurement starts.
+- **A setting that still can't be stored** (changed by hand afterwards, such as a list in
+  `d.meta` given a `None`) is left out: everything else is saved, an `LBDWarning` names it, and
+  its text is kept in the file's `/extra/not_saved`. `d.save` returns the path with
+  `left_out`, the list of what was left out.
+- **Data that can't make a valid file** (a value whose data no longer fits its axes) is
+  written as it is to `name.lbd.rescue`, and `LBDError` names that file. `lbd.recover` reads it
+  back, to fix and save.
+- A full disk or a folder that can't be written raises the usual `OSError`; the old file is
+  untouched.
+
+Before a long measurement, `d.check()` lists what a save would refuse or leave out, and
+`d.save(path, dry_run=True)` also checks the folder and the room on the disk; neither writes
+anything:
+
+```python
+for problem in d.check():
+    print(problem)                  # where: what (how to fix it)
+report = d.save("sweep.lbd", dry_run=True)
+print(report.problems)              # [] when the save would go through
+```
+
 ## Reading
 
 ```python

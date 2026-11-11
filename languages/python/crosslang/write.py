@@ -109,3 +109,16 @@ lb.labels = {"star": True, "project": "Chip – é / Run 1", "users": ["Ana"], "
 lb.save(out / "labels.lbd")
 lbd.set_labels(out / "labels.lbd", tags=["checked"], users=["Bo"])
 lbd.remove_labels(out / "labels.lbd", tags=["calibration"])
+
+# The not-saved fixture (plan 17): a setting changed by hand so it can't be stored; saved without it.
+import warnings  # noqa: E402
+
+ns = lbd.Dataset(title="Not saved")
+ns.add_axis("x", [0.0, 1.0])
+ns.add_value("y", [1.0, 2.0], axes="x")
+ns.meta["ok"] = 1
+ns.meta["vec"] = [1.0]
+ns.meta["vec"].append(None)
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore", lbd.LBDWarning)
+    ns.save(out / "notsaved.lbd")

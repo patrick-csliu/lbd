@@ -220,12 +220,15 @@ def test_bad_metadata_is_refused_before_the_finish(tmp_path):
     w.add_axis("x", [1, 2])
     w.add_value("y", axes="x")
     w.write(x=0, y=1.0)
-    w.meta["oops"] = None
+    with pytest.raises(LBDError, match="None"):                 # at once
+        w.meta["oops"] = None
+    w.meta["list"] = [1.0]
+    w.meta["list"].append(None)                                  # changed by hand: refused at the finish
     with pytest.raises(LBDError, match="None"):
         w.close()
     assert lbd.writing_status(w.writing_path) == "measuring"    # still writing, nothing lost
     w.write(x=1, y=2.0)
-    del w.meta["oops"]
+    del w.meta["list"]
     assert list(lbd.load(w.close()).values["y"].data) == [1.0, 2.0]
 
 

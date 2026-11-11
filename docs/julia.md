@@ -277,6 +277,30 @@ LBD.info(path) -> Dataset
 
 Reads everything except value data. It is the same as `LBD.load(path; values=String[])`.
 
+## If a save goes wrong
+
+A save never loses the measurement:
+
+- `d.meta = ...`, `d.plot = ...`, `d.style = ...`, `d.created = ...` are checked when they are
+  set, so a mistake shows before the measurement starts.
+- Metadata or a saved view that still can't be stored (changed by hand, such as
+  `d.meta["x"] = nothing`) is left out: everything else is saved, a warning names it, and its
+  text is kept in the file's `/extra/not_saved`. `LBD.save(path, d; report=true)` returns
+  `(path, left_out, problems)`.
+- Data that can't make a valid file (a value whose data no longer fits its axes) is written as
+  it is to `name.lbd.rescue`, and an `LBDError` names that file; `LBD.recover` reads it back as
+  a Dict, to fix and save.
+
+`LBD.check(d)` lists what a save would refuse or leave out, and
+`LBD.save(path, d; dry_run=true)` also checks the folder and the room on the disk; neither
+writes anything:
+
+```julia
+d = LBD.load("sweep.lbd")
+isempty(LBD.check(d))                            # true: a save would go through
+LBD.save("sweep.lbd", d; dry_run=true).problems  # nothing written
+```
+
 ## Labels
 
 A file can carry its labels: a star, a project, users, tags and a comment, as LBD Viewer's

@@ -163,10 +163,8 @@ tc.verifyError(@() d.addValue("v", [1 2], "nope"), 'lbd:invalid');
 tc.verifyError(@() d.addValue("x", [1 2], "x"), 'lbd:invalid');
 tc.verifyError(@() d.addValue("v", ["a" "b"], "x"), 'lbd:invalid');
 tc.verifyError(@() d.addValue("v", [1i 2i], "x", Dtype="float64"), 'lbd:invalid');
-d.Meta.bad = [];
-p = fullfile(tc.TestData.dir, "bad.lbd");
-tc.verifyError(@() d.save(p), 'lbd:invalid');
-tc.verifyFalse(isfile(p));
+tc.verifyError(@() setMetaBad(d, []), 'lbd:invalid');   % when it is set, before measuring
+tc.verifyFalse(isfield(d.Meta, 'bad'));
 end
 
 function testIdMadeKeptAndNew(tc)
@@ -321,17 +319,13 @@ end
 function testSavedViewMustBeAnObject(tc)
 d = makeSweep();
 p = fullfile(tc.TestData.dir, "view.lbd");
-d.Plot = 5;
-tc.verifyError(@() d.save(p), 'lbd:invalid');
-d.Plot = '[1, 2]';
-tc.verifyError(@() d.save(p), 'lbd:invalid');
-d.Plot = '{"kind": ';
-tc.verifyError(@() d.save(p), 'lbd:invalid');
+tc.verifyError(@() setProp(d, 'Plot', 5), 'lbd:invalid');          % when it is set
+tc.verifyError(@() setProp(d, 'Plot', '[1, 2]'), 'lbd:invalid');
+tc.verifyError(@() setProp(d, 'Plot', '{"kind": '), 'lbd:invalid');
 tc.verifyFalse(isfile(p));
 d.Plot = '{"kind": "heatmap"}';
 d.Style = struct("figure", struct("width_mm", 120));
-d.StyleName = "";
-tc.verifyError(@() d.save(p), 'lbd:invalid');
+tc.verifyError(@() setProp(d, 'StyleName', ""), 'lbd:invalid');
 d.StyleName = "thesis";
 d.save(p);
 r = lbd.load(p);
@@ -613,10 +607,8 @@ w = lbd.Writer(fullfile(tc.TestData.dir, "meta.lbd"));
 w.addAxis("x", 1:2);
 w.addValue("y", [], "x");
 w.write(x=1, y=1);
-w.Meta.bad = {1};
-tc.verifyError(@() w.close(), 'lbd:invalid');
+tc.verifyError(@() setMetaBad(w, {1}), 'lbd:invalid');           % at once, still measuring
 tc.verifyEqual(lbd.writingStatus(fullfile(tc.TestData.dir, "meta.lbd")), "measuring");
-w.Meta = struct();
 w.write(x=2, y=2);
 tc.verifyEqual(lbd.load(w.close()).Values.y.Data, [1; 2]);
 end
@@ -990,4 +982,28 @@ tc.verifyEqual(r.LbdVersion, "1.3");
 tc.verifyTrue(r.Labels.Star);
 tc.verifyEqual(r.Labels.Tags, "while measuring");
 tc.verifyEqual(r.Labels.Written, at);              % the time they were set, not the finish
+end
+
+% ---- a save never loses the data (plan 17) ------------------------------------------------------
+
+function testSettingsAreCheckedWhenSet(tc)
+d = makeSweep();
+tc.verifyError(@() setProp(d, 'Meta', struct('x', {{1, "a"}})), 'lbd:invalid');
+tc.verifyError(@() setProp(d, 'Plot', 5), 'lbd:invalid');
+tc.verifyError(@() setProp(d, 'Created', "yesterday"), 'lbd:invalid');
+tc.verifyError(@() setProp(d, 'StyleName', ""), 'lbd:invalid');
+tc.verifyEmpty(fieldnames(d.Meta));
+tc.verifyEmpty(d.check());
+p = fullfile(tc.TestData.dir, "nowhere", "a.lbd");
+[~, report] = d.save(p, DryRun=true);
+tc.verifyEqual([report.Problems.Where], "path");
+tc.verifyFalse(isfolder(fullfile(tc.TestData.dir, "nowhere")));
+end
+
+function setProp(d, name, value)
+d.(name) = value;
+end
+
+function setMetaBad(d, value)
+d.Meta.bad = value;
 end

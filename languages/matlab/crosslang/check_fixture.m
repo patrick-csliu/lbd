@@ -42,6 +42,18 @@ for f = dir(fullfile(root, '*', 'labels.lbd'))'
         fprintf('  matlab reads %-7s labels.lbd FAILED: %s\n', lang, err.message);
     end
 end
+for f = dir(fullfile(root, '*', 'notsaved.lbd'))'
+    lang = string(regexp(f.folder, '[^\\/]+$', 'match', 'once'));
+    try
+        d = lbd.load(fullfile(f.folder, f.name));
+        expect(isequal(d.Values.y.Data(:)', [1 2]), "y");
+        expect(isequal(fieldnames(d.Meta), {'ok'}) && d.Meta.ok == 1, "only the meta that could be stored");
+        fprintf('  matlab reads %-7s notsaved.lbd OK\n', lang);
+    catch err
+        failed = true;
+        fprintf('  matlab reads %-7s notsaved.lbd FAILED: %s\n', lang, err.message);
+    end
+end
 for name = ["fixture.lbd" "groups.lbd" "rplus.lbd"]
     for f = dir(fullfile(root, '*', name))'
         lang = string(regexp(f.folder, '[^\\/]+$', 'match', 'once'));

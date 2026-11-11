@@ -102,6 +102,13 @@ with a notice. See [languages/README.md](../../languages/README.md) for adding o
 | written | labels given before the save: star, project `Chip – é / Run 1` (spaces around `/` are removed), users `["Ana"]`, tags `["calibration"]`, comment `ü – note`; then the file changed with the language's set-labels function (tags `["checked"]`, users `["Bo"]`, added) and remove-labels function (tag `calibration`) |
 | check | `lbd_version` `"1.3"`; star; project `Chip – é/Run 1`; users `["Ana", "Bo"]`; tags `["checked"]`; comment `ü – note`; `written` like `2026-11-11T09:30:00.125Z`; saved to another file, the labels and `written` are the same |
 
+## Not-saved fixture definition (plan 17; languages whose settings can be changed past their checks)
+
+| Item | Definition |
+|---|---|
+| file | `<out>/notsaved.lbd`, title `Not saved`: axis `x` `[0, 1]`, value `y(x)` `[1, 2]`, meta `ok = 1` and one meta item changed by hand so it can't be stored (Python: a list given `None`; Julia: `nothing`) |
+| check | `y = [1, 2]`, meta exactly `{ok: 1}`: the save left the bad item out (kept in `/extra/not_saved`), and every reader reads the file |
+
 ## Reading while measuring
 
 `run_all.py` then starts every language's `read_live` command (`{file}` / `LBD_FILE`: a

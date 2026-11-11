@@ -110,6 +110,12 @@ function check_rplus(path)
     @test d.labels.tags == ["kept"]
 end
 
+function check_notsaved(path)
+    d = LBD.load(path)
+    @test d["y"].data == [1.0, 2.0]
+    @test collect(keys(d.meta)) == ["ok"] && d.meta["ok"] == 1
+end
+
 function check_labels(path)
     d = LBD.load(path)
     l = d.labels
@@ -153,5 +159,10 @@ for lang in sort(readdir(root))
     isfile(p) || continue
     @testset "julia reads $lang labels.lbd" begin
         check_labels(p)
+    end
+    p = joinpath(root, lang, "notsaved.lbd")
+    isfile(p) || continue
+    @testset "julia reads $lang notsaved.lbd" begin
+        check_notsaved(p)
     end
 end

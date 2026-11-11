@@ -108,3 +108,11 @@ lb.labels = (star=true, project="Chip – é / Run 1", users=["Ana"], tags=["cal
 LBD.save(joinpath(out, "labels.lbd"), lb)
 LBD.set_labels(joinpath(out, "labels.lbd"); tags=["checked"], users=["Bo"])
 LBD.remove_labels(joinpath(out, "labels.lbd"); tags=["calibration"])
+
+# The not-saved fixture (plan 17): metadata changed by hand so it can't be stored; saved without it.
+ns = LBD.Dataset("Not saved")
+add_axis!(ns, "x", [0.0, 1.0])
+add_value!(ns, "y", [1.0, 2.0], "x")
+ns.meta["ok"] = 1
+ns.meta["bad"] = nothing
+LBD.save(joinpath(out, "notsaved.lbd"), ns)

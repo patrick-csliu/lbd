@@ -25,6 +25,15 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
   gets an error saying to remove it. Each choice of the Save as CSV dialog says what it does when
   you point at it.
 
+- **A save never loses the measurement** (every language). Metadata, the saved view, the style
+  and `created` are checked when they are set, so a mistake shows before measuring. Python and
+  Julia: a setting that still can't be stored (changed by hand afterwards) is left out with a
+  warning, everything else is saved, and its text is kept in the file's `/extra/not_saved`;
+  data that can't make a valid file is kept as it is in `name.lbd.rescue`, which `recover`
+  reads back. `check()` (Python `d.check()`, MATLAB `d.check()`, Julia `LBD.check(d)`) lists
+  what a save would refuse, and a dry run (`dry_run=True`, `DryRun=true`) checks the folder too,
+  writing nothing. Python's `d.save` returns the path with `left_out`.
+
 - **The Library writes labels into the data files.** A star, project, users, tags or comment
   set in the Library is written into the `.lbd` file about 2 s after the last edit (and before
   the viewer closes), so labels go with a file that is copied or moved. Labels already given
