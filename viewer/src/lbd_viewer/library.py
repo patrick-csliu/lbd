@@ -38,7 +38,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from . import scan, versions
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4     # 4: file_labels, and copies compared by their data (plan 17)
 LIBRARY_FILE = "library.sqlite"
 # How often the open folders are checked: while the Library is shown, and otherwise.
 ACTIVE_EVERY, IDLE_EVERY, ACTIVE_FOR = 3.0, 60.0, 30.0
@@ -63,6 +63,45 @@ log = logging.getLogger("lbd_viewer")
 def _version(st: os.stat_result, path: Optional["os.PathLike[str] | str"] = None) -> str:
     """A data file's version (versions.py): unchanged by LBD's own label writes when `path` is given."""
     return versions.content(path, st) if path is not None else versions.raw(st)
+
+
+def data_hash(path: Path) -> str:
+    """SHA-256 of what a data file holds, without its labels: every group, dataset and attribute
+    in sorted order (names, types, shapes, the data read in blocks of about 1 MB), leaving out
+    /labels and the format version (which labels raise). Two copies of one measurement whose
+    labels differ have the same data hash (plan 17)."""
+    import h5py
+    import numpy as np
+
+    h = hashlib.sha256()
+
+    def attrs(obj) -> None:
+        for key in sorted(obj.attrs):
+            if obj.name == "/" and key == "lbd_version":
+                continue
+            h.update(f"@{key}=".encode())
+            h.update(repr(obj.attrs[key]).encode())
+
+    with h5py.File(path, "r") as f:
+        attrs(f)
+        names: List[str] = []
+        f.visit(names.append)
+        for name in sorted(names):
+            if name == "labels" or name.startswith("labels/"):
+                continue
+            obj = f[name]
+            h.update(f"\n{name}:".encode())
+            attrs(obj)
+            if isinstance(obj, h5py.Dataset):
+                h.update(f"{obj.dtype}{obj.shape}".encode())
+                if obj.ndim == 0:
+                    h.update(np.asarray(obj[()]).tobytes())
+                    continue
+                row = max(1, obj.dtype.itemsize * int(np.prod(obj.shape[1:], dtype=np.int64)))
+                step = max(1, (1 << 20) // row)
+                for i in range(0, obj.shape[0], step):
+                    h.update(np.ascontiguousarray(obj[i:i + step]).tobytes())
+    return h.hexdigest()
 
 
 def parse_created(text: Optional[str]) -> Optional[Tuple[float, str]]:
@@ -125,6 +164,7 @@ def row_from_summary(path: Path, root: str, st: os.stat_result, summary: Dict[st
         "value_names": ", ".join(v["name"] for v in values),
         "searchable": "\n".join(w for w in words if w).lower(),
         "summary": json.dumps(summary),
+        "file_labels": json.dumps(summary["labels"]) if summary.get("labels") else None,   # /labels (plan 17)
     })
     return row
 
@@ -138,7 +178,7 @@ def _stat_row(path: Path, root: str, st: os.stat_result, error: Optional[str] = 
         "version": _version(st, path), "size": st.st_size, "mtime": st.st_mtime, "read": 0, "title": "", "description": "",
         "created": None, "sort_time": st.st_mtime, "day": local.date().isoformat(), "date_from_file": 1,
         "writer": None, "lbd_version": None, "sweep": "", "points": 0, "value_names": "",
-        "searchable": path.name.lower(), "summary": None, "error": error, "seen": time.time(),
+        "searchable": path.name.lower(), "summary": None, "error": error, "seen": time.time(), "file_labels": None,
         "id": None, "parent_id": None, "fsid": f"{st.st_dev}:{st.st_ino}", "hash": None, "copies": 0, "conflict": 0,
     }
 
@@ -184,6 +224,10 @@ class LibraryIndex:
         self._sidecar_state: Optional[Dict[str, Optional[str]]] = None
         # how finished data files are changed (Settings: edit in place or copy and swap; files.edit_data_file)
         self.edit_method: Callable[[], str] = lambda: "in_place"
+        # each file's labels as shown, when and where last changed, and what its data file holds
+        # (library_labels.apply); called after each such look: the label writer (label_writer.py)
+        self.label_state: Dict[str, Dict[str, Any]] = {}
+        self.after_apply: List[Callable[[], None]] = []
 
     def trash(self, path: Path) -> None:
         """Move a file (a merged sync conflict copy) to the Recycle Bin."""
@@ -220,7 +264,7 @@ class LibraryIndex:
                 searchable TEXT, summary TEXT, error TEXT, seen REAL,
                 id TEXT, parent_id TEXT, fsid TEXT, hash TEXT, copies INTEGER DEFAULT 0, conflict INTEGER DEFAULT 0,
                 star INTEGER DEFAULT 0, project TEXT, users TEXT DEFAULT '', tags TEXT DEFAULT '',
-                comment TEXT DEFAULT '', label_text TEXT DEFAULT '')""")
+                comment TEXT DEFAULT '', label_text TEXT DEFAULT '', file_labels TEXT)""")
             db.execute("CREATE TABLE IF NOT EXISTS sidecars (folder TEXT PRIMARY KEY)")
             db.execute("CREATE INDEX IF NOT EXISTS files_id ON files (id)")
             db.execute("CREATE INDEX IF NOT EXISTS files_root ON files (root)")
@@ -350,14 +394,19 @@ class LibraryIndex:
         return out
 
     def refresh(self, path: str) -> None:
-        """Read one file again now (LBD itself just changed it), then compare same ids."""
+        """Read one file again now (LBD itself just changed it), then compare same ids. The labels
+        shown for it stay (they come from the label files, library_labels.apply)."""
         p = Path(path).resolve()
         st = p.stat()
+        kept = ("star", "project", "users", "tags", "comment", "label_text")
         with self._lock:
-            r = self._connect().execute("SELECT root FROM files WHERE path = ?", (str(p),)).fetchone()
+            r = self._connect().execute(f"SELECT root, {', '.join(kept)} FROM files WHERE path = ?", (str(p),)).fetchone()
         root = r[0] if r else next((o for o in outermost(self.roots())
                                     if str(p).lower().startswith(o.lower().rstrip("\\/") + os.sep)), str(p.parent))
-        self._write([self._read(p, root, st)])
+        row = self._read(p, root, st)
+        if r:
+            row.update(zip(kept, r[1:]))
+        self._write([row])
         self._compare_same_ids()
         self.generation += 1
 
@@ -381,10 +430,9 @@ class LibraryIndex:
             for m in members[1:]:
                 if m[1] == first[1]:                       # same size and modification time
                     continue
-                if m[2] != first[2]:                       # another size: not the same content
-                    same = False
-                    break
-                if self._hash(first) != self._hash(m):    # same size, other time: compare contents
+                # compare the data: labels written into one copy (plan 17) change its size and
+                # time, not what was measured
+                if self._hash(first) != self._hash(m):
                     same = False
                     break
             for path, *_ in members:
@@ -398,18 +446,14 @@ class LibraryIndex:
             db.execute("COMMIT")
 
     def _hash(self, member: Tuple[str, str, int, Optional[str]]) -> Optional[str]:
-        """A file's content hash (SHA-256), read once per version and kept in the index."""
+        """A file's data hash (data_hash), read once per version and kept in the index."""
         path, version, _, known = member
         if known:
             return known
-        h = hashlib.sha256()
         try:
-            with open(path, "rb") as f:
-                for block in iter(lambda: f.read(1 << 20), b""):
-                    h.update(block)
-        except OSError:
+            digest = data_hash(Path(path))
+        except Exception:                               # noqa: BLE001 - unreadable: not compared
             return None
-        digest = h.hexdigest()
         with self._lock:
             self._connect().execute("UPDATE files SET hash = ? WHERE path = ? AND version = ?", (digest, path, version))
         return digest

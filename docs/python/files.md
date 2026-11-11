@@ -284,6 +284,36 @@ When a saved view or style is written, the file also records the installed matpl
 (`d.matplotlib` after loading, e.g. `"3.11.2"`), because a view's
 [annotations](../styles/plot-settings.md#annotations) are matplotlib calls.
 
+### Labels
+
+A file can carry its labels: a star, a project, users, tags and a comment, as LBD Viewer's
+Library shows them. They are stored in the file, so they go wherever the file is copied or
+moved, also to a computer without LBD Viewer.
+
+```python
+d.labels.star = True
+d.labels.project = "Chip 3/Cooldown 7"           # a nested label: parts separated by /
+d.labels.users.add("Ana")
+d.add_tags("calibration", "first try")
+d.labels = {"project": "Chip 3/Cooldown 7", "tags": ["calibration"]}   # or all at once
+```
+
+Each label is checked when it is set (text, no empty part), so a mistake shows before the
+measurement starts. `d.labels.written` says when they were last set. A file with labels is
+format 1.3; LBD older than 1.3.0 reads it and ignores the labels.
+
+The labels of an existing file change without rewriting its data:
+
+```python
+lbd.set_labels("sweep.lbd", tags=["checked"], star=True)    # tags and users are added
+lbd.set_labels("sweep.lbd", tags=["final"], replace=True)  # ... or replaced
+lbd.remove_labels("sweep.lbd", tags=["checked"])
+lbd.labels("sweep.lbd")                                    # read them; None if it has none
+```
+
+When LBD Viewer's Library edits a file's labels, it writes them into the file too, a moment
+later. If a script and the Library change the same label, the later change wins.
+
 ## Saving
 
 [`d.save(path)`][lbd.Dataset.save] writes the file and sets `d.writer` and `d.path`. An

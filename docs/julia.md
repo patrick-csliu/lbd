@@ -59,6 +59,7 @@ A mutable struct with these fields:
 | `matplotlib` | `String` or `nothing` | matplotlib version that last wrote the saved view (set by Python and the viewer). Julia keeps it when saving. |
 | `id` | `String` or `nothing` | The measurement's identity (a UUID, made at the first save; see `LBD.save`). Don't set it by hand; `new_id!(d)` makes a new one. |
 | `parent_id` | `String` or `nothing` | The `id` of the file this one was made from. |
+| `labels` | `Labels` | The file's [labels](#labels): `star`, `project` (or `nothing`), `users`, `tags`, `comment`; `written` says when they were last set. Checked when set. |
 | `created` | `String`, `DateTime` or `nothing` | When the data was created, ISO-8601 with a UTC offset (`"2026-10-13T16:09:00+08:00"`). Editable: give it as such a text or a `DateTime` (taken in this computer's time zone); a text without an offset gets this computer's offset. `nothing`: `save` fills in the time of the first save. A loaded file keeps its `created`, and saving again keeps it. |
 | `writer` | `String` or `nothing` | Program that wrote the file, e.g. `"julia LBD 1.0.0"`. |
 | `lbd_version` | `String` | Format version of the file. |
@@ -275,6 +276,33 @@ LBD.info(path) -> Dataset
 ```
 
 Reads everything except value data. It is the same as `LBD.load(path; values=String[])`.
+
+## Labels
+
+A file can carry its labels: a star, a project, users, tags and a comment, as LBD Viewer's
+Library shows them. They are stored in the file (format 1.3), so they go wherever the file goes.
+
+```julia
+d = LBD.load("sweep.lbd")
+d.labels.star = true
+d.labels.project = "Chip 3/Cooldown 7"           # a nested label: parts separated by /
+add_tags!(d, "calibration", "first try")
+d.labels = (project="Chip 3/Cooldown 7", users=["Ana"])   # or all at once
+LBD.save("sweep.lbd", d)
+```
+
+Each label is checked when it is set, so a mistake shows before measuring. The labels of an
+existing file change without rewriting its data; tags and users are added (`replace=true`
+replaces them):
+
+```julia
+LBD.set_labels("sweep.lbd"; tags=["checked"], star=true)
+LBD.remove_labels("sweep.lbd"; tags=["checked"])
+LBD.labels("sweep.lbd")                          # read them; nothing if it has none
+```
+
+An `LBD.Writer` has `w.labels` and `add_tags!` too: labels set before the first write are in
+the file from the start, labels set while measuring are written when it finishes.
 
 ## `LBD.version`
 

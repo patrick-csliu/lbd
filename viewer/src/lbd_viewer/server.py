@@ -46,6 +46,7 @@ from . import VERSION  # noqa: E402
 from . import files, images, scan, sdk  # noqa: E402
 from .catalog import Catalog, catalog_dir, fitting, structure  # noqa: E402
 from . import labels, library_labels  # noqa: E402
+from .label_writer import LabelWriter  # noqa: E402
 from .library import LibraryIndex, writing_status  # noqa: E402
 from .previews import PreviewCache, PreviewError, Previewer  # noqa: E402
 from . import live, memory, reading, summaries, versions  # noqa: E402
@@ -120,6 +121,7 @@ class AppState:
         self.live = live.shared()           # files being measured: state and progress (live.py)
         self._catalog: Optional[Catalog] = None
         self._library: Optional[LibraryIndex] = None
+        self._label_writer: Optional[LabelWriter] = None
         self._previews: Optional[Previewer] = None
         self.started = time.monotonic()
         self.last_heartbeat: Optional[float] = None
@@ -140,8 +142,19 @@ class AppState:
             self._library = LibraryIndex(catalog_dir(cfg.dir), lambda: cfg.settings()["roots"],
                                          lambda: cfg.settings()["library"]["read_headers"])
             self._library.edit_method = lambda: cfg.settings()["library"]["data_file_edits"]
+            # labels go into the data files too, a moment after each edit (plan 17)
+            self._label_writer = LabelWriter(self._library, self._library.edit_method)
+            self._library.after_apply.append(self._label_writer.check)
+            self._label_writer.start()
             self._library.start()
         return self._library
+
+    def labels_note(self, path: str) -> Dict[str, Any]:
+        """Whether a file's labels are still to be written into it, and why they couldn't be yet."""
+        w = self._label_writer
+        if w is None:
+            return {"labels_pending": False, "labels_problem": None}
+        return {"labels_pending": w.pending(path), "labels_problem": w.problems.get(path)}
 
     # Previews are drawn in worker processes; tests set this False (threads: quicker to start).
     preview_processes = True
@@ -186,7 +199,11 @@ class AppState:
         return row
 
     def close(self) -> None:
-        """Stop the Library's indexing and previews, and close LBD's databases (the server is stopping)."""
+        """Write the labels still waiting into their data files, stop the Library's indexing and
+        previews, and close LBD's databases (the server is stopping)."""
+        if self._label_writer is not None:
+            self._label_writer.close()
+            self._label_writer = None
         if self._previews is not None:
             self._previews.close()
             self._previews = None
@@ -622,6 +639,8 @@ def file_summary(d: "lbd.Dataset") -> Dict[str, Any]:
         "axes": axes, "values": values, "meta": jsonable(d.meta),
         "groups": {g.name: list(g.order) for g in d.groups.values()},
         "plot": d.plot, "style": d.style, "style_name": d.style_name, "matplotlib": d.matplotlib,
+        # the labels the file holds (/labels, plan 17), or None; the Library may show newer ones
+        "labels": {**d.labels.as_dict(), "written": d.labels.written} if d.labels.written else None,
         "version": file_version(d.path) if d.path else None,
         "writing": writing_status(str(d.path)) if d.path else None,
     }
@@ -1018,10 +1037,13 @@ def create_app(state: AppState) -> FastAPI:
         chosen (`project` and its sub-projects; any of `tags`; any of `users`; `starred`; only
         `conflicts`), sorted."""
         try:
-            return state.library.list(_library_folder(folder), q, date, sort, order, offset, limit,
-                                      project, tags, users, starred, conflicts)
+            out = state.library.list(_library_folder(folder), q, date, sort, order, offset, limit,
+                                     project, tags, users, starred, conflicts)
         except ValueError as e:
             raise HTTPException(400, str(e))
+        for r in out["rows"]:
+            r.update(state.labels_note(r["path"]))
+        return out
 
     @app.get("/api/library/facets")
     def library_facets(folder: Optional[str] = Query(None), q: str = Query(""), date: str = Query("")):
@@ -1037,7 +1059,7 @@ def create_app(state: AppState) -> FastAPI:
             raise HTTPException(404, f"not a file: {path}")
         with collect_warnings() as warns:
             summary = state.library.file(str(p))
-        return {**summary, "warnings": warns}
+        return {**summary, **state.labels_note(str(p)), "warnings": warns}
 
     def _labels_follow(action) -> None:
         """Labels follow a file LBD renamed or recycled (when the Library is in use)."""

@@ -63,6 +63,24 @@ and recipes, see [Reading and writing files](../../python/files.md).
     options:
       heading_level: 3
 
+## Labels
+
+::: lbd.Labels
+    options:
+      heading_level: 3
+
+::: lbd.labels
+    options:
+      heading_level: 3
+
+::: lbd.set_labels
+    options:
+      heading_level: 3
+
+::: lbd.remove_labels
+    options:
+      heading_level: 3
+
 ## Versions
 
 ::: lbd.version

@@ -311,6 +311,11 @@ back through the sync). In Python: `lbd.recover(path, keep=True)`.
 - Tested on Windows; macOS and Linux are checked by the automatic tests.
 - Files being written use the HDF5 1.10 format, readable by every HDF5 since 1.10 (MATLAB needs
   HDF5 1.10 or newer to write them).
+- **Labels** (star, project, users, tags, comment) go on the Writer like on a dataset:
+  `w.labels.tags.add("calibration")` (MATLAB `w.addTags("calibration")`, Julia
+  `add_tags!(w, "calibration")`). Labels set before the first write are in the file from the
+  start; labels set while measuring are written when it finishes, with the time they were set,
+  so a label changed in LBD Viewer's Library during the measurement isn't undone.
 - The same calls work without a Writer: `add_value` without data and `write` fill an
   `lbd.Dataset` in memory, which you `save` at the end.
 - The rules for files being written are in the [file format](../format.md#7-files-being-written).

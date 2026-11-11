@@ -35,7 +35,8 @@ def test_labels_are_written_read_and_removed(tmp_path):
     assert e["changed"]["tags"]["resonator"][2] is True and e["changed"]["star"][1] == labels.computer()
     add(tmp_path, star=False, project=None, remove_tags=["flux/bias", "resonator"], remove_users=["Lab A/Qubit team/Patrick"],
         comment="")
-    assert not (tmp_path / labels.SIDECAR).exists()                  # no labels left: no file
+    e = entry(labels.read(tmp_path))                                  # no labels left: the entry stays, with the
+    assert not labels.has_labels(e) and e["changed"]["star"][0]        # removals' times (newer than an old data file)
     with pytest.raises(labels.LabelsError, match="empty part"):
         add(tmp_path, add_tags=["a//b"])
 

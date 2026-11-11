@@ -182,6 +182,10 @@ class Running:
         try:
             self.server.run()
         finally:
+            try:
+                self.state.close()               # labels still waiting are written into their files
+            except Exception as e:               # noqa: BLE001 - stopping anyway; said in the log
+                print(f"lbd-view: while stopping: {e}", file=sys.stderr)
             if self.lock:
                 try:
                     if json.loads(self.lock.read_text(encoding="utf-8")).get("pid") == os.getpid():

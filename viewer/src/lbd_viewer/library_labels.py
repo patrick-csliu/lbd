@@ -34,9 +34,10 @@ LABEL_KEYS = ("star", "project", "users", "tags", "comment")
 
 
 def _rows(ix: "LibraryIndex") -> List[Dict[str, Any]]:
+    keys = ("path", "name", "id", "created", "conflict", "version", "fsid", "file_labels")
     with ix._lock:
-        cur = ix._connect().execute("SELECT path, name, id, created, conflict, version, fsid FROM files")
-        return [dict(zip(("path", "name", "id", "created", "conflict", "version", "fsid"), r)) for r in cur]
+        cur = ix._connect().execute(f"SELECT {', '.join(keys)} FROM files")
+        return [dict(zip(keys, r)) for r in cur]
 
 
 def _folders(ix: "LibraryIndex", rows: List[Dict[str, Any]]) -> List[str]:
@@ -48,9 +49,10 @@ def _folders(ix: "LibraryIndex", rows: List[Dict[str, Any]]) -> List[str]:
     return sorted(out)
 
 
-def apply(ix: "LibraryIndex", renames: Optional[Dict[str, str]] = None) -> List[str]:
+def apply(ix: "LibraryIndex", renames: Optional[Dict[str, str]] = None, _again: bool = False) -> List[str]:
     """Work out every file's labels from the sidecars again (after a scan or an edit); follow
-    renamed or moved files. Returns notes for the user."""
+    renamed or moved files; take what is newer in the labels the data files hold (plan 17).
+    Returns notes for the user."""
     notes: List[str] = []
     renames = renames or {}
     rows = _rows(ix)
@@ -91,7 +93,7 @@ def apply(ix: "LibraryIndex", renames: Optional[Dict[str, str]] = None) -> List[
                     moves.append((folder, e, everywhere[0]))
                 elif (same := by_path.get(str(Path(folder) / e.get("name", "")))) and not same["id"]:
                     give(same, e)                          # its id was lost (saved by an older program)
-                else:
+                elif labels.has_labels(e):
                     missing.append({"folder": folder, **_brief(e)})
             else:
                 path = str(Path(folder) / e.get("name", ""))
@@ -101,7 +103,8 @@ def apply(ix: "LibraryIndex", renames: Optional[Dict[str, str]] = None) -> List[
                     same = [x for x in rows if x["created"] == e["created"] and x["path"] not in labelled]
                     r = same[0] if len(same) == 1 else None
                 if r is None:
-                    missing.append({"folder": folder, **_brief(e)})
+                    if labels.has_labels(e):
+                        missing.append({"folder": folder, **_brief(e)})
                 elif str(Path(r["path"]).parent) == folder and r["name"] == e.get("name"):
                     give(r, e)
                 else:
@@ -109,7 +112,11 @@ def apply(ix: "LibraryIndex", renames: Optional[Dict[str, str]] = None) -> List[
     for frm, e, row in moves:
         notes += _move(frm, e, row, ix)
         give(row, e)
+    held = {r["path"]: json.loads(r["file_labels"]) for r in rows if r.get("file_labels")}
+    if not _again and _take_from_files(ix, rows, shown, held, notes):
+        return notes + apply(ix, renames, _again=True)        # the label files changed: once more
     _store(ix, rows, shown, accepted)
+    ix.label_state = _label_state(rows, shown, held)
     ix.missing = missing
     kept: Dict[str, Dict[str, List[str]]] = {k: {} for k in labels.KINDS}
     for folder, doc in docs.items():
@@ -123,7 +130,55 @@ def apply(ix: "LibraryIndex", renames: Optional[Dict[str, str]] = None) -> List[
         db.execute("DELETE FROM sidecars")
         db.executemany("INSERT INTO sidecars (folder) VALUES (?)", [(f,) for f in docs])
         db.execute("COMMIT")
+    for hook in ix.after_apply:                                # the label writer looks what is out of date
+        hook()
     return notes
+
+
+def _take_from_files(ix: "LibraryIndex", rows, shown, held, notes: List[str]) -> bool:
+    """Labels in data files that are newer than the label files' (a script's, or another viewer's
+    whose label file this one hasn't seen) go into the file's folder's label file, label by label
+    (labels.file_changes). Files being written are left until they are finished. A folder that
+    can't be written shows them only. Returns whether a label file was written."""
+    takes: Dict[str, List[Tuple[Dict[str, Any], Dict[str, Any]]]] = {}
+    for r in rows:
+        fl = held.get(r["path"])
+        if not fl or r["name"].lower().endswith(".writing"):
+            continue
+        if labels.file_changes(shown.get(r["path"]), fl):
+            takes.setdefault(str(Path(r["path"]).parent), []).append((r, fl))
+    wrote = False
+    for folder, items in takes.items():
+        def change(doc, items=items):
+            for r, fl in items:
+                e = labels.find(doc, r["id"], r["name"])
+                if e is None:
+                    e = labels.new_entry(r["id"], r["name"], r["created"])
+                    doc["files"].append(e)
+                labels.take_from_file(e, fl)
+        try:
+            notes += labels.update(Path(folder), change, ix.trash)
+            wrote = True
+        except labels.LabelsError:                          # e.g. a read-only folder: shown, not kept
+            for r, fl in items:
+                e = json.loads(json.dumps(shown.get(r["path"]) or labels.new_entry(r["id"], r["name"], r["created"])))
+                labels.take_from_file(e, fl)
+                shown[r["path"]] = e
+    return wrote
+
+
+def _label_state(rows, shown, held) -> Dict[str, Dict[str, Any]]:
+    """For each file with labels anywhere: the labels shown, when and on which computer they were
+    last changed, and what its data file holds (label_writer.py works out what to write)."""
+    out: Dict[str, Dict[str, Any]] = {}
+    for r in rows:
+        e, fl = shown.get(r["path"]), held.get(r["path"])
+        if e is None and fl is None:
+            continue
+        when, by = labels.last_change(e) if e else ("", "")
+        out[r["path"]] = {"want": {k: e.get(k) for k in LABEL_KEYS} if e else None, "written": when, "by": by,
+                          "file": fl, "version": r["version"]}
+    return out
 
 
 def _brief(e: Dict[str, Any]) -> Dict[str, Any]:

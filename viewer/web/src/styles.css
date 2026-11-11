@@ -582,6 +582,7 @@ details.group fieldset > .group-fields { margin-top: -4px; }
 .label-picker ul { list-style: none; margin: 4px 0; padding: 0; }
 .label-picker li { padding: 1px 0; }
 .library-copies { font-size: 13px; padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius); margin: 8px 0; }
+.library-labels-note { font-size: 13px; padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius); margin: 8px 0; color: var(--muted, inherit); }
 .library-conflict { border: 1px solid var(--danger); background: var(--danger-soft); border-radius: var(--radius); padding: 8px 12px; margin: 10px 0; font-size: 13px; }
 .library-conflict h3 { margin: 0 0 6px; font-size: 14px; }
 .conflict-files { border-collapse: collapse; width: 100%; margin: 6px 0; }

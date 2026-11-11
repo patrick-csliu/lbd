@@ -25,6 +25,17 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
   gets an error saying to remove it. Each choice of the Save as CSV dialog says what it does when
   you point at it.
 
+- **The Library writes labels into the data files.** A star, project, users, tags or comment
+  set in the Library is written into the `.lbd` file about 2 s after the last edit (and before
+  the viewer closes), so labels go with a file that is copied or moved. Labels already given
+  are written in once, in the background. Labels a script wrote into a file show in the Library;
+  label by label, the newer change wins. A file that can't be changed now (being measured,
+  read-only, open elsewhere) gets them later, and the Library says why they aren't in it yet. Only
+  the computer that made a change writes it, so two computers on one synced folder never both
+  write a file. Copies of one measurement are compared by their data, so different labels don't
+  make them "copies that differ". The label file stays, and keeps an entry whose labels were all
+  removed (the removal counts).
+
 - **Settings → Library → Edit data files: In place or Copy and swap.** Every change LBD makes
   to a finished data file (giving it an id, New measurement, Save view, its labels) follows it.
   In place (the default) takes about 10 ms at any size. Copy and swap writes a complete copy and

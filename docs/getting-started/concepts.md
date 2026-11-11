@@ -174,11 +174,14 @@ on each plot, such as GHz or µs, so the same quantity from different files can 
 
 ## Versions and compatibility
 
-Each file records the format version it was written with (currently `1.0`).
+Each file records the format version it was written with: the lowest version that holds its
+content. Most files are `1.2`; a file with [labels](../python/files.md#labels) is `1.3`, a file
+with an axis group `2.0`, with both `2.1`.
 
-- A **newer minor version** (for example a `1.3` file read by a reader for `1.0`) can be read.
-  The reader warns that some new content may be ignored.
-- A **newer major version** (`2.0`) is refused with a clear message asking you to update.
+- A **newer minor version** (for example a `1.3` file read by a reader for `1.2`) can be read.
+  The reader warns that some new content may be ignored (here: the labels).
+- A **newer major version** (`2.0` for a reader of `1.x`) is refused with a clear message
+  asking you to update.
 
 The modules and the viewer of one release always share one version number, and the
 [Language modules](../viewer/language-modules.md) page of the viewer shows which one.

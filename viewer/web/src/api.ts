@@ -210,6 +210,10 @@ export interface LibraryRow {
   comment: string;
   /** a file being written (name.lbd.writing): "measuring", or "stopped" before finishing; else null */
   writing: Writing;
+  /** its labels are still to be written into the data file (a moment after an edit, plan 17) */
+  labels_pending?: boolean;
+  /** why its labels couldn't be written into the data file yet (tried again later), or null */
+  labels_problem?: string | null;
 }
 
 /** The state of a file being written (name.lbd.writing); null for every other file. */

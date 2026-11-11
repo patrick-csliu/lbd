@@ -1081,6 +1081,12 @@ export default function LibraryPage(props: Props) {
           >
             {selectedRow && !selectedRow.error && (
               <>
+                {selectedRow.labels_problem && (
+                  <div className="library-labels-note" role="note" aria-label="Labels not in the data file">
+                    Labels not yet in the data file: {selectedRow.labels_problem} They are kept in the folder's label file, and
+                    written into the data file as soon as it can be changed.
+                  </div>
+                )}
                 {(selectedRow.copies > 0 || !!selectedRow.conflict) && (
                   <SameIdBox
                     row={selectedRow}

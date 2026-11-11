@@ -1,6 +1,8 @@
 """Labels of data files (plan 8b): a star, a project, users, tags and a comment, kept in a small
-sidecar file in each folder, `.lbd-library.json`, next to the files it describes. Data files are
-never written for a label. The format is defined in docs/developers/library-sidecar.md.
+sidecar file in each folder, `.lbd-library.json`, next to the files it describes. Since plan 17
+the data files hold their labels too (`/labels`, spec §1.9), written shortly after each edit
+(label_writer.py); the sidecar stays the record of every change, for merging and history. The
+format is defined in docs/developers/library-sidecar.md.
 
 - Each file's entry is found by the file's id (format 1.1), else by its name and `created`.
 - Every field, and every single tag and user, records when it was last set or removed and on
@@ -59,10 +61,87 @@ def new_entry(ident: Optional[str], name: str, created: Optional[str]) -> Dict[s
             "users": [], "tags": [], "changed": {"users": {}, "tags": {}}, "history": []}
 
 
+def has_labels(e: Dict[str, Any]) -> bool:
+    return bool(e.get("star") or e.get("project") or e.get("comment") or e.get("users") or e.get("tags"))
+
+
 def is_empty(e: Dict[str, Any]) -> bool:
-    """No label left and nothing decided about the file (the entry can go)."""
-    return not (e.get("star") or e.get("project") or e.get("comment") or e.get("users") or e.get("tags")
-                or e.get("accepted"))
+    """No label, nothing decided about the file and no change recorded (the entry can go). An
+    entry whose labels were all removed stays, with the times of the removals: they are newer
+    than the labels an older copy of the data file may still hold (plan 17)."""
+    return not (has_labels(e) or e.get("accepted") or last_change(e)[0])
+
+
+def last_change(e: Dict[str, Any]) -> Tuple[str, str]:
+    """(time, computer) of the newest change recorded in an entry; ("", "") if none."""
+    best = ("", "")
+    changed = e.get("changed") or {}
+    for key in SCALARS:
+        m = changed.get(key)
+        if m and m[0] > best[0]:
+            best = (m[0], m[1] if len(m) > 1 else "")
+    for key in LISTS:
+        for m in (changed.get(key) or {}).values():
+            if m and m[0] > best[0]:
+                best = (m[0], m[1] if len(m) > 1 else "")
+    return best
+
+
+def same_labels(e: Dict[str, Any], file_labels: Dict[str, Any]) -> bool:
+    """Whether an entry shows the same labels as a data file holds (`/labels`, as lbd reads it)."""
+    return (bool(e.get("star")) == bool(file_labels.get("star")) and (e.get("project") or None) == (file_labels.get("project") or None)
+            and (e.get("comment") or "") == (file_labels.get("comment") or "")
+            and sorted(e.get("users") or []) == sorted(file_labels.get("users") or [])
+            and sorted(e.get("tags") or []) == sorted(file_labels.get("tags") or []))
+
+
+FROM_FILE = "the data file"     # the computer recorded for labels taken from a data file
+
+
+def file_changes(e: Optional[Dict[str, Any]], file_labels: Dict[str, Any]) -> Dict[str, Any]:
+    """What a data file's labels change in an entry: each field, tag and user of the file counts
+    as set at the file's `written` time, so it wins where the entry has no newer change of its
+    own (a script's labels, or another viewer's edit this one hasn't seen); a newer edit in the
+    Library, also a removal, wins over the file. Empty: nothing to take."""
+    when = file_labels.get("written") or ""
+    if not when:
+        return {}
+    e = e or new_entry(None, "", None)
+    changed = e.get("changed") or {}
+    out: Dict[str, Any] = {}
+    wanted = {"star": bool(file_labels.get("star")), "project": file_labels.get("project") or None,
+              "comment": file_labels.get("comment") or ""}
+    for key in SCALARS:
+        mine = (changed.get(key) or [""])[0]
+        if mine < when and (e.get(key) or ({"star": False, "comment": ""}.get(key))) != wanted[key]:
+            out[key] = wanted[key]
+    for key in LISTS:
+        marks = changed.get(key) or {}
+        held = file_labels.get(key) or []
+        add = [x for x in held if x not in (e.get(key) or []) and (marks.get(x) or [""])[0] < when]
+        remove = [x for x in (e.get(key) or []) if x not in held and (marks.get(x) or [""])[0] < when]
+        if add:
+            out[f"add_{key}"] = add
+        if remove:
+            out[f"remove_{key}"] = remove
+    return out
+
+
+def take_from_file(e: Dict[str, Any], file_labels: Dict[str, Any]) -> bool:
+    """The entry takes what is newer in the data file's labels (`file_changes`), recorded at the
+    file's `written` time; the values it had before are kept in its history. Returns whether
+    anything changed."""
+    changes = file_changes(e, file_labels)
+    if not changes:
+        return False
+    when = file_labels["written"]
+    before = {k: copy.deepcopy(e.get(k)) for k in (*SCALARS, *LISTS)}
+    apply(e, changes, when=when, by=FROM_FILE)
+    history = e.setdefault("history", [])
+    history.append({"field": "labels", "value": before, "changed": [when, FROM_FILE],
+                    "note": "changed by newer labels in the data file"})
+    del history[:-50]
+    return True
 
 
 def _clean(label: str) -> str:

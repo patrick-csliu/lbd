@@ -54,6 +54,7 @@ You can set these properties:
 | `Style` | struct, JSON text, or `[]` | Per-file [style](styles/index.md) changes, e.g. `struct("figure", struct("width_mm", 120))`. |
 | `StyleName` | string or empty | Name of a viewer style preset for this file. |
 | `Matplotlib` | string or empty | matplotlib version that last wrote the saved view (set by Python and the viewer). MATLAB keeps it when saving. |
+| `Labels` | struct | The file's [labels](#labels): `Star` (true/false), `Project` (text, `""` for none), `Users` and `Tags` (texts), `Comment` (text); `Written` says when they were last set. Checked when set. |
 | `Created` | string, datetime or empty | When the data was created, ISO-8601 with a UTC offset (`"2026-10-13T16:09:00+08:00"`); a datetime without a time zone, or a text without an offset, is taken in this computer's time zone. Empty: `save` fills in the time of the first save. A loaded file keeps its `Created`, and saving again keeps it. |
 
 These properties are read-only; they are set by the methods and by `lbd.load`:
@@ -319,6 +320,32 @@ for k = 1:numel(files)
     fprintf("%s: %s\n", files(k).name, i.Title);
 end
 ```
+
+## Labels
+
+A file can carry its labels: a star, a project, users, tags and a comment, as LBD Viewer's
+Library shows them. They are stored in the file (format 1.3), so they go wherever the file goes.
+
+```matlab
+d = lbd.load("sweep.lbd");
+d.Labels.Star = true;
+d.Labels.Project = "Chip 3/Cooldown 7";          % a nested label: parts separated by /
+d.addTags(["calibration" "first try"]);
+d.save("sweep.lbd");
+```
+
+Each label is checked when it is set, so a mistake shows before measuring. The labels of an
+existing file change without rewriting its data; tags and users are added (`Replace=true`
+replaces them):
+
+```matlab
+lbd.setLabels("sweep.lbd", Tags="checked", Star=true);
+lbd.removeLabels("sweep.lbd", Tags="checked");
+L = lbd.labels("sweep.lbd");                      % read them
+```
+
+An `lbd.Writer` has `Labels` and `addTags` too: labels set before the first write are in the
+file from the start, labels set while measuring are written when it finishes.
 
 ## `lbd.version`
 

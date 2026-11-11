@@ -366,3 +366,21 @@ def test_long_label_lists_are_typed_into_never_scrolled(viewer, many_labels_file
     picker.get_by_role("combobox").fill("very long tag")
     option = picker.get_by_role("option").first
     assert option.bounding_box()["height"] < 34                                      # one line
+
+
+def test_labels_are_written_into_the_data_file_a_moment_after_an_edit(viewer, library_files, new_page):
+    """Plan 17: a star given in the Library is in the .lbd file about 2 s later, and the file's
+    version stays the same for the page (nothing open on it is read again)."""
+    page = new_page("Library")
+    shows(page, every_file(viewer), 20_000)
+    find(page, "Late resonator sweep")
+    path = next(r["path"] for r in api_rows(viewer) if r["title"] == "Late resonator sweep")
+    version = httpx.get(f"http://127.0.0.1:{viewer.port}/api/file", headers={"X-LBD-Token": viewer.state.token},
+                        params={"path": path}).json()["version"]
+    detail(page).get_by_role("button", name="Star", exact=True).click()
+    expect(rows(page).first).to_contain_text("★")
+    eventually(lambda: bool((lbd.labels(path) or lbd.Labels()).star), True)
+    after = httpx.get(f"http://127.0.0.1:{viewer.port}/api/file", headers={"X-LBD-Token": viewer.state.token},
+                      params={"path": path}).json()["version"]
+    assert after == version
+    expect(detail(page).get_by_role("note", name="Labels not in the data file")).to_have_count(0)

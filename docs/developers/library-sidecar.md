@@ -2,8 +2,12 @@
 
 LBD Viewer's Library keeps the labels people give to data files — a star, a project, users,
 tags and a comment — in a small file in each folder that has labelled files:
-`.lbd-library.json`. Data files are never written for a label. This page defines that file, for
-anyone who wants to read or write it from their own program.
+`.lbd-library.json`. The data files hold their labels too (`/labels`, see
+[the file format](../format.md), §1.9); the label file is the
+record of every change, for merging two computers' edits, history and removals. This page
+defines that file, for anyone who wants to read or write it from their own program. To label
+a file from a script, use the language modules' set-labels functions instead
+(`lbd.set_labels`): they write the data file, and the Library takes the labels from there.
 
 ## Layout
 
@@ -48,8 +52,10 @@ anyone who wants to read or write it from their own program.
 | `labels` | Optional, at the top level next to `files`: labels the folder **keeps without a file** (made with **+ New** in the Library, e.g. a project before its first measurement). Per kind (`"project"`, `"users"`, `"tags"`), per label: `[time, computer, true]` while it is kept, `false` once it was removed (remembered, like a removed tag). |
 
 Labels can be nested with `/` (`Qubit A/Device 3`; users as `group/sub-group/name`); each part is
-trimmed and must not be empty. An entry with no label left is removed; a folder with no entry and
-no kept label has no file.
+trimmed and must not be empty. An entry whose labels were all removed stays, with the times of the
+removals: they are newer than the labels an older copy of the data file may still hold. An entry
+with no label and no recorded change is removed; a folder with no entry and no kept label has no
+file.
 
 ```json
  "labels": {"project": {"Qubit C/Device 1": ["2026-11-04T05:12:00.250Z", "LAB-PC-2", true]},
@@ -75,6 +81,35 @@ computer through a synced folder). A writer:
 newer `changed` time wins; for every single user and tag, the newer record wins (so an addition
 and a removal made on two computers both survive); a value that lost goes to `history`; an exact
 tie keeps the first value and reports it.
+
+## Labels in the data files
+
+The Library writes a file's labels into the data file too, about 2 seconds after the last edit
+(several edits become one write; anything waiting is written before the viewer closes), with
+`written` = the time of the entry's newest change. It follows Settings → Library → **Edit data
+files** (in place, or copy and swap). The data file's version stays the same for the rest of the
+viewer, so nothing open on it is drawn or read again.
+
+- **Which computer writes.** Only the computer that made the newest change (`changed`) writes it
+  into the data file. Two viewers on one synced folder never both write a data file.
+- **Files that can't be written now** (being measured, read-only, open in another program) are
+  written later: a file being written gets its labels when it is finished; the others are tried
+  again every 30 s or so, and the Library says why they aren't in the file yet.
+- **Labels set before** this (only in the label file) are written into their files once, a few
+  at a time, by the computer that last changed them.
+- **Reading.** Each label in a data file counts as set at the file's `written` time. Where it is
+  newer than the entry's record of that field, tag or user (a script's `lbd.set_labels`, another
+  viewer's edit whose label file hasn't arrived), the entry takes it, recorded as changed by
+  `"the data file"`, and the values it had are kept in `history`. Where the entry's record is
+  newer (an edit in the Library, a removal), the entry wins and is written into the file.
+- One `written` time covers all of a file's labels, so a file can't say which field a script
+  changed: if a script changes the labels of a file whose newest Library edit isn't in it yet,
+  the script's labels win for every field.
+- **Copies.** Two files with the same id are compared by their data (labels and format version
+  left out), so labels written into one copy don't make them "copies that differ".
+- LBD is not a sync tool: it does nothing special about a sync tool's conflict copies of data
+  files. Two files with one id are copies, or copies that differ, as before; nothing is deleted
+  or merged automatically.
 
 **Sync conflict copies** — files named like `.lbd-library_<computer>_<date>_Conflict.json`
 (Synology Drive), `.lbd-library (… conflicted copy …).json` (Dropbox) or `.lbd-library-<computer>.json`
