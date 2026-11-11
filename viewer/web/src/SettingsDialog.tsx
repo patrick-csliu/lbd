@@ -4,7 +4,7 @@
 // The server keeps the settings (config.py; SETTINGS_SECTIONS lists each section's settings).
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, AppState, OpenDataIn, OpenFilesIn, Theme } from "./api";
+import { api, AppState, DataFileEdits, OpenDataIn, OpenFilesIn, Theme } from "./api";
 import { ConfirmDialog, ConfirmRequest } from "./menu";
 import { ExploreSettings } from "./ExploreSettings";
 import { MemorySettings } from "./MemorySettings";
@@ -37,6 +37,7 @@ export const SECTIONS: { id: SettingsSection; title: string; settings: { id: str
       { id: "library.previews", name: "Draw previews of", words: "pictures thumbnails images every file nearby" },
       { id: "library.cache", name: "Picture cache", words: "previews disk empty clear space" },
       { id: "library.date_zone", name: "Show dates in", words: "time zone utc offset convert date column" },
+      { id: "library.data_file_edits", name: "Edit data files", words: "write labels id saved view in place copy swap power cut safe disk room" },
     ],
   },
   {
@@ -274,6 +275,9 @@ export function SettingsDialog({
               <SettingsGroup title="Dates">
                 <DateZoneSetting zone={state.library.date_zone} onSettings={onSettings} />
               </SettingsGroup>
+              <SettingsGroup title="Writing into data files">
+                <DataFileEditsSetting value={state.library.data_file_edits} onSettings={onSettings} />
+              </SettingsGroup>
             </>
           )}
           {section === "sidebar" && <SidebarScopeSettings state={state} onSettings={onSettings} />}
@@ -294,5 +298,26 @@ export function SettingsDialog({
       </div>
       {confirm && <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />}
     </dialog>
+  );
+}
+
+/** How LBD changes a finished data file: its id, a saved view, its labels (plan 16.19). */
+function DataFileEditsSetting({ value, onSettings }: { value: DataFileEdits; onSettings: (s: AppState) => void }) {
+  const toast = useToast();
+  const choose = async (data_file_edits: DataFileEdits) => {
+    try {
+      onSettings(await api.setLibrary({ data_file_edits }));
+    } catch (e) {
+      toast((e as Error).message, "error");
+    }
+  };
+  return (
+    <Setting
+      id="library.data_file_edits"
+      name="Edit data files"
+      help="How LBD changes a finished data file: its id, a saved view, its labels. In place takes about 10 ms at any size. Copy and swap writes a complete copy and puts it in the file's place, so even a power cut can't damage the file; it needs room on the disk for the copy and takes about 1 s per GB."
+    >
+      <Segmented<DataFileEdits> name="data-file-edits" label="Edit data files" value={value} onChange={choose} options={[["in_place", "In place"], ["copy_and_swap", "Copy and swap"]]} />
+    </Setting>
   );
 }

@@ -25,6 +25,12 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
   gets an error saying to remove it. Each choice of the Save as CSV dialog says what it does when
   you point at it.
 
+- **Settings → Library → Edit data files: In place or Copy and swap.** Every change LBD makes
+  to a finished data file (giving it an id, New measurement, Save view, its labels) follows it.
+  In place (the default) takes about 10 ms at any size. Copy and swap writes a complete copy and
+  puts it in the file's place, so even a power cut can't damage the file; it needs room on the
+  disk for the copy (and says so if there isn't any) and takes about 1 s per GB.
+
 - **Labels in the data file** (file format 1.3 / 2.1, spec §1.9). A file can hold its labels:
   star, project, users, tags and comment, so they go wherever the file is copied or moved.
   Python: `d.labels` (`d.labels.star = True`, `d.add_tags("calibration")`, or a dict), also on

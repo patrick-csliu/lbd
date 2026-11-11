@@ -48,7 +48,7 @@ from .catalog import Catalog, catalog_dir, fitting, structure  # noqa: E402
 from . import labels, library_labels  # noqa: E402
 from .library import LibraryIndex, writing_status  # noqa: E402
 from .previews import PreviewCache, PreviewError, Previewer  # noqa: E402
-from . import live, memory, reading, summaries  # noqa: E402
+from . import live, memory, reading, summaries, versions  # noqa: E402
 from . import export as csv_export  # noqa: E402
 from .explore import KINDS as EXPLORE_KINDS, ExploreClosed, ExploreError, ExploreSession, Sessions  # noqa: E402
 from .pages import PageError, Pages, UnknownPage  # noqa: E402
@@ -139,6 +139,7 @@ class AppState:
             cfg = self.config
             self._library = LibraryIndex(catalog_dir(cfg.dir), lambda: cfg.settings()["roots"],
                                          lambda: cfg.settings()["library"]["read_headers"])
+            self._library.edit_method = lambda: cfg.settings()["library"]["data_file_edits"]
             self._library.start()
         return self._library
 
@@ -560,9 +561,9 @@ def canonical(path: str) -> str:
 
 
 def file_version(path: Path) -> str:
-    """Changes when the file is written: modification time and size."""
-    st = path.stat()
-    return f"{st.st_mtime_ns}-{st.st_size}"
+    """Changes when the file is written (modification time and size), but not when LBD itself
+    writes only its labels (versions.py)."""
+    return versions.content(path)
 
 
 # ---- JSON helpers -------------------------------------------------------------------
@@ -1274,8 +1275,18 @@ def create_app(state: AppState) -> FastAPI:
         if body.if_version is not None and p.is_file() and file_version(p) != body.if_version:
             raise HTTPException(409, f"{p.name} was changed since you opened it (in another page or "
                                      "program); reload it, or save again to overwrite")
+        from lbd.io import _apply_plot, _check_editable, _plot_changes
+
+        texts = _plot_changes(**changes)               # a bad view is refused before the file is touched
+
+        def change(f) -> None:
+            _check_editable(f, p)
+            _apply_plot(f, texts)
         with collect_warnings() as warns:
-            lbd.set_plot(p, **changes)
+            try:
+                files.edit_data_file(p, change, cfg.settings()["library"]["data_file_edits"])
+            except files.DataEditError as e:
+                raise HTTPException(409, str(e))
             summary = file_summary(lbd.info(p))
         return {**summary, "warnings": warns}
 

@@ -36,7 +36,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
-from . import scan
+from . import scan, versions
 
 SCHEMA_VERSION = 3
 LIBRARY_FILE = "library.sqlite"
@@ -60,8 +60,9 @@ LABEL_SORTS = {"star": "star", "project": "project COLLATE NOCASE", "users": "us
 log = logging.getLogger("lbd_viewer")
 
 
-def _version(st: os.stat_result) -> str:
-    return f"{st.st_mtime_ns}-{st.st_size}"
+def _version(st: os.stat_result, path: Optional["os.PathLike[str] | str"] = None) -> str:
+    """A data file's version (versions.py): unchanged by LBD's own label writes when `path` is given."""
+    return versions.content(path, st) if path is not None else versions.raw(st)
 
 
 def parse_created(text: Optional[str]) -> Optional[Tuple[float, str]]:
@@ -134,7 +135,7 @@ def _stat_row(path: Path, root: str, st: os.stat_result, error: Optional[str] = 
     local = datetime.fromtimestamp(st.st_mtime).astimezone()
     return {
         "path": str(path), "root": root, "folder": "" if rel == "." else rel.replace(os.sep, "/"), "name": path.name,
-        "version": _version(st), "size": st.st_size, "mtime": st.st_mtime, "read": 0, "title": "", "description": "",
+        "version": _version(st, path), "size": st.st_size, "mtime": st.st_mtime, "read": 0, "title": "", "description": "",
         "created": None, "sort_time": st.st_mtime, "day": local.date().isoformat(), "date_from_file": 1,
         "writer": None, "lbd_version": None, "sweep": "", "points": 0, "value_names": "",
         "searchable": path.name.lower(), "summary": None, "error": error, "seen": time.time(),
@@ -181,6 +182,8 @@ class LibraryIndex:
         self.kept: Dict[str, Dict[str, List[str]]] = {}  # kind -> label -> folders keeping it without a file
         self.notes: List[str] = []                       # about labels, for the page (told once)
         self._sidecar_state: Optional[Dict[str, Optional[str]]] = None
+        # how finished data files are changed (Settings: edit in place or copy and swap; files.edit_data_file)
+        self.edit_method: Callable[[], str] = lambda: "in_place"
 
     def trash(self, path: Path) -> None:
         """Move a file (a merged sync conflict copy) to the Recycle Bin."""
@@ -286,7 +289,7 @@ class LibraryIndex:
                 known = {r[0]: (r[1], r[2], r[3], r[4]) for r in
                          self._connect().execute("SELECT path, version, read, root, fsid FROM files")}
             todo = [(p, root, st) for p, root, st in found
-                    if (k := known.get(str(p))) is None or k[0] != _version(st) or k[2] != root
+                    if (k := known.get(str(p))) is None or k[0] != _version(st, p) or k[2] != root
                     or (read and not k[1])]
             self.status.update({"indexing": bool(todo), "done": 0, "total": len(todo), "errors": errors})
             batch: List[Dict[str, Any]] = []
@@ -648,7 +651,7 @@ class LibraryIndex:
         st = p.stat()
         with self._lock:
             r = self._connect().execute("SELECT version, summary, root FROM files WHERE path = ?", (str(p),)).fetchone()
-        if r and r[0] == _version(st) and r[1]:
+        if r and r[0] == _version(st, p) and r[1]:
             return {**json.loads(r[1]), "writing": writing_status(str(p))}   # the status now, not when read
         summary = self._summary(p)                 # raises: the page shows why
         root = r[2] if r else next((o for o in outermost(self.roots())

@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 import h5py
 
-from . import labels
+from . import files, labels, versions
 
 if TYPE_CHECKING:
     from .library import LibraryIndex
@@ -225,22 +225,18 @@ def set_labels(ix: "LibraryIndex", paths: List[str], changes: Dict[str, Any]) ->
     return notes
 
 
-def _write_id(path: str, version: str, new: str, parent: Optional[str]) -> None:
-    """Write an id into an existing data file — only after the user asked; refused when the file
-    changed since it was shown or another program has it open."""
-    p = Path(path)
-    st = p.stat()
-    if f"{st.st_mtime_ns}-{st.st_size}" != version:
-        raise labels.LabelsError(f"{p.name} changed since it was shown; nothing was written. Look at it again "
-                                 "and repeat if still wanted.")
+def _write_id(ix: "LibraryIndex", path: str, version: str, new: str, parent: Optional[str]) -> None:
+    """Write an id into an existing data file — only after the user asked, as Settings says
+    (in place, or copy and swap); refused when the file changed since it was shown or another
+    program has it open."""
+    def change(f: h5py.File) -> None:
+        f.attrs["id"] = new
+        if parent:
+            f.attrs["parent_id"] = parent
     try:
-        with h5py.File(p, "r+") as f:
-            f.attrs["id"] = new
-            if parent:
-                f.attrs["parent_id"] = parent
-    except OSError as e:
-        raise labels.LabelsError(f"{p.name} couldn't be changed ({e}); it may be open in another program. "
-                                 "Close it there and try again. Nothing was written.") from None
+        files.edit_data_file(Path(path), change, ix.edit_method(), expect=version)
+    except files.DataEditError as e:
+        raise labels.LabelsError(str(e)) from None
 
 
 def new_measurement(ix: "LibraryIndex", path: str) -> List[str]:
@@ -250,7 +246,7 @@ def new_measurement(ix: "LibraryIndex", path: str) -> List[str]:
 
     r = _row(ix, path)
     new = new_uuid7()
-    _write_id(r["path"], r["version"], new, r["id"])
+    _write_id(ix, r["path"], r["version"], new, r["id"])
     folder = Path(r["path"]).parent
     with ix._lock:                                          # another copy in this folder shares its entry
         shared = ix._connect().execute("SELECT COUNT(*) FROM files WHERE id = ? AND path != ? AND path LIKE ?",
@@ -332,7 +328,7 @@ def give_ids(ix: "LibraryIndex", paths: List[str]) -> List[str]:
         if r["id"]:
             continue
         new = new_uuid7()
-        _write_id(r["path"], r["version"], new, None)
+        _write_id(ix, r["path"], r["version"], new, None)
         def change(doc, r=r, new=new):
             e = labels.find(doc, None, r["name"])
             if e is not None:

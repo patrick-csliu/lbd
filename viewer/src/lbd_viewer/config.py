@@ -36,6 +36,7 @@ THEMES = ("system", "light", "dark")      # the viewer's colours; "system" follo
 LIBRARY_COLUMNS = ("name", "date", "sweep", "values", "folder", "size", "file", "modified",
                    "star", "project", "users", "tags", "comment", "copies")
 PREVIEW_MODES = ("all", "nearby", "off")
+DATA_FILE_EDITS = ("in_place", "copy_and_swap")   # how finished data files are changed (files.edit_data_file)
 LIST_VIEWS = ("list", "pictures")
 # The Files sidebar of Explore and Figure: which lists it offers. "library": the Library's list
 # with the browser tab's filters (always offered); "folders": the folder tree (in Figure with
@@ -52,7 +53,8 @@ LIBRARY_DEFAULTS: Dict[str, Any] = {"read_headers": True, "notice_seen": False, 
                                     "previews": "all", "list_view": "list", "sidebar_scopes": ["library"],
                                     "sidebar_layout": "two", "sidebar_main": "title",
                                     "sidebar_fields": ["date", "sweep", "project", "tags"],
-                                    "date_zone": "local", "card_main": "title", "card_fields": ["date"]}
+                                    "date_zone": "local", "card_main": "title", "card_fields": ["date"],
+                                    "data_file_edits": "in_place"}
 # Memory for data (plan 6d, memory.py): what to leave free for the rest of the computer (None:
 # automatic, max(2 GB, 10% of RAM)), the most LBD may use (None: no maximum), and the disk cache
 # of large maps' and curves' summaries. In GB.
@@ -69,7 +71,7 @@ EXPLORE_DEFAULTS: Dict[str, Any] = {"line_traces": 20}
 GENERAL_DEFAULTS: Dict[str, Any] = {"theme": "system", "open_files_in": "viewer", "open_data_in": "explore"}
 SETTINGS_SECTIONS: Dict[str, List[str]] = {
     "general": ["theme", "open_files_in", "open_data_in"],
-    "library": ["library.read_headers", "library.previews"],
+    "library": ["library.read_headers", "library.previews", "library.data_file_edits"],
     "sidebar": ["library.sidebar_scopes"],
     "memory": [f"memory.{k}" for k in MEMORY_DEFAULTS],
     "measurements": [f"measurements.{k}" for k in MEASUREMENTS_DEFAULTS],
@@ -414,7 +416,8 @@ def _check_library(library: Dict[str, Any]) -> Dict[str, Any]:
         raise ConfigError(f"Library 'card_fields' must be a list of {', '.join(SIDEBAR_FIELDS)}, not {fields!r}")
     library = {**library, "card_fields": list(dict.fromkeys(fields))}                # once each, in the order chosen
     for key, allowed in (("previews", PREVIEW_MODES), ("list_view", LIST_VIEWS), ("sidebar_layout", SIDEBAR_LAYOUTS),
-                         ("sidebar_main", SIDEBAR_MAIN), ("card_main", SIDEBAR_MAIN)):
+                         ("sidebar_main", SIDEBAR_MAIN), ("card_main", SIDEBAR_MAIN),
+                         ("data_file_edits", DATA_FILE_EDITS)):
         if library.get(key) not in allowed:
             raise ConfigError(f"Library setting '{key}' must be one of {', '.join(allowed)}, not {library.get(key)!r}")
     zone = library.get("date_zone")     # "local", "file" or a zone's name: the page knows the names

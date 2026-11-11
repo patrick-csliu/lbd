@@ -155,7 +155,11 @@ export interface LibrarySettings {
   card_main: "title" | "file";
   /** the lines under each picture */
   card_fields: LibraryColumn[];
+  /** how LBD changes a finished data file (its id, a saved view, its labels): in the file, or a full copy put in its place */
+  data_file_edits: DataFileEdits;
 }
+
+export type DataFileEdits = "in_place" | "copy_and_swap";
 
 /** What the Files sidebar lists: the Library's list with this tab's filters, the folder tree,
  * the starred files, or the files opened lately. */

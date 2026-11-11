@@ -270,10 +270,10 @@ def work(job: Dict[str, Any]) -> Tuple[Optional[bytes], Optional[str]]:
 
 def file_version(path: str) -> Optional[str]:
     """The file's version as the Library index writes it (library._version), or None if it is gone."""
-    from .library import _version
+    from . import versions
 
     try:
-        return _version(os.stat(path))
+        return versions.content(path)
     except OSError:
         return None
 
