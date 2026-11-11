@@ -15,6 +15,7 @@ classdef Dataset < handle
     %   i = d.write(A=3); d.write(Parent=i, B=[15 25], f=[1 2]);
     %   m = d.toDense("f");                             % the full rectangle, gaps NaN
     %   d.Meta.T_mK = 12;
+    %   d.Labels.Star = true; d.addTags("calibration");   % the file's labels (format 1.3)
     %   d.save("sweep.lbd");
     %
     %   d = lbd.load("sweep.lbd");
@@ -33,6 +34,13 @@ classdef Dataset < handle
         % When the data was created: ISO-8601 text with a UTC offset, or a datetime. Empty: save
         % fills in the time of the first save; a loaded file keeps its time, and saving keeps it.
         Created = string.empty
+        % The file's labels (format 1.3), as LBD Viewer's Library shows them: a struct with Star
+        % (true/false), Project (text, "" for none), Users and Tags (texts) and Comment (text).
+        % Checked when set: d.Labels.Star = true; d.Labels.Tags(end+1) = "calibration";
+        % d.Labels = struct("Project", "Cooldown 7", "Users", "Ana"). Written: when they were
+        % last set (UTC), changed by every change.
+        Labels (1,1) struct = struct('Star', false, 'Project', "", 'Users', strings(1, 0), ...
+            'Tags', strings(1, 0), 'Comment', "", 'Written', "")
     end
 
     properties (SetAccess = private)
@@ -75,6 +83,8 @@ classdef Dataset < handle
         Lookups (1,1) struct = struct()
         % lbd.open: the file its values are read from (lbd.LazySource), or [] after lbd.load
         Source = []
+        % labels read from a file keep their time (Written)
+        LabelsFromFile (1,1) logical = false
     end
 
     methods
@@ -89,6 +99,21 @@ classdef Dataset < handle
             if ~isempty(opts.Created)
                 obj.Created = lbd_created_text(opts.Created);
             end
+        end
+
+        function set.Labels(obj, v)
+            obj.Labels = lbd_labels_check(v, obj.Labels, obj.LabelsFromFile); %#ok<MCSUP>
+        end
+
+        function addTags(obj, tags)
+            %ADDTAGS  Add tags to the file's labels: d.addTags(["calibration" "Chip 3/Cooldown 7"])
+            arguments
+                obj
+                tags string
+            end
+            L = obj.Labels;
+            L.Tags = [L.Tags tags(:)'];
+            obj.Labels = L;
         end
 
         function group = addGroup(obj, name)
@@ -747,6 +772,7 @@ classdef Dataset < handle
                 end
                 H5G.close(gid);
             end
+            lbd_labels_write(fid, obj.Labels);
             obj.Created = created;
             obj.Writer = writer;
             obj.LbdVersion = ver;
@@ -859,6 +885,9 @@ classdef Dataset < handle
                 if d.Matplotlib == "", d.Matplotlib = string.empty; end
                 H5G.close(gid);
             end
+            d.LabelsFromFile = true;
+            d.Labels = lbd_labels_read(fid, base);
+            d.LabelsFromFile = false;
 
             if H5L.exists(fid, 'axes', 'H5P_DEFAULT')
                 gid = H5G.open(fid, 'axes');
@@ -1817,6 +1846,9 @@ classdef Dataset < handle
                 rethrow(err);
             end
             obj.Source.run(@(fid) rewriteDescription(fid, obj));
+            if lbd_labels_has(obj.Labels)
+                obj.LbdVersion = lbd_labels_version(obj.LbdVersion);
+            end
         end
 
         function keepIdentityAt(obj, path)
@@ -2022,4 +2054,5 @@ if ~isempty(d.Plot) || ~isempty(d.Style) || ~isempty(d.StyleName)
     if ~isempty(d.Matplotlib) && strlength(d.Matplotlib) > 0, lbd_write_attr(gid, 'matplotlib', d.Matplotlib); end
     H5G.close(gid);
 end
+lbd_labels_write(fid, d.Labels, true);
 end

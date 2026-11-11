@@ -35,6 +35,7 @@ classdef Writer < handle
         Plot
         Style
         StyleName
+        Labels                         % the file's labels, as lbd.Dataset's Labels
     end
 
     properties (SetAccess = private)
@@ -107,6 +108,13 @@ classdef Writer < handle
         function set.Style(obj, v), obj.D.Style = v; end
         function v = get.StyleName(obj), v = obj.D.StyleName; end
         function set.StyleName(obj, v), obj.D.StyleName = v; end
+        function v = get.Labels(obj), v = obj.D.Labels; end
+        function set.Labels(obj, v), obj.D.Labels = v; end
+        function addTags(obj, tags)
+            %ADDTAGS  Add tags to the file's labels: set before the first write, they are in the
+            %   file from the start; set later, they are written when it finishes.
+            obj.D.addTags(tags);
+        end
 
         function a = axes(obj), a = obj.D.Axes; end
         function g = groups(obj), g = obj.D.Groups; end
@@ -444,6 +452,7 @@ classdef Writer < handle
             gid = H5G.create(fid, 'meta', 'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
             lbd_write_meta(gid, d.Meta, "meta");
             H5G.close(gid);
+            lbd_labels_write(fid, d.Labels);
         end
 
         function apply(obj, item)
@@ -584,6 +593,7 @@ classdef Writer < handle
                 if ~isempty(d.StyleName), lbd_write_attr(gid, 'style_name', d.StyleName); end
                 H5G.close(gid);
             end
+            lbd_labels_write(fid, d.Labels, true);   % also labels set while measuring, with their time
             if H5L.exists(fid, 'measured', 'H5P_DEFAULT')
                 gid = H5G.open(fid, 'measured');
                 for name = lbd_link_names(gid)

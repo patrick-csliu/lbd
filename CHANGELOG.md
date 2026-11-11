@@ -1,8 +1,8 @@
 # Changelog
 
 All components (the viewer and every language module) share one version number.
-The file format has its own version (`lbd_version`, currently 2.0; files without an axis group
-are still written as 1.2).
+The file format has its own version (`lbd_version`, currently 2.1; a file is written with the
+lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with an axis group).
 
 ## 1.3.0 (in development)
 
@@ -24,6 +24,16 @@ are still written as 1.2).
   has a Units choice, and `lbd.plot.table` no longer takes `units=`: a script still passing it
   gets an error saying to remove it. Each choice of the Save as CSV dialog says what it does when
   you point at it.
+
+- **Labels in the data file** (file format 1.3 / 2.1, spec §1.9). A file can hold its labels:
+  star, project, users, tags and comment, so they go wherever the file is copied or moved.
+  Python: `d.labels` (`d.labels.star = True`, `d.add_tags("calibration")`, or a dict), also on
+  `lbd.Writer`; `lbd.set_labels`, `lbd.remove_labels` and `lbd.labels` for an existing file,
+  without loading or rewriting its data. MATLAB: `d.Labels` (a struct), `d.addTags`,
+  `lbd.setLabels`, `lbd.removeLabels`, `lbd.labels`. Julia: `d.labels`, `add_tags!`,
+  `LBD.set_labels`, `LBD.remove_labels`, `LBD.labels`. Each label is checked when it is set.
+  Every language keeps a file's labels when it saves it again. A file with labels is written as
+  format 1.3 (2.1 with an axis group); older LBD reads it and ignores the labels.
 
 - **File format 2.0: variable sweeps** (axis groups, spec §1.8; every language). A sweep whose
   inner points depend on the outer ones (frequencies chosen per power, a different number of

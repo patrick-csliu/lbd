@@ -80,11 +80,13 @@ def check_live(path: Path) -> None:
     np.testing.assert_array_equal(d["n"].data, [[0, 3, 0], [7, 0, 0]])
     np.testing.assert_array_equal(d["n"].measured, [[False, True, False], [True, False, False]])
     assert d["state"].elements == ["ground", "excited"]
+    assert d.lbd_version == "1.3" and d.labels.tags == ["live"] and d.labels.star, (d.lbd_version, d.labels)
 
 
 def check_groups(path: Path) -> None:
     d = lbd.load(path)
-    assert d.lbd_version == "2.0", d.lbd_version
+    assert d.lbd_version == "2.1", d.lbd_version
+    assert d.labels.tags == ["groups"], d.labels
     assert d.groups["AB"].order == ["A", "B"] and d.groups["PQR"].order == ["P", "Q", "R"]
     np.testing.assert_array_equal(d["A"].data, [1, 2, 3])
     np.testing.assert_array_equal(d["B"].data, [10, 10, 20, 15, 25, 35])
@@ -130,12 +132,28 @@ def check_rplus(path: Path) -> None:
     d = lbd.load(path)
     np.testing.assert_array_equal(d["y"].data, [0, 0, 7, 0, 0])
     assert d.meta["edited"] == 1 and d.title == "R plus"
+    assert d.labels.tags == ["kept"], d.labels
+
+
+def check_labels(path: Path) -> None:
+    import re
+
+    d = lbd.load(path)
+    assert d.lbd_version == "1.3", d.lbd_version
+    assert d.labels == {"star": True, "project": "Chip – é/Run 1", "users": ["Ana", "Bo"], "tags": ["checked"],
+                        "comment": "ü – note"}, d.labels
+    assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z", d.labels.written or ""), d.labels.written
+    with tempfile.TemporaryDirectory() as tmp:          # saved to another file: the same labels, the same time
+        d.save(Path(tmp) / "copy.lbd")
+        c = lbd.labels(Path(tmp) / "copy.lbd")
+        assert c == d.labels and c.written == d.labels.written, c
 
 
 root = Path(sys.argv[1])
 failed = False
 for name, test in (("fixture.lbd", check), ("live.lbd", check_live), ("groups.lbd", check_groups),
-                   ("fixture.lbd", check_open), ("groups.lbd", check_open), ("rplus.lbd", check_rplus)):
+                   ("fixture.lbd", check_open), ("groups.lbd", check_open), ("rplus.lbd", check_rplus),
+                   ("labels.lbd", check_labels)):
     for p in sorted(root.glob(f"*/{name}")):
         try:
             test(p)

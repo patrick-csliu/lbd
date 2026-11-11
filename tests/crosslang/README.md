@@ -19,11 +19,12 @@ with a notice. See [languages/README.md](../../languages/README.md) for adding o
 ## What the scripts must do
 
 - **write** creates `<out>/fixture.lbd` with exactly the content below, `<out>/live.lbd`
-  with the language's Writer (the live fixture), `<out>/groups.lbd` (the groups fixture) and
-  `<out>/rplus.lbd` (changed in place with the language's `open` in mode r+).
+  with the language's Writer (the live fixture), `<out>/groups.lbd` (the groups fixture),
+  `<out>/rplus.lbd` (changed in place with the language's `open` in mode r+) and
+  `<out>/labels.lbd` (the labels fixture).
   `<out>` is given as `{out}` / `LBD_OUT`.
-- **check** finds every `<root>/*/fixture.lbd`, `<root>/*/live.lbd`, `<root>/*/groups.lbd` and
-  `<root>/*/rplus.lbd`, also opens every fixture and groups file with the language's `open` (read
+- **check** finds every `<root>/*/fixture.lbd`, `<root>/*/live.lbd`, `<root>/*/groups.lbd`,
+  `<root>/*/rplus.lbd` and `<root>/*/labels.lbd`, also opens every fixture and groups file with the language's `open` (read
   lazily: the same values as a full load, read whole and by part) (`{root}` /
   `LBD_ROOT`), compares each with its definition, prints one line per file (`<language> reads
   <writer> OK` or `FAILED: <reason>`), and exits non-zero if any check failed.
@@ -64,13 +65,15 @@ with a notice. See [languages/README.md](../../languages/README.md) for adding o
 | value `S21(power, freq)` | complex128, written a trace at a time for powers 0 and 1: `S21[i, j] = (i+1) + (j+1)·1j`; power 2 never measured (`NaN`); no mask |
 | value `T(time)` | float64; written as `time=0, T=0`, then `time=[1, 2], T=[10, 20]`, then `time=3, T=30`: `time = [0, 1, 2, 3]`, `T = [0, 10, 20, 30]`; no mask |
 | value `n(state, power)` | int32, written at `state="excited", power 0` (7) and `state="ground", power 1` (3): data `[[0, 3, 0], [7, 0, 0]]`, mask `/measured/n` `[[0, 1, 0], [1, 0, 0]]` |
+| labels | tag `live` set before the first write, star set while measuring: the file has both, `lbd_version` `"1.3"` |
 | finish | closed as stopped on purpose (`close(stopped=True)` and its equivalents) |
 
-## Groups fixture definition (format 2.0; indices from 0 as in the file)
+## Groups fixture definition (format 2.1; indices from 0 as in the file)
 
 | Item | Definition |
 |---|---|
-| file | `<out>/groups.lbd`, title `Groups`, `lbd_version` `"2.0"` |
+| file | `<out>/groups.lbd`, title `Groups`, `lbd_version` `"2.1"` (an axis group and labels) |
+| labels | tag `groups` |
 | group `AB` | order `A, B`; `A` unit V, `B` unit Hz; written by coordinates: A=1: B=10; A=2: B=10, 20; A=3: B=15, 25, 35. Levels: `A = [1, 2, 3]`, `B = [10, 10, 20, 15, 25, 35]`, `B._parent = [0, 1, 1, 2, 2, 2]` |
 | axis `C` | fixed, `[0.1, 0.2, 0.3]` |
 | value `f(A, B)` | float64, `100·A + B` per (A, B) point: `[110, 210, 220, 315, 325, 335]` |
@@ -88,7 +91,16 @@ with a notice. See [languages/README.md](../../languages/README.md) for adding o
 |---|---|
 | file | `<out>/rplus.lbd`, title `R plus` |
 | written | axis `x` `[0, 1, 2, 3, 4]`, value `y(x)` float64 zeros, saved; then opened with mode r+: `y` at x index 2 (from 0) set to 7, meta `edited = 1`, saved in place |
-| check | `y = [0, 0, 7, 0, 0]`, `meta.edited = 1`, title `R plus` |
+| labels | tag `kept`, given before the first save |
+| check | `y = [0, 0, 7, 0, 0]`, `meta.edited = 1`, title `R plus`, tags `["kept"]` (kept by the save in place) |
+
+## Labels fixture definition (format 1.3, spec §1.9)
+
+| Item | Definition |
+|---|---|
+| file | `<out>/labels.lbd`, title `Labels`: axis `x` `[0, 1, 2]`, value `y(x)` zeros |
+| written | labels given before the save: star, project `Chip – é / Run 1` (spaces around `/` are removed), users `["Ana"]`, tags `["calibration"]`, comment `ü – note`; then the file changed with the language's set-labels function (tags `["checked"]`, users `["Bo"]`, added) and remove-labels function (tag `calibration`) |
+| check | `lbd_version` `"1.3"`; star; project `Chip – é/Run 1`; users `["Ana", "Bo"]`; tags `["checked"]`; comment `ü – note`; `written` like `2026-11-11T09:30:00.125Z`; saved to another file, the labels and `written` are the same |
 
 ## Reading while measuring
 

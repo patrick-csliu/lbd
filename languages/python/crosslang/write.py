@@ -47,6 +47,7 @@ with lbd.Writer(out / "live.lbd", title="Live – ü") as w:
     w.add_value("S21", axes=["power", "freq"], dtype="complex128")
     w.add_value("T", axes="time")
     w.add_value("n", axes=["state", "power"], dtype="int32")
+    w.labels.tags = ["live"]                             # labels before the start ...
     for i in range(2):                                   # power 3 is never measured
         w.write(power=i, S21=(i + 1) + 1j * np.arange(1, 4))
     w.write(time=0.0, T=0.0)
@@ -54,6 +55,7 @@ with lbd.Writer(out / "live.lbd", title="Live – ü") as w:
     w.write(time=3.0, T=30.0)
     w.write(state="excited", power=0, n=7)
     w.write(state="ground", power=1, n=3)
+    w.labels.star = True                                 # ... and while measuring
     w.close(stopped=True)
 
 # The groups fixture (format 2.0): variable sweeps, the same in every language.
@@ -84,14 +86,26 @@ for p in range(1, 4):                                                 # by paren
         k = g.write(parent=i, Q=q, u=10 * p + q)
         r = np.arange(q)
         g.write(parent=k, R=r, w=100 * p + 10 * q + r)
+g.labels.tags.add("groups")                                           # labels: format 2.1
 g.save(out / "groups.lbd")
 
 # The r+ fixture (plan 6d): saved, then opened with mode="r+" and changed in place.
 r = lbd.Dataset(title="R plus")
 r.add_axis("x", np.arange(5.0))
 r.add_value("y", np.zeros(5), axes="x")
+r.add_tags("kept")
 r.save(out / "rplus.lbd")
 with lbd.open(out / "rplus.lbd", mode="r+") as o:
     o.write(x=2, y=7.0)
     o.meta["edited"] = 1
     o.save()
+
+# The labels fixture (format 1.3): labels given at creation, then changed on the file.
+lb = lbd.Dataset(title="Labels")
+lb.add_axis("x", [0.0, 1.0, 2.0])
+lb.add_value("y", np.zeros(3), axes="x")
+lb.labels = {"star": True, "project": "Chip – é / Run 1", "users": ["Ana"], "tags": ["calibration"],
+             "comment": "ü – note"}
+lb.save(out / "labels.lbd")
+lbd.set_labels(out / "labels.lbd", tags=["checked"], users=["Bo"])
+lbd.remove_labels(out / "labels.lbd", tags=["calibration"])

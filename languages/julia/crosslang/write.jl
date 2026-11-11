@@ -40,6 +40,7 @@ add_axis!(w, "time"; unit="s", grows=true)
 add_value!(w, "S21"; axes=["power", "freq"], dtype=ComplexF64)
 add_value!(w, "T"; axes="time")
 add_value!(w, "n"; axes=["state", "power"], dtype=Int32)
+add_tags!(w, "live")                                   # labels before the start ...
 for i in 1:2                                           # power 3 is never measured
     write!(w; power=i, S21=[ComplexF64(i, j) for j in 1:3])
 end
@@ -48,6 +49,7 @@ write!(w; time=[1.0, 2.0], T=[10.0, 20.0])
 write!(w; time=3.0, T=30.0)
 write!(w; state="excited", power=1, n=7)
 write!(w; state="ground", power=2, n=3)
+w.labels.star = true                                   # ... and while measuring
 close(w; stopped=true)
 
 # The groups fixture (format 2.0): variable sweeps, the same in every language.
@@ -83,15 +85,26 @@ for p in 1:3                                                           # by pare
         write!(g; parent=k, R=r, w=100p .+ 10q .+ r)
     end
 end
+add_tags!(g, "groups")                                 # labels: format 2.1
 LBD.save(joinpath(out, "groups.lbd"), g)
 
 # The r+ fixture (plan 6d): saved, then opened with mode="r+" and changed in place.
 r = LBD.Dataset("R plus")
 add_axis!(r, "x", collect(0.0:4))
 add_value!(r, "y", zeros(5), "x")
+add_tags!(r, "kept")
 LBD.save(joinpath(out, "rplus.lbd"), r)
 LBD.open(joinpath(out, "rplus.lbd"); mode="r+") do o
     write!(o; x=3, y=7.0)
     o.meta["edited"] = 1
     LBD.save(o)
 end
+
+# The labels fixture (format 1.3): labels given at creation, then changed on the file.
+lb = LBD.Dataset("Labels")
+add_axis!(lb, "x", [0.0, 1.0, 2.0])
+add_value!(lb, "y", zeros(3), "x")
+lb.labels = (star=true, project="Chip – é / Run 1", users=["Ana"], tags=["calibration"], comment="ü – note")
+LBD.save(joinpath(out, "labels.lbd"), lb)
+LBD.set_labels(joinpath(out, "labels.lbd"); tags=["checked"], users=["Bo"])
+LBD.remove_labels(joinpath(out, "labels.lbd"); tags=["calibration"])

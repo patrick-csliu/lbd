@@ -63,11 +63,13 @@ function check_live(path)
     @test d["n"].data == [0 3 0; 7 0 0]
     @test d["n"].measured == [false true false; true false false]
     @test d["state"].elements == ["ground", "excited"]
+    @test d.lbd_version == "1.3" && d.labels.tags == ["live"] && d.labels.star
 end
 
 function check_groups(path)
     d = LBD.load(path)
-    @test d.lbd_version == "2.0"
+    @test d.lbd_version == "2.1"
+    @test d.labels.tags == ["groups"]
     @test d.groups["AB"].order == ["A", "B"] && d.groups["PQR"].order == ["P", "Q", "R"]
     @test d["A"].data == [1, 2, 3] && d["B"].data == [10, 10, 20, 15, 25, 35]
     @test d["B"].parent == [1, 2, 2, 3, 3, 3]                             # from 1 in Julia
@@ -105,6 +107,19 @@ function check_rplus(path)
     d = LBD.load(path)
     @test d["y"].data == [0, 0, 7, 0, 0]
     @test d.meta["edited"] == 1 && d.title == "R plus"
+    @test d.labels.tags == ["kept"]
+end
+
+function check_labels(path)
+    d = LBD.load(path)
+    l = d.labels
+    @test d.lbd_version == "1.3"
+    @test l.star && l.project == "Chip – é/Run 1" && l.comment == "ü – note"
+    @test l.users == ["Ana", "Bo"] && l.tags == ["checked"]
+    @test occursin(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$", something(l.written, ""))
+    copy = LBD.save(joinpath(mktempdir(), "copy.lbd"), d)     # saved to another file: the same labels and time
+    c = LBD.labels(copy)
+    @test c == l && c.written == l.written
 end
 
 root = ARGS[1]
@@ -133,5 +148,10 @@ for lang in sort(readdir(root))
     isfile(p) || continue
     @testset "julia reads $lang rplus.lbd" begin
         check_rplus(p)
+    end
+    p = joinpath(root, lang, "labels.lbd")
+    isfile(p) || continue
+    @testset "julia reads $lang labels.lbd" begin
+        check_labels(p)
     end
 end

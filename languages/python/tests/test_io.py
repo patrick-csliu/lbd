@@ -30,7 +30,7 @@ def test_roundtrip_values_and_axes(tmp_path):
     assert r.title == "Resonator power sweep"
     assert r.description == "test"
     assert r.writer == f"python lbd {lbd.__version__}"
-    assert r.lbd_version == "1.2" and lbd.FORMAT_VERSION == "2.0"   # no axis group: written as 1.2
+    assert r.lbd_version == "1.2" and lbd.FORMAT_VERSION == "2.1"   # no axis group: written as 1.2
     assert r.created
     np.testing.assert_array_equal(r["power"].data, d["power"].data)
     assert r["freq"].unit == "Hz" and r["freq"].label == "Frequency"
@@ -201,9 +201,13 @@ def test_version_checks(tmp_path):
     with h5py.File(p, "a") as f:
         f.attrs["lbd_version"] = "2.0"
     lbd.load(p)                                   # 2.0 is known: no warning
+    for known in ("1.3", "2.1"):                  # with labels (spec §1.9): known too
+        with h5py.File(p, "a") as f:
+            f.attrs["lbd_version"] = known
+        lbd.load(p)
     with h5py.File(p, "a") as f:
-        f.attrs["lbd_version"] = "2.1"
-    with pytest.warns(UserWarning, match="newer than 2.0"):
+        f.attrs["lbd_version"] = "2.2"
+    with pytest.warns(UserWarning, match="newer than 2.1"):
         lbd.load(p)
     with h5py.File(p, "a") as f:
         f.attrs["lbd_version"] = "3.0"
@@ -244,7 +248,7 @@ def test_fixed_length_strings_accepted(tmp_path):
 
 def test_version_function():
     v = lbd.version()
-    assert v["lbd_version"] == "2.0"
+    assert v["lbd_version"] == "2.1"
     assert v["package"] == lbd.__version__
 
 

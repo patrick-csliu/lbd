@@ -25,11 +25,16 @@ from typing import Any, Dict, Iterable, Iterator, List, Mapping, Optional, Seque
 import h5py
 import numpy as np
 
+from . import _labels
+from ._labels import Labels
+
 __version__ = "1.3.0.dev0"
-FORMAT_VERSION = "2.0"         # the newest format this module reads and writes
+FORMAT_VERSION = "2.1"         # the newest format this module reads and writes
 _GRID_VERSION = "1.2"          # what a file without an axis group is written as (spec §6)
+_GROUP_VERSION = "2.0"         # a file with an axis group
+_LABELS_MINOR = {1: 3, 2: 1}   # the first minor version with /labels (spec §1.9), per major version
 _FORMAT_MAJOR = int(FORMAT_VERSION.split(".")[0])
-_LATEST_MINOR = {1: 2, 2: 0}   # the newest minor version known, per major version
+_LATEST_MINOR = {1: 3, 2: 1}   # the newest minor version known, per major version
 
 _NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,62}$")
 _STR_DTYPE = h5py.string_dtype("utf-8")
@@ -359,6 +364,11 @@ class Dataset:
     meta : dict
         Free metadata; nested dicts become groups. Allowed: str, int, float, complex, bool
         (stored as 0/1), numeric arrays, lists of str, nested dicts. `None` is refused at save.
+    labels : Labels
+        The file's labels: `star`, `project`, `users`, `tags`, `comment`, as LBD Viewer's
+        Library shows them. Set one (`d.labels.star = True`, `d.labels.tags.add("calibration")`)
+        or all (`d.labels = {"project": "Cooldown 7", "tags": ["calibration"]}`); each is
+        checked at once. Stored in the file (format 1.3), so they go wherever the file goes.
     plot : dict or None
         Default view for LBD Viewer and `lbd.plot.plot`: a plot spec such as
         `{"kind": "heatmap", "complex": "db"}`.
@@ -420,6 +430,7 @@ class Dataset:
         self.groups: Dict[str, Group] = {}
         self.values: Dict[str, Value] = {}
         self.meta: Dict[str, Any] = {}
+        self._labels = Labels()
         self.plot: Optional[Dict[str, Any]] = None
         self.style: Optional[Dict[str, Any]] = None
         self.style_name: Optional[str] = None
@@ -441,6 +452,25 @@ class Dataset:
     def parent_id(self) -> Optional[str]:
         """The id of the file this one was made from, or None."""
         return self._parent_id
+
+    @property
+    def labels(self) -> Labels:
+        """The file's labels (star, project, users, tags, comment); see [`Labels`][lbd.Labels]."""
+        return self._labels
+
+    @labels.setter
+    def labels(self, value: Any) -> None:
+        new = Labels.of(value, "labels")
+        if isinstance(value, Labels):
+            new.written = value.written
+        else:
+            new.written = _labels.now()      # also for None: the labels were removed now
+        self._labels = new
+
+    def add_tags(self, *tags: str) -> None:
+        """Add tags to the file's labels: `d.add_tags("calibration", "Chip 3/Cooldown 7")`."""
+        for t in tags:
+            self._labels.tags.add(t)
 
     def new_id(self) -> str:
         """Make this a separate measurement: a new id, the old one becomes `parent_id`.
@@ -1343,6 +1373,8 @@ class Dataset:
             if mpl:
                 g_plot.attrs["matplotlib"] = mpl
 
+        _labels.write(f, self._labels)
+
 
 WRITING_SUFFIX = ".writing"   # name.lbd.writing: being written by lbd.Writer (spec §7)
 REPLACE_WAIT = 3.0   # seconds `save` waits for a file another program has open (Windows)
@@ -1559,33 +1591,172 @@ def set_plot(path: PathLike, *, spec: Any = _UNSET, style: Any = _UNSET, style_n
     """
     if spec is _UNSET and style is _UNSET and style_name is _UNSET:
         raise TypeError("set_plot needs at least one of spec=, style= or style_name=")
+    path = _edit_path(path, "set_plot")
+    changes = _plot_changes(spec, style, style_name)
+    with _open(path, "r+") as f:
+        _check_editable(f, path)
+        _apply_plot(f, changes)
+
+
+def _edit_path(path: PathLike, what: str) -> Path:
+    """The path of a finished file to edit in place: a file being written is refused."""
     path = Path(path)
+    if path.name.lower().endswith(WRITING_SUFFIX):
+        raise LBDError(f"{path.name} is still being written: {what} can't change it. Labels and the saved "
+                       "view given to the lbd.Writer (w.labels, w.plot) are written when it finishes; or "
+                       "change the finished file")
     if path.suffix.lower() != ".lbd":
         _warn(f"{path.name}: LBD files should use the .lbd extension")
-    changes = {}
+    return path
+
+
+def _check_editable(f: h5py.File, path: Path) -> None:
+    if _attr_str(f, "lbd_format", "", path) != "LBD":
+        raise LBDError(f"{path.name} is not an LBD file (missing lbd_format='LBD')")
+    _check_version(_attr_str(f, "lbd_version", "", path), path)
+
+
+def _plot_changes(spec: Any = _UNSET, style: Any = _UNSET, style_name: Any = _UNSET) -> Dict[str, Optional[str]]:
+    """set_plot's arguments, checked, as the texts to store (None: remove)."""
+    changes: Dict[str, Optional[str]] = {}
     if spec is not _UNSET:
         changes["spec"] = None if spec is None else _plot_json(spec, "spec")
     if style is not _UNSET:
         changes["style"] = None if style is None else _style_json(style, "style")
     if style_name is not _UNSET:
         changes["style_name"] = None if style_name is None else _check_style_name(style_name)
-    with _open(path, "r+") as f:
-        if _attr_str(f, "lbd_format", "", path) != "LBD":
-            raise LBDError(f"{path.name} is not an LBD file (missing lbd_format='LBD')")
-        _check_version(_attr_str(f, "lbd_version", "", path), path)
-        g = f.require_group("plot")
-        for key, text in changes.items():
-            if text is None:
-                if key in g.attrs:
-                    del g.attrs[key]
-            else:
-                g.attrs[key] = text
-        if not any(k in g.attrs for k in ("spec", "style", "style_name")):
-            del f["plot"]                      # nothing left (a version alone means nothing)
+    return changes
+
+
+def _apply_plot(f: h5py.File, changes: Mapping[str, Optional[str]]) -> None:
+    """Change the saved view of an open file (`_plot_changes`); LBD Viewer uses it too."""
+    g = f.require_group("plot")
+    for key, text in changes.items():
+        if text is None:
+            if key in g.attrs:
+                del g.attrs[key]
         else:
-            mpl = _matplotlib_version()
-            if mpl:
-                g.attrs["matplotlib"] = mpl
+            g.attrs[key] = text
+    if not any(k in g.attrs for k in ("spec", "style", "style_name")):
+        del f["plot"]                      # nothing left (a version alone means nothing)
+    else:
+        mpl = _matplotlib_version()
+        if mpl:
+            g.attrs["matplotlib"] = mpl
+
+
+def _apply_labels(f: h5py.File, labels: Labels, path: Path) -> None:
+    """Write the labels into an open file, raising its version to one with labels; LBD Viewer
+    uses it too."""
+    _raise_version_for_labels(f, path)
+    _labels.write(f, labels)
+
+
+def _file_labels(f: h5py.File, path: Path) -> Labels:
+    return _labels.read(f["labels"], path) if "labels" in f else Labels()
+
+
+def labels(path: PathLike) -> Optional[Labels]:
+    """The labels stored in a file (star, project, users, tags, comment), or None if it has none.
+
+    Reads only the file's description, not its data. LBD Viewer's Library may show newer
+    labels for a file, set there after the file was last written.
+
+    Examples
+    --------
+    >>> lbd.labels("sweep.lbd").tags
+    ['calibration']
+    """
+    path = Path(path)
+    with _open(path, "r") as f:
+        _check_editable(f, path)
+        if "labels" not in f:
+            return None
+        return _labels.read(f["labels"], path)
+
+
+def set_labels(path: PathLike, *, star: Any = _UNSET, project: Any = _UNSET, users: Any = _UNSET,
+               tags: Any = _UNSET, comment: Any = _UNSET, replace: bool = False) -> Labels:
+    """Change the labels of an existing file; the data is not touched or rewritten.
+
+    Only what is given changes. Tags and users are added to those the file has; with
+    `replace=True` they replace them. Works on any `.lbd` file, with or without LBD Viewer;
+    the Library shows the new labels at its next check.
+
+    Parameters
+    ----------
+    path : str or path-like
+        A finished `.lbd` file (not one being written: use `w.labels` on the `lbd.Writer`).
+    star : bool, optional
+        Starred or not.
+    project : str or None, optional
+        The project; None (or "") removes it.
+    users, tags : list of str, optional
+        Added to the file's, or with `replace=True` the new lists.
+    comment : str, optional
+        Free text.
+    replace : bool, optional
+        Replace the users and tags instead of adding to them.
+
+    Returns
+    -------
+    Labels
+        The file's labels now.
+
+    Raises
+    ------
+    TypeError
+        No label given, or one of the wrong type.
+    LBDError
+        An empty label; the file is being written, or is not an LBD file.
+
+    Examples
+    --------
+    >>> lbd.set_labels("sweep.lbd", tags=["calibration"], star=True)
+    >>> lbd.set_labels("sweep.lbd", tags=["checked"], replace=True)
+    """
+    given = {k: v for k, v in (("star", star), ("project", project), ("users", users), ("tags", tags),
+                               ("comment", comment)) if v is not _UNSET}
+    if not given:
+        raise TypeError("set_labels needs at least one of star=, project=, users=, tags=, comment=")
+    if not isinstance(replace, bool):
+        raise TypeError(f"replace must be True or False, not {replace!r}")
+    Labels.of(given, "set_labels")                    # every argument checked before the file is opened
+    path = _edit_path(path, "set_labels")
+    with _open(path, "r+") as f:
+        _check_editable(f, path)
+        out = _file_labels(f, path)
+        for key, value in given.items():
+            if key in ("users", "tags") and not replace:
+                getattr(out, key).update(value)
+            else:
+                setattr(out, key, value)
+        out.written = _labels.now()
+        _apply_labels(f, out, path)
+    return out
+
+
+def remove_labels(path: PathLike, *, tags: Iterable[str] = (), users: Iterable[str] = ()) -> Labels:
+    """Remove tags and users from an existing file's labels; the data is not touched.
+
+    A label the file doesn't have is ignored. Returns the file's labels now.
+
+    Examples
+    --------
+    >>> lbd.remove_labels("sweep.lbd", tags=["calibration"])
+    """
+    probe = Labels(tags=tags, users=users)           # checked before the file is opened
+    path = _edit_path(path, "remove_labels")
+    with _open(path, "r+") as f:
+        _check_editable(f, path)
+        out = _file_labels(f, path)
+        for t in probe.tags:
+            out.tags.discard(t)
+        for u in probe.users:
+            out.users.discard(u)
+        out.written = _labels.now()
+        _apply_labels(f, out, path)
+    return out
 
 
 @contextlib.contextmanager
@@ -1736,6 +1907,8 @@ def _read_header(f: h5py.File, path: Path) -> Dataset:
         d.style = _attr_json(g, "style", path)
         d.style_name = _attr_str(g, "style_name", "", path) or None
         d.matplotlib = _attr_str(g, "matplotlib", "", path) or None
+    if "labels" in f:
+        d._labels = _labels.read(f["labels"], path)
     return d
 
 
@@ -1757,8 +1930,25 @@ def _check_version(ver: str, path: Path) -> None:
 
 
 def _version_needed(d: "Dataset") -> str:
-    """The lowest format version that holds `d`'s content (spec §6): 1.2 without an axis group."""
-    return FORMAT_VERSION if d.groups else _GRID_VERSION
+    """The lowest format version that holds `d`'s content (spec §6): 1.2 for a grid, 2.0 with an
+    axis group; 1.3 / 2.1 with labels."""
+    major = 2 if d.groups else 1
+    if _has_labels(d._labels):
+        return f"{major}.{_LABELS_MINOR[major]}"
+    return _GROUP_VERSION if d.groups else _GRID_VERSION
+
+
+def _has_labels(labels: Labels) -> bool:
+    """Whether the file gets a /labels group: labels set, or set and all removed again."""
+    return bool(labels) or labels.written is not None
+
+
+def _raise_version_for_labels(f: h5py.File, path: Path) -> None:
+    """An existing file that gets /labels: its version raised to the first one with labels."""
+    ver = _attr_str(f, "lbd_version", "", path)
+    major, minor = (int(x) for x in ver.split("."))
+    if minor < _LABELS_MINOR[major]:
+        f.attrs["lbd_version"] = f"{major}.{_LABELS_MINOR[major]}"
 
 
 def _read_axis(name: str, ds: Any, path: Path, where: Optional[str] = None, in_group: bool = False) -> Axis:

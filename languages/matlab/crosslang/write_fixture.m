@@ -38,6 +38,7 @@ w.addAxis("time", [], Unit="s", Grows=true);
 w.addValue("S21", [], ["power" "freq"], Dtype="complex128");
 w.addValue("T", [], "time");
 w.addValue("n", [], ["state" "power"], Dtype="int32");
+w.addTags("live");                                     % labels before the start ...
 for i = 1:2                                            % power 3 is never measured
     w.write(power=i, S21=complex(i, 1:3));
 end
@@ -46,6 +47,7 @@ w.write(time=[1 2], T=[10 20]);
 w.write(time=3, T=30);
 w.write(state="excited", power=1, n=7);
 w.write(state="ground", power=2, n=3);
+w.Labels.Star = true;                                  % ... and while measuring
 w.close(Stopped=true);
 
 % The groups fixture (format 2.0): variable sweeps, the same in every language.
@@ -80,16 +82,28 @@ for p = 1:3                                            % by Parent=
         g.write(Parent=k, R=r, w=100 * p + 10 * q + r);
     end
 end
+g.addTags("groups");                                   % labels: format 2.1
 g.save(fullfile(out, "groups.lbd"));
 
 % The r+ fixture (plan 6d): saved, then opened with Mode="r+" and changed in place.
 r = lbd.Dataset("R plus");
 r.addAxis("x", 0:4);
 r.addValue("y", zeros(1, 5), "x");
+r.addTags("kept");
 r.save(fullfile(out, "rplus.lbd"));
 o = lbd.open(fullfile(out, "rplus.lbd"), Mode="r+");
 o.write(x=3, y=7);
 o.Meta.edited = 1;
 o.save();
 o.close();
+
+% The labels fixture (format 1.3): labels given at creation, then changed on the file.
+lb = lbd.Dataset("Labels");
+lb.addAxis("x", [0 1 2]);
+lb.addValue("y", zeros(1, 3), "x");
+lb.Labels = struct('Star', true, 'Project', "Chip – é / Run 1", 'Users', "Ana", 'Tags', "calibration", ...
+    'Comment', "ü – note");
+lb.save(fullfile(out, "labels.lbd"));
+lbd.setLabels(fullfile(out, "labels.lbd"), Tags="checked", Users="Bo");
+lbd.removeLabels(fullfile(out, "labels.lbd"), Tags="calibration");
 end

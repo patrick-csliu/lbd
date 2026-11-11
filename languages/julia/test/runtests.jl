@@ -257,13 +257,18 @@ end
             delete_attribute(f, "lbd_version")
             write_attribute(f, "lbd_version", "2.1")
         end
-        @test_logs (:warn, r"newer than 2.0") LBD.load(p)
+        @test_logs LBD.load(p)                      # 2.1 (labels) is known too
+        h5open(p, "r+") do f
+            delete_attribute(f, "lbd_version")
+            write_attribute(f, "lbd_version", "2.2")
+        end
+        @test_logs (:warn, r"newer than 2.1") LBD.load(p)
         h5open(p, "r+") do f
             delete_attribute(f, "lbd_version")
             write_attribute(f, "lbd_version", "3.0")
         end
         @test_throws LBDVersionError LBD.load(p)
-        @test LBD.version().lbd_version == "2.0"
+        @test LBD.version().lbd_version == "2.1"
     end
 
     @testset "robust reading" begin
@@ -773,4 +778,81 @@ end
         @test to_dense(d, "f")["f"].data[3, :] == [30, 31, 32]
         @test coords(d, "g")["C"] == [0, 0, 0, 1]
     end
+end
+
+@testset "labels (spec §1.9)" begin
+    dir = mktempdir()
+    d = make_sweep()
+    @test d.labels.written === nothing
+    d.labels.star = true
+    d.labels.project = " Chip 3 / Cooldown 7 "
+    d.labels.users = ["Ana"]
+    add_tags!(d, "calibration", "b")
+    d.labels.comment = "first try"
+    p = LBD.save(joinpath(dir, "labels.lbd"), d)
+    r = LBD.load(p)
+    @test r.lbd_version == "1.3"
+    @test r.labels == d.labels && r.labels.written == d.labels.written
+    @test r.labels.project == "Chip 3/Cooldown 7" && r.labels.tags == ["b", "calibration"]
+    r.title = "again"
+    LBD.save(p, r)                                  # kept by a save, and by a copy
+    @test LBD.labels(p).tags == ["b", "calibration"]
+    c = LBD.save(joinpath(dir, "copy.lbd"), r)
+    @test LBD.labels(c).written == d.labels.written
+    LBD.open(p; mode="r+") do o
+        o.labels.users = vcat(o.labels.users, "Bo")
+        LBD.save(o)
+    end
+    @test LBD.labels(p).users == ["Ana", "Bo"]
+
+    # checked when set
+    e = make_sweep()
+    @test_throws LBDError (e.labels.star = "yes")
+    @test_throws LBDError add_tags!(e, "a//b")
+    @test_throws LBDError (e.labels.tags = "one text")
+    @test_throws LBDError (e.labels = (stars=true,))
+    @test !e.labels.star && e.labels.written === nothing
+    e.labels = (tags=["x"], star=true)
+    @test e.labels.tags == ["x"] && e.labels.written !== nothing
+
+    # an existing file
+    q = LBD.save(joinpath(dir, "set.lbd"), make_sweep())
+    @test LBD.labels(q) === nothing
+    l = LBD.set_labels(q; tags=["a"], users=["Ana"], star=true)
+    @test l.tags == ["a"] && LBD.info(q).lbd_version == "1.3"
+    LBD.set_labels(q; tags=["b"])
+    @test LBD.labels(q).tags == ["a", "b"]
+    LBD.set_labels(q; tags=["c"], replace=true)
+    @test LBD.labels(q).tags == ["c"] && LBD.labels(q).users == ["Ana"]
+    l = LBD.remove_labels(q; tags=["c", "not there"], users=["Ana"])
+    @test isempty(l.tags) && isempty(l.users) && l.star
+    @test_throws LBDError LBD.set_labels(q)
+    @test_throws LBDError LBD.set_labels(q; tags=["/"])
+    @test_throws LBDError LBD.set_labels(q * ".writing"; star=true)
+    g = LBD.save(joinpath(dir, "group.lbd"), group_case2())
+    LBD.set_labels(g; star=true)
+    @test LBD.info(g).lbd_version == "2.1"
+
+    # a bad label in a file: left out with a warning
+    h5open(q, "r+") do f
+        delete_attribute(f["labels"], "tags")
+        write_attribute(f["labels"], "tags", "not json")
+    end
+    l = @test_logs (:warn, r"'tags' can't be read") LBD.labels(q)
+    @test l.star && isempty(l.tags)
+
+    # the Writer: labels set while measuring keep their time
+    wp = joinpath(dir, "live.lbd")
+    w = LBD.Writer(wp; flush_every=60)
+    add_axis!(w, "x", [1.0, 2.0])
+    add_value!(w, "y"; axes=["x"])
+    w.labels.star = true
+    write!(w; x=1, y=1.0)
+    write!(w; x=2, y=2.0)
+    sleep(0.01)
+    add_tags!(w, "while measuring")
+    at = w.labels.written
+    close(w)
+    r = LBD.load(wp)
+    @test r.lbd_version == "1.3" && r.labels.star && r.labels.tags == ["while measuring"] && r.labels.written == at
 end

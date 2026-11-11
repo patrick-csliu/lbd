@@ -17,6 +17,7 @@ add_value!(d, "f"; axes=["A", "B"])               # one entry per (A, B) point
 i = write!(d; A=3); write!(d; parent=i, B=[15, 25], f=[1.0, 2.0])
 m = to_dense(d, "f")                              # the full rectangle, gaps NaN
 d.meta["T_mK"] = 12
+d.labels.star = true; add_tags!(d, "calibration")   # the file's labels (format 1.3)
 LBD.save("sweep.lbd", d)
 d = LBD.load("sweep.lbd")
 d["S21"].data
@@ -33,12 +34,13 @@ using Random: RandomDevice
 export Dataset, Axis, Value, Group, add_axis!, add_value!, add_group!, write!, new_id!, LBDError, LBDVersionError
 export coords, rows, to_dense
 export Writer, lbd_writer, writing_status, recover
+export Labels, add_tags!
 
 const PACKAGE_VERSION = "1.3.0-dev"
-const FORMAT_VERSION = "2.0"            # the newest format this module reads and writes
+const FORMAT_VERSION = "2.1"            # the newest format this module reads and writes
 const GRID_VERSION = "1.2"              # what a file without an axis group is written as (spec §6)
 const FORMAT_MAJOR = parse(Int, split(FORMAT_VERSION, ".")[1])
-const LATEST_MINOR = Dict(1 => 2, 2 => 0)   # the newest minor version known, per major version
+const LATEST_MINOR = Dict(1 => 3, 2 => 1)   # the newest minor version known, per major version
 const NAME_RE = r"^[A-Za-z][A-Za-z0-9_]{0,62}$"
 const COMPRESS_MIN_SIZE = 1024
 const REPLACE_WAIT = 3.0   # seconds `save` waits for a file another program has open (Windows)
@@ -60,6 +62,8 @@ struct LBDVersionError <: Exception
 end
 Base.showerror(io::IO, e::LBDError) = print(io, "LBDError: ", e.msg)
 Base.showerror(io::IO, e::LBDVersionError) = print(io, "LBDVersionError: ", e.msg)
+
+include("labels.jl")
 
 """Package version and the LBD format version it reads and writes."""
 version() = (package=PACKAGE_VERSION, lbd_version=FORMAT_VERSION)
@@ -127,6 +131,7 @@ mutable struct Dataset
     style::Union{Dict{String,Any},Nothing}
     style_name::Union{String,Nothing}
     matplotlib::Union{String,Nothing}   # matplotlib version that last wrote the saved view (kept as is)
+    labels::Labels                 # the file's labels (format 1.3); checked when set
     # The measurement's identity (a UUID version 7) and the one it was made from; set by `save`
     # and `new_id!`, not by hand: see `save`.
     id::Union{String,Nothing}
@@ -141,8 +146,18 @@ end
 Dataset(title::AbstractString=""; description::AbstractString="", created=nothing) = Dataset(
     String(title), String(description), created === nothing ? nothing : created_text(created), nothing, GRID_VERSION,
     OrderedDict{String,Axis}(), OrderedDict{String,Group}(), OrderedDict{String,Value}(), OrderedDict{String,Any}(),
-    nothing, nothing, nothing, nothing, nothing, nothing, nothing, false, String[], Dict{String,Any}(), nothing,
+    nothing, nothing, nothing, nothing, Labels(), nothing, nothing, nothing, false, String[], Dict{String,Any}(), nothing,
 )
+
+# `d.labels = (tags=["calibration"],)`: checked at once, and the time they were set is now
+function Base.setproperty!(d::Dataset, s::Symbol, x)
+    if s === :labels
+        l = as_labels(x)
+        x isa Labels || setfield!(l, :written, label_time())   # also for nothing: removed now
+        return setfield!(d, :labels, l)
+    end
+    return setfield!(d, s, convert(fieldtype(Dataset, s), x))
+end
 
 # ---- the measurement's identity ----------------------------------------------
 
@@ -1236,6 +1251,7 @@ function write_file(f, d::Dataset, compression::Bool)
         d.style_name !== nothing && write_str_attr(gp, "style_name", d.style_name)
         d.matplotlib !== nothing && !isempty(d.matplotlib) && write_str_attr(gp, "matplotlib", d.matplotlib)
     end
+    write_labels(f, d.labels)
 end
 
 # The axes the file stores at its top: the fixed axes, then each value's data point dimensions
@@ -1607,6 +1623,7 @@ function read_header(f, path)
         s = attr_str(g, "style_name"); d.style_name = isempty(s) ? nothing : s
         m = attr_str(g, "matplotlib"); d.matplotlib = isempty(m) ? nothing : m
     end
+    setfield!(d, :labels, read_labels(f, path))
     return d
 end
 
@@ -1633,8 +1650,11 @@ function check_version(ver, path)
     end
 end
 
-"The lowest format version that holds `d`'s content (spec §6): 2.0 with an axis group, 1.2 without."
-version_needed(d::Dataset) = isempty(d.groups) ? GRID_VERSION : FORMAT_VERSION
+"The lowest format version that holds `d`'s content (spec §6): 1.2 for a grid, 2.0 with an axis group; 1.3 / 2.1 with labels."
+function version_needed(d::Dataset)
+    ver = isempty(d.groups) ? GRID_VERSION : "2.0"
+    return has_labels(d.labels) ? labels_version(ver) : ver
+end
 
 function describe_value(name, ds)
     isbool = attr_int(ds, "lbd_bool") == 1

@@ -6,7 +6,7 @@ end
 major = str2double(tok{1}); minor = str2double(tok{2});
 v = lbd.version();
 sup = str2double(split(v.lbd_version, "."));
-latestMinor = [2 0];            % the newest minor version known, per major version (1.2, 2.0)
+latestMinor = [3 1];            % the newest minor version known, per major version (1.3, 2.1)
 if major > sup(1)
     error('lbd:version', ['%s uses LBD format %s, but this lbd package (%s) only supports formats ' ...
         'up to %d.x. Please update lbd.'], base, ver, v.package, sup(1));

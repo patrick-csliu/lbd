@@ -193,6 +193,8 @@ function save_in_place(d::Dataset)
             d.style_name !== nothing && write_str_attr(gp, "style_name", d.style_name)
             d.matplotlib !== nothing && !isempty(d.matplotlib) && write_str_attr(gp, "matplotlib", d.matplotlib)
         end
+        write_labels_in_place(f, d.labels)
     end
+    has_labels(d.labels) && (d.lbd_version = labels_version(d.lbd_version))
     return s.path
 end

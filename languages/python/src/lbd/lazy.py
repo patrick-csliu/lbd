@@ -39,9 +39,12 @@ from .io import (
     _same_target,
     _style_json,
     _validate_loaded,
+    _has_labels,
+    _raise_version_for_labels,
     _warn,
     _write_meta,
 )
+from . import _labels
 
 MODES = ("r", "r+")
 
@@ -323,6 +326,10 @@ def save_in_place(d: Dataset) -> Path:
             mpl = _matplotlib_version() or d.matplotlib
             if mpl:
                 g.attrs["matplotlib"] = mpl
+        if _has_labels(d.labels):
+            _raise_version_for_labels(f, source.path)
+            d.lbd_version = _attr_str(f, "lbd_version", "", source.path)
+        _labels.write(f, d.labels)
 
     source.run(rewrite)
     return source.path

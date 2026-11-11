@@ -51,11 +51,15 @@ from .io import (
     _check_text,
     _matplotlib_version,
     _version_needed,
+    _attr_str,
+    _has_labels,
+    _raise_version_for_labels,
     _warn,
     _write_meta,
     load,
     new_uuid7,
 )
+from . import _labels
 from .live import Heartbeat, live_path
 
 PathLike = Union[str, os.PathLike]
@@ -425,6 +429,13 @@ class Writer:
     plot = property(lambda self: self._d.plot, lambda self, v: setattr(self._d, "plot", v))
     style = property(lambda self: self._d.style, lambda self, v: setattr(self._d, "style", v))
     style_name = property(lambda self: self._d.style_name, lambda self, v: setattr(self._d, "style_name", v))
+    labels = property(lambda self: self._d.labels, lambda self, v: setattr(self._d, "labels", v),
+                      doc="The file's labels, as `Dataset.labels`. Set before the first write, they are in the "
+                          "file from the start; set later, they are written when it finishes.")
+
+    def add_tags(self, *tags: str) -> None:
+        """Add tags to the file's labels, as `Dataset.add_tags`."""
+        self._d.add_tags(*tags)
 
     @property
     def axes(self) -> Dict[str, Axis]:
@@ -579,6 +590,7 @@ class Writer:
             elif v.measured is not None:
                 v.measured = None                # given whole: everything measured
         _write_meta(f.create_group("meta"), d.meta, "meta")
+        _labels.write(f, d.labels)
 
     def write(self, names: Optional[Mapping[str, Any]] = None, *, parent: Any = None, **more: Any) -> Any:
         """Put measured data in its place: as [`Dataset.write`][lbd.Dataset.write], with the
@@ -799,6 +811,10 @@ class Writer:
                 mpl = _matplotlib_version()
                 if mpl:
                     g.attrs["matplotlib"] = mpl
+            if _has_labels(d.labels):          # labels set while measuring: written with their own time
+                _raise_version_for_labels(f, self.writing_path)
+                d.lbd_version = _attr_str(f, "lbd_version", "", self.writing_path)
+            _labels.write(f, d.labels)
             if "measured" in f:
                 for name in list(f["measured"]):
                     if np.all(f["measured"][name][()]):

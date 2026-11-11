@@ -32,6 +32,16 @@ for f = dir(fullfile(root, '*', 'groups.lbd'))'
         fprintf('  matlab reads %-7s groups.lbd FAILED: %s\n', lang, err.message);
     end
 end
+for f = dir(fullfile(root, '*', 'labels.lbd'))'
+    lang = string(regexp(f.folder, '[^\\/]+$', 'match', 'once'));
+    try
+        checkLabels(fullfile(f.folder, f.name));
+        fprintf('  matlab reads %-7s labels.lbd OK\n', lang);
+    catch err
+        failed = true;
+        fprintf('  matlab reads %-7s labels.lbd FAILED: %s\n', lang, err.message);
+    end
+end
 for name = ["fixture.lbd" "groups.lbd" "rplus.lbd"]
     for f = dir(fullfile(root, '*', name))'
         lang = string(regexp(f.folder, '[^\\/]+$', 'match', 'once'));
@@ -84,11 +94,26 @@ function checkRplus(p)
 d = lbd.load(p);
 expect(isequal(d.Values.y.Data(:)', [0 0 7 0 0]), "y written in place");
 expect(d.Meta.edited == 1 && d.Title == "R plus", "meta saved in place");
+expect(isequal(d.Labels.Tags, "kept"), "labels kept by the save in place");
+end
+
+function checkLabels(p)
+d = lbd.load(p);
+L = d.Labels;
+expect(d.LbdVersion == "1.3", "version 1.3: " + d.LbdVersion);
+expect(L.Star && L.Project == "Chip – é/Run 1" && L.Comment == "ü – note", "star, project, comment");
+expect(isequal(L.Users, ["Ana" "Bo"]) && isequal(L.Tags, "checked"), "users, tags");
+expect(~isempty(regexp(L.Written, '^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$', 'once')), "written: " + L.Written);
+copy = tempname + ".lbd";
+cleanup = onCleanup(@() delete(copy));
+d.save(copy);                                      % saved to another file: the same labels and time
+expect(isequal(lbd.labels(copy), L), "labels of a copy");
 end
 
 function checkGroups(p)
 d = lbd.load(p);
-expect(d.LbdVersion == "2.0", "version 2.0");
+expect(d.LbdVersion == "2.1", "version 2.1: " + d.LbdVersion);
+expect(isequal(d.Labels.Tags, "groups"), "labels");
 expect(isequal(d.Groups.AB.Order, ["A" "B"]) && isequal(d.Groups.PQR.Order, ["P" "Q" "R"]), "group orders");
 expect(isequal(double(d.Axes.A.Data(:)'), [1 2 3]), "A");
 expect(isequal(double(d.Axes.B.Data(:)'), [10 10 20 15 25 35]), "B");
@@ -121,6 +146,7 @@ expect(isempty(d.Values.T.Measured) && isempty(d.Values.S21.Measured), "no masks
 expect(isa(d.Values.n.Data, 'int32') && isequal(d.Values.n.Data, int32([0 3 0; 7 0 0])), "n");
 expect(isequal(d.Values.n.Measured, logical([0 1 0; 1 0 0])), "n measured");
 expect(isequal(d.Axes.state.Elements, ["ground" "excited"]), "state elements");
+expect(d.LbdVersion == "1.3" && isequal(d.Labels.Tags, "live") && d.Labels.Star, "labels");
 end
 
 function checkOne(p)

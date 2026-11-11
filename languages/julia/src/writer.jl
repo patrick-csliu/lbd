@@ -137,13 +137,17 @@ function Writer(path::AbstractString; title::AbstractString="", description::Abs
 end
 
 function Base.getproperty(w::Writer, s::Symbol)
-    s in (:title, :description, :meta, :plot, :style, :style_name, :axes, :groups, :values, :id) && return getfield(getfield(w, :d), s)
+    s in (:title, :description, :meta, :plot, :style, :style_name, :labels, :axes, :groups, :values, :id) && return getfield(getfield(w, :d), s)
     return getfield(w, s)
 end
 function Base.setproperty!(w::Writer, s::Symbol, x)
     s in (:title, :description, :meta, :plot, :style, :style_name) && return setfield!(getfield(w, :d), s, x)
+    s === :labels && return setproperty!(getfield(w, :d), s, x)
     return setfield!(w, s, x)
 end
+
+"Add tags to the file's labels: set before the first write, they are in the file from the start; set later, they are written when it finishes."
+add_tags!(w::Writer, tags::AbstractString...) = add_tags!(getfield(w, :d), tags...)
 Base.show(io::IO, w::Writer) = print(io, "LBD.Writer(\"", w.state == :writing ? w.writing_path : w.path, "\", :", w.state, ")")
 
 """
@@ -285,6 +289,7 @@ function create_live!(f, d::Dataset)
         end
     end
     write_meta(create_group(f, "meta"), d.meta, "meta")
+    write_labels(f, d.labels)
 end
 
 # The dimensions of `v` that grow while it is written: a growing axis, a group's level.
@@ -574,6 +579,7 @@ function finish_description(w::Writer)
             d.style !== nothing && write_str_attr(gp, "style", JSON3.write(d.style))
             d.style_name !== nothing && write_str_attr(gp, "style_name", d.style_name)
         end
+        write_labels_in_place(f, d.labels)   # also labels set while measuring, with their time
         if haskey(f, "measured")
             gm = f["measured"]
             for name in collect(keys(gm))

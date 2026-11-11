@@ -288,12 +288,14 @@ setVersion(p, "1.7");
 tc.verifyWarning(@() lbd.load(p), 'lbd:newerVersion');
 setVersion(p, "2.0");
 lbd.load(p);                                        % 2.0 is known: no warning
-setVersion(p, "2.1");
+setVersion(p, "2.1");                               % with labels: known too
+lbd.load(p);
+setVersion(p, "2.2");
 tc.verifyWarning(@() lbd.load(p), 'lbd:newerVersion');
 setVersion(p, "3.0");
 tc.verifyError(@() lbd.load(p), 'lbd:version');
 v = lbd.version();
-tc.verifyEqual(v.lbd_version, "2.0");
+tc.verifyEqual(v.lbd_version, "2.1");
 end
 
 function setVersion(p, ver)
@@ -898,4 +900,94 @@ r = d.rows("g", By="A");
 tc.verifyEqual(r{3, 2}.Values.g.Data', [310 320 321]);
 tc.verifyEqual(d.toDense("f").Values.f.Data(3, :), [30 31 32]);
 tc.verifyEqual(d.coords("g").C', [0 0 0 1]);
+end
+
+% ---- labels (plan 17, spec section 1.9) ---------------------------------------------------------
+
+function testLabelsRoundTrip(tc)
+d = makeSweep();
+tc.verifyEqual(d.Labels.Written, "");
+d.Labels.Star = true;
+d.Labels.Project = " Chip 3 / Cooldown 7 ";
+d.Labels.Users = "Ana";
+d.addTags(["calibration" "b"]);
+d.Labels.Comment = "first try";
+p = d.save(fullfile(tc.TestData.dir, "labels.lbd"));
+r = lbd.load(p);
+tc.verifyEqual(r.LbdVersion, "1.3");
+tc.verifyTrue(r.Labels.Star);
+tc.verifyEqual(r.Labels.Project, "Chip 3/Cooldown 7");
+tc.verifyEqual(r.Labels.Users, "Ana");
+tc.verifyEqual(r.Labels.Tags, ["b" "calibration"]);
+tc.verifyEqual(r.Labels.Comment, "first try");
+tc.verifyEqual(r.Labels.Written, d.Labels.Written);
+tc.verifyTrue(endsWith(r.Labels.Written, "Z"));
+r.Title = "again";
+r.save(p);                                         % kept by a save
+tc.verifyEqual(lbd.labels(p).Tags, ["b" "calibration"]);
+c = r.save(fullfile(tc.TestData.dir, "labels_copy.lbd"));   % and by a copy
+tc.verifyEqual(lbd.labels(c).Written, d.Labels.Written);
+o = lbd.open(p, Mode="r+");
+L = o.Labels; L.Users(end+1) = "Bo"; o.Labels = L;
+o.save();
+o.close();
+tc.verifyEqual(lbd.labels(p).Users, ["Ana" "Bo"]);
+end
+
+function testLabelsAreCheckedWhenSet(tc)
+d = makeSweep();
+tc.verifyError(@() setLabel(d, 'Star', "yes"), 'lbd:labels');
+tc.verifyError(@() setLabel(d, 'Tags', "a//b"), 'lbd:labels');
+tc.verifyError(@() setLabel(d, 'Comment', 3), 'lbd:labels');
+tc.verifyError(@() setAll(d, struct('Stars', true)), 'lbd:labels');
+tc.verifyFalse(d.Labels.Star);
+tc.verifyEqual(d.Labels.Written, "");
+end
+
+function setLabel(d, key, value)
+L = d.Labels;
+L.(key) = value;
+d.Labels = L;
+end
+
+function setAll(d, value)
+d.Labels = value;
+end
+
+function testSetLabelsOnAFile(tc)
+p = makeSweep().save(fullfile(tc.TestData.dir, "set_labels.lbd"));
+tc.verifyEqual(lbd.labels(p).Written, "");
+L = lbd.setLabels(p, Tags="a", Users="Ana", Star=true);
+tc.verifyEqual(L.Tags, "a");
+tc.verifyEqual(lbd.info(p).LbdVersion, "1.3");
+lbd.setLabels(p, Tags="b");
+tc.verifyEqual(lbd.labels(p).Tags, ["a" "b"]);
+lbd.setLabels(p, Tags="c", Replace=true);
+tc.verifyEqual(lbd.labels(p).Tags, "c");
+L = lbd.removeLabels(p, Tags=["c" "not there"], Users="Ana");
+tc.verifyEmpty(L.Tags);
+tc.verifyEmpty(L.Users);
+tc.verifyTrue(L.Star);
+tc.verifyError(@() lbd.setLabels(p), 'lbd:labels');
+tc.verifyError(@() lbd.setLabels(p, Tags="/"), 'lbd:labels');
+tc.verifyError(@() lbd.setLabels(p + ".writing", Star=true), 'lbd:writing');
+g = groupCase2().save(fullfile(tc.TestData.dir, "set_labels_group.lbd"));
+lbd.setLabels(g, Star=true);
+tc.verifyEqual(lbd.info(g).LbdVersion, "2.1");
+end
+
+function testWriterLabels(tc)
+p = fullfile(tc.TestData.dir, "live_labels.lbd");
+w = makeWriter(p);
+w.Labels.Star = true;
+w.write(power=1, S21=(1:4) + 1i, n=5);
+pause(0.01);
+w.addTags("while measuring");
+at = w.Labels.Written;
+tc.verifyWarning(@() w.close(), 'lbd:notMeasured');
+r = lbd.load(p);
+tc.verifyEqual(r.LbdVersion, "1.3");
+tc.verifyTrue(r.Labels.Star);
+tc.verifyEqual(r.Labels.Tags, "while measuring");
+tc.verifyEqual(r.Labels.Written, at);              % the time they were set, not the finish
 end

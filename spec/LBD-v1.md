@@ -1,4 +1,4 @@
-# LBD file format — version 2.0
+# LBD file format — version 2.1
 
 LBD ("Lab Data", extension `.lbd`) is a file format for measurement and simulation data that can be written and read identically from any programming language, and viewed with the LBD viewer. Any language with HDF5 support can implement it; this repository provides implementations for Python, MATLAB and Julia.
 
@@ -29,6 +29,7 @@ that implement this spec, see [Python](../docs/python/files.md), [MATLAB](../doc
 ├── meta/               (group)  free key/value metadata, stored as attributes; may contain sub-groups
 ├── measured/           (group, optional)  one uint8 mask per integer / boolean value not fully measured
 ├── plot/               (group, optional)  attrs: spec, style, style_name [, matplotlib]
+├── labels/             (group, optional, since 1.3)  attrs: star, project, users, tags, comment, written
 └── extra/              (group, optional)  anything; ignored by LBD readers
 ```
 
@@ -37,7 +38,7 @@ that implement this spec, see [Python](../docs/python/files.md), [MATLAB](../doc
 | Attribute | Type | Required | Meaning |
 |---|---|---|---|
 | `lbd_format` | string, `"LBD"` | must | Identifies the file as LBD. |
-| `lbd_version` | string, `"<major>.<minor>"` | must | Format version: `"2.0"` for a file with an axis group (§1.8), `"1.2"` for every other file written by this spec (`"1.0"` and `"1.1"` files are valid 1.2 files without the content added since). See §6. |
+| `lbd_version` | string, `"<major>.<minor>"` | must | Format version: `"1.2"` for a file without an axis group (§1.8) or labels (§1.9), `"1.3"` with labels, `"2.0"` with an axis group, `"2.1"` with both (`"1.0"` and `"1.1"` files are valid 1.2 files without the content added since). See §6. |
 | `title` | string | must (may be `""`) | Short human-readable title. |
 | `description` | string | must (may be `""`) | Free text. |
 | `created` | string, ISO-8601 with UTC offset | must | When the data was created (measured), e.g. `2026-10-13T16:09:00+08:00`. Given by the user when known; otherwise writers fill in the time of the first save. A writer saving a dataset that already has a `created` (set by the user, or read from a file) writes it unchanged. |
@@ -169,6 +170,33 @@ measured points listed together, level by level. Only measured points are stored
 Reading a point: for point *j* of level C, its coordinate is `C[j]`; its (A, B) point is
 `p = C._parent[j]`, with B = `B[p]`; its A is `A[B._parent[p]]`.
 
+### 1.9 Labels — `/labels` (optional, since 1.3 / 2.1)
+
+The file's labels, as a library of files shows and edits them (LBD Viewer's Library): a star, a
+project, users, tags and a comment. They are stored in the file so that they go wherever the
+file goes (a copy, a move to another computer).
+
+| Attribute | Type | Meaning |
+|---|---|---|
+| `star` | 8-bit integer, `0` or `1` | Starred. |
+| `project` | string | The file's project. Absent: none. |
+| `users` | JSON string: a list of strings | Who measured or uses the file. |
+| `tags` | JSON string: a list of strings | Free tags. |
+| `comment` | string | Free text. |
+| `written` | string, ISO-8601 in UTC with milliseconds and `Z`, e.g. `2026-11-11T09:30:00.125Z` | When the labels were **set** (not when the file was written): a program that keeps labels elsewhere too compares this time with its own to know which labels are newer. |
+
+- Every attribute is optional; absent means none (`star` absent means not starred).
+- A label (project, user, tag) is text; a nested label has parts separated by `/`
+  (`"Chip 3/Cooldown 7"`). Writers remove spaces around the slashes and refuse a label with an
+  empty part. Lists hold each label once.
+- A `/labels` group with no labels but a `written` time records that the labels were removed
+  then.
+- Writers keep the labels when they save a file again, also to another file. A program changing
+  only the labels of an existing file rewrites `/labels` in place, sets `written` to the time of
+  the change, and raises `lbd_version` to `1.3` (from 1.0 to 1.2) or `2.1` (from 2.0).
+- A reader that can't read one attribute (wrong type, not a JSON list of strings) ignores it with
+  a warning and reads the others.
+
 ---
 
 ## 2. Dimension order
@@ -230,14 +258,16 @@ Writers may store datasets chunked and gzip-compressed. Readers must handle this
 - A **minor** bump only adds optional content. A reader for `1.x` must read any `1.y` file, ignoring what it does not understand, and should warn when `y > x`.
 - A **major** bump may break compatibility. A reader must refuse a file whose major version is newer than it supports, with an error telling the user to update.
 - Readers must ignore unknown attributes, groups and datasets anywhere in the file.
-- **Writers write the lowest version their content needs**: `"2.0"` only for a file with an axis
-  group, `"1.2"` otherwise, so readers of 1.x keep reading every file without a group.
+- **Writers write the lowest version their content needs**: `"1.2"` for a file without an axis
+  group or labels, `"1.3"` with labels, `"2.0"` with an axis group, `"2.1"` with both. Readers
+  of 1.x keep reading every file without a group, and older readers ignore the labels.
 - A reader that supports 2.x reads every 1.x file. It warns for a minor version newer than it
-  knows within that major (1.3 or later, 2.1 or later).
+  knows within that major (1.4 or later, 2.2 or later).
 - Version history: **1.1** added the root `id` and `parent_id`; **1.2** added an axis's
   `elements` and `role`, data points with a shape (§1.2, §1.3), the `/measured` masks (§1.7)
   and files being written (§7); **2.0** added axis groups (§1.8, and dimensions on them in
-  §1.3). Readers of 1.x refuse 2.0 files with "please update".
+  §1.3). Readers of 1.x refuse 2.0 files with "please update". **1.3** and **2.1** added the
+  labels (§1.9).
 
 ---
 
@@ -309,6 +339,14 @@ when complete.
 /meta                     T_mK=12  sample="R7"
 /meta/vna                 ifbw_Hz=1000.0 averages=4
 /plot                     spec='{"kind":"heatmap","values":["S21"],"complex":"db"}'
+```
+
+The same file with labels (format 1.3):
+
+```
+/                         lbd_format="LBD" lbd_version="1.3" …
+/labels                   star=1 project="Chip 3/Cooldown 7" users='["Ana"]'
+                          tags='["calibration"]' comment="" written="2026-11-11T09:30:00.125Z"
 ```
 
 A file with named positions and a vector per data point (format 1.2):
