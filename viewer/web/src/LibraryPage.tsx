@@ -41,6 +41,7 @@ import { useResizable, widestContent } from "./resizable";
 import { SidebarToggle } from "./SidebarToggle";
 import { NO_FILTERS } from "./libraryQuery";
 import { MeasuringStatus } from "./MeasuringStatus";
+import { useDiskVersion } from "./watch";
 import { PAGE, useLibraryRows, useLibraryStatus } from "./libraryRows";
 
 /**
@@ -1496,11 +1497,18 @@ function SelectedFile({
 }) {
   const [info, setInfo] = useState<FileInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // gone from its place (a measurement finished and was renamed, or the file was moved): not a
+  // bad file; the next list says where it is (16.54)
+  const [gone, setGone] = useState(false);
+  // watched while shown: a measurement that finishes here is followed to its finished file, as
+  // open tabs are (App's onFinished renames the selection)
+  useDiskVersion("file", path);
   // read again when the file changed (its row's size or time) or another file is shown
   const version = row ? `${row.size}-${row.mtime}-${row.read}` : "";
   useEffect(() => {
     let live = true;
     setError(null);
+    setGone(false);
     api
       .libraryFile(path)
       .then((i) => {
@@ -1510,7 +1518,8 @@ function SelectedFile({
       .catch((e) => {
         if (!live) return;
         setInfo(null);
-        setError((e as Error).message);
+        if (e instanceof ApiError && e.status === 404) setGone(true);
+        else setError((e as Error).message);
       });
     return () => {
       live = false;
@@ -1562,7 +1571,8 @@ function SelectedFile({
         </div>
       </div>
       {children}
-      {!shown && !error && <p className="muted">Reading…</p>}
+      {gone && !error && <p className="muted">This file isn't at this place any more (renamed, moved, or its measurement finished): waiting for the list…</p>}
+      {!shown && !error && !gone && <p className="muted">Reading…</p>}
       {shown && <FileDetails info={shown} metaFilter layout="library" />}
     </div>
   );
@@ -1572,7 +1582,7 @@ function SelectedFile({
 function plainReadError(e: string): string {
   if (/truncated|eof|end of file|unable to (synchronously )?open file/i.test(e)) return "It is damaged or incomplete (it ends early, e.g. a copy that didn't finish).";
   if (/not inside one of your folders/i.test(e)) return "It is no longer inside one of your folders.";
-  if (/no such file|not found|doesn't exist/i.test(e)) return "It isn't there any more.";
+  if (/no such file|not found|not a file|doesn't exist/i.test(e)) return "It isn't there any more.";
   if (/permission|access is denied/i.test(e)) return "This computer's user may not read it.";
   return "It isn't an .lbd file this version of LBD can read.";
 }

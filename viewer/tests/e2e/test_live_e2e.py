@@ -81,3 +81,28 @@ def test_the_settings_choose_the_parts(viewer, new_page):
         expect(status(page)).to_contain_text("points")
     finally:
         w.close(stopped=True)
+
+
+def test_a_measurement_finishing_while_selected_in_the_library_shows_no_error(viewer, new_page):
+    """16.54: the Library's selected file is a measurement that finishes: its selection follows the
+    finished file, and no red "This file can't be read" appears on the way."""
+    from test_library_e2e import lib_row
+
+    w = sweep_writer(viewer, "selected.lbd")
+    w.write(power=0, S21=np.zeros(5))
+    w.flush()
+    page = new_page("Library")
+    try:
+        lib_row(page, "Live sweep").first.click(timeout=20_000)
+        expect(page.locator(".library-detail .path-name")).to_have_text("selected.lbd.writing")
+    finally:
+        w.close(stopped=True)
+    errors = []
+    watch = page.locator(".library-detail .error-box")
+    for _ in range(20):                                    # through the finish: never the red box
+        if watch.count():
+            errors.append(watch.first.inner_text())
+        page.wait_for_timeout(150)
+    assert not errors
+    expect(page.locator(".library-detail .path-name")).to_have_text("selected.lbd", timeout=15_000)
+    expect(page.locator(".library-detail .error-box")).to_have_count(0)

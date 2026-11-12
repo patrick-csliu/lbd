@@ -112,6 +112,10 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
 
 **Viewer**
 
+- **Fixed: a red "This file can't be read" when a measurement finished** while it was selected in
+  the Library. The selection now follows the finished file, as open tabs do; a file that is
+  briefly gone (renamed, moved) says so plainly instead of being called a bad file.
+
 - **Fixed: a red "This plot can't be shown" after leaving Explore idle.** The server closes a view
   unused for 10 minutes; the first click, key, zoom, cursor, Peak or size change after that opened
   it again but showed an error on every panel. Now the view opens again quietly ("Drawing…"), the
