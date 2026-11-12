@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import io
 import dataclasses
+import functools
 import json
 import re
 import secrets
@@ -114,9 +115,21 @@ def _finite_range(arrays) -> Tuple[float, float]:
     return (lo - 0.5, hi + 0.5) if lo == hi else (lo, hi)
 
 
+def _locked(method):
+    """Run a session's step under the session's own lock (16.22): a change of the plot
+    (`set_spec`) and a picture or read-out never overlap, so a step never sees the new kind with
+    the old plot. The session lock is always taken before lbd.plot's RENDER_LOCK."""
+    @functools.wraps(method)
+    def run(self, *args, **kwargs):
+        with self.lock:
+            return method(self, *args, **kwargs)
+    return run
+
+
 class ExploreSession:
     """One Explore tab's view of a file. Create with `open_session`; all drawing happens in
-    `render`, under the render lock."""
+    `render`, under the render lock. Every step that reads or changes the session holds
+    `self.lock` (an RLock: the server holds it across several steps of one request)."""
 
     def __init__(self, path: Path, version: str, spec: Dict[str, Any], style: Style,
                  width: int, height: int, dpr: float, saved_view: bool = True, summarise: bool = True,
@@ -129,6 +142,7 @@ class ExploreSession:
         Library's previews: a thumbnail of the data, small and the same for every file)."""
         if width < 50 or height < 50:
             raise ExploreError(f"the plot area is too small ({width}×{height} px); make the window larger")
+        self.lock = threading.RLock()
         self.id = secrets.token_urlsafe(9)
         self.path, self.version, self.style = path, version, style
         self.saved_view = saved_view
@@ -145,6 +159,7 @@ class ExploreSession:
         FigureCanvasAgg(self.fig)
         self.set_spec(spec)
 
+    @_locked
     def set_spec(self, spec: Dict[str, Any]) -> None:
         """Show other plot settings (values, kind, axes, slices, complex mode). The data already
         read is kept; values not read yet are read now."""
@@ -233,6 +248,7 @@ class ExploreSession:
         self._notes.append(f"This computer has little free memory ({available / memory.GB:.1f} GB free): this {what} "
                            f"is shown from a summary. Close other programs and open the file again to see every {each}.")
 
+    @_locked
     def take_notes(self) -> List[str]:
         """Notes for the user not told yet (each once)."""
         out, self._notes = self._notes, []
@@ -491,6 +507,7 @@ class ExploreSession:
 
     # -- view settings: how the same data is shown (never written into the file)
 
+    @_locked
     def apply(self, settings: Optional[Dict[str, Any]]) -> List[str]:
         """Show the data with these view settings; returns notes for the user.
 
@@ -572,6 +589,7 @@ class ExploreSession:
         self.settings = settings
         return notes
 
+    @_locked
     def crange_state(self) -> Optional[Dict[str, Any]]:
         """For the page: a map with sliders, its colour range's source ("slice" or "all") and,
         while every slice's range is worked out, how far ("working", fraction) or why it failed."""
@@ -599,6 +617,7 @@ class ExploreSession:
         with np.errstate(invalid="ignore"):
             return any(bool(np.any(np.isfinite(v := np.asarray(a, dtype=float)) & (v > 0))) for a in arrays)
 
+    @_locked
     def hidden(self) -> Tuple[List[str], Optional[str]]:
         """What the scales hide (points ≤ 0 on a log scale, …), and why nothing is shown when
         nothing can be: notes the page keeps on screen. Worked out once per model and scales."""
@@ -738,6 +757,7 @@ class ExploreSession:
             self._check_open()
             self.base_model = prepare(self.complex_data, self.spec, self.style)
 
+    @_locked
     def calculate(self, what: str, index: int, xlim: Sequence[float], trace: Optional[int]) -> Dict[str, Any]:
         """Delay or rotation for operation `index` from the data in x range `xlim` (plot units) of
         cursor 1's trace (or all shown traces); see operations.calculate."""
@@ -756,6 +776,7 @@ class ExploreSession:
             raise ExploreError(str(e)) from None
         return out
 
+    @_locked
     def ops_info(self) -> Dict[str, Any]:
         """For the page: each operation's state (None: applied, "off", or why not), each equation
         field's (error or note), what is shown, and the names equations can use (the legend)."""
@@ -972,6 +993,7 @@ class ExploreSession:
         ye = inv.transform(np.column_stack([np.full_like(ys, bb.x0), ys]))[:, 1]
         return xe, ye
 
+    @_locked
     def resize(self, width: int, height: int, dpr: float) -> None:
         """Draw for a panel of a new size from now on (the data and its reductions are kept)."""
         if width < 50 or height < 50:
@@ -1038,6 +1060,7 @@ class ExploreSession:
                      "point of each stretch" if thinned else "; x is not sorted: drawn as stored")
         return note, reduced
 
+    @_locked
     def render(self, xlim: Optional[Tuple[float, float]], ylim: Optional[Tuple[float, float]],
                stat: str = "max", fmt: str = "raw", draft: bool = False,
                _again: bool = False) -> Tuple[bytes, Dict[str, Any]]:
@@ -1102,6 +1125,7 @@ class ExploreSession:
         }
         return body, meta
 
+    @_locked
     def sync_keys(self) -> Dict[str, str]:
         """What panels must share to follow each other's zoom (plan 4): the horizontal axis as
         drawn (its label, unit prefix included: an equation or an FFT changes it), and the
@@ -1123,6 +1147,7 @@ class ExploreSession:
         pts = self.ax.transData.transform(np.column_stack([np.ravel(x), np.ravel(y)]))
         return pts[:, 0], self.fig.bbox.height - pts[:, 1]
 
+    @_locked
     def pick(self, px: float, py: float) -> Optional[Dict[str, Any]]:
         """The stored point (curves) or cell (maps) at image pixel (px, py), from the full data."""
         self.last_used = time.monotonic()
@@ -1230,7 +1255,7 @@ class ExploreSession:
     def close(self):
         """Free the figure (and a summarised map's summary file); a request still using the
         session then gets ExploreClosed."""
-        with rnd.RENDER_LOCK:
+        with self.lock, rnd.RENDER_LOCK:
             self.fig = None
             for model in {id(m): m for m in (getattr(self, "base_model", None), getattr(self, "model", None))}.values():
                 if isinstance(getattr(model, "z", None), summaries.BigMap):
@@ -1253,11 +1278,13 @@ class Sessions:
     def add(self, s: ExploreSession) -> None:
         with self._lock:
             self._expire()
+            oldest = None
             if len(self._by_id) >= self.limit:
                 oldest = min(self._by_id.values(), key=lambda v: v.last_used)
                 del self._by_id[oldest.id]
-                oldest.close()
             self._by_id[s.id] = s
+        if oldest is not None:
+            oldest.close()
 
     def get(self, sid: str) -> ExploreSession:
         with self._lock:
@@ -1274,9 +1301,12 @@ class Sessions:
             s.close()
 
     def _expire(self) -> None:
+        """Close sessions unused for `idle` seconds; closed in a thread of their own, since one may
+        be busy drawing (its lock), and nobody should wait for that while holding this list's lock."""
         now = time.monotonic()
-        for sid in [k for k, v in self._by_id.items() if now - v.last_used > self.idle]:
-            self._by_id.pop(sid).close()
+        gone = [self._by_id.pop(k) for k, v in list(self._by_id.items()) if now - v.last_used > self.idle]
+        if gone:
+            threading.Thread(target=lambda: [s.close() for s in gone], daemon=True).start()
 
     def __len__(self) -> int:
         return len(self._by_id)

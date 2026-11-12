@@ -112,6 +112,10 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
 
 **Viewer**
 
+- **Fixed: changing the plot type while a picture was drawn** (for example a map to Scatter on a busy
+  computer) could show "This plot can't be shown". Each Explore view now finishes one change before
+  the next step reads it.
+
 - **⚙ Settings are a dialog with sections** (General, Library, Files sidebar, Memory,
   Measurements) instead of one long menu: each setting with its name, a line about it and its
   control (switches, choices side by side); **Find a setting…**; a dot on a section that was

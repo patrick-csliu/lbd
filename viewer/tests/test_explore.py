@@ -388,3 +388,44 @@ def test_large_data_is_read_from_the_pyramids(client, big_map, many_curves, monk
     assert sess.spans is not None and meta["reduced"] and not every_point
     meta, _ = render(client, o["session"], xlim=[0.5, 0.501])
     assert sess.spans is None and meta["note"] == "every point shown"
+
+
+def test_a_picture_never_sees_a_half_changed_plot(data_dir, monkeypatch):
+    """16.22: changing the plot type while a picture is drawn. The change is held in the middle (its
+    new plot not built yet) while another thread asks for a picture: the picture waits for the
+    change, and is drawn with the new plot, never the new type with the old plot."""
+    import threading
+
+    import lbd.plot as lp
+    from lbd_viewer import kinds
+
+    s = ExploreSession(data_dir / "sub" / "sweep.lbd", "v", {"kind": "heatmap"}, lp.load_style(), 400, 300, 1)
+    scatter = kinds.interactions()["scatter"]
+    entered, release = threading.Event(), threading.Event()
+    real = scatter.prepare
+
+    def slow_prepare(session):
+        entered.set()
+        assert release.wait(10)
+        return real(session)
+    monkeypatch.setattr(scatter, "prepare", slow_prepare)
+    errors, pictures = [], []
+    change = threading.Thread(target=lambda: s.set_spec({"kind": "scatter"}))
+    change.start()
+    assert entered.wait(10)                       # the new type is set, its plot not built yet
+
+    def draw():
+        try:
+            pictures.append(s.ops_info())         # the step that crashed: it reads the kind and the plot
+            pictures.append(s.render(None, None))
+        except Exception as e:                    # noqa: BLE001 - the failure this test is about
+            errors.append(e)
+    picture = threading.Thread(target=draw)
+    picture.start()
+    picture.join(0.5)
+    assert picture.is_alive()                     # waiting for the change, not drawing the half-made plot
+    release.set()
+    change.join(10)
+    picture.join(10)
+    assert not errors and len(pictures) == 2 and s.kind == "scatter"
+    s.close()

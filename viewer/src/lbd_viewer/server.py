@@ -1387,12 +1387,13 @@ def create_app(state: AppState) -> FastAPI:
         the mapping between its pixels and the data, the reduction used and the timings."""
         s = _session(session_id)
         started = time.perf_counter()
-        if body.width is not None and body.height is not None:
-            s.resize(body.width, body.height, body.dpr if body.dpr is not None else s.dpr)
-        notes = s.apply(body.settings) if body.settings is not None else []
-        if body.angle is not None and hasattr(s.view, "turn"):
-            s.view.turn(body.angle)
-        data, meta = s.render(body.xlim, body.ylim, body.stat, body.format, body.draft)
+        with s.lock:                     # one step: a change of the plot can't fall between its parts (16.22)
+            if body.width is not None and body.height is not None:
+                s.resize(body.width, body.height, body.dpr if body.dpr is not None else s.dpr)
+            notes = s.apply(body.settings) if body.settings is not None else []
+            if body.angle is not None and hasattr(s.view, "turn"):
+                s.view.turn(body.angle)
+            data, meta = s.render(body.xlim, body.ylim, body.stat, body.format, body.draft)
         meta["notes"] = notes
         meta["ms"]["total"] = round((time.perf_counter() - started) * 1000, 1)   # all of it, on the server
         media = "image/png" if meta["format"] == "png" else "application/octet-stream"
@@ -1451,22 +1452,26 @@ def create_app(state: AppState) -> FastAPI:
         them: everything the page draws for one cursor state (reading.py)."""
         s = _session(session_id)
         s.last_used = time.monotonic()
-        return reading.cursors(s, body.cursors, body.type, {"xlim": body.xlim, "ylim": body.ylim},
-                               (body.width, body.height), body.cuts, body.lines, body.every, body.at_line,
-                               cfg.settings()["explore"]["line_traces"], body.together)
+        with s.lock:
+            return reading.cursors(s, body.cursors, body.type, {"xlim": body.xlim, "ylim": body.ylim},
+                                   (body.width, body.height), body.cuts, body.lines, body.every, body.at_line,
+                                   cfg.settings()["explore"]["line_traces"], body.together)
 
     @app.post("/api/explore/{session_id}/find")
     def explore_find(session_id: str, body: FindBody):
         """Where the maximum, minimum or peak is, in a range of the stored data."""
-        return reading.find(_session(session_id), body.what, body.xlim, body.ylim, body.trace)
+        s = _session(session_id)
+        with s.lock:
+            return reading.find(s, body.what, body.xlim, body.ylim, body.trace)
 
     @app.post("/api/explore/{session_id}/histogram")
     def explore_histogram(session_id: str, body: HistogramBody):
         """The map's values counted (with these view settings), for the contrast control."""
         s = _session(session_id)
-        if body.settings is not None:
-            s.apply(body.settings)
-        return reading.histogram(s)
+        with s.lock:
+            if body.settings is not None:
+                s.apply(body.settings)
+            return reading.histogram(s)
 
     @app.post("/api/explore/{session_id}/calculate")
     def explore_calculate(session_id: str, body: CalculateBody):
@@ -1483,7 +1488,8 @@ def create_app(state: AppState) -> FastAPI:
         target = Path(body.path).expanduser().resolve()
         if target.parent != s.path.resolve().parent and _key(target) not in state.chosen:   # next to its file: allowed
             state.check_allowed(str(target.parent))
-        saved = reading.save_cut(s, body.which, body.index, target, body.trace)
+        with s.lock:
+            saved = reading.save_cut(s, body.which, body.index, target, body.trace)
         if _key(s.path.resolve()) in state.opened:              # a file opened by double-click: so is its cut
             state.opened.add(_key(saved))
         return {"path": str(saved)}
