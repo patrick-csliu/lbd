@@ -3,6 +3,7 @@ import type { CursorType, FileInfo, PlotSpec, ValueInfo } from "./api";
 import type { Angle, ViewSettings } from "./ExploreView";
 import { kindRow as bars } from "./BarsControls";
 import { kindRow as bars3d } from "./Bars3dControls";
+import { CurveDisplay } from "./CurveControls";
 import { GroupMapDisplay } from "./GroupMapControls";
 import { kindRow as histogram } from "./HistogramControls";
 import { kindRow as matrix } from "./MatrixControls";
@@ -49,7 +50,7 @@ const ALL_CURSORS: CursorType[] = ["cross", "vertical", "horizontal"];
 const common = { explore: true, controls: null, cursorTypes: ALL_CURSORS, openInFigure: true, cursorMark: "lines", axes: "2d", syncs: true, findButtons: true } as const;
 
 const BUILT_IN: PlotKind[] = [
-  { ...common, kind: "curve", strips: null, darkInverted: true },
+  { ...common, kind: "curve", display: CurveDisplay, strips: null, darkInverted: true },
   { ...common, kind: "heatmap", display: GroupMapDisplay, strips: "cuts", darkInverted: false },
 ];
 
