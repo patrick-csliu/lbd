@@ -252,6 +252,7 @@ def set_labels(ix: "LibraryIndex", paths: List[str], changes: Dict[str, Any]) ->
     """Change the labels of these files (and of their identical copies in the open folders)."""
     labels.apply(labels.new_entry(None, "", None), changes)   # a mistyped label stops here, before any write
     notes: List[str] = []
+    refused: List[str] = []
     targets: Dict[str, List[Dict[str, Any]]] = {}
     for path in paths:
         r = _row(ix, path)
@@ -274,10 +275,20 @@ def set_labels(ix: "LibraryIndex", paths: List[str], changes: Dict[str, Any]) ->
         try:
             notes += labels.update(Path(folder), change, ix.trash)
         except labels.LabelsError as err:
-            notes.append(str(err))
+            refused.append(str(err))
     notes += apply(ix)
     ix.generation += 1
+    _refuse(refused, len(targets), notes)
     return notes
+
+
+def _refuse(refused: List[str], folders: int, notes: List[str]) -> None:
+    """A change refused in some folder (busy, read-only) is an error, not a note: the page shows
+    that it was not made, and why. What was saved in the other folders stays saved."""
+    if not refused:
+        return
+    saved = ["The labels in the other folders were changed."] if len(refused) < folders else []
+    raise labels.LabelsError(" ".join(refused + saved + notes))
 
 
 def _write_id(ix: "LibraryIndex", path: str, version: str, new: str, parent: Optional[str]) -> None:
@@ -444,13 +455,14 @@ def _sidecar_folders(ix: "LibraryIndex") -> List[str]:
     return sorted(known | {str(Path(root).resolve()) for root in ix.roots()})
 
 
-def _each(ix: "LibraryIndex", change, dry: bool) -> Tuple[int, List[str]]:
+def _each(ix: "LibraryIndex", change, dry: bool) -> Tuple[int, List[str], List[str], int]:
     """Run `change(doc) -> entries changed` on every folder's labels (dry: only count). Returns the
-    number of entries changed and notes."""
-    count, notes = 0, []
+    number of entries changed, notes, the folders' refusals (see _refuse) and the folders tried."""
+    count, notes, refused, folders = 0, [], [], 0
     for folder in _sidecar_folders(ix):
         if not (Path(folder) / labels.SIDECAR).exists():
             continue
+        folders += 1
         if dry:
             count += change(labels.read(Path(folder), notes))
             continue
@@ -461,9 +473,9 @@ def _each(ix: "LibraryIndex", change, dry: bool) -> Tuple[int, List[str]]:
         try:
             notes += labels.update(Path(folder), run, ix.trash)
         except labels.LabelsError as err:
-            notes.append(str(err))
+            refused.append(str(err))
         count += n[0]
-    return count, notes
+    return count, notes, refused, folders
 
 
 def create_label(ix: "LibraryIndex", kind: str, label: str, root: Optional[str] = None) -> List[str]:
@@ -497,9 +509,10 @@ def rename_label(ix: "LibraryIndex", kind: str, old: str, new: str, dry: bool = 
     count = _files_with(ix, kind, old)
     if dry:
         return {"files": count, "notes": []}
-    _, notes = _each(ix, change, False)
+    _, notes, refused, folders = _each(ix, change, False)
     notes += apply(ix)
     ix.generation += 1
+    _refuse(refused, folders, notes)
     return {"files": count, "notes": notes}
 
 
@@ -515,9 +528,10 @@ def remove_label(ix: "LibraryIndex", kind: str, label: str, dry: bool = False) -
     count = _files_with(ix, kind, label)
     if dry:
         return {"files": count, "notes": []}
-    _, notes = _each(ix, change, False)
+    _, notes, refused, folders = _each(ix, change, False)
     notes += apply(ix)
     ix.generation += 1
+    _refuse(refused, folders, notes)
     return {"files": count, "notes": notes}
 
 

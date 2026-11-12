@@ -384,3 +384,34 @@ def test_labels_are_written_into_the_data_file_a_moment_after_an_edit(viewer, li
                       params={"path": path}).json()["version"]
     assert after == version
     expect(detail(page).get_by_role("note", name="Labels not in the data file")).to_have_count(0)
+
+
+def test_a_change_that_waits_its_turn_says_so_and_a_refusal_says_it_was_not_made(viewer, new_page, monkeypatch):
+    """Another program holding the folder's labels (the server slowed here): after a second the
+    Library says it is saving; a change refused in the end says it was not made, and why."""
+    import threading
+
+    from lbd_viewer import labels
+
+    real_update, go_on = labels.update, threading.Event()
+
+    def slow_update(*args, **kwargs):                  # waits its turn, then saves
+        go_on.wait(20)
+        return real_update(*args, **kwargs)
+    monkeypatch.setattr(labels, "update", slow_update)
+    page = new_page("Library")
+    shows(page, every_file(viewer), 20_000)
+    rows(page).first.click()
+    detail(page).get_by_role("button", name="Star", exact=True).click()
+    expect(status(page)).to_contain_text("Saving labels…")
+    go_on.set()
+    expect(status(page)).not_to_contain_text("Saving labels…")
+    expect(rows(page).first).to_contain_text("★")
+
+    def busy(folder, *args, **kwargs):                 # still busy after the wait: refused
+        raise labels.LabelsError(f"The labels in {folder} were not changed: another LBD program was changing "
+                                 "them and didn't finish within 15 s. Try again in a moment.")
+    monkeypatch.setattr(labels, "update", busy)
+    detail(page).get_by_role("button", name=re.compile("Starred")).click()
+    expect(page.locator(".toast.error")).to_contain_text("were not changed: another LBD program")
+    expect(rows(page).first).to_contain_text("★")

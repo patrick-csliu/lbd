@@ -357,7 +357,7 @@ export default function LibraryPage(props: Props) {
   const closeMenu = useCallback(() => setMenu(null), []);
   const [savingCsv, setSavingCsv] = useState<string | null>(null); // Save as CSV open for this file
 
-  const { run, label, toggleStar, askTrash, askNewMeasurement, menuEntries } = useFileActions({
+  const { run, runLabels, saving, label, toggleStar, askTrash, askNewMeasurement, menuEntries } = useFileActions({
     platform: state.platform,
     login: state.login,
     refresh,
@@ -406,7 +406,7 @@ export default function LibraryPage(props: Props) {
               : checkName(v) ?? (known.has(v.trim()) ? `There is a ${KIND_WORD[kind]} "${v.trim()}" already` : null),
           hint: (v) => `A new ${KIND_WORD[kind]} ${whereItGoes(v.trim())}.`,
         },
-        onConfirm: (v, [root]) => run(api.libraryLabelCreate(kind, v.trim(), root), `Made the ${KIND_WORD[kind]} "${v.trim()}"`),
+        onConfirm: (v, [root]) => runLabels(api.libraryLabelCreate(kind, v.trim(), root), `Made the ${KIND_WORD[kind]} "${v.trim()}"`),
       });
     },
     menu: (e, kind, node) => {
@@ -432,7 +432,7 @@ export default function LibraryPage(props: Props) {
                   text: `It is renamed on ${filesWord(n)}${node.children.length ? ", with the labels inside it" : ""}.`,
                   action: "Rename",
                   input: { value: lastPart(node.label), check: (v) => checkName(v) ?? (v.includes("/") ? "Use Move into… to put it into another group" : null) },
-                  onConfirm: (v) => run(api.libraryLabelRename(kind, node.label, parent ? `${parent}/${v.trim()}` : v.trim()).then((r) => ({ notes: r.notes }))),
+                  onConfirm: (v) => runLabels(api.libraryLabelRename(kind, node.label, parent ? `${parent}/${v.trim()}` : v.trim()).then((r) => ({ notes: r.notes }))),
                 }),
               ),
           },
@@ -459,7 +459,7 @@ export default function LibraryPage(props: Props) {
                   onConfirm: (v) => {
                     const into = v.trim().replace(/\/+$/, "");
                     const to = into ? `${into}/${node.name}` : node.name;
-                    if (to !== node.label) return run(api.libraryLabelRename(kind, node.label, to).then((r) => ({ notes: r.notes })));
+                    if (to !== node.label) return runLabels(api.libraryLabelRename(kind, node.label, to).then((r) => ({ notes: r.notes })));
                   },
                 }),
               ),
@@ -475,7 +475,7 @@ export default function LibraryPage(props: Props) {
                   text: `It is taken off ${filesWord(n)}${node.children.length ? ", with the labels inside it" : ""}, and no longer kept. The data files aren't touched.`,
                   action: "Remove",
                   danger: true,
-                  onConfirm: () => run(api.libraryLabelRemove(kind, node.label).then((r) => ({ notes: r.notes }))),
+                  onConfirm: () => runLabels(api.libraryLabelRemove(kind, node.label).then((r) => ({ notes: r.notes }))),
                 }),
               ),
           },
@@ -492,7 +492,7 @@ export default function LibraryPage(props: Props) {
             title: `Move the ${KIND_WORD[kind]} "${from}"?`,
             text: `${to ? `Into "${to}"` : "To the top level"}: it becomes "${target}" on ${filesWord(r.files)}.`,
             action: "Move",
-            onConfirm: () => run(api.libraryLabelRename(kind, from, target).then((x) => ({ notes: x.notes }))),
+            onConfirm: () => runLabels(api.libraryLabelRename(kind, from, target).then((x) => ({ notes: x.notes }))),
           }),
         )
         .catch((err) => toast((err as Error).message, "error"));
@@ -780,6 +780,11 @@ export default function LibraryPage(props: Props) {
           )}
           {chosen.length > 1 && <span className="muted">{chosen.length} selected</span>}
           {!settings.read_headers && <span className="muted">names only: reading files' details is off in ⚙</span>}
+          {saving && (
+            <span className="muted" title="A change waits its turn (up to 15 s) while another program changes labels in the same folder">
+              Saving labels…
+            </span>
+          )}
           {status?.indexing && (
             <span className="muted">
               Indexing {status.done.toLocaleString()} of {status.total.toLocaleString()}…

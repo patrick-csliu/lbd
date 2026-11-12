@@ -6,6 +6,7 @@ import json
 import multiprocessing as mp
 import os
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -150,10 +151,84 @@ def test_a_newer_sidecar_is_read_only_and_a_damaged_one_set_aside(tmp_path):
     assert list(tmp_path.glob(".lbd-library.broken-*.json"))
 
 
-def test_a_lock_left_behind_is_taken_over(tmp_path):
+@pytest.fixture
+def quick_lock(monkeypatch):
+    """The lock's times made short, so a test waits a second, not 15 s."""
+    monkeypatch.setattr(labels, "LOCK_STALE", 0.4)
+    monkeypatch.setattr(labels, "LOCK_REFRESH", 0.05)
+    monkeypatch.setattr(labels, "LOCK_WAIT", 2.0)
+
+
+@pytest.mark.parametrize("age", [60, -3600], ids=["old", "from a computer whose clock is ahead"])
+def test_a_lock_left_behind_is_taken_over(tmp_path, quick_lock, age):
+    """A lock whose time doesn't change while we watch was left behind, whatever its time says:
+    the file's time is only compared with itself, never with this computer's clock."""
     lock = tmp_path / labels.LOCK
     lock.write_text("crashed")
-    old = os.path.getmtime(lock) - 60
-    os.utime(lock, (old, old))
+    t = os.path.getmtime(lock) - age
+    os.utime(lock, (t, t))
     add(tmp_path, star=True)
     assert entry(labels.read(tmp_path))["star"]
+    assert not lock.exists()
+
+
+def test_a_refreshed_lock_is_waited_for_and_kept(tmp_path, quick_lock, monkeypatch):
+    """A lock whose writer keeps touching it is never taken over; after LOCK_WAIT the change is
+    refused and says it was not made."""
+    monkeypatch.setattr(labels, "LOCK_WAIT", 1.0)
+    lock = tmp_path / labels.LOCK
+    lock.write_text("other-computer 1 busy")
+    t = os.path.getmtime(lock) - 60                  # its time looks old ...
+    os.utime(lock, (t, t))
+    stop = threading.Event()
+
+    def other_writer():                              # ... but it is refreshed
+        while not stop.wait(0.05):
+            os.utime(lock)
+    toucher = threading.Thread(target=other_writer)
+    toucher.start()
+    try:
+        with pytest.raises(labels.LabelsError, match="were not changed: another LBD program"):
+            add(tmp_path, star=True)
+    finally:
+        stop.set()
+        toucher.join()
+    assert lock.read_text() == "other-computer 1 busy"
+    assert labels.read(tmp_path)["files"] == []
+
+
+def test_a_writer_slower_than_the_stale_time_keeps_its_lock(tmp_path, quick_lock, monkeypatch):
+    monkeypatch.setattr(labels, "LOCK_WAIT", 5.0)
+    events = []
+
+    def slow(doc):                                   # works 3 times as long as LOCK_STALE
+        events.append("slow starts")
+        time.sleep(1.2)
+        e = labels.new_entry(None, "a.lbd", "2026-10-29T10:00:00+08:00")
+        labels.apply(e, {"add_tags": ["slow"]})
+        doc["files"].append(e)
+        events.append("slow ends")
+
+    def quick():
+        while not events:                            # starts once the slow one holds the lock
+            time.sleep(0.01)
+        add(tmp_path, add_tags=["quick"])
+        events.append("quick done")
+    t = threading.Thread(target=quick)
+    t.start()
+    labels.update(tmp_path, slow)
+    t.join()
+    assert events == ["slow starts", "slow ends", "quick done"]
+    assert entry(labels.read(tmp_path))["tags"] == ["quick", "slow"]
+    assert not (tmp_path / labels.LOCK).exists()
+
+
+def test_release_leaves_another_writers_lock(tmp_path):
+    """If our lock was taken over meanwhile, the other writer's lock stays when we finish."""
+    lock = tmp_path / labels.LOCK
+
+    def taken_over(doc):
+        lock.unlink()
+        lock.write_text("other-computer 7 abcd")
+    labels.update(tmp_path, taken_over)
+    assert lock.read_text() == "other-computer 7 abcd"
