@@ -115,6 +115,9 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
 - **Ctrl+C stops the viewer within a second or two**, and it prints one line, "LBD viewer
   stopped", not error text (before: 8 to 15 s with a page open, and three `Traceback` blocks). A
   save in progress finishes first, and labels still waiting are written into their files.
+- **The viewer stays up under an open page after the computer slept.** On waking, the open
+  pages get 15 seconds to say they are there before the viewer counts them as closed; before, it
+  could stop at once, as the sleep counted as time without a page.
 - **A preview worker no longer stays behind** when the viewer is killed or crashes: it stops by
   itself within a few seconds (before, it kept running, holding memory and keeping files open).
 - **⚙ Settings are a dialog with sections** (General, Library, Files sidebar, Memory,

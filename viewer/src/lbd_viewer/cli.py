@@ -200,6 +200,36 @@ class Running:
 
 
 GRACEFUL_STOP = 2.0     # seconds the server waits for running requests (a save) to answer when stopping
+WAKE_GRACE = 15.0       # after the computer woke up, the open pages have this long to say they are there
+
+
+class IdleWatch:
+    """When the viewer stops by itself (`--idle-exit`): `idle` seconds after the last page's last
+    heartbeat (every 10 s from each open page), or 60 s or more if no page ever came.
+
+    After the computer slept, the clock has moved on (on Windows the monotonic clock counts the
+    sleep), so the first look would see a long silence and stop the viewer under an open page.
+    A look that comes much later than its TICK means the computer slept: the pages then get
+    WAKE_GRACE seconds to send their next heartbeat (plan 16.17)."""
+
+    TICK = 2.0
+
+    def __init__(self, idle: float, clock: Callable[[], float] = time.monotonic):
+        self.idle, self.clock = idle, clock
+        self.last_look = clock()
+        self.not_before = 0.0
+
+    def should_stop(self, last_heartbeat: Optional[float], started: float) -> bool:
+        if self.idle <= 0:                       # 0: never
+            return False
+        now = self.clock()
+        if now - self.last_look > 3 * self.TICK:  # this watch didn't run: the computer slept
+            self.not_before = now + WAKE_GRACE
+        self.last_look = now
+        if now < self.not_before:
+            return False
+        limit = self.idle if last_heartbeat else max(self.idle, 60)   # the first tab needs time to start
+        return now - (last_heartbeat or started) > limit
 
 
 def _make_server(config, on_stop: Callable[[], None]):
@@ -351,13 +381,10 @@ def start(args: argparse.Namespace, files: List[str], dirs: List[str],
             _open_tabs(port, state.token, files, args.no_browser)
 
     def watchdog():
-        idle = 0 if args.dev else args.idle_exit
-        while idle > 0 and not server.should_exit:
-            time.sleep(2)
-            last = state.last_heartbeat or state.started
-            # Give the first browser tab extra time to start up.
-            limit = idle if state.last_heartbeat else max(idle, 60)
-            if time.monotonic() - last > limit:
+        watch = IdleWatch(0 if args.dev else args.idle_exit)
+        while watch.idle > 0 and not server.should_exit:
+            time.sleep(watch.TICK)
+            if watch.should_stop(state.last_heartbeat, state.started):
                 server.should_exit = True
 
     threading.Thread(target=after_start, daemon=True).start()
