@@ -38,34 +38,37 @@ export function DateZoneSetting({ zone, onSettings }: { zone: string; onSettings
       name="Show dates in"
       help="How the Date column, the pictures and the Files sidebar show dates. A date's tooltip gives the other form. A file's Created line, the date tree and the date filter stay as written in the file; sorting is by the real moment."
     >
-      <select
-        aria-label="Show dates in"
-        value={kind}
-        onChange={(e) => {
-          const v = e.target.value;
-          if (v === OTHER) {
-            setOther(true);
-          } else {
-            setOther(false);
-            save(v);
-          }
-        }}
-      >
-        <option value="local">This computer's time zone ({here})</option>
-        <option value={OTHER}>Another time zone</option>
-        <option value="file">As written in the file</option>
-      </select>
-      {other && (
-        <select aria-label="Time zone" value={names.includes(zone) ? zone : ""} onChange={(e) => e.target.value && save(e.target.value)}>
-          <option value="">Choose a time zone…</option>
-          {names.map((n) => (
-            <option key={n} value={n}>
-              {n}
-            </option>
-          ))}
+      {/* the time zone list goes under the first one: side by side they squeezed the name and help */}
+      <div className="setting-stack">
+        <select
+          aria-label="Show dates in"
+          value={kind}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === OTHER) {
+              setOther(true);
+            } else {
+              setOther(false);
+              save(v);
+            }
+          }}
+        >
+          <option value="local">This computer's time zone ({here})</option>
+          <option value={OTHER}>Another time zone</option>
+          <option value="file">As written in the file</option>
         </select>
-      )}
-      {unknown && <p className="field-error">This browser doesn't know the time zone "{zone}": dates are in this computer's time zone. Choose another.</p>}
+        {other && (
+          <select aria-label="Time zone" value={names.includes(zone) ? zone : ""} onChange={(e) => e.target.value && save(e.target.value)}>
+            <option value="">Choose a time zone…</option>
+            {names.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        )}
+        {unknown && <p className="field-error">This browser doesn't know the time zone "{zone}": dates are in this computer's time zone. Choose another.</p>}
+      </div>
     </Setting>
   );
 }

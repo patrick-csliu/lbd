@@ -849,9 +849,14 @@ details.group fieldset > .group-fields { margin-top: -4px; }
 .settings-group { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 10px; }
 .settings-main > .settings-group:first-of-type { border-top: none; margin-top: 4px; padding-top: 0; }
 .settings-group h4 { margin: 0 0 2px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: none; letter-spacing: normal; }
-.setting-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 20px; align-items: center; padding: 8px 6px; margin: 0 -6px; border-radius: var(--radius); }
+/* the name and help keep at least 16ch, so a wide control can't squeeze them into a strip of letters */
+.setting-row { display: grid; grid-template-columns: minmax(16ch, 1fr) auto; gap: 3px 20px; align-items: center; padding: 8px 6px; margin: 0 -6px; border-radius: var(--radius); }
 .setting-row .setting-name { font-weight: 600; }
 .setting-row .setting-control { grid-row: 1 / span 2; grid-column: 2; display: flex; gap: 8px; align-items: center; justify-content: flex-end; }
+/* controls one under another, as wide as the widest (Show dates in: the time zone list under the first) */
+.setting-stack { display: flex; flex-direction: column; align-items: stretch; gap: 6px; min-width: 0; max-width: 100%; }
+.setting-stack select { max-width: 100%; }
+.setting-stack .field-error { margin: 0; max-width: 30ch; }
 .setting-row .setting-help { grid-column: 1; color: var(--muted); font-size: 12.5px; max-width: 60ch; }
 .setting-row.sub { padding-left: 28px; }
 .setting-row.sub .setting-name { font-weight: 500; }
