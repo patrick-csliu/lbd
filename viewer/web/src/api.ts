@@ -306,10 +306,31 @@ export interface LibraryStatus {
   total: number;
   errors: { path: string; error: string }[];
   scans: number;
+  /** how each open folder is watched (library_watch.py): the system's notifications, or timed
+   * checks every `every` seconds (a network drive, notifications that couldn't start: `reason`) */
+  watching: FolderWatch[];
   generation: number;
   notes?: string[]; // about labels (merged sync copies, …): told once
   /** automatic previews: drawn (current) of total files, how many are waiting or being drawn, the mode in effect */
   previews: { drawn: number; total: number; drawing: number; mode: PreviewMode };
+}
+
+export interface FolderWatch {
+  path: string;
+  how: "notifications" | "timed";
+  every: number | null;
+  reason: string;
+}
+
+/** What "Check folders now" found (POST /api/library/check): data files new, changed, gone and
+ * moved, and the folders or files that couldn't be read; `folders`: how many open folders were checked. */
+export interface LibraryCheck {
+  new: string[];
+  changed: string[];
+  gone: string[];
+  moved: { from: string; to: string }[];
+  errors: { path: string; error: string }[];
+  folders: number;
 }
 
 export interface LibraryQuery {
@@ -1101,6 +1122,8 @@ export const api = {
     call<{ notes: string[] }>("POST", "/api/library/missing", { entry, path }),
   libraryFile: (path: string) => call<FileInfo>("GET", "/api/library/file", undefined, { path }),
   libraryStatus: () => call<LibraryStatus>("GET", "/api/library/status"),
+  /** Check the open folders now (waits for a check that is running): what it found. */
+  libraryCheck: () => call<LibraryCheck>("POST", "/api/library/check"),
   // ---- Library previews (previews.py)
   /** `now`: the selected file (drawn first); else a picture in view (drawn after it). */
   libraryPreview: async (path: string, now = true, signal?: AbortSignal): Promise<Preview> => {

@@ -72,9 +72,11 @@ where the details are (`viewer.log`, next to LBD's database); the session stays 
 ## Library
 
 The index of the data files under the open folders (`library.py`, `library.sqlite` next to
-`catalog.sqlite`): read in the background, from the first library request on (every few seconds
-while the Library asks, else every minute, and at once after `POST/DELETE /api/roots` or a change
-of `library.read_headers`). A path outside the open folders is a 403.
+`catalog.sqlite`): read in the background, from the first library request on: every open folder
+at start, every 7 minutes and at once after `POST/DELETE /api/roots` or a change of
+`library.read_headers`; between those, the folders the system's notifications say changed
+(`library_watch.py`, `watchdog`), and folders on a network drive or without notifications on a
+timer (60 s, 10 s). A path outside the open folders is a 403.
 
 | Method and path | Body / query | Response |
 |---|---|---|
@@ -92,7 +94,8 @@ of `library.read_headers`). A path outside the open folders is a 403.
 | `POST /api/library/preview/update` | `{paths, replace_chosen?}` | `{updated, chosen}`: **Update preview**: drops these files' automatic pictures and draws them again now (a kept picture is otherwise never redrawn when its file changes). Files with a picture chosen in Explore keep it and are listed in `chosen`, unless `replace_chosen` (the page asks first). |
 | `POST /api/library/preview/choose` | `{path, panels: [{spec, settings, stat, view}], grid: [rows, columns], preset?}` | `{chosen_at, warnings}`: Explore's **Use as Library picture**: draws its panels once and keeps only the picture as the file's chosen preview (`catalog.sqlite`, under the file's id so identical copies share it, else its path); 422 with the reason if it can't be drawn. `DELETE ?path=` forgets it (`{forgotten}`) and draws the automatic one again. |
 | `GET /api/library/preview/cache` / `POST /api/library/preview/clear` | | `{count, bytes}` of the automatic pictures / `{freed}`: deletes them (chosen ones are kept). |
-| `GET /api/library/status` | | `{indexing, done, total, errors, scans, generation, notes, previews: {drawn, total, drawing, mode}}` (`notes`: about labels, e.g. a merged sync conflict copy; given once): progress of the current check (`done` of `total` files to read), folders that couldn't be read, and `generation`, which changes whenever the index does (the page then asks for its rows again). |
+| `POST /api/library/check` | | `{new, changed, gone, moved: [{from, to}], errors: [{path, error}], folders}`: **Check folders now**. Checks every open folder now (after a check that is running), and gives the data files it found new, changed (another version), gone and moved or renamed, together with what checks that finished meanwhile found; `errors`: the folders and files that couldn't be read; `folders`: how many open folders were checked. |
+| `GET /api/library/status` | | `{indexing, done, total, errors, scans, watching, generation, notes, previews: {drawn, total, drawing, mode}}` (`watching`: `[{path, how: "notifications" | "timed", every, reason}]`, how each open folder is watched; `notes`: about labels, e.g. a merged sync conflict copy; given once): progress of the current check (`done` of `total` files to read), folders that couldn't be read, and `generation`, which changes whenever the index does (the page then asks for its rows again). |
 
 ## Pages
 

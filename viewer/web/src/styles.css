@@ -380,6 +380,14 @@ details.group fieldset > .group-fields { margin-top: -4px; }
 .library-detail > .back { margin: 10px 18px 0; }
 .library-search-row { display: flex; gap: 6px; align-items: center; }
 .library-search-row .library-search { flex: 1; min-width: 0; }
+.library-check-button { white-space: nowrap; }
+/* what "Check folders now" found (LibraryCheck.tsx) */
+.library-check { display: flex; align-items: flex-start; gap: 6px; font-size: 13px; padding: 4px 8px; border-radius: var(--radius); background: var(--accent-soft); margin: 4px 0; }
+.library-check > span:first-child { flex: none; }
+.library-check.warn { background: var(--danger-soft); }
+.library-check-errors { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.library-check-errors ul { margin: 2px 0 0; padding-left: 18px; }
+.library-check > button { margin-left: auto; }
 .sidebar-toggle { flex: none; display: inline-flex; align-items: center; gap: 2px; padding: 3px 7px; color: var(--muted); background: var(--panel); }
 .sidebar-toggle:hover { color: var(--accent); }
 .sidebar-toggle .sidebar-arrow { font-size: 15px; line-height: 12px; }

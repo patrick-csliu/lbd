@@ -154,6 +154,26 @@ def test_an_unreadable_file_and_a_new_file(viewer, library_files, new_page):
     expect(lib_row(page, "Measured just now")).to_be_visible(timeout=15_000)
 
 
+def test_check_folders_now_says_what_it_found(viewer, new_page, tmp_path):
+    """Check folders now: what it found, and a folder it couldn't read, named; how the folders
+    are watched, in the status line."""
+    page = new_page("Library")
+    shows(page, every_file(viewer), 20_000)
+    expect(status(page)).to_contain_text("New files: noticed at once")              # how the folders are watched
+    page.get_by_role("button", name="Check folders now").click()
+    outcome = page.get_by_role("status", name="Check folders now")
+    expect(outcome).to_contain_text("Nothing new")
+    other = tmp_path / "Unplugged drive"
+    other.mkdir()
+    httpx.post(f"http://127.0.0.1:{viewer.port}/api/roots", headers={"X-LBD-Token": viewer.state.token}, json={"path": str(other)}).raise_for_status()
+    other.rmdir()
+    page.get_by_role("button", name="Check folders now").click()
+    expect(outcome).to_contain_text("Couldn't read")
+    expect(outcome).to_contain_text("Unplugged drive")
+    outcome.get_by_role("button", name="Close").click()
+    expect(outcome).to_have_count(0)
+
+
 def test_the_notice_and_names_only(viewer, library_files, new_page):
     viewer.state.config.set_library({"read_headers": False})            # before the first index
     page = new_page("Library")

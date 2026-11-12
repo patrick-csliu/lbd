@@ -147,6 +147,15 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
   Library, the Figure page). Values, Axes and Metadata are a little larger, in the text colour,
   with a line under them and more space above each section; in the narrow list at the right the
   names are no longer bold and the lines between them are lighter, so the sections stand out.
+- **New files appear in the Library in about a second**, told by the system's notifications,
+  no longer by looking through every open folder every 3 seconds (60 when the Library isn't
+  shown). Every folder is still looked through at start and every 7 minutes, in case a notice was
+  lost. A folder on a network drive is looked through every 60 seconds instead, and one where
+  notifications can't be had every 10 seconds; the status line says how the folders are watched
+  (point at it for each folder and why).
+- **Check folders now** in the Library (next to the search box) looks through the open folders
+  at once, for a file that should be listed but isn't yet. It says what it found ("3 new files",
+  "Nothing new", changed, moved and gone files) and names every folder it couldn't read, with why.
 - **No value is locked in Curves** (Explore). A value on another axis, or with a third unit, used
   to be greyed out, and with one value ticked nothing could be changed; now clicking it shows it in
   that panel instead (its tip says so), as Histogram and Scatter already did.
@@ -649,6 +658,9 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
 
 **For developers**
 
+- The viewer depends on `watchdog` (the Library's notifications, `library_watch.py`; bundled in
+  every installer). `LibraryIndex.scan(folders=...)` checks only some folders; `scan()` returns
+  what it found (`ScanResult`).
 - **Faster tests.**
   - The viewer's tests and its browser tests run in parallel processes (pytest-xdist, whole files
     each); `test_all.py --workers N` (`1`: one by one). Tests that need the computer to themselves

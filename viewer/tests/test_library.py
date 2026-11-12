@@ -158,6 +158,46 @@ def test_the_api(client, data_dir, library_files):
     assert client.get("/api/library/list", params={"sort": "colour"}).status_code == 400
 
 
+def _small_file(path, title="Small"):
+    d = lbd.Dataset(title=title, created="2026-10-29T10:00:00+08:00")
+    d.add_axis("x", [1.0, 2.0])
+    d.add_value("y", [3.0, 4.0], axes="x")
+    d.save(path)
+
+
+def test_check_folders_now_says_what_it_found(client, data_dir):
+    """The Library's "Check folders now" (POST /api/library/check): new, changed, moved and gone
+    files, or nothing new."""
+    first = client.post("/api/library/check").json()
+    assert first["folders"] == 1 and first["errors"] == []
+    again = client.post("/api/library/check").json()
+    assert again["new"] == again["changed"] == again["gone"] == again["moved"] == []      # nothing new
+    _small_file(data_dir / "sub" / "fresh.lbd")
+    found = client.post("/api/library/check").json()
+    assert found["new"] == [str(data_dir.resolve() / "sub" / "fresh.lbd")] and found["changed"] == []
+    _small_file(data_dir / "sub" / "fresh.lbd", "Changed")
+    os.utime(data_dir / "sub" / "fresh.lbd", (time.time() + 5, time.time() + 5))   # surely another version
+    assert client.post("/api/library/check").json()["changed"] == [str(data_dir.resolve() / "sub" / "fresh.lbd")]
+    (data_dir / "sub" / "fresh.lbd").rename(data_dir / "moved.lbd")
+    moved = client.post("/api/library/check").json()
+    assert moved["moved"] == [{"from": str(data_dir.resolve() / "sub" / "fresh.lbd"), "to": str(data_dir.resolve() / "moved.lbd")}]
+    assert moved["new"] == moved["gone"] == []
+    (data_dir / "moved.lbd").unlink()
+    assert client.post("/api/library/check").json()["gone"] == [str(data_dir.resolve() / "moved.lbd")]
+
+
+def test_check_folders_now_names_a_folder_it_couldnt_read(client, tmp_path):
+    """An open folder that can't be read (here: removed, like a network drive not connected) is
+    named, with why."""
+    other = tmp_path / "other"
+    other.mkdir()
+    client.post("/api/roots", json={"path": str(other)}).raise_for_status()
+    other.rmdir()
+    out = client.post("/api/library/check").json()
+    assert out["folders"] == 2
+    assert [e["path"] for e in out["errors"]] == [str(other.resolve())] and out["errors"][0]["error"]
+
+
 def test_ten_thousand_files_answer_fast(tmp_path_factory):
     folder = tmp_path_factory.mktemp("big")
     t0 = time.perf_counter()

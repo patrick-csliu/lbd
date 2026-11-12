@@ -21,7 +21,8 @@ a = Analysis(
     pathex=[str(VIEWER_SRC), str(LBD_SRC)],
     datas=[(str(STATIC), "lbd_viewer/static")],
     # matplotlib picks its output backends by name at savefig() time, so list them explicitly.
-    hiddenimports=collect_submodules("uvicorn") + collect_submodules("lbd_viewer") + collect_submodules("lbd") + [
+    # watchdog picks its observer per system (Windows, macOS FSEvents, Linux inotify) at import time.
+    hiddenimports=collect_submodules("uvicorn") + collect_submodules("lbd_viewer") + collect_submodules("lbd") + collect_submodules("watchdog") + [
         "matplotlib.backends.backend_agg",
         "matplotlib.backends.backend_svg",
         "matplotlib.backends.backend_pdf",

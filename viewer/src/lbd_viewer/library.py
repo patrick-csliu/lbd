@@ -5,8 +5,9 @@ what the Library lists, filters and searches by, kept on this computer.
   holds nothing that isn't in the files, so deleting it costs only the time to read the files
   again. One that can't be read (or was made by a newer LBD) is deleted and built again.
 - A background thread walks the open folders: a file is read again only when its version (size
-  and modification time) changed. While the Library is shown it checks every few seconds,
-  otherwise every minute, and at once when woken (a folder added or removed, a setting changed).
+  and modification time) changed. Every open folder is checked at start, every 7 minutes, and at
+  once when woken (a folder added or removed, a setting changed); between those, only the folders
+  the system's notifications say changed, and network drives on a timer (library_watch.py).
 - With "read headers" off (the setting for cloud storage, where opening a file downloads it),
   only what the disk tells is stored (name, size, dates); a file's header is read when it is
   asked for (`file`).
@@ -32,16 +33,17 @@ import re
 import sqlite3
 import threading
 import time
+from collections import deque
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
-from . import scan, versions
+from . import library_watch, scan, versions
+from .library_watch import is_inside
 
 SCHEMA_VERSION = 4     # 4: file_labels, and copies compared by their data (plan 17)
 LIBRARY_FILE = "library.sqlite"
-# How often the open folders are checked: while the Library is shown, and otherwise.
-ACTIVE_EVERY, IDLE_EVERY, ACTIVE_FOR = 3.0, 60.0, 30.0
 SORTS = {
     "name": "COALESCE(NULLIF(title, ''), name) COLLATE NOCASE",
     "date": "sort_time",
@@ -203,6 +205,22 @@ def _like(word: str) -> str:
     return "%" + word.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
 
 
+@dataclass
+class ScanResult:
+    """What one check of the folders found: data files new to the index, changed (another
+    version), gone, and moved or renamed (old path -> new); the folders and files it couldn't read
+    ({path, error}). True when anything in the index changed (labels too: `changed_any`)."""
+    new: List[str] = field(default_factory=list)
+    changed: List[str] = field(default_factory=list)
+    gone: List[str] = field(default_factory=list)
+    moved: Dict[str, str] = field(default_factory=dict)
+    errors: List[Dict[str, str]] = field(default_factory=list)
+    changed_any: bool = False
+
+    def __bool__(self) -> bool:
+        return self.changed_any
+
+
 class LibraryIndex:
     def __init__(self, directory: Path, roots: Callable[[], List[str]], read_headers: Callable[[], bool],
                  summarize: Optional[Callable[[Path], Dict[str, Any]]] = None):
@@ -212,12 +230,17 @@ class LibraryIndex:
         self._db: Optional[sqlite3.Connection] = None
         self._lock = threading.RLock()           # the connection
         self._scanning = threading.Lock()        # one scan at a time
+        self._recent: "deque[Tuple[int, ScanResult]]" = deque(maxlen=20)   # (scans done, result): for check()
         self._wake = threading.Event()
+        self._full_wanted = False                # wake(): every open folder, not only those notified
+        # the system's notices of changes in the open folders, and timed checks (library_watch.py)
+        self.watcher = library_watch.Watcher(self._wake.set)
         self._thread: Optional[threading.Thread] = None
         self._stop = False
         self.last_request = 0.0                  # when the Library last asked (it is shown)
         self.generation = 0                      # changes whenever the index does
-        self.status: Dict[str, Any] = {"indexing": False, "done": 0, "total": 0, "errors": [], "scans": 0}
+        self.status: Dict[str, Any] = {"indexing": False, "done": 0, "total": 0, "errors": [], "scans": 0,
+                                       "watching": []}   # how each open folder is watched (library_watch.py)
         self.missing: List[Dict[str, Any]] = []          # labels whose file can't be found
         self.kept: Dict[str, Dict[str, List[str]]] = {}  # kind -> label -> folders keeping it without a file
         self.notes: List[str] = []                       # about labels, for the page (told once)
@@ -314,74 +337,125 @@ class LibraryIndex:
 
     # -- indexing
 
-    def scan(self) -> bool:
-        """Bring the index up to date with the open folders now; True when anything changed."""
+    def scan(self, folders: Optional[Dict[str, bool]] = None) -> "ScanResult":
+        """Bring the index up to date with the open folders now; with `folders` ({folder: also its
+        subfolders}, e.g. those the system said changed), only with what is in them. What it found
+        (ScanResult) is true when anything changed."""
         with self._scanning:
-            roots = outermost(self.roots())
-            read = bool(self.read_headers())
-            errors: List[Dict[str, str]] = []
-            found: List[Tuple[Path, str, os.stat_result]] = []
-            for root in roots:
-                for p in scan.walk_files(Path(root), errors):
-                    if not scan.is_lbd(p.name):
-                        continue
-                    try:
-                        found.append((p, root, p.stat()))
-                    except OSError as e:
-                        errors.append({"path": str(p), "error": e.strerror or str(e)})
-            with self._lock:
-                known = {r[0]: (r[1], r[2], r[3], r[4]) for r in
-                         self._connect().execute("SELECT path, version, read, root, fsid FROM files")}
-            todo = [(p, root, st) for p, root, st in found
-                    if (k := known.get(str(p))) is None or k[0] != _version(st, p) or k[2] != root
-                    or (read and not k[1])]
-            self.status.update({"indexing": bool(todo), "done": 0, "total": len(todo), "errors": errors})
-            batch: List[Dict[str, Any]] = []
-            for i, (p, root, st) in enumerate(todo):
-                batch.append(self._read(p, root, st) if read else _stat_row(p, root, st))
-                if len(batch) >= 100:
-                    self._write(batch)
-                    batch = []
-                    self.generation += 1
-                self.status["done"] = i + 1
-            self._write(batch)
-            gone = set(known) - {str(p) for p, _, _ in found}
-            # renamed or moved on the same drive: the file system's id is the same
-            new_by_fsid = {f"{st.st_dev}:{st.st_ino}": str(p) for p, _, st in found if str(p) not in known}
-            renames = {g: new_by_fsid[known[g][3]] for g in gone if known[g][3] in new_by_fsid}
-            if gone:
-                with self._lock:
-                    db = self._connect()
-                    db.execute("BEGIN")
-                    db.executemany("DELETE FROM files WHERE path = ?", [(g,) for g in gone])
-                    db.execute("COMMIT")
-            changed = bool(todo or gone)
-            if changed:
-                self._compare_same_ids()
-            sidecars = self._sidecars([p for p, _, _ in found])
-            if changed or sidecars != self._sidecar_state:
-                from . import library_labels
+            if folders is not None and self._sidecar_state is None:
+                folders = None                       # no full check yet: this one is
+            result = self._scan(folders)
+            self._recent.append((self.status["scans"], result))
+            return result
 
+    def check(self) -> Dict[str, Any]:
+        """Check every open folder now (the Library's "Check folders now"): waits for a check that
+        is running, then checks again. What it found, together with what checks that finished
+        meanwhile found (they may have seen the new files first): new, changed, gone and moved
+        files, and the folders or files that couldn't be read."""
+        before = self.status["scans"]                # scans finished before this one was asked for
+        own = self.scan()
+        meanwhile = [r for n, r in list(self._recent) if n > before and r is not own]
+        new, changed, gone, moved = [], [], [], {}
+        for r in meanwhile + [own]:
+            new += [p for p in r.new if p not in new]
+            changed += [p for p in r.changed if p not in changed]
+            gone += [p for p in r.gone if p not in gone]
+            moved.update(r.moved)
+        new = [p for p in new if p not in own.gone]
+        changed = [p for p in changed if p not in new and p not in own.gone]
+        return {"new": new, "changed": changed, "gone": gone,
+                "moved": [{"from": a, "to": b} for a, b in moved.items()],
+                "errors": own.errors, "folders": len(outermost(self.roots()))}
+
+    def _scan(self, folders: Optional[Dict[str, bool]] = None) -> "ScanResult":
+        roots = outermost(self.roots())
+        read = bool(self.read_headers())
+        errors: List[Dict[str, str]] = []
+        found: List[Tuple[Path, str, os.stat_result]] = []
+        # where to look: (folder, its open folder, also its subfolders)
+        if folders is None:
+            places = [(root, root, True) for root in roots]
+        else:
+            places = [(f, root, deep) for f, deep in folders.items()
+                      if (root := next((r for r in roots if is_inside(f, r)), None)) is not None]
+        scope = _Scope(places, whole=folders is None)
+        for folder, root, deep in places:
+            if folders is not None and not os.path.isdir(folder):
+                continue                             # removed since: what was in it is gone
+            files = scan.walk_files(Path(folder), errors) if deep else _files_in(folder, errors)
+            for p in files:
+                if not scan.is_lbd(p.name):
+                    continue
                 try:
-                    self.notes += library_labels.apply(self, renames)
-                except Exception as e:                   # labels must never stop the list
-                    log.exception("Library: labels couldn't be worked out")
-                    self.notes.append(f"The Library's labels couldn't be worked out ({e}); the details are in the log.")
-                self._sidecar_state = self._sidecars([p for p, _, _ in found])
-                changed = True
-            if changed:
+                    found.append((p, root, p.stat()))
+                except OSError as e:
+                    errors.append({"path": str(p), "error": e.strerror or str(e)})
+        with self._lock:
+            known = {r[0]: (r[1], r[2], r[3], r[4]) for r in
+                     self._connect().execute("SELECT path, version, read, root, fsid FROM files")
+                     if scope.has_file(r[0])}
+        todo = [(p, root, st) for p, root, st in found
+                if (k := known.get(str(p))) is None or k[0] != _version(st, p) or k[2] != root
+                or (read and not k[1])]
+        # the folders that couldn't be read: those checked now, and the others as last seen
+        all_errors = [e for e in self.status["errors"] if not scope.has_file(e["path"])] + errors
+        self.status.update({"indexing": bool(todo), "done": 0, "total": len(todo), "errors": all_errors})
+        batch: List[Dict[str, Any]] = []
+        for i, (p, root, st) in enumerate(todo):
+            batch.append(self._read(p, root, st) if read else _stat_row(p, root, st))
+            if len(batch) >= 100:
+                self._write(batch)
+                batch = []
                 self.generation += 1
-            self.status.update({"indexing": False, "scans": self.status["scans"] + 1})
-            return changed
+            self.status["done"] = i + 1
+        self._write(batch)
+        gone = set(known) - {str(p) for p, _, _ in found}
+        # renamed or moved on the same drive: the file system's id is the same
+        new_by_fsid = {f"{st.st_dev}:{st.st_ino}": str(p) for p, _, st in found if str(p) not in known}
+        renames = {g: new_by_fsid[known[g][3]] for g in gone if known[g][3] in new_by_fsid}
+        if gone:
+            with self._lock:
+                db = self._connect()
+                db.execute("BEGIN")
+                db.executemany("DELETE FROM files WHERE path = ?", [(g,) for g in gone])
+                db.execute("COMMIT")
+        moved_to = set(renames.values())
+        result = ScanResult(
+            new=[str(p) for p, _, _ in todo if str(p) not in known and str(p) not in moved_to],
+            # another version, not only read now (reading files' details was turned on)
+            changed=[str(p) for p, root, st in todo
+                     if (k := known.get(str(p))) is not None and (k[0] != _version(st, p) or k[2] != root)],
+            gone=sorted(g for g in gone if g not in renames), moved=renames, errors=errors)
+        changed = bool(todo or gone)
+        if changed:
+            self._compare_same_ids()
+        sidecars = self._sidecars([p for p, _, _ in found], scope)
+        if changed or sidecars != self._sidecar_state:
+            from . import library_labels
 
-    def _sidecars(self, files: List[Path]) -> Dict[str, Optional[str]]:
-        """The version of the label file of every folder with data files (or labels before)."""
+            try:
+                self.notes += library_labels.apply(self, renames)
+            except Exception as e:                   # labels must never stop the list
+                log.exception("Library: labels couldn't be worked out")
+                self.notes.append(f"The Library's labels couldn't be worked out ({e}); the details are in the log.")
+            self._sidecar_state = self._sidecars([p for p, _, _ in found], scope)
+            changed = True
+        if changed:
+            self.generation += 1
+        self.status.update({"indexing": False, "scans": self.status["scans"] + 1})
+        result.changed_any = changed
+        return result
+
+    def _sidecars(self, files: List[Path], scope: "_Scope") -> Dict[str, Optional[str]]:
+        """The version of the label file of every folder with data files (or labels before): looked
+        at now in the folders checked (`scope`), as last seen in the others."""
         from .labels import SIDECAR
 
         folders = {str(p.parent) for p in files}
         with self._lock:
-            folders |= {f for (f,) in self._connect().execute("SELECT folder FROM sidecars")}
-        out = {}
+            folders |= {f for (f,) in self._connect().execute("SELECT folder FROM sidecars") if scope.has_folder(f)}
+        out = {f: v for f, v in (self._sidecar_state or {}).items() if not scope.has_folder(f)}
         for f in folders:
             try:
                 st = os.stat(os.path.join(f, SIDECAR))
@@ -494,19 +568,40 @@ class LibraryIndex:
         if self._thread is not None:
             self._thread.join(timeout=5)
             self._thread = None
+        self.watcher.stop()
+        self.status["watching"] = []
 
     def wake(self) -> None:
-        """Check the folders now (a folder added or removed, a setting changed)."""
+        """Check every open folder now (a folder added or removed, a setting changed)."""
+        self._full_wanted = True
         self._wake.set()
 
     def _run(self) -> None:
+        """Keep the index up to date (library_watch.py): a full check at start and every FULL_EVERY
+        seconds or when woken; between them, the folders the system said changed, and the timed
+        ones (network drives, folders without notifications)."""
+        next_full = 0.0
         while not self._stop:
+            now = time.monotonic()
             try:
-                self.scan()
+                if self._full_wanted or now >= next_full:
+                    self._full_wanted = False
+                    # watched first: a file that arrives during the check is noticed too
+                    self.watcher.update(outermost(self.roots()))
+                    self.status["watching"] = self.watcher.describe()
+                    self.scan()
+                    next_full = time.monotonic() + library_watch.FULL_EVERY
+                    self.watcher.checked_all(time.monotonic())
+                else:
+                    due = self.watcher.due(now)
+                    self.status["watching"] = self.watcher.describe()
+                    if due:
+                        self.scan(folders=due)
             except Exception:                      # never stop indexing; the log has the details
                 log.exception("Library index: a scan failed")
-            active = time.monotonic() - self.last_request < ACTIVE_FOR
-            self._wake.wait(ACTIVE_EVERY if active else IDLE_EVERY)
+            # at the latest after LOOK_EVERY: whether every observer still runs (due() looks)
+            until = min(next_full, self.watcher.next_time() or math.inf, time.monotonic() + library_watch.LOOK_EVERY)
+            self._wake.wait(max(0.05, until - time.monotonic()))
             self._wake.clear()
 
     # -- what the Library asks
@@ -718,6 +813,33 @@ def writing_status(path: str) -> Optional[str]:
     except OSError:                              # gone meanwhile (finished: renamed)
         return None
     return None if state == "gone" else state
+
+
+class _Scope:
+    """What one scan looks at: every open folder (`whole`), or some folders, each alone or with its
+    subfolders ([(folder, open folder, also subfolders)])."""
+
+    def __init__(self, places: List[Tuple[str, str, bool]], whole: bool):
+        self.places, self.whole = places, whole
+
+    def has_folder(self, folder: str) -> bool:
+        return self.whole or any(is_inside(folder, f) if deep else os.path.normcase(folder) == os.path.normcase(f)
+                                 for f, _, deep in self.places)
+
+    def has_file(self, path: str) -> bool:
+        """A file (or a folder that couldn't be read) the scan looks at."""
+        return self.whole or self.has_folder(os.path.dirname(path)) or self.has_folder(path)
+
+
+def _files_in(folder: str, errors: List[Dict[str, str]]) -> List[Path]:
+    """The files directly in `folder` (not in its subfolders); a folder that can't be read is
+    added to `errors`."""
+    try:
+        with os.scandir(folder) as it:
+            return sorted((Path(e.path) for e in it if e.is_file()), key=lambda p: p.name.lower())
+    except OSError as e:
+        errors.append({"path": folder, "error": e.strerror or str(e)})
+        return []
 
 
 def _listdir(folder: str) -> List[str]:
