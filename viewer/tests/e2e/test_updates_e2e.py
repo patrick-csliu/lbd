@@ -18,7 +18,7 @@ def test_the_reminder_shows_once_and_leads_to_settings_about(viewer, context):
 
     second = context.new_page()                                # another page: no second window
     second.goto(viewer.url)
-    expect(second.get_by_role("button", name="Settings")).to_be_visible()
+    expect(second.locator("button[aria-label=Settings]")).to_be_visible()
     second.wait_for_timeout(500)
     expect(second.get_by_role("dialog", name="LBD 99.0.0 is available")).to_have_count(0)
 

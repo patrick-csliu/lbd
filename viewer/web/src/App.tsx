@@ -37,13 +37,22 @@ const FOLDERS_SHOWN_KEY = "lbd-folders-shown";
 // The workspace this browser tab shows, so reloading the page stays there (per tab).
 const WORKSPACE_KEY = "lbd-workspace";
 
+/** The page this browser tab starts on (16.14): after a reload, the one it showed; opened for a
+ * file (`?open=`, `?claim=`), the workspace that file goes to, so the Library never flashes
+ * first; otherwise the Library. */
 function loadPage(): Page {
   try {
     const p = sessionStorage.getItem(WORKSPACE_KEY);
-    return p === "library" || p === "figure" || p === "styles" || p === "sdk" ? p : "explore";
+    if (p === "library" || p === "explore" || p === "figure" || p === "styles" || p === "sdk") return p;
   } catch {
-    return "explore";
+    /* storage unavailable: from the address */
   }
+  const url = new URL(window.location.href);
+  const open = url.searchParams.get("open"), where = url.searchParams.get("in");
+  if (where === "explore" || where === "figure") return where;
+  if (url.searchParams.get("claim")) return "explore";
+  if (open) return fileKind(open) === "lbd" ? "explore" : "figure";   // the setting may still say Figure
+  return "library";
 }
 
 // The Files sidebar's list, and the data files opened lately (per browser tab).
@@ -748,7 +757,12 @@ function Shell() {
   // Esc, a click beside it, a file kept open); the choice made in a wide window is kept for it.
   const drawerMode = useMedia(DRAWER_MEDIA);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  useEffect(() => setDrawerOpen(false), [drawerMode, page]);
+  // a switch to a page with no file open there shows the Files bar (16.15): in a narrow window, the drawer
+  const drawerOnSwitch = useRef(false);
+  useEffect(() => {
+    setDrawerOpen(drawerOnSwitch.current);
+    drawerOnSwitch.current = false;
+  }, [drawerMode, page]);
   useEffect(() => {
     if (!drawerOpen) return;
     const onKey = (e: globalThis.KeyboardEvent) => e.key === "Escape" && setDrawerOpen(false);
@@ -756,6 +770,24 @@ function Shell() {
     return () => window.removeEventListener("keydown", onKey);
   }, [drawerOpen]);
   const sidebarShown = drawerMode ? drawerOpen : foldersShown;
+
+  /** Go to a page; Explore or Figure with no file open there shows the Files bar, to choose one
+   * (16.15). Hiding it again works until the next switch. */
+  const goTo = (p: Page) => {
+    const empty = (p === "explore" && exploreTabs.length === 0) || (p === "figure" && tabs.length === 0);
+    if (empty && p !== page) {
+      if (drawerMode) drawerOnSwitch.current = true;
+      else if (!foldersShown) {
+        try {
+          sessionStorage.setItem(FOLDERS_SHOWN_KEY, "yes");
+        } catch {
+          /* storage unavailable: not remembered */
+        }
+        setFoldersShown(true);
+      }
+    }
+    setPage(p);
+  };
 
   const toggleFolders = () => {
     if (drawerMode) {
@@ -892,7 +924,7 @@ function Shell() {
               ["figure", "Figure", "Make figures: styles, export"],
             ] as [Page, string, string][]
           ).map(([p, label, title]) => (
-            <button key={p} role="tab" aria-selected={page === p} className={page === p ? "active" : ""} title={title} onClick={() => setPage(p)}>
+            <button key={p} role="tab" aria-selected={page === p} className={page === p ? "active" : ""} title={title} onClick={() => goTo(p)}>
               {label}
             </button>
           ))}
@@ -904,7 +936,7 @@ function Shell() {
               ["sdk", "Language modules"],
             ] as [Page, string][]
           ).map(([p, label]) => (
-            <button key={p} aria-current={page === p ? "page" : undefined} className={page === p ? "active" : ""} onClick={() => setPage(p)}>
+            <button key={p} aria-current={page === p ? "page" : undefined} className={page === p ? "active" : ""} onClick={() => goTo(p)}>
               {label}
             </button>
           ))}

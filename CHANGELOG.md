@@ -177,6 +177,9 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
   refused.
 - **Legend dots are big enough to see their colour**, whatever the size of the plotted points (a
   scatter plot of small points, the strips beside it, curves with points): at least 6 pt.
+- **A new page starts on the Library**, not on an empty Explore. A page opened for a file still
+  starts on that file, and a reload stays where it was. Going to Explore or Figure with nothing
+  open there shows the Files bar (in a narrow window, its drawer), even if it was hidden.
 - **Look options are under Display.** Data says what is plotted, Display how it looks: a
   histogram's Bins, Draw and Vertical axis; Scatter's Equal axes and Histograms beside the plot;
   a map's Cells; a matrix's Numbers, Significant digits, Row sums and Colour range; Bars' Bars and

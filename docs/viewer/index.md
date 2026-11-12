@@ -18,7 +18,9 @@ It has three workspaces, switched at the top left:
 
 1. **Workspaces and pages:** **Library**, **Explore** and **Figure** on the left; **Styles** (how
    figures look) and **Language modules** (installing the module for each programming language
-   you use) on the right. See [The viewer's pages](#the-viewers-pages) below.
+   you use) on the right. See [The viewer's pages](#the-viewers-pages) below. A new page starts
+   on the **Library**; one opened for a file (from Explorer or a script) starts on that file; a
+   reloaded page stays where it was.
 2. **Page number:** this browser tab's number. You can open the viewer in several browser tabs.
    Each is a numbered *page*, and you can move open files between them. See
    [Several browser tabs](folders-and-files.md#several-browser-tabs).
@@ -30,7 +32,8 @@ It has three workspaces, switched at the top left:
    it open (here, in Figure: to plot it); ↑ ↓ step through the list. See
    [The Files sidebar](folders-and-files.md#the-files-sidebar).
 6. **Tabs:** the files open in this page. **◧‹** at the top of the Files sidebar hides it for
-   more room; **◧›** at the left of the tabs shows it again. Right-click a tab to close it or move it to another page. See
+   more room; **◧›** at the left of the tabs shows it again. Going to Explore or Figure with no
+   file open there shows it, so you can choose one. Right-click a tab to close it or move it to another page. See
    [Tabs](folders-and-files.md#tabs).
 7. **File header:** the file's title and path, and **Show in folder**.
 8. **Plot controls:** what to plot and how, and the style. See [Plotting](plotting.md).
