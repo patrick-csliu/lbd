@@ -23,8 +23,10 @@ The installer:
 - makes double-clicking `.lbd` files open the viewer;
 - puts the language modules in `%LOCALAPPDATA%\Programs\LBDViewer\sdk`.
 
-**Upgrade:** run the installer of the new version. It replaces the old one, closing a running
-viewer first if needed.
+**Upgrade:** run the installer of the new version. It replaces the old one. A running viewer is
+first asked to stop (labels still waiting are written into their files), and stopped by force only
+if it hasn't ended after 10 seconds. An installer older than the installed version refuses: see
+[Going back to an older version](#going-back-to-an-older-version).
 
 **Uninstall:** Windows Settings → Apps → **LBD Viewer** → Uninstall. This removes the program
 and the `.lbd` file association. When it starts, it asks whether to keep your presets and
@@ -73,8 +75,9 @@ openSUSE: `sudo zypper install fetchmsttfonts`; Arch: `ttf-ms-fonts` from the AU
 the default style on the Styles page, e.g. DejaVu Sans, which is always available.
 `./install.sh --no-fonts` skips the check.
 
-**Upgrade:** run `install.sh` of the new version. **Uninstall:** run `./uninstall.sh` from the
-unpacked folder. It asks whether to keep your presets and settings in `~/.config/lbd`; the
+**Upgrade:** run `install.sh` of the new version. It stops a running viewer first (gently, as on
+Windows) and refuses a version older than the installed one. **Uninstall:** run `./uninstall.sh`
+from the unpacked folder, or `~/.local/share/lbd-viewer/uninstall.sh`. It asks whether to keep your presets and settings in `~/.config/lbd`; the
 default is to keep them, and otherwise they go to the desktop's trash when there is one.
 
 Requirements: a 64-bit Linux desktop with a web browser. The file association and menu entry
@@ -140,6 +143,27 @@ install Python: uv downloads the version the viewer is tested with.
 | Upgrade | the same `uv tool install` command with the new files, plus `--force` |
 | Uninstall | `uv tool uninstall lbd-viewer`. Your presets and settings in `~/Library/Application Support/lbd` are kept; delete that folder to remove them too. |
 
+
+## Going back to an older version
+
+A new version replaces the old one; no two versions are installed side by side. The Windows and
+Linux installers refuse to put an older version over a newer one, with a message such as *"LBD
+Viewer 1.4.0 is installed, newer than this installer (1.3.0)"*. To go back: uninstall the newer
+version first (Windows Settings → Apps; on Linux `~/.local/share/lbd-viewer/uninstall.sh`), then
+run the older installer. A disk image on macOS can't refuse; the older app says so once, at its
+first start, and carries on.
+
+Your settings and Library stay when you uninstall, and the older version uses them as far as it
+can:
+
+- **Settings:** it reads the settings it knows. Since 1.3.0, settings only a newer version knows
+  are kept when an older one saves, so going forward again finds them. Versions before 1.3.0
+  write only their own settings: after changing a setting there, the newer version's other
+  settings (Library, memory, Explore, …) are back to their defaults.
+- **The Library's index** is built again by a version that uses another kind of index.
+- **LBD's database** (remembered Explore views, chosen previews): one made by a newer version is
+  put aside (`catalog.broken-<time>.sqlite`) and a new one started, and the viewer says so.
+- **Labels** are in the data files and the Library's label files, not in the program.
 
 ## Language modules
 

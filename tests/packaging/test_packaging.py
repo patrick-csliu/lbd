@@ -190,45 +190,140 @@ def test_windows_installer_asks_for_shortcuts():
     assert '{autodesktop}\\LBD Viewer"; Filename: "{app}\\lbd-view.exe"; Comment: "View LBD data files"; Tasks: desktopicon' in iss
 
 
-def test_linux_install_without_a_terminal_uses_the_shortcut_defaults(tmp_path):
-    """Run install.sh (and uninstall.sh) into a temporary home, unattended: a menu entry, no
-    desktop shortcut; uninstall removes everything it made."""
+def _posix_shell():
     import shutil
-    import subprocess
-    from pathlib import Path
 
     sh = shutil.which("sh") or shutil.which("bash")
     if not sh:
         pytest.skip("no POSIX shell here")
+    return sh
+
+
+def linux_package(folder, version):
+    """An unpacked Linux package as build_linux.sh makes it, with a fake `lbd-view` that notes
+    `--stop` in the home folder (how install.sh stops a running viewer)."""
+    import shutil
+    from pathlib import Path
+
     linux = Path(__file__).resolve().parents[2] / "packaging" / "linux"
-    icons = linux.parent / "icons"
-    unpacked = tmp_path / "unpacked"
-    (unpacked / "LBDViewer").mkdir(parents=True)
+    (folder / "LBDViewer").mkdir(parents=True)
     for f in ("install.sh", "uninstall.sh", "lbd-viewer.desktop", "lbd-mime.xml"):
-        shutil.copy(linux / f, unpacked / f)
+        shutil.copy(linux / f, folder / f)
     for f in ("lbd.png", "lbd.svg"):
-        shutil.copy(icons / f, unpacked / f)
-    exe = unpacked / "LBDViewer" / "lbd-view"
-    exe.write_text("#!/bin/sh\necho viewer\n", newline="\n")
+        shutil.copy(linux.parent / "icons" / f, folder / f)
+    exe = folder / "LBDViewer" / "lbd-view"
+    exe.write_text(f'#!/bin/sh\n[ "$1" = --stop ] && echo "{version}" >> "$HOME/stopped"\necho viewer {version}\n',
+                   newline="\n")
     exe.chmod(0o755)
+    (folder / "LBDViewer" / "VERSION").write_text(version + "\n", newline="\n")
+    return folder
+
+
+def linux_home(tmp_path):
     home = tmp_path / "home"
     (home / "Desktop").mkdir(parents=True)
     env = {"HOME": str(home), "XDG_DATA_HOME": str(home / "data"), "XDG_CONFIG_HOME": str(home / "config"),
            "PATH": __import__("os").environ["PATH"]}
+    return home, env
 
-    def run(name, *args):
-        r = subprocess.run([sh, str(unpacked / name), *args], env=env, stdin=subprocess.DEVNULL,
-                           capture_output=True, text=True)
-        assert r.returncode == 0, r.stdout + r.stderr
-        return r.stdout
 
-    out = run("install.sh", "--no-fonts")
+def run_sh(script, env, *args, ok=True):
+    import subprocess
+
+    r = subprocess.run([_posix_shell(), str(script), *args], env=env, stdin=subprocess.DEVNULL,
+                       capture_output=True, text=True)
+    assert (r.returncode == 0) == ok, r.stdout + r.stderr
+    return r
+
+
+def test_linux_install_without_a_terminal_uses_the_shortcut_defaults(tmp_path):
+    """Run install.sh (and uninstall.sh) into a temporary home, unattended: a menu entry, no
+    desktop shortcut; uninstall removes everything it made."""
+    _posix_shell()
+    unpacked = linux_package(tmp_path / "unpacked", "1.3.0")
+    home, env = linux_home(tmp_path)
+
+    out = run_sh(unpacked / "install.sh", env, "--no-fonts").stdout
     entry = home / "data" / "applications" / "lbd-viewer.desktop"
     assert entry.is_file() and "NoDisplay" not in entry.read_text()        # in the menu
     assert not (home / "Desktop" / "lbd-viewer.desktop").exists()           # no desktop shortcut
     assert "applications menu" in out
-    run("uninstall.sh")
+    run_sh(unpacked / "uninstall.sh", env)
     assert not entry.exists() and not (home / "data" / "lbd-viewer").exists()
+
+
+def test_linux_upgrade_keeps_settings_and_refuses_an_older_version(tmp_path):
+    """Plan 16.26's upgrade test, locally: an installation from before 1.3.0 (no VERSION file),
+    settings and labels; the new version replaces it (stopping the old viewer first) and keeps
+    them; then an older package is refused, leaving the new one as it was."""
+    _posix_shell()
+    home, env = linux_home(tmp_path)
+    app = home / "data" / "lbd-viewer"
+    (app / "_internal").mkdir(parents=True)                       # "1.2.0", installed before
+    (app / "_internal" / "old-only.py").write_text("old")
+    (app / "lbd-view").write_text('#!/bin/sh\necho "old" >> "$HOME/stopped"\n', newline="\n")
+    (app / "lbd-view").chmod(0o755)
+    settings = home / "config" / "lbd" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text('{"roots": ["/data"], "theme": "dark"}')
+    labels = home / "measurements" / "lbd-labels.json"
+    labels.parent.mkdir()
+    labels.write_text('{"a.lbd": {"tags": ["x"]}}')
+
+    new = linux_package(tmp_path / "new", "1.3.0")
+    out = run_sh(new / "install.sh", env, "--no-fonts").stdout
+    assert "Replacing the earlier LBD Viewer with 1.3.0" in out
+    assert (home / "stopped").read_text().split() == ["old"]                 # the old viewer was asked to stop
+    assert not (app / "_internal" / "old-only.py").exists()                  # the old program folder is gone
+    assert (app / "VERSION").read_text().strip() == "1.3.0" and (app / "uninstall.sh").is_file()
+    assert settings.read_text() == '{"roots": ["/data"], "theme": "dark"}' and labels.is_file()
+
+    older = linux_package(tmp_path / "older", "1.2.9")
+    r = run_sh(older / "install.sh", env, "--no-fonts", ok=False)
+    assert "LBD Viewer 1.3.0 is installed, newer than this installer (1.2.9)" in r.stderr
+    assert "uninstall.sh first" in r.stderr and "settings and Library are kept" in r.stderr
+    assert (app / "VERSION").read_text().strip() == "1.3.0"                  # untouched
+
+    same = run_sh(new / "install.sh", env, "--no-fonts").stdout                # the same again: fine
+    assert "Replacing LBD Viewer 1.3.0 with 1.3.0" in same
+    assert (home / "stopped").read_text().split() == ["old", "1.3.0"]
+    run_sh(app / "uninstall.sh", env)                                        # the copy kept next to the app
+    assert not app.exists() and settings.is_file()
+
+
+@pytest.mark.parametrize("installed, package, refused", [
+    ("1.3.0", "1.2.0", True), ("1.3.0", "1.3.0-dev", True), ("1.10.0", "1.9.0", True),
+    ("1.3.0-dev", "1.3.0", False), ("1.2.0", "1.3.0", False), ("1.3.0", "1.3.0", False), ("garbage", "1.0.0", False),
+])
+def test_linux_installer_compares_versions(tmp_path, installed, package, refused):
+    _posix_shell()
+    home, env = linux_home(tmp_path)
+    (home / "data" / "lbd-viewer").mkdir(parents=True)
+    (home / "data" / "lbd-viewer" / "VERSION").write_text(installed)
+    run_sh(linux_package(tmp_path / "pkg", package) / "install.sh", env, "--no-fonts", ok=not refused)
+
+
+def test_linux_package_without_a_version_is_refused(tmp_path):
+    _posix_shell()
+    home, env = linux_home(tmp_path)
+    pkg = linux_package(tmp_path / "pkg", "1.3.0")
+    (pkg / "LBDViewer" / "VERSION").unlink()
+    assert "VERSION is missing" in run_sh(pkg / "install.sh", env, ok=False).stderr
+
+
+def test_windows_installer_refuses_an_older_version_and_stops_gently():
+    """The Inno Setup script's logic (it is compiled and run in release.yml's Windows job)."""
+    import re
+    from pathlib import Path
+
+    iss = (Path(__file__).resolve().parents[2] / "packaging" / "windows" / "LBDViewer.iss").read_text(encoding="utf-8")
+    app_id = re.search(r"^AppId=\{\{([0-9A-F-]+)\}", iss, re.M)[1]
+    assert f'#define UninstallKey "{{{app_id}}}_is1"' in iss                  # the entry Windows keeps for AppId
+    assert "function InitializeSetup(): Boolean;" in iss and "IsNewerVersion(Installed, '{#AppVersion}')" in iss
+    assert "newer than this installer ({#AppVersion})" in iss and "uninstall ' + Installed + ' first" in iss
+    assert "Your settings and Library are kept." in iss
+    stop = iss[iss.index("procedure StopViewer"):]
+    assert stop.index("'--stop'") < stop.index("Stop-Process -Force")        # gently first, then by force
 
 
 def test_linux_installer_asks_for_shortcuts():
@@ -285,3 +380,11 @@ def test_uninstaller_keeps_settings_by_default():
     assert "DelTree(ExpandConstant('{userappdata}" not in iss
     sh = (root / "linux" / "uninstall.sh").read_text(encoding="utf-8")
     assert "keep=y" in sh and "[Y/n]" in sh
+
+
+def test_the_upgrade_test_script_loads(load_module):
+    """scripts/upgrade_test.py runs only in release.yml (it installs into the real user folders);
+    here it must at least load and know its arguments."""
+    up = load_module("scripts/upgrade_test.py")
+    with pytest.raises(SystemExit):
+        up.main(["--help"])

@@ -116,6 +116,12 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
   fields you tick on a second line), **one line**, or as **columns** that sort the sidebar only,
   with column widths dragged and kept; the name is the title or the file name.
 
+- **The installers refuse an older version.** On Windows and Linux, installing a version older
+  than the one installed stops with a message: to go back, uninstall first, then install the
+  older one (settings and Library are kept). On macOS, an older app started after a newer one
+  says so once, and carries on. Settings that only a newer version knows are now kept when an
+  older one saves its settings.
+
 **Viewer**
 
 - **A slider no longer moves the plot** (Explore, curves and scatter). While a slider steps
@@ -140,6 +146,11 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
   unused for 10 minutes; the first click, key, zoom, cursor, Peak or size change after that opened
   it again but showed an error on every panel. Now the view opens again quietly ("Drawing…"), the
   request is done on it, and several requests share one reopening.
+
+- **The installers stop a running viewer gently** before replacing it: `lbd-view --stop` asks
+  the viewer to stop (labels still waiting are written into their files first) and waits up to
+  10 s; only then is it stopped by force. The Linux install keeps `uninstall.sh` next to the
+  app (`~/.local/share/lbd-viewer/uninstall.sh`).
 
 - **Fixed: changing the plot type while a picture was drawn** (for example a map to Scatter on a busy
   computer) could show "This plot can't be shown". Each Explore view now finishes one change before
@@ -626,6 +637,9 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
   a whole run takes about as long as the browser tests instead of the sum of all. `--changed
   [REF]` runs only the suites the changed files can affect, `--only` names suites. Viewer and
   browser tests that fail side by side run again alone, and the summary says so.
+- New endpoint `POST /api/stop` (local, with the token). The release workflow's Windows and Linux
+  jobs run `scripts/upgrade_test.py`: v1.2.0 from its release, the new build over it, then an
+  older-numbered build of the same installer, which must be refused.
 
 ## 1.2.0 (2026-10-28)
 

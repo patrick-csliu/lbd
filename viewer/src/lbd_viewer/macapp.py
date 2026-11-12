@@ -112,6 +112,8 @@ def run() -> int:
 
     running = cli.start(cli.build_parser().parse_args([]), [], [], on_started=lambda r: None)
     app = MacApp(running)
+    if running.notice:                                # older than the version used before
+        app.alert(running.notice)
     server = threading.Thread(target=running.run, daemon=True)
     server.start()
 

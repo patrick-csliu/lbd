@@ -125,6 +125,7 @@ class AppState:
         self._previews: Optional[Previewer] = None
         self.started = time.monotonic()
         self.last_heartbeat: Optional[float] = None
+        self.on_stop: Any = None            # stops the server: set by cli.start (POST /api/stop)
 
     @property
     def catalog(self) -> Catalog:
@@ -789,6 +790,27 @@ def deliver_files(state: AppState, files: List[str], dirs: List[str]) -> Dict[st
     return {"delivered": not unplaced, "shown": offer.shown, "busy": offer.busy, "unplaced": unplaced}
 
 
+LOCAL_CLIENTS = ("127.0.0.1", "::1")
+
+
+def add_stop_route(app: FastAPI, state: AppState) -> None:
+    """POST /api/stop: stop this viewer gently (`lbd-view --stop`, run by the installers before
+    they replace the program). The server stops as after its idle time: labels still waiting are
+    written into their files and the previews are stopped (AppState.close, run by cli.Running).
+    Only from this computer, with the session token (from server.json) like every /api request."""
+
+    @app.post("/api/stop")
+    def stop(request: Request):
+        client = request.client.host if request.client else ""
+        if client not in LOCAL_CLIENTS:
+            raise HTTPException(403, f"the viewer can only be stopped from this computer, not from {client}")
+        if state.on_stop is None:
+            raise HTTPException(409, "this viewer wasn't started by lbd-view, so it can't stop itself; "
+                                     "stop it where it was started")
+        state.on_stop()
+        return {"stopping": True, "pid": os.getpid()}
+
+
 class _UiFiles(StaticFiles):
     """The built web UI. Its page (index.html) is checked again on every load, so a browser never
     keeps showing an older viewer after an update; the scripts it names have a content hash in
@@ -902,6 +924,8 @@ def create_app(state: AppState) -> FastAPI:
     def heartbeat():
         state.last_heartbeat = time.monotonic()
         return {"ok": True}
+
+    add_stop_route(app, state)
 
     # -- summaries of maps bigger than memory (summaries.py)
 

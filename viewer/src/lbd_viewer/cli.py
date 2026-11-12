@@ -3,6 +3,7 @@
     lbd-view                      open the viewer
     lbd-view file.lbd             open a file (this is what double-clicking runs)
     lbd-view some/folder          add a folder to the folder panel and open the viewer
+    lbd-view --stop               stop the running viewer gently (the installers use this)
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ import platformdirs
 import lbd
 
 from . import VERSION
+from . import updates
 from .config import Config, ConfigError
 from .server import AppState, create_app
 
@@ -159,6 +161,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--dev", action="store_true",
                     help="development: port 8765, token 'dev', never exit; for the Vite dev server")
     ap.add_argument("--new", action="store_true", help="always start a new server")
+    ap.add_argument("--stop", action="store_true",
+                    help="stop the running viewer (labels waiting are written first) and exit")
     ap.add_argument("--version", action="version", version=f"lbd-view {VERSION}")
     return ap
 
@@ -168,6 +172,7 @@ class Running:
 
     def __init__(self, state: AppState, server, port: int, lock: Optional[Path]):
         self.state, self.server, self.port, self.lock = state, server, port, lock
+        self.notice: Optional[str] = None     # for the user at the start (an older version: _note_version)
 
     def url(self, open_path: Optional[str] = None) -> str:
         return viewer_url(self.port, self.state.token, open_path)
@@ -292,6 +297,8 @@ class _ignoring_ctrl_c:
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.stop:
+        return stop_running()
 
     files, dirs = _split_args(args.paths)
     if args.paths and not files and not dirs:
@@ -367,6 +374,9 @@ def start(args: argparse.Namespace, files: List[str], dirs: List[str],
         lock = lock_path()
         lock.write_text(json.dumps({"port": port, "token": state.token, "pid": os.getpid()}), encoding="utf-8")
     running = Running(state, server, port, lock)
+    state.on_stop = running.stop                 # POST /api/stop (lbd-view --stop)
+    if not args.dev:
+        running.notice = _note_version(cfg)
 
     def after_start():
         while not server.started:
@@ -390,6 +400,64 @@ def start(args: argparse.Namespace, files: List[str], dirs: List[str],
     threading.Thread(target=after_start, daemon=True).start()
     threading.Thread(target=watchdog, daemon=True).start()
     return running
+
+
+def _alive(pid: int) -> bool:
+    import psutil
+
+    try:
+        return psutil.Process(pid).status() != psutil.STATUS_ZOMBIE
+    except psutil.Error:                          # gone (or no longer ours to look at)
+        return False
+
+
+def stop_running(wait: float = 10.0) -> int:
+    """`lbd-view --stop`: ask the running viewer to stop (POST /api/stop) and wait up to `wait`
+    seconds for its process to end. 0 if it stopped or none was running; 1 if it couldn't be asked
+    or is still running (an installer then stops it by force)."""
+    info = _running_server()
+    if info is None:
+        print("lbd-view: no viewer is running", flush=True)
+        return 0
+    pid = info.get("pid")
+    try:
+        _api(info["port"], info["token"], "POST", "/api/stop", {}, timeout=5)
+    except urllib.error.HTTPError as e:
+        try:
+            detail = json.loads(e.read().decode() or "{}").get("detail", e.reason)
+        except ValueError:
+            detail = e.reason
+        if e.code == 404:
+            detail = "it is a version without this way to stop (older than 1.3.0)"
+        print(f"lbd-view: the running viewer (process {pid}) refused to stop: {detail}", file=sys.stderr)
+        return 1
+    except (OSError, ValueError) as e:
+        print(f"lbd-view: couldn't ask the running viewer (process {pid}) to stop: {e}", file=sys.stderr)
+        return 1
+    deadline = time.monotonic() + wait
+    while _alive(pid):                            # server.json always has the process id
+        if time.monotonic() > deadline:
+            print(f"lbd-view: the viewer (process {pid}) is still running {wait:g} s after it was asked to stop",
+                  file=sys.stderr)
+            return 1
+        time.sleep(0.1)
+    print("lbd-view: the viewer stopped", flush=True)
+    return 0
+
+
+def _note_version(cfg: Config) -> Optional[str]:
+    """Record this version as the one using the settings; the message for the user if the one
+    used before was newer (an older version installed over it), else None."""
+    try:
+        notice = updates.older_than_before(cfg.note_version(VERSION))
+    except ConfigError:
+        return None                              # unreadable settings: the viewer's page says so
+    except OSError as e:
+        print(f"lbd-view: couldn't record the version in the settings: {e}", file=sys.stderr)
+        return None
+    if notice:
+        print(f"lbd-view: {notice}", file=sys.stderr)
+    return notice
 
 
 if __name__ == "__main__":
