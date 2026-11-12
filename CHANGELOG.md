@@ -559,6 +559,10 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
   opens a test viewer on it (`lbd-view --dev`, with scratch settings). Documented in
   *Developers → Mock data* and a new *Quick start for developers*; *Releases* starts with a
   summary and a "Before releasing" list.
+- `dev_viewer.py --build` builds the docs too (`mkdocs build --strict` into `site/`, the test
+  viewer's Help), and without `--build` a line says when Help is older than the docs. Its scratch
+  folders are deleted when the viewer stops, and those of stopped runs at the next start; never
+  one still running, a `--keep-settings` folder or a folder you named.
 - `scripts/test_all.py` runs the suites side by side (`--jobs`, default 4), the longest first:
   a whole run takes about as long as the browser tests instead of the sum of all. `--changed
   [REF]` runs only the suites the changed files can affect, `--only` names suites. Viewer and

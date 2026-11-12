@@ -1,6 +1,6 @@
 """scripts/make_mock_data.py: one command makes a whole folder of mock data, with every kind of
-label (stars, nested projects, users and tags, comments, labels kept without a file); and
-scripts/dev_viewer.py refuses to start without a built UI or with a folder that isn't one."""
+label (stars, nested projects, users and tags, comments, labels kept without a file).
+scripts/dev_viewer.py is tested in test_dev_viewer.py."""
 
 import importlib.util
 import json
@@ -36,11 +36,3 @@ def test_a_folder_of_mock_data_with_every_kind_of_label(tmp_path):
     assert set(kept) == {"project", "users", "tags"}
     with pytest.raises(SystemExit):                                                          # never over files
         make.make(root, files=5, small=True)
-
-
-def test_the_dev_viewer_checks_first(tmp_path, monkeypatch):
-    dev = load("dev_viewer")
-    monkeypatch.setattr(dev, "STATIC", tmp_path / "missing.html")
-    assert dev.main([str(tmp_path)]) == 2                                                    # the UI isn't built
-    monkeypatch.setattr(dev, "STATIC", Path(__file__))
-    assert dev.main([str(tmp_path / "nowhere")]) == 2                                        # not a folder
