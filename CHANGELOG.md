@@ -124,6 +124,9 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
 
 **Viewer**
 
+- **Check folders now** in the Library (next to the search box) looks through the open folders
+  at once, for a file that should be listed but isn't yet. It says what it found ("3 new files",
+  "Nothing new", changed, moved and gone files) and names every folder it couldn't read, with why.
 - **No value is locked in Curves** (Explore). A value on another axis, or with a third unit, used
   to be greyed out, and with one value ticked nothing could be changed; now clicking it shows it in
   that panel instead (its tip says so), as Histogram and Scatter already did.

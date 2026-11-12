@@ -1213,6 +1213,12 @@ def create_app(state: AppState) -> FastAPI:
         conflict (they differ), with what differs."""
         return state.library.same_id(str(state.check_allowed(path)))
 
+    @app.post("/api/library/check")
+    def library_check():
+        """Check the open folders now (the Library's "Check folders now"; waits for a check that is
+        running): {new, changed, gone, moved: [{from, to}], errors: [{path, error}], folders}."""
+        return state.library.check()
+
     @app.get("/api/library/status")
     def library_status():
         """Indexing progress ({indexing, done, total, errors, scans}) and the index's generation:

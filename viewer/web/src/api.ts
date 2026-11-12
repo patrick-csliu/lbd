@@ -312,6 +312,17 @@ export interface LibraryStatus {
   previews: { drawn: number; total: number; drawing: number; mode: PreviewMode };
 }
 
+/** What "Check folders now" found (POST /api/library/check): data files new, changed, gone and
+ * moved, and the folders or files that couldn't be read; `folders`: how many open folders were checked. */
+export interface LibraryCheck {
+  new: string[];
+  changed: string[];
+  gone: string[];
+  moved: { from: string; to: string }[];
+  errors: { path: string; error: string }[];
+  folders: number;
+}
+
 export interface LibraryQuery {
   folder: string | null;
   q: string;
@@ -1084,6 +1095,8 @@ export const api = {
     call<{ notes: string[] }>("POST", "/api/library/missing", { entry, path }),
   libraryFile: (path: string) => call<FileInfo>("GET", "/api/library/file", undefined, { path }),
   libraryStatus: () => call<LibraryStatus>("GET", "/api/library/status"),
+  /** Check the open folders now (waits for a check that is running): what it found. */
+  libraryCheck: () => call<LibraryCheck>("POST", "/api/library/check"),
   // ---- Library previews (previews.py)
   /** `now`: the selected file (drawn first); else a picture in view (drawn after it). */
   libraryPreview: async (path: string, now = true, signal?: AbortSignal): Promise<Preview> => {

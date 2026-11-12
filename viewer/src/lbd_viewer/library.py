@@ -32,6 +32,8 @@ import re
 import sqlite3
 import threading
 import time
+from collections import deque
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
@@ -203,6 +205,22 @@ def _like(word: str) -> str:
     return "%" + word.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
 
 
+@dataclass
+class ScanResult:
+    """What one check of the folders found: data files new to the index, changed (another
+    version), gone, and moved or renamed (old path -> new); the folders and files it couldn't read
+    ({path, error}). True when anything in the index changed (labels too: `changed_any`)."""
+    new: List[str] = field(default_factory=list)
+    changed: List[str] = field(default_factory=list)
+    gone: List[str] = field(default_factory=list)
+    moved: Dict[str, str] = field(default_factory=dict)
+    errors: List[Dict[str, str]] = field(default_factory=list)
+    changed_any: bool = False
+
+    def __bool__(self) -> bool:
+        return self.changed_any
+
+
 class LibraryIndex:
     def __init__(self, directory: Path, roots: Callable[[], List[str]], read_headers: Callable[[], bool],
                  summarize: Optional[Callable[[Path], Dict[str, Any]]] = None):
@@ -212,6 +230,7 @@ class LibraryIndex:
         self._db: Optional[sqlite3.Connection] = None
         self._lock = threading.RLock()           # the connection
         self._scanning = threading.Lock()        # one scan at a time
+        self._recent: "deque[Tuple[int, ScanResult]]" = deque(maxlen=20)   # (scans done, result): for check()
         self._wake = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._stop = False
@@ -314,65 +333,99 @@ class LibraryIndex:
 
     # -- indexing
 
-    def scan(self) -> bool:
-        """Bring the index up to date with the open folders now; True when anything changed."""
+    def scan(self) -> "ScanResult":
+        """Bring the index up to date with the open folders now. What it found (ScanResult) is
+        true when anything changed."""
         with self._scanning:
-            roots = outermost(self.roots())
-            read = bool(self.read_headers())
-            errors: List[Dict[str, str]] = []
-            found: List[Tuple[Path, str, os.stat_result]] = []
-            for root in roots:
-                for p in scan.walk_files(Path(root), errors):
-                    if not scan.is_lbd(p.name):
-                        continue
-                    try:
-                        found.append((p, root, p.stat()))
-                    except OSError as e:
-                        errors.append({"path": str(p), "error": e.strerror or str(e)})
-            with self._lock:
-                known = {r[0]: (r[1], r[2], r[3], r[4]) for r in
-                         self._connect().execute("SELECT path, version, read, root, fsid FROM files")}
-            todo = [(p, root, st) for p, root, st in found
-                    if (k := known.get(str(p))) is None or k[0] != _version(st, p) or k[2] != root
-                    or (read and not k[1])]
-            self.status.update({"indexing": bool(todo), "done": 0, "total": len(todo), "errors": errors})
-            batch: List[Dict[str, Any]] = []
-            for i, (p, root, st) in enumerate(todo):
-                batch.append(self._read(p, root, st) if read else _stat_row(p, root, st))
-                if len(batch) >= 100:
-                    self._write(batch)
-                    batch = []
-                    self.generation += 1
-                self.status["done"] = i + 1
-            self._write(batch)
-            gone = set(known) - {str(p) for p, _, _ in found}
-            # renamed or moved on the same drive: the file system's id is the same
-            new_by_fsid = {f"{st.st_dev}:{st.st_ino}": str(p) for p, _, st in found if str(p) not in known}
-            renames = {g: new_by_fsid[known[g][3]] for g in gone if known[g][3] in new_by_fsid}
-            if gone:
-                with self._lock:
-                    db = self._connect()
-                    db.execute("BEGIN")
-                    db.executemany("DELETE FROM files WHERE path = ?", [(g,) for g in gone])
-                    db.execute("COMMIT")
-            changed = bool(todo or gone)
-            if changed:
-                self._compare_same_ids()
-            sidecars = self._sidecars([p for p, _, _ in found])
-            if changed or sidecars != self._sidecar_state:
-                from . import library_labels
+            result = self._scan()
+            self._recent.append((self.status["scans"], result))
+            return result
 
+    def check(self) -> Dict[str, Any]:
+        """Check every open folder now (the Library's "Check folders now"): waits for a check that
+        is running, then checks again. What it found, together with what checks that finished
+        meanwhile found (they may have seen the new files first): new, changed, gone and moved
+        files, and the folders or files that couldn't be read."""
+        before = self.status["scans"]                # scans finished before this one was asked for
+        own = self.scan()
+        meanwhile = [r for n, r in list(self._recent) if n > before and r is not own]
+        new, changed, gone, moved = [], [], [], {}
+        for r in meanwhile + [own]:
+            new += [p for p in r.new if p not in new]
+            changed += [p for p in r.changed if p not in changed]
+            gone += [p for p in r.gone if p not in gone]
+            moved.update(r.moved)
+        new = [p for p in new if p not in own.gone]
+        changed = [p for p in changed if p not in new and p not in own.gone]
+        return {"new": new, "changed": changed, "gone": gone,
+                "moved": [{"from": a, "to": b} for a, b in moved.items()],
+                "errors": own.errors, "folders": len(outermost(self.roots()))}
+
+    def _scan(self) -> "ScanResult":
+        roots = outermost(self.roots())
+        read = bool(self.read_headers())
+        errors: List[Dict[str, str]] = []
+        found: List[Tuple[Path, str, os.stat_result]] = []
+        for root in roots:
+            for p in scan.walk_files(Path(root), errors):
+                if not scan.is_lbd(p.name):
+                    continue
                 try:
-                    self.notes += library_labels.apply(self, renames)
-                except Exception as e:                   # labels must never stop the list
-                    log.exception("Library: labels couldn't be worked out")
-                    self.notes.append(f"The Library's labels couldn't be worked out ({e}); the details are in the log.")
-                self._sidecar_state = self._sidecars([p for p, _, _ in found])
-                changed = True
-            if changed:
+                    found.append((p, root, p.stat()))
+                except OSError as e:
+                    errors.append({"path": str(p), "error": e.strerror or str(e)})
+        with self._lock:
+            known = {r[0]: (r[1], r[2], r[3], r[4]) for r in
+                     self._connect().execute("SELECT path, version, read, root, fsid FROM files")}
+        todo = [(p, root, st) for p, root, st in found
+                if (k := known.get(str(p))) is None or k[0] != _version(st, p) or k[2] != root
+                or (read and not k[1])]
+        self.status.update({"indexing": bool(todo), "done": 0, "total": len(todo), "errors": errors})
+        batch: List[Dict[str, Any]] = []
+        for i, (p, root, st) in enumerate(todo):
+            batch.append(self._read(p, root, st) if read else _stat_row(p, root, st))
+            if len(batch) >= 100:
+                self._write(batch)
+                batch = []
                 self.generation += 1
-            self.status.update({"indexing": False, "scans": self.status["scans"] + 1})
-            return changed
+            self.status["done"] = i + 1
+        self._write(batch)
+        gone = set(known) - {str(p) for p, _, _ in found}
+        # renamed or moved on the same drive: the file system's id is the same
+        new_by_fsid = {f"{st.st_dev}:{st.st_ino}": str(p) for p, _, st in found if str(p) not in known}
+        renames = {g: new_by_fsid[known[g][3]] for g in gone if known[g][3] in new_by_fsid}
+        if gone:
+            with self._lock:
+                db = self._connect()
+                db.execute("BEGIN")
+                db.executemany("DELETE FROM files WHERE path = ?", [(g,) for g in gone])
+                db.execute("COMMIT")
+        moved_to = set(renames.values())
+        result = ScanResult(
+            new=[str(p) for p, _, _ in todo if str(p) not in known and str(p) not in moved_to],
+            # another version, not only read now (reading files' details was turned on)
+            changed=[str(p) for p, root, st in todo
+                     if (k := known.get(str(p))) is not None and (k[0] != _version(st, p) or k[2] != root)],
+            gone=sorted(g for g in gone if g not in renames), moved=renames, errors=errors)
+        changed = bool(todo or gone)
+        if changed:
+            self._compare_same_ids()
+        sidecars = self._sidecars([p for p, _, _ in found])
+        if changed or sidecars != self._sidecar_state:
+            from . import library_labels
+
+            try:
+                self.notes += library_labels.apply(self, renames)
+            except Exception as e:                   # labels must never stop the list
+                log.exception("Library: labels couldn't be worked out")
+                self.notes.append(f"The Library's labels couldn't be worked out ({e}); the details are in the log.")
+            self._sidecar_state = self._sidecars([p for p, _, _ in found])
+            changed = True
+        if changed:
+            self.generation += 1
+        self.status.update({"indexing": False, "scans": self.status["scans"] + 1})
+        result.changed_any = changed
+        return result
 
     def _sidecars(self, files: List[Path]) -> Dict[str, Optional[str]]:
         """The version of the label file of every folder with data files (or labels before)."""

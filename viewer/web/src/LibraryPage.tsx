@@ -25,6 +25,7 @@ import {
 import { docsUrl } from "./help";
 import { FileDetails, FileFacts } from "./FileView";
 import { SortButtons } from "./SortButtons";
+import { useFolderCheck } from "./LibraryCheck";
 import { ConfirmDialog, ConfirmRequest, ContextMenu, isMenuKey, MenuAt, menuAt, MenuEntry, useOutsideClose } from "./menu";
 import { copyPath, fileEntries } from "./fileActions";
 import { useToast } from "./toast";
@@ -226,6 +227,7 @@ export default function LibraryPage(props: Props) {
 
   // ---- the index: changes (generation), progress
   const { status, generation, refresh } = useLibraryStatus(true);
+  const folderCheck = useFolderCheck(refresh);
 
   // ---- facets: folders with counts, the date tree
   const [facets, setFacets] = useState<LibraryFacets | null>(null);
@@ -728,6 +730,7 @@ export default function LibraryPage(props: Props) {
             placeholder={settings.read_headers ? "Search names, descriptions, values, units, metadata…" : "Search file names…"}
             aria-label="Search the files"
           />
+          {folderCheck.button}
         </div>
         <div className="library-status small" role="status">
           <span>
@@ -817,6 +820,7 @@ export default function LibraryPage(props: Props) {
             </span>
           )}
         </div>
+        {folderCheck.result}
         {listError && <div className="error-box">{listError}</div>}
         {!!facets?.conflicts && !conflicts && (
           <div className="library-conflicts" role="note">

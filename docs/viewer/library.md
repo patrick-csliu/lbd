@@ -119,6 +119,12 @@ one is read again within a few seconds, while your selection stays. A file that 
 (damaged, not an LBD file, or from a newer LBD) stays in the list, greyed and marked ⚠; select it
 to see why in plain words (the technical message is under **Details**).
 
+**Check folders now** (next to the search box) looks through every open folder at once, for a
+file that should be there but isn't listed yet. It says **Checking the folders…**, then what it
+found: e.g. **3 new files, 1 changed**, or **Nothing new**, and it names every folder (or file) it
+couldn't read, with why: a network drive that isn't connected, a folder you have no permission
+for. **×** closes the message.
+
 ## Narrow windows
 
 In a window narrower than about 1280 pixels (half a screen, a laptop), the filters slide over the
