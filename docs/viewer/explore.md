@@ -648,6 +648,14 @@ pixel shows, and says so in the note above the plot:
   (the overall look; a single odd cell fades).
 - **Curves:** each pixel column keeps the lowest and highest point in it ("lowest and highest
   point per pixel column"), so a spike of one point still shows.
+- **Show points** (curves, in **Display**) puts a small dot on the stored points. Every dot is a
+  stored point, at its own x and y: each pixel that holds points gets one dot, the first stored
+  point in it. Dots in one pixel would cover each other, so this looks the same as a dot on every
+  point, at every zoom, and a spike of one point keeps its dot. Where a curve has more than two
+  points per pixel column its line is already solid there: the dots shrink to the line's width,
+  so they don't make it heavier. With more than 1.5 million stored points in view (all shown
+  curves together) the dots are left out and the note says so: zoom in or show fewer curves to
+  see them. **Open in Figure** keeps Show points; the figure draws a dot on every point.
 - **Many curves** (more than 30 on screen) are drawn together as one picture, which is much faster;
   their lines are then not smoothed (antialiased), so they look a little sharper-edged. Choose a
   few traces to see them drawn as in a figure.

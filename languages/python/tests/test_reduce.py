@@ -7,7 +7,8 @@ cells, a one-point spike, a gap. A slow brute-force reduction checks the fast on
 import numpy as np
 import pytest
 
-from lbd.plot.reduce import CurvePyramid, MapPyramid, ReduceError, cell_edges, curve_levels, curve_minmax, map_levels, nearest_point
+from lbd.plot.reduce import (CurvePyramid, MapPyramid, ReduceError, cell_edges, curve_levels, curve_minmax, in_view, map_levels,
+                              nearest_point)
 
 
 def pixels(lo, hi, n):
@@ -363,3 +364,71 @@ def test_a_curve_pyramid_built_stretch_by_stretch_equals_one_built_whole(n):
             np.testing.assert_array_equal(xa, xb)
             np.testing.assert_array_equal(ya, yb)
         assert parts.minmax(pxe, rows=[2])[0][0][1].tolist() == pytest.approx(b[2][1].tolist(), nan_ok=True)
+
+
+# ---- dots on curves (16.39): one stored point per occupied pixel ----------------------------------
+
+
+def _occupied_brute(x, y, xlim, ylim, w, h):
+    """The first stored point of every occupied pixel, one point at a time."""
+    seen, out = set(), []
+    for i, (a, b) in enumerate(zip(x, y)):
+        c, r = (a - xlim[0]) / (xlim[1] - xlim[0]) * w, (b - ylim[0]) / (ylim[1] - ylim[0]) * h
+        if 0 <= c < w and 0 <= r < h and (int(c), int(r)) not in seen:
+            seen.add((int(c), int(r)))
+            out.append(i)
+    return out
+
+
+@pytest.mark.parametrize("seed", range(4))
+def test_occupied_points_are_the_first_stored_point_of_every_occupied_pixel(seed):
+    from lbd.plot.reduce import occupied_points
+
+    rng = np.random.default_rng(seed)
+    x = np.sort(rng.uniform(0, 1, 3000))
+    y = np.cumsum(rng.normal(0, 0.05, x.size))
+    y[rng.integers(0, x.size, 30)] = np.nan
+    finite = y[np.isfinite(y)]
+    mid = np.median(finite)                                           # views that cut the curve somewhere
+    xlim = (rng.uniform(-0.2, 0.4), rng.uniform(0.6, 1.2))
+    ylim = (rng.uniform(finite.min(), mid), rng.uniform(mid, finite.max()))
+    w, h = int(rng.integers(5, 80)), int(rng.integers(5, 80))
+    expected = _occupied_brute(x, y, xlim, ylim, w, h)
+    other = y[::-1].copy()                                            # a second curve on the same x
+    found = occupied_points(x, [y, other, y], xlim, ylim, w, h)
+    assert expected and [f.tolist() for f in found] == [expected, _occupied_brute(x, other, xlim, ylim, w, h), expected]
+    # only the stretch in view, increasing or decreasing: the same points
+    part = in_view(x, *xlim)
+    assert (part.start + occupied_points(x[part], [y[part]], xlim, ylim, w, h)[0]).tolist() == expected
+    back = in_view(x[::-1], *xlim)
+    assert x[::-1][back].min() == x[part].min() and x[::-1][back].max() == x[part].max()
+
+
+def test_the_spike_and_dip_of_engine_test_1_have_dots():
+    from lbd.plot.reduce import occupied_points
+
+    x, y = accuracy_curve()
+    y[200000:200003] = -3
+    y[500000:500100] = np.nan
+    [dots] = occupied_points(x, [y], (0, 1), (-3.5, 5.5), 900, 500)
+    assert 731234 in dots and 200000 in dots                          # each the first point of its pixel
+    assert not np.any((dots >= 500000) & (dots < 500100))             # none in the gap
+    # one dot per occupied pixel: no two dots share a pixel, and every occupied pixel has one
+    col = np.floor(x * 900).astype(int)
+    row = np.floor((y + 3.5) / 9 * 500)
+    ok = np.isfinite(row) & (col < 900)
+    occupied = set(zip(col[ok], row[ok].astype(int)))
+    assert len(set(zip(col[dots], row[dots].astype(int)))) == len(dots) == len(occupied)
+    assert len(dots) < 5000                                           # not a million
+
+
+def test_occupied_points_on_log_axes():
+    from lbd.plot.reduce import occupied_points
+
+    x = np.logspace(0, 4, 2000)
+    y = np.logspace(-2, 2, 2000)
+    y[600] = -1                                                       # not drawable on a log axis
+    [dots] = occupied_points(x, [y], (10, 1000), (0.01, 100), 40, 40, x_log=True, y_log=True)
+    # even in log10, the curve is a straight line through one pixel per column
+    assert 600 not in dots
+    assert len(dots) == 40 and np.all((x[dots] >= 10) & (x[dots] <= 1000))

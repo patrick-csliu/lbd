@@ -40,6 +40,10 @@ Every change redraws the figure straight away. The same settings are available i
 | **Colour by** | Scatter: colour the points by an axis (e.g. power) or by another value with the same axes. A short axis (e.g. the prepared state) gets one colour per point and a legend; a longer axis or a value gets a colour bar, with the style's fixed scales. |
 | **Log x / Log y** | Logarithmic axes. |
 
+**Show points** (curves, under **Display**) puts a small dot, matplotlib's `.` marker, on every
+stored point; its size is the style's marker size (`figure.axes.lines.marker_size_pt`), halved.
+Its [plot setting](../styles/plot-settings.md) is `points` in `options`.
+
 ### Choosing a point on an axis that isn't drawn
 
 ![A slider with the box to type the axis value](img/slider.png){ width="340" align=right }

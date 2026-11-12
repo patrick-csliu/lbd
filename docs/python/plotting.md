@@ -158,6 +158,7 @@ annotations, change limits, then `plt.show()` or `lp.save(...)`.
 ```python
 fig = lp.plot("sweep.lbd")                                   # the file's saved view and style
 fig = lp.plot(d, "curve", "S21", complex="phase_deg", series="power")
+fig = lp.plot(d, "curve", "S21", series="power", options={"points": True})   # a small dot on every point
 fig = lp.plot(d, "scatter", "S21", complex="iq", color="power", style="thesis")
 ```
 

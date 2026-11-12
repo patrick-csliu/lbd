@@ -177,6 +177,12 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
   points are left out, and the vertical axis says which ("Mean of |S21|"). **Error bars** (under
   Display, off at first) draw one standard deviation on each bar. In `lp.plot`: `all=[...]`,
   `options={"stat": "median", "errors": True}`.
+- **Show points on curves** (Display, Explore and Figure; `options={"points": True}` in
+  `lp.plot`). A small dot on the stored points, off by default; Open in Figure keeps it. Explore
+  draws one stored point per pixel that holds points, at every zoom: dots in one pixel would cover
+  each other, so it looks the same, and a one-point spike keeps its dot. Where a curve has more
+  than two points per pixel column the dots shrink to the line's width; with more than 1.5
+  million points in view they are left out, with a note.
 - **No value is locked in Curves** (Explore). A value on another axis, or with a third unit, used
   to be greyed out, and with one value ticked nothing could be changed; now clicking it shows it in
   that panel instead (its tip says so), as Histogram and Scatter already did.

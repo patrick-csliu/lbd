@@ -403,6 +403,37 @@ def test_curves_bigger_than_memory_are_drawn_from_their_summary(client, long_tra
     assert differ <= len(whole) // 1000                                # the same picture (float32 rounding)
 
 
+def test_summarised_curves_get_their_dots_from_the_stored_points_in_view(client, long_traces, monkeypatch):
+    """Show points (16.39) on curves drawn from their summary: the stored points in view are read
+    for the dots; more than the memory holds leaves the dots out, with a note saying why."""
+    path, _ = long_traces
+    spec = {**CURVES, "options": {"points": True}}
+    little_room(monkeypatch)
+    sid, meta, _ = picture(client, path, spec)
+    s = client.app.state.lbd.explore.get(sid)
+    assert s.summarised
+    assert "points not shown: this needs" in meta["note"] and "more than the memory available" in meta["note"]
+    f = s.model.xs[0]                                                  # in plot units (GHz)
+    view = {"format": "raw", "xlim": [float(f[12000]), float(f[12300])]}
+
+    def zoomed(sid):
+        r = client.post(f"/api/explore/{sid}/render", json=view)
+        r.raise_for_status()
+        return json.loads(r.headers["X-LBD-Frame"]), r.content
+
+    meta, by_summary = zoomed(sid)
+    assert "points not shown" not in meta["note"]
+    monkeypatch.setitem(memory._shared, "cache", PartCache(Memory(always_whole=0, system=FakeMemory(room=10 * GB))))
+    sid2, _, _ = picture(client, path, spec)
+    assert not client.app.state.lbd.explore.get(sid2).summarised
+    _, whole = zoomed(sid2)
+    differ = np.count_nonzero(np.frombuffer(by_summary, np.uint8) != np.frombuffer(whole, np.uint8))
+    assert differ <= len(whole) // 1000                                # the same dots
+    sid3, _, _ = picture(client, path, CURVES)
+    _, no_dots = zoomed(sid3)
+    assert np.count_nonzero(np.frombuffer(no_dots, np.uint8) != np.frombuffer(whole, np.uint8)) > len(whole) // 100
+
+
 def test_reading_summarised_curves_reads_the_stored_points(client, long_traces, monkeypatch):
     path, y = long_traces
     little_room(monkeypatch)

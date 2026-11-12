@@ -640,3 +640,23 @@ def test_old_saved_scatter_view_is_the_same_picture():
     a, _ = rnd.render_dataset(d, old, Style(), fmt="png")
     b, _ = rnd.render_dataset(d, {**old, "all": ["g", "t"]}, Style(), fmt="png")
     assert hashlib.sha256(a).digest() == hashlib.sha256(b).digest()
+
+
+def test_show_points_puts_a_small_dot_on_every_stored_point():
+    """Show points (16.39): matplotlib's `.` marker on each line, every point; off by default."""
+    import lbd.plot as lp
+
+    ax = lp.plot(sweep(), "curve", "T", series="power", options={"points": True}).axes[0]
+    assert ax.lines and all(line.get_marker() == "." and line.get_markevery() is None for line in ax.lines)
+    assert len(ax.lines[0].get_xdata()) == 21
+    ax = lp.plot(sweep(), "curve", "T", series="power").axes[0]
+    assert all(line.get_marker() in ("None", "", None) for line in ax.lines)
+
+
+def test_show_points_must_be_true_or_false():
+    with pytest.raises(RenderError, match="points must be true or false, not 'yes'"):
+        resolve_spec(sweep(), {"kind": "curve", "values": "T", "options": {"points": "yes"}})
+    d = sweep()
+    d.plot = {"kind": "curve", "values": ["T"], "options": {"points": 1}}
+    with pytest.warns(RenderWarning, match="points must be true or false; using the default instead"):
+        assert "points" not in resolve_spec(d, {}).get("options", {})

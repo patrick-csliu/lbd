@@ -40,7 +40,7 @@ import { MeasuringStatus } from "./MeasuringStatus";
 
 interface Props {
   path: string;
-  onOpenInFigure: (spec?: PlotSpec) => void; // `spec`: what a plot type of its own shows
+  onOpenInFigure: (spec?: PlotSpec, looks?: PlotSpec["options"]) => void; // `spec`: what a plot type of its own shows; `looks`: options curves take along
   onError: (msg: string) => void;
   onMenu?: (e: MouseEvent) => void;
   /** The file's title, once read (its tab shows it). */
@@ -692,7 +692,8 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
   // curves and maps start from the file's own figure; another plot type goes with its choices
   const openFigure = () => {
     const r = actLive.resolved;
-    if (!r || r.kind === "curve" || r.kind === "heatmap") return onOpenInFigure();
+    // Show points on (16.39): the figure shows them too
+    if (!r || r.kind === "curve" || r.kind === "heatmap") return onOpenInFigure(undefined, r?.kind === "curve" && r.spec.options?.points ? { points: true } : undefined);
     onOpenInFigure({ ...figureSpec(r, act.view), color: r.spec.color, all: r.spec.all, y_scale: act.settings.yscale ?? r.spec.y_scale });
   };
   const actApi = panelApi(act.id);

@@ -376,6 +376,10 @@ def _resolve_curve_or_map(d, out, values, pick, spec, index_in, warn_unused, fil
     variable = [a for a in all_axes if getattr(d.axes[a], "group", None) is not None]
     if getattr(d, "_curve_view", False):
         out["real_axes"] = real_axes(d, out["values"])
+    if kind == "curve":
+        from .matrix import checked_options
+
+        checked_options(d, out, spec, CURVE_OPTIONS)
     if variable:
         _warn(f"{_where(d)}{', '.join(variable)} {'is' if len(variable) == 1 else 'are'} part of a variable sweep "
               "(its values differ from point to point) of more than two levels: drawn against the point number",
@@ -842,6 +846,14 @@ def _axis_quantity(style: Style, d, name: str) -> QuantityStyle:
     return find_quantity(style, name, a.label, None)
 
 
+# Curves' own choices (`options`), checked as lbd.plot.matrix.checked_options does
+CURVE_OPTIONS = {
+    "points": (lambda v: isinstance(v, bool), "points must be true or false"),
+    "grid": (lambda v: isinstance(v, bool), "grid must be true or false"),
+    "equal": (lambda v: isinstance(v, bool), "equal must be true or false"),
+}
+
+
 @dataclass
 class CurveModel:
     """A curve plot worked out from the full data (prepare_curves): what draw_curves draws.
@@ -1003,8 +1015,10 @@ def draw_curves(fig: Figure, ax, model: CurveModel, d, spec, style: Style,
                 data: Optional[List[Tuple[np.ndarray, np.ndarray]]] = None) -> List[Any]:
     """Draw a CurveModel; `data` replaces each line's (x, y), e.g. by a reduced copy. Returns the lines."""
     drawn = []
+    # Show points (16.39): matplotlib's small dot on every stored point
+    dots = {"marker": "."} if (spec.get("options") or {}).get("points") else {}
     for j, (y, lab) in enumerate(model.lines):
-        kw = {"color": model.colors[j]} if model.colors is not None else {}
+        kw = {"color": model.colors[j], **dots} if model.colors is not None else dict(dots)
         x, y = (model.xs[j], y) if data is None else data[j]
         drawn += ax.plot(x, y, label=lab, **kw)
     ax.set_xlabel(model.x_label)

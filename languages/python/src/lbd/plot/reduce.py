@@ -400,6 +400,54 @@ def curve_minmax(x: np.ndarray, ys: Sequence[np.ndarray], px_x_edges: Sequence[f
     return out, len(out) > 0
 
 
+def in_view(x: np.ndarray, lo: float, hi: float) -> slice:
+    """The stretch of a sorted x (increasing or decreasing, no missing points) between lo and hi."""
+    x = np.asarray(x, dtype=float)
+    if x.size > 1 and x[0] > x[-1]:                     # decreasing: count from the end
+        a = x.size - int(np.searchsorted(x[::-1], hi, side="right"))
+        b = x.size - int(np.searchsorted(x[::-1], lo, side="left"))
+        return slice(a, b)
+    return slice(int(np.searchsorted(x, lo, side="left")), int(np.searchsorted(x, hi, side="right")))
+
+
+def occupied_points(x: np.ndarray, ys: Sequence[np.ndarray], xlim: Sequence[float], ylim: Sequence[float],
+                    width: int, height: int, x_log: bool = False, y_log: bool = False) -> List[np.ndarray]:
+    """The stored points to draw as dots on curves: for each pixel of a width × height picture of
+    xlim × ylim that holds at least one stored point of a curve, the first of them (in stored order).
+
+    Returns, per curve of `ys` (all on `x`), the indices of its dots, increasing. Dots in one pixel
+    would land on each other, so this looks the same as a dot on every point, and every dot is a
+    real stored point (a spike of one point keeps its dot). Pixel column 0 starts at xlim[0], row 0
+    at ylim[0]; on a log axis the pixels are even in log10. Points outside the picture, missing
+    (NaN) or not positive on a log axis have no pixel. For long sorted curves, pass only the
+    stretch in view (`in_view`)."""
+    x = np.asarray(x, dtype=float)
+
+    def pixels(v: np.ndarray, lim: Sequence[float], size: int, log: bool) -> np.ndarray:
+        if log:
+            with np.errstate(divide="ignore", invalid="ignore"):
+                v, lim = np.log10(np.where(v > 0, v, np.nan)), np.log10(np.asarray(lim, dtype=float))
+        return (v - lim[0]) * (size / (lim[1] - lim[0]))
+
+    col = pixels(x, xlim, width, x_log)
+    in_columns = (col >= 0) & (col < width)                       # NaN: never
+    col = np.where(in_columns, col, 0).astype(np.int64) * height
+    # Per pixel, the first point's position; one table for all curves, emptied after each curve
+    # (only where it was written), so many short curves cost no more than one long one.
+    empty = np.iinfo(np.int64).max
+    firsts = np.full(width * height, empty, dtype=np.int64)
+    out = []
+    for y in ys:
+        row = pixels(np.asarray(y, dtype=float), ylim, height, y_log)
+        inside = np.flatnonzero(in_columns & (row >= 0) & (row < height))
+        pixel = col[inside] + row[inside].astype(np.int64)
+        order = np.arange(inside.size)
+        np.minimum.at(firsts, pixel, order)
+        out.append(inside[firsts[pixel] == order])                # each point that is first in its pixel
+        firsts[pixel] = empty
+    return out
+
+
 def nearest_point(x: np.ndarray, ys: Sequence[np.ndarray], to_px, click: Tuple[float, float],
                   max_px: float = 12.0) -> Optional[Tuple[int, int]]:
     """The stored point nearest to a click, in screen pixels: (curve, index), or None when no
