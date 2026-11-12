@@ -122,7 +122,13 @@ def test_zooming_counts_the_view(viewer, new_page):
         page.mouse.move(box["x"] + left + width * 0.4, box["y"] + top + height * 0.4, steps=4)   # (equal axes: a square-ish box)
         page.mouse.up()
 
-    after = frames(page, zoom)
+    import json
+
+    got = []                                                       # every panel's pictures: x is synced (16.3)
+    page.on("response", lambda r: got.append(json.loads(r.headers["x-lbd-frame"]))
+            if r.url.endswith("/render") and r.ok and "x-lbd-frame" in r.headers else None)
+    frames(page, zoom)
+    after = [m for m in got if "sides" in m][-1]                  # this scatter's own picture
     assert sum(sum(c) for c in after["sides"]["x"]["counts"]) < whole
 
 
