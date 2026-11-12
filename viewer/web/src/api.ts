@@ -26,6 +26,8 @@ export interface AppState {
   measurements: MeasurementSettings;
   /** this computer's user name (suggested first when labelling users) */
   login: string;
+  /** the units that get an automatic prefix, on plots and in the page's numbers (lbd.plot.units.AUTO_UNITS) */
+  auto_units: string[];
   /** the default of each setting of each Settings section: {section: {"memory.maximum_gb": null, ...}} */
   defaults?: Record<string, Record<string, unknown>>;
 }

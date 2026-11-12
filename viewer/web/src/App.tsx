@@ -1,4 +1,5 @@
 import { setDateZone } from "./libraryColumns";
+import { setAutoUnits } from "./units";
 import { CSSProperties, KeyboardEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DEFAULT_MEASUREMENTS, MeasurementsContext, notifyInBackground } from "./MeasuringStatus";
 import { onFinished } from "./watch";
@@ -133,6 +134,7 @@ function Shell() {
   const toast = useToast();
   const [state, setState] = useState<AppState | null>(null);
   if (state) setDateZone(state.library.date_zone); // before the lists draw their dates
+  if (state) setAutoUnits(state.auto_units); // the plots' units that take a prefix, before numbers are written
   const [fatal, setFatal] = useState<string | null>(null);
   const [page, setPage] = useState<Page>(loadPage);
   useEffect(() => {

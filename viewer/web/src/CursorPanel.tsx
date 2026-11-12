@@ -284,7 +284,7 @@ const PREFIX: Record<string, number> = { T: 1e12, G: 1e9, M: 1e6, k: 1e3, m: 1e-
 
 /** A typed number in a unit, with an optional SI prefix: "5.12 GHz", "5.12G", "5120000000". */
 export function parseSi(text: string, unit: string): number | null {
-  let t = text.trim().replace("−", "-");
+  let t = text.trim().replace(/−/g, "-"); // shown numbers use − (also in 2e−7)
   if (unit && t.endsWith(unit)) t = t.slice(0, -unit.length).trim();
   let f = 1;
   const last = t.slice(-1);

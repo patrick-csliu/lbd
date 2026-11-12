@@ -53,11 +53,36 @@ automatically:
   k M G T … (the full range from q, 10⁻³⁰, to Q, 10³⁰). c, d, da and h are never chosen
   automatically.
 - It applies to these base units only: `Hz s V A W Ω Ohm F H T K m g J C S Pa N eV Wb`.
-  Other units, such as `dB`, `dBm`, `%`, `a.u.`, compound units (`V/Hz`) and units that already
-  have a prefix (`GHz`), are shown as they are.
+  The whole unit is compared with this list, exactly; every other unit is shown as stored (see
+  [the table below](#which-units-get-a-prefix)).
 - When a colour bar has fixed limits (`vmin`/`vmax`), it gets no automatic prefix, so the
   limits read exactly as entered.
 - In the I/Q plane, both axes use the same prefix, so circles stay circles.
+
+### Which units get a prefix
+
+One rule holds for the axes and colour bars of every figure and for the numbers the viewer
+writes (Explore's cursor read-outs, differences and means, tables, cuts and tooltips): a unit
+gets a prefix only when the **whole unit** is on the list above. Nothing is guessed from the
+unit's spelling, and nothing needs to be set.
+
+| Stored | Shown | Why |
+|---|---|---|
+| 5120310000 Hz | 5.12031 GHz | on the list |
+| 0.002 K | 2 mK | on the list |
+| 0.5 C | 500 mC | on the list (coulomb); `°C` is not |
+| 0.75 mm | 0.75 mm | already has a prefix |
+| 5000 kHz | 5000 kHz | already has a prefix (not changed to 5 MHz) |
+| 0.5 dB, 12 %, 0.5 rad, 3 ppm, 90 ° | as stored | not on the list |
+| 0.5 a.u., 1500 counts, 0.5 min | as stored | not on the list |
+| 0.02 V/cm, 3 m/s, 0.5 V*s, 2 A·s | as stored | a combined unit: no prefix on its first part |
+| 2e-7 V/cm, 1.5e6 counts | 2e−7 V/cm, 1.5e6 counts | in the viewer's numbers, a unit without a prefix writes numbers below 0.001 or from 1 000 000 in scientific notation |
+
+In a table, each column has one prefix, chosen from its largest number, so the digits line up
+and the unit can go in the column's head.
+
+To show another unit with a prefix, store the data in that unit, or give its quantity a fixed
+prefix (below; for figures).
 
 ### A fixed prefix
 

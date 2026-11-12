@@ -1,6 +1,8 @@
 """Every HTTP endpoint of the viewer, with its error statuses and the warnings it passes on."""
 
 import json
+import re
+from pathlib import Path
 
 import h5py
 import numpy as np
@@ -8,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import lbd
+from lbd.plot.units import AUTO_UNITS
 from lbd_viewer import server
 from lbd_viewer.server import AppState, collect_warnings, create_app, jsonable
 
@@ -37,6 +40,16 @@ def test_state_reports_problems(client, cfg, tmp_path):
     warnings = client.get("/api/state").json()["warnings"]
     assert any("no longer exists" in w and "gone" in w for w in warnings)
     assert any("deleted-style" in w for w in warnings)
+
+
+def test_state_sends_the_plots_prefix_units(client):
+    """The page writes its numbers with the plots' list of units that get a prefix (16.1)."""
+    assert client.get("/api/state").json()["auto_units"] == sorted(AUTO_UNITS)
+    # the page's own test (viewer/web/tests/units.test.mjs) uses a copy of the list: the same one
+    page_test = (Path(__file__).parents[1] / "web/tests/units.test.mjs").read_text(encoding="utf-8")
+    copy = re.search(r"^setAutoUnits\((\[.*\])\);$", page_test, re.MULTILINE)
+    assert copy, "units.test.mjs no longer sets the list in one line"
+    assert set(json.loads(copy.group(1))) == AUTO_UNITS
 
 
 def test_broken_settings_file_is_an_error_not_a_reset(client, cfg):

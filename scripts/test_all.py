@@ -233,7 +233,11 @@ def main(argv=None) -> int:
         if not (REPO / "viewer/web/node_modules").is_dir():
             return ("skipped", "run `npm ci` in viewer/web first")
         r = run(["npm", "run", "typecheck"], REPO / "viewer/web")
-        return ("passed" if r.returncode == 0 else "FAILED", r.stdout + r.stderr)
+        if r.returncode != 0:
+            return ("FAILED", r.stdout + r.stderr)
+        # the page's own logic tests (plain Node: viewer/web/tests)
+        t = run(["npm", "test"], REPO / "viewer/web")
+        return ("passed" if t.returncode == 0 else "FAILED", r.stdout + r.stderr + t.stdout + t.stderr)
 
     def docs_build():
         import importlib.util
@@ -263,7 +267,7 @@ def main(argv=None) -> int:
     suites += [
         ("viewer", "Viewer tests", pytest_suite("viewer/tests", "--ignore=viewer/tests/e2e", workers=viewer_workers)),
         ("tools", "Script and packaging tests", pytest_suite("tests/scripts", "tests/packaging")),
-        ("web", "Web UI type check", web_typecheck),
+        ("web", "Web UI type check and tests", web_typecheck),
         ("docs", "Docs build (strict)", docs_build),
         ("examples", "Doc examples", doc_examples),
     ]

@@ -40,7 +40,7 @@ import lbd  # noqa: E402
 from lbd.plot import render as rnd  # noqa: E402
 from lbd.plot.style import STYLE_SUFFIX, read_style_file  # noqa: E402
 from lbd.plot import whole as whole_file  # noqa: E402
-from lbd.plot.units import prefix_scale  # noqa: E402
+from lbd.plot.units import AUTO_UNITS, prefix_scale  # noqa: E402
 
 from . import VERSION  # noqa: E402
 from . import files, images, scan, sdk  # noqa: E402
@@ -941,6 +941,8 @@ def create_app(state: AppState) -> FastAPI:
             "open_files_in": s["open_files_in"], "open_data_in": s["open_data_in"], "theme": s["theme"],
             "library": s["library"], "memory": {**s["memory"], **memory_now()}, "measurements": s["measurements"], "explore": s["explore"], "login": getpass.getuser(), "platform": sys.platform, "config_dir": str(cfg.dir), "warnings": problems + warns,
             "defaults": section_defaults(),
+            # the page writes its numbers with the plots' prefix rule (one list, in lbd.plot.units)
+            "auto_units": sorted(AUTO_UNITS),
         }
 
     @app.post("/api/open")

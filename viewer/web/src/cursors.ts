@@ -1,4 +1,8 @@
 import { AtLine, CursorAsk, CursorRead, CursorType, ReadItem } from "./api";
+import { si } from "./units";
+
+// How a number is written with its unit: one rule with the plots, in units.ts.
+export { columnSi, si } from "./units";
 
 /**
  * The Explore view's cursors: what is remembered for a file (positions on the data, type, cuts)
@@ -70,48 +74,6 @@ function spots([x, y]: [number, number], [l, t, w]: [number, number, number, num
     return [[e, y - r], [e, y + r], [e - far, y - r], [e - far, y + r], [e - 2 * far, y - r], [e - 2 * far, y + r]];
   }
   return [[x + d, y - d], [x - d, y - d], [x + d, y + d], [x - d, y + d], [x + 2 * d, y - d], [x - 2 * d, y + d]];
-}
-
-// Units that take no SI prefix.
-const NO_PREFIX = new Set(["dB", "dBm", "dBc", "°", "%", "deg", "K"]);
-const PREFIXES: [string, number][] = [
-  ["T", 1e12],
-  ["G", 1e9],
-  ["M", 1e6],
-  ["k", 1e3],
-  ["", 1],
-  ["m", 1e-3],
-  ["µ", 1e-6],
-  ["n", 1e-9],
-  ["p", 1e-12],
-  ["f", 1e-15],
-];
-
-/** A number with its unit, with an SI prefix where it fits: 5120310000 Hz → "5.12031 GHz". */
-export function si(v: number | null | undefined, unit: string, digits = 7): string {
-  if (v === null || v === undefined || !Number.isFinite(v)) return "empty";
-  const plain = (n: number) => Number(n.toPrecision(digits)).toString().replace("-", "−");
-  if (!unit) return plain(v);
-  // a ratio (dB/GHz) is shown as the axis shows it: no further prefix
-  if (NO_PREFIX.has(unit) || unit.includes("/") || v === 0) return `${plain(v)} ${unit}`;
-  const a = Math.abs(v);
-  for (const [p, f] of PREFIXES) if (a >= f * 0.9999999) return `${plain(v / f)} ${p}${unit}`;
-  return `${plain(v)} ${unit}`;
-}
-
-/** The numbers of one table column: a single unit with a single SI prefix (the largest number's),
- * so their digits line up and the unit can go in the column's head. */
-export function columnSi(values: (number | null | undefined)[], unit: string, digits = 7): { unit: string; show: (v: number | null | undefined) => string } {
-  const top = Math.max(0, ...values.map((v) => (v !== null && v !== undefined && Number.isFinite(v) ? Math.abs(v) : 0)));
-  let [prefix, factor]: [string, number] = ["", 1];
-  if (unit && !NO_PREFIX.has(unit) && !unit.includes("/") && top > 0) {
-    const found = PREFIXES.find(([, f]) => top >= f * 0.9999999);
-    if (found) [prefix, factor] = found;
-  }
-  return {
-    unit: prefix + unit,
-    show: (v) => (v === null || v === undefined || !Number.isFinite(v) ? "empty" : Number((v / factor).toPrecision(digits)).toString().replace("-", "−")),
-  };
 }
 
 /** One read-out number: "Frequency = 5.12031 GHz". */

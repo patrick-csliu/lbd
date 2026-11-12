@@ -362,6 +362,13 @@ Under the plot are their values, as stored, and the differences and means betwee
 **Cursors** section of the side panel (below the colours) has the same and more: the cursor
 type, typed positions, Max · Min · Peak, the cuts, and taking a cut out.
 
+The numbers get a unit prefix by the same rule as the plot's axes: only units on the plots' list
+(`Hz s V A W Ω Ohm F H T K m g J C S Pa N eV Wb`, the whole unit compared exactly) get one, so
+5120310000 Hz reads 5.12031 GHz and 0.002 K reads 2 mK. Every other unit is shown as stored:
+0.75 mm, 5000 kHz, 0.5 a.u., 1500 counts, 0.02 V/cm. A unit without a prefix writes very large
+or small numbers in scientific notation (2e−7 V/cm). A table has one prefix per column. The
+full rule and more examples: [which units get a prefix](../styles/scales-and-units.md#which-units-get-a-prefix).
+
 Cursors sit **on the stored data**: a click puts cursor 1 on the nearest point of the nearest
 trace (curves) or on the cell (maps), and every number shown is the value stored in the file,
 with its index ("stored at freq[4031], trace[12]"). Values are as plotted, for example |S21| in

@@ -8,6 +8,12 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
 
 **Changes to how things behave** (read these when upgrading)
 
+- **Explore's numbers get a unit prefix by the plots' rule.** Only a unit on the plots' list
+  (`Hz s V A W Ω Ohm F H T K m g J C S Pa N eV Wb`, compared whole) gets a prefix; every other
+  unit is shown as stored. Before, the cursor read-outs and tables put a prefix on almost any
+  unit: 0.75 mm read "750 mmm", 5000 kHz "5 kkHz", 1500 counts "1.5 kcounts". Now K gets one
+  (2 mK), as on the plots; rad, ppm and V*s no longer do. Very large or small numbers of a unit
+  without a prefix are written as 2e−7 V/cm.
 - **A value on two levels of an axis group opens as a map**, no longer against its point number.
 - **The Library's dates are in one time zone.** Date, the pictures and the Files sidebar show every
   file's time in this computer's time zone, so they can be compared; before, each date was as
