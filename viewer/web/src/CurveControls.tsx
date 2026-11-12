@@ -11,5 +11,15 @@ export function CurveDisplay(props: KindControlsProps) {
   return parts.length ? <>{parts}</> : null;
 }
 
+/** Show points (16.39): a small dot on the stored points; off by default. */
+function ShowPoints({ resolved, update }: KindControlsProps) {
+  return (
+    <label className="check" title="A small dot on every stored point. In Explore, one dot per pixel that holds points: dots in one pixel would cover each other">
+      <input type="checkbox" checked={!!resolved.options?.points} onChange={(e) => update({ options: { ...(resolved.options ?? {}), points: e.target.checked } })} />
+      Show points
+    </label>
+  );
+}
+
 /** The look options of curves, in the order they are shown. */
-const CURVE_LOOKS: ((p: KindControlsProps) => ReactElement | null)[] = [];
+const CURVE_LOOKS: ((p: KindControlsProps) => ReactElement | null)[] = [ShowPoints];

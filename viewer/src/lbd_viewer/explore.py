@@ -40,7 +40,7 @@ from matplotlib.figure import Figure
 
 import lbd
 from lbd.plot import render as rnd
-from lbd.plot.reduce import STATS, CurvePyramid, MapPyramid, cell_edges, curve_minmax, thin_in_order
+from lbd.plot.reduce import STATS, CurvePyramid, MapPyramid, cell_edges, curve_minmax, in_view, occupied_points, thin_in_order
 from lbd.plot.style import Style
 from lbd.plot.units import prefix_scale
 
@@ -53,6 +53,11 @@ UNSORTED_LIMIT = 200_000   # a curve with unsorted x and more points than this i
 # instead of drawn line by line: matplotlib needs ~0.7 ms per line, so 1000 curves would take most
 # of a second; Pillow paints them in a few tens of milliseconds (without antialiasing).
 RASTER_ABOVE = 30
+# Show points (16.39): finding the dots reads every stored point in view. Measured on 1000 traces
+# of 10 000 points: about 100 ms more per picture at 1.6 million points in view, 380 ms at all
+# 10 million (one curve of 1 million: 25 ms). Above this many points in view the dots are left
+# out, with a note, so a picture stays quick.
+DOTS_LIMIT = 1_500_000
 # Tick labels the layout makes room for, so zooming (more digits) never needs a new layout.
 WIDEST_TICK = "\u22128.888888"
 # A colour bar's tick labels (its range changes with the data, not with zooming), and the part of
@@ -75,11 +80,14 @@ class ExploreClosed(ExploreError):
     """The session was closed (unused for a while, or its page moved on) while a request used it."""
 
 
-def paint_lines(lines, colors: np.ndarray, width: int, height: int, thickness: float) -> np.ndarray:
+def paint_lines(lines, colors: np.ndarray, width: int, height: int, thickness: float,
+                dots: Optional[Sequence[Tuple[np.ndarray, np.ndarray]]] = None, dot_size: int = 2) -> np.ndarray:
     """Paint polylines into an RGBA picture (height × width), in order, later lines on top.
 
     `lines`: (px, py) per line in pixels of the picture (x to the right, y down), NaN breaking a
-    line; `colors`: RGBA (0-255) per line. Uses Pillow's line drawing (C, no antialiasing)."""
+    line; `colors`: RGBA (0-255) per line. Uses Pillow's line drawing (C, no antialiasing).
+    `dots` (Show points, 16.39): (px, py) per line, each a square of `dot_size` pixels in the
+    line's colour, painted over the lines, later lines' dots on top."""
     from PIL import Image, ImageDraw
 
     img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
@@ -95,7 +103,36 @@ def paint_lines(lines, colors: np.ndarray, width: int, height: int, thickness: f
             if b - a == 1:                                 # a single point: a dot
                 pts = np.r_[pts, pts]
             draw.line(pts.tolist(), fill=fill, width=w)
-    return np.asarray(img)
+    out = np.array(img)
+    if dots:
+        _paint_dots(out, dots, colors, dot_size)
+    return out
+
+
+def _paint_dots(out: np.ndarray, dots: Sequence[Tuple[np.ndarray, np.ndarray]], colors: np.ndarray, size: int) -> None:
+    """Paint squares of `size` pixels around the dots of each line into `out` (height × width ×
+    4), in the line's colour; where dots of several lines meet, the later line's. All lines at
+    once with numpy: Pillow would take a call per pixel of the square and line."""
+    height, width = out.shape[:2]
+    counts = [len(px) for px, _ in dots]
+    if not sum(counts):
+        return
+    line = np.repeat(np.arange(len(dots)), counts)
+    # each dot's top-left pixel (px - pad/2 rounded down), on a grid with room for squares that
+    # start above or left of the picture: shifted by pad, so dots in the picture never round below 0
+    pad = size - 1
+    left = (np.concatenate([px for px, _ in dots]) + pad / 2).astype(np.int64)
+    top = (np.concatenate([py for _, py in dots]) + pad / 2).astype(np.int64)
+    ok = (left >= 0) & (left < width + pad) & (top >= 0) & (top < height + pad)
+    corner = np.full((height + pad, width + pad), -1, dtype=np.int64)   # the last line with a dot there
+    np.maximum.at(corner.reshape(-1), top[ok] * (width + pad) + left[ok], line[ok])
+    # a pixel shows the last line of the dots whose square covers it: its corner up to size-1 pixels up and left
+    owner = np.full((height, width), -1, dtype=np.int64)
+    for i in range(size):
+        for j in range(size):
+            np.maximum(owner, corner[pad - j:pad - j + height, pad - i:pad - i + width], out=owner)
+    painted = owner >= 0
+    out[painted] = colors[owner[painted]]
 
 
 def _is_sorted(x: np.ndarray) -> bool:
@@ -527,6 +564,18 @@ class ExploreSession:
         m.series_bar = None
         self.lines = rnd.draw_curves(self.fig, self.ax, m, self.data, self.spec, self.style,
                                      data=[(x[:0], y[:0]) for x, (y, _) in zip(m.xs, m.lines)])
+        # Show points: the lines here are reduced to pixel columns, so their dots come from the
+        # stored points instead (_dots): painted into the picture of many curves, or drawn as
+        # square markers (dot_artists) on few curves. The legend keeps its dot.
+        self.points = bool((self.spec.get("options") or {}).get("points"))
+        self.dots_note = ""
+        self.dot_artists = []
+        if self.points:
+            for artist in self.lines:
+                artist.set_marker("None")
+                self.dot_artists += self.ax.plot([], [], linestyle="None", marker="s", markeredgewidth=0,
+                                                 color=artist.get_color(), antialiased=False, transform=self.ax.transAxes,
+                                                 zorder=artist.get_zorder(), label="_dots")
         # Many curves are drawn as one picture over the plot area (see render).
         self.line_image = self.ax.imshow(np.zeros((1, 1, 4), np.uint8), extent=(0, 1, 0, 1), transform=self.ax.transAxes,
                                          interpolation="nearest", aspect="auto", zorder=2, visible=False)
@@ -1023,14 +1072,16 @@ class ExploreSession:
             a, b = f(np.asarray(yl, dtype=float))
             return h - (f(v) - a) / (b - a) * h
 
-        width = self.lines[shown[0]].get_linewidth() * self.fig.dpi / 72 * (0.5 if draft else 1.0)
+        scale = 0.5 if draft else 1.0
+        width = self.lines[shown[0]].get_linewidth() * self.fig.dpi / 72 * scale
         # each column's lowest and highest value, joined column to column: as the curves look
         xx = np.repeat(np.arange(w) + 0.5, 2)
         yy = np.empty((len(shown), 2 * w))
         yy[:, 0::2], yy[:, 1::2] = rows(lo[shown]), rows(hi[shown])
-        self.line_image.set_data(paint_lines([(xx, y) for y in yy], self.line_colors[shown], w, h, width))
+        dots, size = self._dots(shown, w, h, scale)
+        self.line_image.set_data(paint_lines([(xx, y) for y in yy], self.line_colors[shown], w, h, width, dots, size))
         self.line_image.set_visible(True)
-        for artist in self.lines:
+        for artist in self.lines + self.dot_artists:
             artist.set_visible(False)
         # what was drawn, for highlighting a picked curve: per column its lowest and highest value
         self.spans = (np.repeat((pxe[:-1] + pxe[1:]) / 2, 2), lo, hi)
@@ -1074,7 +1125,71 @@ class ExploreSession:
         xl, yl = self.ax.get_xlim(), self.ax.get_ylim()
         width = (self.lines[shown[0]].get_linewidth() * self.fig.dpi / 72 if shown else 1.0) * scale
         px = [(to_px(lines[k][0], xl, xs, w), h - to_px(lines[k][1], yl, ys, h)) for k in shown]
-        self.line_image.set_data(paint_lines(px, self.line_colors[shown], w, h, width))
+        dots, size = self._dots(shown, w, h, scale)
+        self.line_image.set_data(paint_lines(px, self.line_colors[shown], w, h, width, dots, size))
+
+    def _dots(self, shown: List[int], w: int, h: int, scale: float
+              ) -> Tuple[Optional[List[Tuple[np.ndarray, np.ndarray]]], int]:
+        """Show points (16.39): per shown curve, its dots in pixels of a w × h picture of the
+        current limits (x to the right, y down): one real stored point per occupied pixel
+        (lbd.plot.reduce.occupied_points); and a dot's side in pixels (`scale` < 1 in a draft).
+        None when points are off, or (with a note) when more than DOTS_LIMIT stored points are
+        in view.
+
+        A dot is matplotlib's `.` marker of the style's marker size (half of it: 2.3 screen
+        pixels by default), rounded up, as its antialiased edge looks that wide. Where a curve has
+        more than two points per pixel column (its line is reduced), the dots would only make the
+        line heavier: they shrink to the line's width."""
+        self.dots_note = ""
+        lw = self.lines[shown[0]].get_linewidth() * self.fig.dpi / 72 if shown else 1.0
+        size = 0.5 * self.style.figure.axes.lines.marker_size_pt * self.fig.dpi / 72
+        size = max(1, int(np.ceil(max(size, 2.0) * scale)))
+        if not self.points:
+            return None, size
+        xl, yl = self.ax.get_xlim(), self.ax.get_ylim()
+        xlog, ylog = self.ax.get_xscale() == "log", self.ax.get_yscale() == "log"
+        # the curves on one x together, and the stretch in view: all of x unless it is sorted without gaps
+        on = set(shown)
+        groups = []
+        for x, ks, is_sorted in self.x_groups:
+            ks = [k for k in ks if k in on]
+            if ks:
+                is_sorted = is_sorted and bool(np.all(np.isfinite(x)))
+                groups.append((x, ks, in_view(x, min(xl), max(xl)) if is_sorted else slice(0, x.size), is_sorted))
+        many = sum(len(ks) * (part.stop - part.start) for _, ks, part, _ in groups)
+        if many > DOTS_LIMIT:
+            self.dots_note = (f"points not shown: {many / 1e6:.1f} million stored points in view, more than "
+                              f"{DOTS_LIMIT / 1e6:g} million; zoom in or show fewer curves to see them")
+            return None, size
+        across = [part.stop - part.start if is_sorted else int(np.count_nonzero((x >= min(xl)) & (x <= max(xl))))
+                  for x, _, part, is_sorted in groups]     # a curve's points in view
+        if across and max(across) > 2 * self._plot_area()[2]:      # per column of the screen, also in a draft
+            size = max(1, int(round(lw * scale)))
+
+        def to_px(v, lim, log, size):
+            f = (lambda a: np.log10(np.where(a > 0, a, np.nan))) if log else (lambda a: a)
+            a, b = f(np.asarray(lim, dtype=float))
+            return (f(v) - a) / (b - a) * size
+
+        dots: Dict[int, Tuple[np.ndarray, np.ndarray]] = {}
+        for x, ks, part, _ in groups:
+            if self.summarised:                           # read from the file: the points in view only
+                try:
+                    ys = np.asarray(self.pyramids[id(x)].y[ks, part], dtype=float)
+                except ExploreError as e:                 # more than the memory available holds
+                    self.dots_note = f"points not shown: {e}"
+                    return None, size
+            else:
+                ys = np.stack([np.asarray(self.model.lines[k][0][part], dtype=float) for k in ks])
+            xv = x[part]
+            found = occupied_points(xv, ys, xl, yl, w, h, xlog, ylog)
+            # every curve's dots at once, then split per curve
+            idx = np.concatenate(found)
+            row = np.repeat(np.arange(len(ks)), [len(f) for f in found])
+            px, py = to_px(xv[idx], xl, xlog, w), h - to_px(ys[row, idx], yl, ylog, h)
+            ends = np.cumsum([len(f) for f in found])[:-1]
+            dots.update(zip(ks, zip(np.split(px, ends), np.split(py, ends))))
+        return [dots[k] for k in shown], size
 
     def _plot_area(self) -> Tuple[int, int, int, int]:
         """The axes' box in image pixels: left, top, width, height (top-left origin)."""
@@ -1136,7 +1251,7 @@ class ExploreSession:
     def _curve_picture(self, pxe: np.ndarray, draft: bool, w: int, h: int) -> Tuple[str, bool]:
         """The curves for these pixel edges: (the note, whether they are reduced)."""
         if self._fast_picture(pxe, w, h, draft):
-            return "lowest and highest point per pixel column", True
+            return "lowest and highest point per pixel column" + (f"; {self.dots_note}" if self.dots_note else ""), True
         full_w = self._plot_area()[2]
         self.spans = None
         ys = [y for y, _ in self.model.lines]
@@ -1174,12 +1289,23 @@ class ExploreSession:
         self.line_image.set_visible(as_picture)
         if as_picture:
             self._raster(lines, shown, w, h, 0.5 if draft else 1.0)
+            for artist in self.dot_artists:
+                artist.set_visible(False)
+        else:
+            # Show points on lines drawn by matplotlib: square markers at the dots, placed in
+            # the plot box (0 to 1), always sharp (a draft's pixels are only coarser for the lines)
+            dots, size = self._dots(shown, w, h, 1.0)
+            for k, artist in enumerate(self.dot_artists):
+                artist.set_visible(dots is not None and self.visible[k])
+            for k, (px, py) in zip(shown, dots or []):
+                self.dot_artists[k].set_data(px / w, 1 - py / h)
+                self.dot_artists[k].set_markersize(size * 72 / self.fig.dpi)
         self.last_lines = lines
         note = "lowest and highest point per pixel column" if reduced else "every point shown"
         if unsorted:
             note += ("; x is not sorted: drawn in stored order, thinned to the lowest and highest "
                      "point of each stretch" if thinned else "; x is not sorted: drawn as stored")
-        return note, reduced
+        return note + (f"; {self.dots_note}" if self.dots_note else ""), reduced
 
     @_locked
     def render(self, xlim: Optional[Tuple[float, float]], ylim: Optional[Tuple[float, float]],

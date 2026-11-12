@@ -412,13 +412,15 @@ function Shell() {
 
   /** Open a file in a chosen workspace (menus, "Open in Explore" / "Open in Figure"). */
   const openIn = useCallback(
-    (path: string, where: "explore" | "figure", spec?: PlotSpec) => {
+    (path: string, where: "explore" | "figure", spec?: PlotSpec, looks?: PlotSpec["options"]) => {
       if (where === "explore") openExplore([path], true);
       else {
-        if (spec) {
-          // the plot shown in Explore: the figure starts from it, keeping its own preset and style
+        if (spec || looks) {
+          // the plot shown in Explore: the figure starts from it, keeping its own preset and style;
+          // `looks`: options Explore's curves take along (Show points), added to the figure's own
           const now = tabStates.current.get(path) ?? initialStates.current.get(path);
-          initialStates.current.set(path, { preset: null, override: {}, ...now, spec });
+          const base = spec ?? now?.spec ?? {};
+          initialStates.current.set(path, { preset: null, override: {}, ...now, spec: looks ? { ...base, options: { ...(base.options ?? {}), ...looks } } : base });
           setFigureStarts((old) => ({ ...old, [path]: (old[path] ?? 0) + 1 }));
         }
         setPage("figure");
@@ -1071,7 +1073,7 @@ function Shell() {
               <ExploreTab
                 path={t.path}
                 onTitle={(title) => setExploreTitles((old) => (old[t.path] === title ? old : { ...old, [t.path]: title }))}
-                onOpenInFigure={(spec) => openIn(t.path, "figure", spec)}
+                onOpenInFigure={(spec, looks) => openIn(t.path, "figure", spec, looks)}
                 onError={(m) => toast(m, "error")}
                 onMenu={(e) => {
                   e.preventDefault();
