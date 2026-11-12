@@ -8,6 +8,13 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
 
 **Changes to how things behave** (read these when upgrading)
 
+- **A Library preview stays when its file changes.** It is no longer drawn again when data is
+  added: right-click → **Update preview** draws it again (it asks first for a picture chosen in
+  Explore). An automatic preview is now **one panel**: the plot saved in the file (Save view,
+  `lbd.set_plot`) when it has one, else its first value that isn't a single number (before: up to
+  four values side by side, ignoring the saved plot). Several panels come only from Explore's
+  **Use as Library picture**, now with a thin frame around each and a gap between them. A file
+  being measured shows **Live** in place of its preview. Pictures drawn before are kept as they are.
 - **Explore's numbers get a unit prefix by the plots' rule.** Only a unit on the plots' list
   (`Hz s V A W Ω Ohm F H T K m g J C S Pa N eV Wb`, compared whole) gets a prefix; every other
   unit is shown as stored. Before, the cursor read-outs and tables put a prefix on almost any

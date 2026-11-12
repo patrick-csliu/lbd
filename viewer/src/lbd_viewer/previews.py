@@ -1,10 +1,14 @@
-"""The Library's previews (plan 8c): a small picture of a data file, drawn by the Explore engine.
+"""The Library's previews (plan 8c, 16.43): a small picture of a data file, drawn by the Explore engine.
 
-- A preview comes only from Explore. **Automatic**: what Explore opens with the first time,
-  worked out from the file's data alone (the file's saved figure view, /plot, is never used):
-  one panel per value with axes, up to four, in Explore's grid. **Chosen**: the user pressed
-  "Library preview" in Explore; the panels as shown are drawn once and only the picture
-  is kept (catalog.py), never how it was made.
+- **A preview stays** (16.43 rule 1): once a file has one, it is kept when the file changes. It
+  changes only when the user chooses **Update preview** (right-click in the Library) or
+  **Use as Library picture** in Explore.
+- **Automatic** (rules 2 and 3), for a file without one: a single panel, of the file's saved
+  figure view (/plot) when it has one, else of the first value that isn't a single number (the
+  plot type by its number of axes). A file of single numbers only has no picture and says why.
+  **Chosen** (rule 4): the user pressed "Use as Library picture" in Explore; the panels as shown
+  are drawn once and only the picture is kept (catalog.py), never how it was made. Only a chosen
+  picture has several panels: each gets a thin frame, with a gap between them.
 - Every preview has one size (4:3, PREVIEW_SIZE CSS pixels at PREVIEW_DPR) and is a WebP
   picture: a fraction of a PNG's size, so thousands of them stay small.
 - A preview shows only the data (ExploreSession `bare`): no axes, tick labels, axis labels,
@@ -12,9 +16,12 @@
   every file; the numbers are in the file's details next to it.
 - Drawing a panel is an ExploreSession (explore.py) at its share of the picture, so a preview
   uses Explore's reduction (a large map draws in about a second) and looks like Explore.
-- Automatic pictures are a cache (`previews.sqlite`, next to the Library index): current while
-  the file's version (size, modification time) is the same; a style change doesn't redraw them.
-  Deletable: they are drawn again.
+- Automatic pictures are kept in `previews.sqlite`, next to the Library index, with the file
+  version they were drawn for. A picture is kept whatever the file's version; only "can't be
+  drawn" (an error) is tried again once the file changed. A style change doesn't redraw them.
+  Emptying the cache draws them again (of the files as they are now).
+- A file being written (name.lbd.writing) has no preview ("Live" in the Library); it gets one
+  once it is finished, as any file without one.
 - Drawing happens in two worker processes, never in the server's own: matplotlib's render lock
   would make Explore wait while a large file is drawn. One draws what the user is looking at
   now; the other, at lower priority, the rest. The setting (config.py PREVIEW_MODES) says what
@@ -50,10 +57,11 @@ from lbd.plot.style import Style
 PREVIEW_SIZE = (640, 480)           # drawn as a 640×480 Explore panel (text in proportion), 4:3
 PREVIEW_DPR = 2.0                   # 1280×960 pixels: sharp up to 640×480 on a high-density (2×, e.g. 4K) screen
 PREVIEW_QUALITY = 80                # WebP quality (0-100); lines and text stay readable
-FIRST_PANELS = 4                    # as Explore (ExploreTab.tsx FIRST_PANELS)
 BACKGROUND = (255, 255, 255, 255)   # around the panels
+PANEL_GAP = 8                       # CSS pixels between the panels of a chosen picture (several panels)
+FRAME = (190, 190, 190, 255)        # the thin frame (1 CSS pixel) around each of several panels
 CACHE_FILE, CACHE_SCHEMA = "previews.sqlite", 2   # 2: data only (no axes, labels, colour bar), at 2×
-REDRAW_EVERY = 30.0                 # a file that keeps changing (being written) is redrawn in the background at most this often
+REDRAW_EVERY = 30.0                 # a file that changed while it was drawn is drawn again this much later
 PARENT_CHECK = 2.0                  # a worker checks this often (seconds) that the viewer is still running
 NOW, NEAR, ALL = 0, 1, 2            # priorities: what the user looks at, the rows near it, every file
 log = logging.getLogger("lbd_viewer")
@@ -78,21 +86,29 @@ def grid_of(n: int, layout: str = "side") -> Tuple[int, int]:
 
 
 def automatic_panels(header: "lbd.Dataset") -> Tuple[List[Panel], Tuple[int, int]]:
-    """What Explore opens a file with the first time (ExploreTab.tsx `fresh`), from the data
-    only: one panel per value with axes, up to FIRST_PANELS, side by side."""
+    """The one panel of an automatic preview (16.43 rules 2 and 3): the file's saved figure
+    view (/plot) when it has one (an empty spec: drawn with `saved_view=True`, so all of it comes
+    from the file); otherwise the first value that isn't a single number, its plot type by its
+    number of axes."""
     header = flat(header)
     names = [name for name, v in header.values.items() if len(v.shape) > 0]
     if not names:
         singles = ", ".join(header.values) or "none"
         raise PreviewError(f"this file has only single numbers ({singles}); there is no plot to preview")
-    panels = [{"spec": {"values": [name]}, "settings": {}, "view": None} for name in names[:FIRST_PANELS]]
-    return panels, grid_of(len(panels))
+    spec: Dict[str, Any] = {} if uses_saved_view(header) else {"values": [names[0]]}
+    return [{"spec": spec, "settings": {}, "view": None}], (1, 1)
+
+
+def uses_saved_view(header: "lbd.Dataset") -> bool:
+    """Whether a file's automatic preview is its saved figure view (/plot: Save view, lbd.set_plot)."""
+    return isinstance(header.plot, dict) and bool(header.plot)
 
 
 def draw(path: Path, panels: Sequence[Panel], grid: Tuple[int, int], style: Style,
          saved_view: bool = False) -> bytes:
-    """The picture of these panels (WebP). `saved_view` False (automatic previews): the file's
-    saved figure view is ignored. Raises PreviewError with the reason."""
+    """The picture of these panels (WebP). `saved_view` False: the file's saved figure view
+    is ignored. Several panels (a chosen picture) each get a thin frame, with a gap between
+    them, so two maps don't read as one. Raises PreviewError with the reason."""
     from PIL import Image
 
     from .explore import ExploreSession
@@ -105,10 +121,12 @@ def draw(path: Path, panels: Sequence[Panel], grid: Tuple[int, int], style: Styl
     canvas = np.empty((px_h, px_w, 4), dtype=np.uint8)
     canvas[:] = BACKGROUND
     version = ""                                     # sessions are used once: no version needed
+    framed = len(panels) > 1
+    pad = PANEL_GAP // 2 if framed else 0            # half a gap on each side of a panel
     for i, panel in enumerate(panels):
         r, c = divmod(i, cols)
-        x0, x1 = c * width // cols, (c + 1) * width // cols
-        y0, y1 = r * height // rows, (r + 1) * height // rows
+        x0, x1 = c * width // cols + pad, (c + 1) * width // cols - pad
+        y0, y1 = r * height // rows + pad, (r + 1) * height // rows - pad
         try:
             # a preview is a picture: the notices about how a plot is drawn (e.g. a variable sweep
             # against its point number) are shown when the file is opened, not on its thumbnail
@@ -131,19 +149,27 @@ def draw(path: Path, panels: Sequence[Panel], grid: Tuple[int, int], style: Styl
         top, left = round(y0 * PREVIEW_DPR), round(x0 * PREVIEW_DPR)
         h, w = min(picture.shape[0], px_h - top), min(picture.shape[1], px_w - left)
         canvas[top:top + h, left:left + w] = picture[:h, :w]
+        if framed:                                   # a thin frame, over the panel's edge pixels
+            t = max(1, round(PREVIEW_DPR))
+            bottom, right = top + h, left + w
+            canvas[top:top + t, left:right] = FRAME
+            canvas[bottom - t:bottom, left:right] = FRAME
+            canvas[top:bottom, left:left + t] = FRAME
+            canvas[top:bottom, right - t:right] = FRAME
     buf = io.BytesIO()
     Image.fromarray(canvas[:, :, :3]).save(buf, format="WEBP", quality=PREVIEW_QUALITY, method=4)
     return buf.getvalue()
 
 
 def draw_automatic(path: Path, style: Style) -> bytes:
-    """A file's automatic preview: Explore's first open, from the data only."""
+    """A file's automatic preview: one panel, of its saved figure view (/plot) if it has one,
+    else of its first value that isn't a single number (automatic_panels)."""
     try:
         header = lbd.info(path)
     except Exception as e:
         raise PreviewError(_reason(e)) from e
     panels, grid = automatic_panels(header)
-    return draw(path, panels, grid, style, saved_view=False)
+    return draw(path, panels, grid, style, saved_view=uses_saved_view(header))
 
 
 def _reason(e: Exception) -> str:
@@ -209,9 +235,11 @@ class PreviewCache:
             self._connect().execute("INSERT OR REPLACE INTO previews (path, version, picture, error, drawn_at) "
                                     "VALUES (?, ?, ?, ?, ?)", (path, version, picture, error, time.time()))
 
-    def versions(self) -> Dict[str, str]:
+    def kept(self) -> Dict[str, Tuple[str, bool]]:
+        """Every row's (version, whether it has a picture), by path."""
         with self._lock:
-            return dict(self._connect().execute("SELECT path, version FROM previews"))
+            rows = self._connect().execute("SELECT path, version, picture IS NOT NULL FROM previews").fetchall()
+        return {p: (v, bool(has)) for p, v, has in rows}
 
     def drop(self, paths: Iterable[str]) -> None:
         with self._lock:
@@ -320,6 +348,12 @@ def work(job: Dict[str, Any]) -> Tuple[Optional[bytes], Optional[str]]:
         return None, str(e)
 
 
+def current(row: Optional[Dict[str, Any]], version: Optional[str]) -> bool:
+    """Whether a cached row is the file's preview now (16.43 rule 1): a picture always is, whatever
+    the file's version; "can't be drawn" only while the file is unchanged (it is tried again)."""
+    return row is not None and (row["picture"] is not None or row["version"] == version)
+
+
 def file_version(path: str) -> Optional[str]:
     """The file's version as the Library index writes it (library._version), or None if it is gone."""
     from . import versions
@@ -360,7 +394,7 @@ class Previewer:
     # -- asking
 
     def answer(self, path: str, now: bool = True) -> Dict[str, Any]:
-        """The automatic picture of a file if it is current ({picture} or {error}), else what is
+        """The automatic picture of a file if it has one ({picture} or {error}: `current`), else what is
         happening: {state: "drawing"} (asked for: `now` for the selected file, else as a row near
         it, e.g. a picture in view; not when previews are off) or {state: "off"}."""
         if path.lower().endswith(".lbd.writing"):
@@ -369,7 +403,7 @@ class Previewer:
         if version is None:
             return {"error": "The file is gone (moved, renamed or deleted)."}
         row = self.cache.get(path)
-        if row and row["version"] == version:
+        if row is not None and current(row, version):
             return {"picture": row["picture"], "error": row["error"], "drawn_at": row["drawn_at"]}
         with self._cond:
             busy = path in self._drawing or path in self._queue
@@ -392,7 +426,7 @@ class Previewer:
                     continue
                 version = file_version(p)
                 row = self.cache.get(p)
-                if version is None or (row and row["version"] == version) or p in self._drawing:
+                if version is None or current(row, version) or p in self._drawing:
                     continue
                 old = self._queue.get(p)
                 if old is None or priority < old[0]:     # what the user looks at isn't held back
@@ -418,6 +452,13 @@ class Previewer:
 
     def forget(self, path: str) -> None:
         self.cache.drop([path])
+
+    def update(self, path: str) -> None:
+        """Update preview: the file's automatic picture is drawn again now, of the file as it is
+        (and of its saved figure view, if one was saved since)."""
+        self.cache.drop([path])
+        self._last_drawn.pop(path, None)              # asked for: not held back
+        self.want([path], now=True)
 
     def clear(self) -> int:
         freed = self.cache.clear()
@@ -533,18 +574,23 @@ class Previewer:
 
     def _refill(self) -> None:
         """After the Library's index changed (or the mode did): drop the pictures of files that
-        are gone, and with "all", queue every file whose picture isn't current."""
+        are gone, and with "all", queue every file without a preview (`current`)."""
         seen = (self.generation(), self.mode())
         if seen == self._seen:
             return
         self._seen = seen
         mode = seen[1]
         files = self.files()
-        cached = self.cache.versions()
+        cached = self.cache.kept()
         gone = [p for p in cached if p not in files]
         if gone:
             self.cache.drop(gone)
-        todo = [p for p, v in files.items() if cached.get(p) != v and not p.lower().endswith(".lbd.writing")]
+
+        def has_preview(p: str, version: str) -> bool:
+            row = cached.get(p)
+            return row is not None and (row[1] or row[0] == version)
+
+        todo = [p for p, v in files.items() if not has_preview(p, v) and not p.lower().endswith(".lbd.writing")]
         self.status.update({"total": len(files), "drawn": len(files) - len(todo)})
         with self._cond:
             if mode == "all":

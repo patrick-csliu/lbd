@@ -138,3 +138,36 @@ def test_the_cache_size_is_told_and_emptied(client, data_dir):
     assert size["count"] == 1 and size["bytes"] > 1000
     assert client.post("/api/library/preview/clear").json()["freed"] == size["bytes"]
     assert client.get("/api/library/preview/cache").json() == {"count": 0, "bytes": 0}
+
+
+def test_a_changed_file_keeps_its_preview_and_update_preview_draws_it_again(client, data_dir):
+    """16.43 rule 1: a preview stays when the file changes; Update preview (right-click) redraws it."""
+    path = write(data_dir / "a.lbd")
+    first, _ = preview(client, path)
+    time.sleep(0.02)
+    write(path, n=80)
+    assert preview(client, path)[0] == first
+    r = client.post("/api/library/preview/update", json={"paths": [str(path)]})
+    assert r.json() == {"updated": 1, "chosen": []}
+    again, about = preview(client, path)
+    assert again != first and about["source"] == "automatic"
+
+
+def test_update_preview_keeps_a_chosen_picture_until_the_user_agrees(client, data_dir):
+    path = write(data_dir / "a.lbd")
+    client.post("/api/library/preview/choose", json={"path": str(path), **ONE_PANEL}).raise_for_status()
+    chosen, _ = preview(client, path)
+    r = client.post("/api/library/preview/update", json={"paths": [str(path)]})
+    assert r.json() == {"updated": 0, "chosen": [str(path)]}       # the page asks first
+    assert preview(client, path)[0] == chosen
+    r = client.post("/api/library/preview/update", json={"paths": [str(path)], "replace_chosen": True})
+    assert r.json() == {"updated": 1, "chosen": []}
+    _, about = preview(client, path)
+    assert about["source"] == "automatic"
+
+
+def test_a_file_being_measured_is_live(client, data_dir):
+    path = data_dir / "m.lbd.writing"
+    path.write_bytes(write(data_dir / "m.lbd").read_bytes())
+    picture, body = preview(client, path)
+    assert picture is None and body["state"] == "writing" and body["reason"].startswith("Live")

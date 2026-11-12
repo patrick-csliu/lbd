@@ -70,7 +70,7 @@ def test_opened_with_its_status_not_a_warning(client, writing):
 def test_no_preview_while_written(client, writing):
     w, _ = writing
     r = client.get("/api/library/preview", params={"path": str(w.writing_path)}).json()
-    assert r["state"] == "writing" and "being written" in r["reason"]
+    assert r["state"] == "writing" and r["reason"].startswith("Live")
 
 
 @pytest.mark.parametrize("call", [

@@ -133,7 +133,8 @@ A measurement written with the Writer (see
 `name.lbd.writing` until it is finished. The Library lists it with its state:
 
 - **measuring…**: its measurement is writing it right now, on this computer. Explore and the
-  selected file show its progress as it grows. It gets no preview until it is finished, and LBD
+  selected file show its progress as it grows. It shows **Live** in place of a preview and gets
+  one once it is finished, and LBD
   never writes into it (only the measuring program does).
 - **measuring elsewhere…**: it is measured on another computer and synced here (its heartbeat,
   `name.lbd.live`, says so and keeps changing): *Measuring on LAB-PC*.
@@ -150,8 +151,10 @@ See [Writing while measuring](../getting-started/writing-while-measuring.md) and
 
 ## Previews
 
-The selected file shows a picture of its data on the right, as Explore first shows it: one panel
-per value (up to four), curves for a value over one swept axis, a heat map over two. A preview
+The selected file shows a picture of its data on the right: **one panel**, of the plot saved in
+the file (**Save view** on the Figure page, `lbd.set_plot` in a script) when it has one;
+otherwise of its first value that isn't a single number, as curves over one swept axis or a
+heat map over two. A file of single numbers only has no picture, and says so. A preview
 is **the data only**: no axes, numbers, colour bar or legend (those are in the file's details
 next to it); it is drawn sharp enough for high-density (4K, Retina) screens. Step through
 the list with ↑ ↓ and the pictures follow at once: the files near the selection are drawn ahead.
@@ -165,15 +168,24 @@ the list with ↑ ↓ and the pictures follow at once: the files near the select
 
     ![The picture view](img/library-pictures.png)
 
+- **A preview stays.** Once a file has a picture, it keeps it when the file changes (data added,
+  a plot saved later). It changes only when you ask:
+    - **Update preview** (right-click the file; several selected files: **Update N previews**)
+      draws it again from the file as it is now, by the rule above, so it picks up a plot saved
+      in the file since. On a file with a picture chosen in Explore it asks first, because that
+      picture can't be drawn again.
+    - **Use as Library picture** in Explore (below).
 - **Choose a file's picture:** open it in Explore, show what you want (panels, zoom, operations),
-  then **Library preview** (above the panels, on the right). The Library then shows that picture, "Chosen in
-  Explore on …", and keeps it however you change Explore afterwards. Only the picture is kept,
-  so it shows the data as it was then: if the file changes later, it says "before the file last
-  changed"; choose again to update it. **Reset preview** goes back to the automatic one.
-  Identical copies of a measurement share a chosen picture.
-- **Automatic pictures** are drawn again when their file changes (data added). They ignore the
-  file's saved figure view and style: a preview is about the data, the same for every file.
-- A file without a picture says why, e.g. "only single numbers".
+  then **⋯ → Use as Library picture** (at the top). The Library then shows that picture, "Chosen in
+  Explore on …", and keeps it however you change Explore afterwards. It is the only way to a
+  picture of several panels; each gets a thin frame, with a gap between them, so two maps don't
+  read as one. Only the picture is kept, so it shows the data as it was then: if the file
+  changes later, it says "before the file last changed"; choose again to update it. **Reset
+  preview** goes back to an automatic one, drawn of the file as it is now. Identical copies of a
+  measurement share a chosen picture.
+- Automatic pictures use LBD's default style, not the file's: a preview is about the data.
+- A file without a picture says why, e.g. "only single numbers"; one that couldn't be drawn is
+  tried again when it changes.
 
 **⚙ → Library → Previews** sets which pictures are drawn without being asked:
 

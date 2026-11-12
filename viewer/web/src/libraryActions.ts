@@ -104,6 +104,33 @@ export function useFileActions(ctx: FileActionsContext) {
       onConfirm: () => run(api.libraryGiveIds(rows.map((x) => x.path))),
     });
 
+  /**
+   * Update preview: draw the files' previews again, as a file without one gets it (its saved
+   * figure view, else its first value). A picture chosen in Explore can't be drawn again, so the
+   * server keeps those and says which; they are replaced only after asking.
+   */
+  const updatePreviews = async (paths: string[]) => {
+    try {
+      const r = await api.libraryPreviewUpdate(paths);
+      if (r.chosen.length) {
+        const one = r.chosen.length === 1;
+        setConfirm({
+          title: one ? "Replace the picture chosen in Explore?" : `Replace ${r.chosen.length} pictures chosen in Explore?`,
+          text:
+            (one ? `${baseName(r.chosen[0])} has a picture chosen in Explore (Use as Library picture). ` : `${r.chosen.length} of these files have a picture chosen in Explore (Use as Library picture). `) +
+            "Update preview draws it again as Explore first shows the file. The chosen picture can't be drawn again: to get it back, choose it again in Explore.",
+          action: one ? "Replace it" : "Replace them",
+          danger: true,
+          onConfirm: () => run(api.libraryPreviewUpdate(r.chosen, true).then(() => ({ notes: [] }))),
+        });
+      }
+    } catch (e) {
+      toast((e as Error).message, "error");
+    } finally {
+      refresh();
+    }
+  };
+
   /** The menu of `rows` (several selected files), or of the one file `r`. */
   const menuEntries = (rows: LibraryRow[], r: LibraryRow): MenuEntry[] => {
     const many = rows.length > 1;
@@ -128,6 +155,10 @@ export function useFileActions(ctx: FileActionsContext) {
       ...(withoutId.length ? [{ label: withoutId.length === 1 ? "Give this file an identity…" : `Give ${withoutId.length} files an identity…`, onClick: () => askGiveIds(withoutId) }] : []),
     ];
     if (identity.length) items.push("-", ...identity);
+    // its Library picture: drawn again only when asked (a file's preview stays when it changes)
+    const drawable = rows.filter((x) => !x.error && !x.writing);
+    if (drawable.length)
+      items.push("-", { label: drawable.length === 1 ? "Update preview" : `Update ${drawable.length} previews`, onClick: () => void updatePreviews(drawable.map((x) => x.path)) });
     if (!many)
       // one file: also what can be done with the file itself
       items.push(
