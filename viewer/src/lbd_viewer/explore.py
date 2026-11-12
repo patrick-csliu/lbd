@@ -119,6 +119,13 @@ def _finite_range(arrays) -> Tuple[float, float]:
     return (lo - 0.5, hi + 0.5) if lo == hi else (lo, hi)
 
 
+def full_text(label: Any) -> str:
+    """A label's whole text, also when the layout shortened it to fit (`_shorten`); a text set
+    anew since then (another plot) is taken as it is."""
+    shown = label.get_text()
+    return label._lbd_full if getattr(label, "_lbd_shown", None) == shown and hasattr(label, "_lbd_full") else shown
+
+
 def _locked(method):
     """Run a session's step under the session's own lock (16.22): a change of the plot
     (`set_spec`) and a picture or read-out never overlap, so a step never sees the new kind with
@@ -206,7 +213,7 @@ class ExploreSession:
         with rnd.RENDER_LOCK, matplotlib.rc_context(self.style.to_rcparams()):
             self._check_open()
             if self.base_kind == "curve":
-                self.base_model = rnd.prepare_curves(self.data, self.spec, self.style, big=big)
+                self.base_model = rnd.prepare_curves(self.data, self.spec, self.style, big=big, whole_span=True)
             elif self.base_kind != "heatmap":
                 self.base_model = kinds.interactions()[self.base_kind].prepare(self)
             else:
@@ -399,9 +406,13 @@ class ExploreSession:
 
     @staticmethod
     def _shorten(label: Any, room: float, size_of: Any) -> None:
-        """A label wider than `room` pixels gets "…" in place of its end (the whole text stays in
-        the file and the controls)."""
-        text = label.get_text()
+        """A label wider than `room` pixels gets "…" in place of its end. Its whole text is kept
+        (`full_text`): every layout starts from it, so a label shortened at a small size is whole
+        again at a larger one, and what the label means (sync_keys) never changes."""
+        text = full_text(label)
+        label._lbd_full = text
+        label.set_text(text)
+        label._lbd_shown = text
         if not text or not label.get_visible() or size_of(text, label.get_fontsize())[0] <= room:
             return
         lo, hi = 0, len(text)
@@ -412,6 +423,7 @@ class ExploreSession:
             else:
                 hi = mid - 1
         label.set_text(text[:lo].rstrip() + "…")
+        label._lbd_shown = label.get_text()
 
     def _bare_out(self) -> None:
         """Only the data, over the whole picture (`bare`). Call under the render lock."""
@@ -926,8 +938,28 @@ class ExploreSession:
 
     def _full_view(self) -> Tuple[Tuple[float, float], Tuple[float, float]]:
         """The limits that show all the data drawn now (the chosen traces; on a log axis the
-        positive part only)."""
-        return self.view.limits()
+        positive part only). While a slider chooses what is drawn, all of it means every slider
+        position (16.49): the limits stay the same while the slider moves, so steps compare."""
+        (x0, x1), (y0, y1) = self.view.limits()
+        whole = getattr(self.model, "whole", None)
+        if whole is None or self.model is not self.base_model or not self._slider_moves():
+            return (x0, x1), (y0, y1)
+        linear = self.ax.get_xscale() == "linear", self.ax.get_yscale() == "linear"
+        if self.kind == "curve" and linear[1] and not (self.model.ylim and None not in self.model.ylim):
+            y0, y1 = self._padded(whole, False)          # padded as each step's own limits are
+        elif self.kind == "scatter":
+            if linear[0]:
+                x0, x1 = self._padded(whole[0], False)
+            if linear[1] and not (self.model.ylim and None not in self.model.ylim):
+                y0, y1 = self._padded(whole[1], False)
+        return (x0, x1), (y0, y1)
+
+    def _slider_moves(self) -> bool:
+        """Whether a slider chooses what is drawn: an axis with more than one position that isn't
+        drawn along (x, series) nor shown whole (All)."""
+        drawn = {self.spec.get("x"), self.spec.get("along"), self.spec.get("series"), *(self.spec.get("all") or [])}
+        return any(a not in drawn and a in self.data.axes and len(self.data.axes[a].data) > 1
+                   for a in (self.spec.get("index") or {}))
 
     @staticmethod
     def _range(arrays: Sequence[Any], log: bool) -> Tuple[float, float]:
@@ -1156,6 +1188,7 @@ class ExploreSession:
             t1 = time.perf_counter()
             self.last_used = time.monotonic()
             self.view.frame(xlim, ylim)
+            asked = (list(xlim), list(ylim))              # before equal axes widen it (16.49)
             xlim, ylim = self.view.shown_limits(xlim, ylim)
             left, top, w, h = self._plot_area()
             dw, dh = (max(w // 2, 1), max(h // 2, 1)) if draft else (w, h)
@@ -1178,7 +1211,7 @@ class ExploreSession:
         t4 = time.perf_counter()
         meta = {
             "format": fmt, "width": width, "height": height, "dpr": self.dpr,
-            "plot": [left, top, w, h], "xlim": list(xlim), "ylim": list(ylim),
+            "plot": [left, top, w, h], "xlim": list(xlim), "ylim": list(ylim), "asked": asked,
             "xscale": self.ax.get_xscale(), "yscale": self.ax.get_yscale(),
             "full": [list(self.full[0]), list(self.full[1])],
             "note": note, "reduced": reduced, "stat": stat, "draft": draft, "ops": self.ops_info(),
@@ -1196,13 +1229,13 @@ class ExploreSession:
         vertical axis (maps: its label; curves: its unit, prefix included)."""
         if not self.view.syncs:
             return {}
-        ylabel = self.ax.get_ylabel()
+        ylabel = full_text(self.ax.yaxis.label)
         if self.kind == "heatmap":
             y = ylabel
         else:
             m = re.search(r"\(([^()]*)\)\s*$", ylabel)
             y = m.group(1) if m else ""
-        return {"x": self.ax.get_xlabel(), "y": y}
+        return {"x": full_text(self.ax.xaxis.label), "y": y}
 
     # -- picking
 

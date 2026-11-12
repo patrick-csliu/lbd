@@ -180,7 +180,7 @@ class Scatter(Interaction):
         s.scatter_span = None
         if not too_many(s):
             s.crange_info = None
-            return sc.prepare_scatter(s.data, s.spec, s.style)
+            return sc.prepare_scatter(s.data, s.spec, s.style, whole_span=True)
         return cls._prepare_big(s)
 
     @classmethod

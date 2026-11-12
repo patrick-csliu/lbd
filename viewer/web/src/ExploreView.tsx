@@ -659,7 +659,8 @@ export default function ExploreView({
           showAll.current = false;
           wanted.current = { xlim: f.meta.xlim, ylim: f.meta.ylim, ...(f.meta.angle ? { angle: f.meta.angle } : {}) };
         }
-        if (f.meta.equal && same(wanted.current, v)) wanted.current = { xlim: f.meta.xlim, ylim: f.meta.ylim };
+        // (equal axes: the view asked for is kept, not the wider one shown, so a slider moving or a
+        // new size never widens it again and again: 16.49)
         onViewRef.current({ xlim: f.meta.xlim, ylim: f.meta.ylim, ...(f.meta.angle ? { angle: f.meta.angle } : {}) });
         onOpsInfoRef.current(f.meta.ops ?? null);
         onSyncRef.current?.(f.meta.sync?.x !== undefined ? { ...(f.meta.sync as SyncKeys), full: f.meta.full } : null); // null: nothing to share
@@ -713,7 +714,7 @@ export default function ExploreView({
         const f = frame.current, sz = sizeRef.current, w = wanted.current;
         const stale =
           f &&
-          (!same(w && { xlim: w.xlim, ylim: w.ylim }, { xlim: f.meta.xlim, ylim: f.meta.ylim }) ||
+          (!same(w && { xlim: w.xlim, ylim: w.ylim }, f.meta.equal && f.meta.asked ? { xlim: f.meta.asked[0], ylim: f.meta.asked[1] } : { xlim: f.meta.xlim, ylim: f.meta.ylim }) ||
             !sameAngle(angleOf(w), f.meta.angle) ||
             (sz && Math.abs(f.meta.width / f.meta.dpr - sz.w) > 1) ||
             (f.meta.draft && !moving.current)); // a draft, and the mouse rests: the sharp picture

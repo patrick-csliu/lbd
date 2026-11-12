@@ -106,3 +106,32 @@ def test_a_measurement_finishing_while_selected_in_the_library_shows_no_error(vi
     assert not errors
     expect(page.locator(".library-detail .path-name")).to_have_text("selected.lbd", timeout=15_000)
     expect(page.locator(".library-detail .error-box")).to_have_count(0)
+
+
+def test_the_display_controls_stay_still_while_a_measurement_grows(viewer, new_page):
+    """16.55: while the file grows (read again each time), no control of the Display section
+    disappears for a moment: their places stay the same."""
+    w = sweep_writer(viewer, "grows.lbd", rows=30)
+    for i in range(3):
+        w.write(power=i, S21=np.full(5, float(i)))
+    w.flush()
+    try:
+        page = new_page("Explore")
+        frames(page, lambda: row(page, "grows.lbd.writing").dblclick())
+        display = explore(page).locator("details.controls-section", has_text="Display").first
+        if not display.evaluate("d => d.open"):
+            display.locator("summary").click()
+        page.wait_for_timeout(1500)
+        heights = []
+        watch = ("d => { const out = []; const t = setInterval(() => out.push(d.getBoundingClientRect().height), 40);"
+                 " window.__heights = out; window.__stop = () => clearInterval(t); }")
+        display.evaluate(watch)
+        for i in range(3, 9):                                     # the file grows six times
+            w.write(power=i, S21=np.full(5, float(i)))
+            w.flush()
+            w._beat_now(force=True)
+            page.wait_for_timeout(700)
+        heights = page.evaluate("() => { window.__stop(); return window.__heights; }")
+    finally:
+        w.close(stopped=True)
+    assert heights and max(heights) - min(heights) <= 2, sorted(set(round(h) for h in heights))

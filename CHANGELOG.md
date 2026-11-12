@@ -112,6 +112,14 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
 
 **Viewer**
 
+- **A slider no longer moves the plot** (Explore, curves and scatter). While a slider steps
+  through a measurement, the unit prefix, the plot's size and (until you zoom) its limits stay the
+  same at every step, so the steps can be compared; before, a step could change the unit (mV to V)
+  and leave the old limits, showing the points as a dot, and Equal axes widened the view a little
+  more at each step.
+- **Fixed: the Display controls jumped while a measurement grew** (a map's colour range shrank
+  for a moment each time the file was read again).
+
 - **A plot's layout depends only on its panel's size** (Explore). Two panels of one size have
   plots of one size, whatever came before (the window resized, F12 opened and closed, another
   value or slider step), and a colour bar is never pushed out of the picture. The margins are

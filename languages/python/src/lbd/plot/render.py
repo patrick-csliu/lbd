@@ -17,8 +17,9 @@ import math
 import numbers
 import re
 import threading
+import warnings
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import matplotlib
 import matplotlib.colors as mcolors
@@ -619,6 +620,29 @@ def _unwrap(phase: np.ndarray, axis: int) -> np.ndarray:
     return np.moveaxis(flat.reshape(p.shape), -1, axis)
 
 
+def whole_numbers(v: "lbd.Value", mode: str) -> Optional[np.ndarray]:
+    """A value's numbers as shown in a complex mode, over all of it (every slider position), flat;
+    None when its data isn't held whole (read by part: reading it all would cost too much). Used
+    to choose one unit prefix and one range for every slider position (16.49)."""
+    if not isinstance(v.data, np.ndarray):
+        return None
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        numbers = apply_complex(v.data, v.label, v.unit, mode)[0]
+    return np.ravel(numbers)
+
+
+def whole_range(arrays: Sequence[Optional[np.ndarray]]) -> Optional[Tuple[float, float]]:
+    """The lowest and highest finite number of these arrays; None if any is missing or none is finite."""
+    if any(a is None for a in arrays):
+        return None
+    parts = [a[np.isfinite(a)] for a in arrays if a is not None and a.size]
+    parts = [p for p in parts if p.size]
+    if not parts:
+        return None
+    return float(min(p.min() for p in parts)), float(max(p.max() for p in parts))
+
+
 def apply_complex(arr: np.ndarray, label: str, unit: str, mode: str, axis: int = 0) -> Tuple[np.ndarray, str, str]:
     """Turn data into what is plotted for a complex mode: (numbers, label, unit).
 
@@ -787,6 +811,7 @@ class CurveModel:
     series_bar: Optional[Tuple[ScalarMappable, str]]    # many series: a colour bar instead of a legend
     auto_axes: List[Tuple[str, str]]
     x_ticks: Optional[Tuple[np.ndarray, List[str]]] = None   # an axis with elements: its texts as ticks
+    whole: Optional[Tuple[float, float]] = None        # the values' range at every slider position (plot units)
 
 
 @dataclass
@@ -811,10 +836,13 @@ class MapModel:
     y_ticks: Optional[Tuple[np.ndarray, List[str]]] = None
 
 
-def prepare_curves(d, spec, style: Style, big: Optional[Any] = None) -> CurveModel:
+def prepare_curves(d, spec, style: Style, big: Optional[Any] = None, whole_span: bool = False) -> CurveModel:
     """`big`: stands for the curves when they are too big to read whole (LBD Viewer's
     summaries.BigCurves, one value): `big.trace(j)` for each line, `big.range()` their lowest and
-    highest number, `trace * factor` scaled; the model's lines are then read part by part."""
+    highest number, `trace * factor` scaled; the model's lines are then read part by part.
+    `whole_span`: the vertical unit prefix is chosen from the values' numbers at every slider
+    position, not only the ones shown, so it stays the same while a slider moves (Explore,
+    16.49); the model's `whole` then holds their range (plot units)."""
     d = flat(d)
     a = style.figure.axes
     xs, ys = style.axis_style("x"), style.axis_style("y")
@@ -869,7 +897,10 @@ def prepare_curves(d, spec, style: Style, big: Optional[Any] = None) -> CurveMod
     if len(set(units)) > 1:
         _warn(f"the curves have different units {sorted(set(units))}; the vertical axis shows no unit", RenderWarning)
     common_unit = units[0] if len(set(units)) == 1 else ""
-    yf, yunit = _unit_scale(yall, common_unit, quantity, ys.label.auto_prefix)
+    whole = None
+    if whole_span and big is None:
+        whole = whole_range([whole_numbers(d.values[n], spec["complex"]) for n in spec["values"]])
+    yf, yunit = _unit_scale(np.array(whole) if whole else yall, common_unit, quantity, ys.label.auto_prefix)
     if _auto_prefix(quantity, common_unit, ys.label.auto_prefix):
         auto_axes.append((spec["values"][0], yunit))
     # Several values: the legend names them, so the axis gets a generic label.
@@ -893,7 +924,8 @@ def prepare_curves(d, spec, style: Style, big: Optional[Any] = None) -> CurveMod
         x_label=axis_label(spec.get("x_label") or xa.label, xunit, xs.label.unit_format),
         y_label=axis_label(ylabel, yunit, ys.label.unit_format), x_scale=spec["x_scale"], y_scale=y_scale,
         ylim=ylim, series_bar=series_bar, auto_axes=auto_axes,
-        x_ticks=None if x_is_value else _element_ticks(xa, xf))
+        x_ticks=None if x_is_value else _element_ticks(xa, xf),
+        whole=None if whole is None else (whole[0] * yf, whole[1] * yf))
 
 
 def draw_curves(fig: Figure, ax, model: CurveModel, d, spec, style: Style,

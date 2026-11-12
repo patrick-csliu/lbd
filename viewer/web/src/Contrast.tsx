@@ -33,7 +33,9 @@ export default function Contrast({ load, loadKey, clim, onClim }: Props) {
       .current()
       .then((h) => {
         if (!live) return;
-        setHist(h);
+        // no answer yet (the file is being read again, as a measurement grows): the last histogram
+        // stays until the new one is here, so the panel never shrinks and jumps back (16.55)
+        if (h) setHist(h);
         setError(null);
       })
       .catch((e) => live && setError((e as Error).message));

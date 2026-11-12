@@ -689,6 +689,8 @@ export interface ExploreFrameMeta {
   default_angle?: { elev: number; azim: number; zoom: number };
   sides?: Sides | null; // a scatter plot: histograms of the points in view
   equal?: boolean; // equal axes: xlim and ylim are what the server made of the view asked for
+  /** the view asked for, before equal axes widened it */
+  asked?: [[number, number], [number, number]];
   /** A map with a slider: where its colour range comes from, and while every slice's range is
    *  worked out (crange.py) how far it is, or why it failed. */
   crange?: { from: "slice" | "all" | "histogram" | "scatter"; state?: "working" | "failed"; fraction?: number; slices?: number; error?: string | null; grow?: boolean } | null;

@@ -23,7 +23,7 @@ from .points import Points, _fixed
 from .points import points_of as read_points
 from .render import (SCATTER_RASTER_ABOVE, RenderError, RenderWarning, _annotate, _auto_prefix, _axis_quantity, _check_log,
                      _colorbar, _fits_curve, _is_point, _legend, _legend_label, _norm, _slices, _swept, _unit_scale,
-                     apply_complex, find_quantity, flat)
+                     apply_complex, find_quantity, flat, whole_numbers, whole_range)
 from .style import MM, Style
 from .units import axis_label, mathsafe
 
@@ -58,6 +58,9 @@ class ScatterModel:
     y_text: Tuple[str, str] = ("", "")
     c_text: Tuple[str, str] = ("", "")
     cf: float = 1.0                             # plot units of `cvals` per stored unit
+    # x and y at every slider position (plot units), when asked for (`whole_span`): one prefix
+    # and one range while a slider moves (16.49)
+    whole: Optional[Tuple[Tuple[float, float], Tuple[float, float]]] = None
 
 
 def _numbers(v: Any, points: Points, mode: str) -> Tuple[np.ndarray, str, str]:
@@ -140,9 +143,12 @@ def iter_points(d: Any, spec: Dict[str, Any], block: int = BLOCK) -> Iterator[Tu
             yield k, x, y, step, number
 
 
-def prepare_scatter(d: Any, spec: Dict[str, Any], style: Style, big: Optional[Span] = None, **kw: Any) -> ScatterModel:
+def prepare_scatter(d: Any, spec: Dict[str, Any], style: Style, big: Optional[Span] = None, whole_span: bool = False,
+                    **kw: Any) -> ScatterModel:
     """`big`: the numbers' ends, for points too many to hold: the model has no points then (LBD
-    Viewer counts them per pixel, part by part)."""
+    Viewer counts them per pixel, part by part). `whole_span`: the unit prefixes are chosen from
+    the numbers at every slider position, not only the ones shown, so they stay while a slider
+    moves (Explore, 16.49); the model's `whole` then holds their ranges."""
     d = flat(d)
 
     def points_of(d_: Any, spec_: Dict[str, Any], name: str) -> Points:
@@ -187,6 +193,21 @@ def prepare_scatter(d: Any, spec: Dict[str, Any], style: Style, big: Optional[Sp
     stored_x, stored_y = xunit, yunit
     all_x = np.concatenate([s[0] for s in raw]) if big is None else np.asarray(big.x)
     all_y = np.concatenate([s[1] for s in raw]) if big is None else np.asarray(big.y)
+    whole = None
+    if whole_span and big is None:
+        if mode == "iq":
+            held = first.data if isinstance(first.data, np.ndarray) else None
+            wx = None if held is None else np.ravel(held.real).astype(float)
+            wy = None if held is None else np.ravel(held.imag).astype(float) if np.iscomplexobj(held) else np.zeros(1)
+            wys = [wy]
+        else:
+            x = spec["x"]
+            wx = whole_numbers(d.values[x], mode) if x in d.values else np.asarray(_axis_of(d, first, x).data, dtype=float)
+            wys = [whole_numbers(d.values[n], mode) for n in spec["values"]]
+        xr, yr = whole_range([wx]), whole_range(wys)
+        whole = (xr, yr) if xr and yr else None
+    if whole is not None:                  # the prefixes from every slider position
+        all_x, all_y = np.array(whole[0]), np.array(whole[1])
     if mode == "iq":  # one scale for both axes keeps the I/Q plane undistorted
         base = xunit
         both = xs.label.auto_prefix and ys.label.auto_prefix
@@ -246,7 +267,8 @@ def prepare_scatter(d: Any, spec: Dict[str, Any], style: Style, big: Optional[Sp
         xf=xf, yf=yf, x_label=axis_label(spec.get("x_label") or xlab, xunit, xs.label.unit_format),
         y_label=axis_label(spec.get("y_label") or ylab, yunit, ys.label.unit_format), c_label=clabel,
         x_scale=spec["x_scale"], y_scale=y_scale, equal=(spec.get("options") or {}).get("equal", mode == "iq"),
-        auto_axes=auto_axes, ylim=ylim, x_text=(xlab, stored_x), y_text=(ylab, stored_y), c_text=c_text, cf=cf)
+        auto_axes=auto_axes, ylim=ylim, x_text=(xlab, stored_x), y_text=(ylab, stored_y), c_text=c_text, cf=cf,
+        whole=None if whole is None else ((whole[0][0] * xf, whole[0][1] * xf), (whole[1][0] * yf, whole[1][1] * yf)))
 
 
 def draw_scatter(fig: Any, ax: Any, model: ScatterModel, d: Any, spec: Dict[str, Any], style: Style,

@@ -35,7 +35,8 @@ def test_iq_starts_with_two_clouds_at_one_power(viewer, new_page):
     expect(view.get_by_label("Horizontal axis")).to_have_count(0)
     assert meta["equal"] and meta["note"] == "every point shown"
     after = frames(page, lambda: slider.press("ArrowRight"))
-    assert after["full"] != meta["full"]
+    assert after["full"] == meta["full"]                           # the same limits at every step (16.49)
+    assert after["plot"] == meta["plot"]
 
 
 def test_colour_by_none(viewer, new_page):
@@ -109,7 +110,7 @@ def test_zooming_counts_the_view(viewer, new_page):
     def zoom():
         page.mouse.move(box["x"] + left + width * 0.05, box["y"] + top + height * 0.05)
         page.mouse.down()
-        page.mouse.move(box["x"] + left + width * 0.4, box["y"] + top + height * 0.95, steps=4)
+        page.mouse.move(box["x"] + left + width * 0.4, box["y"] + top + height * 0.4, steps=4)   # (equal axes: a square-ish box)
         page.mouse.up()
 
     after = frames(page, zoom)
