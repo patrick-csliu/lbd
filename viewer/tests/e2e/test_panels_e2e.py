@@ -299,14 +299,15 @@ def test_a_map_and_a_curve_share_the_cursor_x(values_files, new_page):
     assert xs[0] == pytest.approx(xs[1], rel=1e-3)
 
 
-def test_two_units_in_one_panel_and_a_third_refused(values_files, new_page):
+def test_two_units_in_one_panel_and_a_third_shown_instead(values_files, new_page):
     page = new_page("Explore")
     per_panel(page, lambda: row(page, "6 rabi.lbd").dblclick(), panels=4)
     values = shown(page).locator(".controls fieldset").filter(has_text="Values")
     per_panel(page, lambda: values.get_by_label("Population").click())        # panel 1: I (V) + population (no unit)
     expect(values.get_by_label("Population")).to_be_checked()               # once the server drew it
     expect(shown(page).locator(".panel-title .panel-name").nth(0)).to_have_text("Digitizer I (V), Population")
-    expect(values.get_by_label("Phase")).to_be_disabled()                     # a third unit
+    expect(values.get_by_label("Phase")).to_be_enabled()                      # a third unit: never locked (16.46) ...
+    expect(values.locator("label.check", has_text="Phase")).to_have_attribute("title", re.compile("A third unit: clicking shows it here instead"))
     expect(values.get_by_label("Digitizer Q")).to_be_enabled()                # V again: the left axis
     # a cursor on the right-hand curve reads its own number (the server tests check the values)
     box = shown(page).locator(".panel .explore-overlay").nth(0).bounding_box()

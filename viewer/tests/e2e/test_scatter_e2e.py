@@ -34,7 +34,13 @@ def test_iq_starts_with_two_clouds_at_one_power(viewer, new_page):
     expect(slider).to_have_count(1)
     expect(view.get_by_label("Horizontal axis")).to_have_count(0)
     assert meta["equal"] and meta["note"] == "every point shown"
-    after = frames(page, lambda: slider.press("ArrowRight"))
+    import json
+
+    got = []
+    page.on("response", lambda r: got.append(json.loads(r.headers["x-lbd-frame"]))
+            if r.url.endswith("/render") and r.ok and "x-lbd-frame" in r.headers else None)
+    frames(page, lambda: slider.press("ArrowRight"))
+    after = [m for m in got if m.get("equal")][-1]                 # this scatter's picture (the slider moves every panel)
     assert after["full"] == meta["full"]                           # the same limits at every step (16.49)
     assert after["plot"] == meta["plot"]
 
