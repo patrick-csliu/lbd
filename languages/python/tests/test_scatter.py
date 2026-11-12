@@ -254,3 +254,18 @@ def test_the_style_sizes_the_sides():
 def test_a_legend_goes_under_the_sides():
     fig, ax = figure(shots(), values="Q", x="I", color="state", options={"sides": True})
     assert ax.get_legend() is None and len(fig.legends) == 1
+
+
+def test_legend_dots_are_readable_whatever_the_points_size():
+    """16.11: tiny points (2.5 pt) still get legend dots of at least 6 pt, so their colour shows;
+    the same with the strips beside the plot."""
+    from lbd.plot.render import LEGEND_DOT_PT
+
+    import lbd.plot as lp
+
+    style = {"figure": {"axes": {"scatter": {"size_pt": 2.5}}}}
+    for options in ({}, {"sides": True}):
+        fig = lp.plot(shots(), "scatter", "IQ", complex="iq", color="state", style=style, options=options)
+        legend = fig.axes[0].get_legend() or fig.legends[0]
+        sizes = [float(np.sqrt(h.get_sizes()[0])) for h in legend.legend_handles]
+        assert len(sizes) == 2 and min(sizes) >= LEGEND_DOT_PT

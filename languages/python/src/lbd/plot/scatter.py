@@ -21,7 +21,7 @@ from . import kinds
 from .histogram import BLOCK, _parts, auto_bins, count_bins
 from .points import Points, _fixed
 from .points import points_of as read_points
-from .render import look_options
+from .render import look_options, readable_dots
 from .render import (SCATTER_RASTER_ABOVE, RenderError, RenderWarning, _annotate, _auto_prefix, _axis_quantity, _check_log,
                      _colorbar, _fits_curve, _is_point, _legend, _legend_label, _norm, _slices, _swept, _unit_scale,
                      apply_complex, find_quantity, flat, whole_numbers, whole_range)
@@ -463,7 +463,7 @@ def _make_room(fig: Any, ax: Any) -> None:
         handles, labels = ax.get_legend_handles_labels()
         legend.remove()
         short = [label.split(" = ", 1)[-1] for label in labels]      # (one row, under a narrow figure)
-        fig.legend(handles, short, loc="outside lower center", ncols=len(labels), markerscale=2)
+        readable_dots(fig.legend(handles, short, loc="outside lower center", ncols=len(labels)))
     for other in fig.axes:
         info = getattr(other, "_colorbar_info", None)
         if info:

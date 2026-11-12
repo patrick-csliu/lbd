@@ -172,6 +172,11 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
   the complex ones, Subtract the mean, Normalize, Derivative and Smooth; Scatter now Rotation,
   Auto-rotate (on the I/Q plane) and Subtract the mean. An operation a type doesn't offer, from a
   view made on another type, is left out with a note instead of an error.
+- **A scatter plot too large to hold can be saved as CSV** (Explore): its points are read from
+  the file part by part while the file is written, with progress and Cancel. Before, it was
+  refused.
+- **Legend dots are big enough to see their colour**, whatever the size of the plotted points (a
+  scatter plot of small points, the strips beside it, curves with points): at least 6 pt.
 - **Look options are under Display.** Data says what is plotted, Display how it looks: a
   histogram's Bins, Draw and Vertical axis; Scatter's Equal axes and Histograms beside the plot;
   a map's Cells; a matrix's Numbers, Significant digits, Row sums and Colour range; Bars' Bars and

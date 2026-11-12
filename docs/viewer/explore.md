@@ -711,7 +711,11 @@ Save dialog, starting in the data file's folder with a name filled in; it asks b
 a file. Every save writes one file. A large file is written part by part, with a progress bar and
 **Cancel saving**; a file being replaced stays as it was until the new one is complete. On a
 computer without a Save dialog, the name is typed in the dialog and the file goes next to the
-data file.
+data file. A disk that fills up while saving stops it, says so, and leaves no part file behind.
+
+A scatter plot with more points than this computer can hold is saved too: its points are read
+from the file a block at a time while the CSV is written, one point per row (x, the value, the
+colour; without the stored indices, which there is no room to hold).
 
 **The whole file** saves every point of every slider position as stored, like converting the
 file to CSV, also from the panel-less **Save the whole file as CSV…** in the file's **⋯** menu, and

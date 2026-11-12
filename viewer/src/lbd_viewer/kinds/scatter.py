@@ -392,9 +392,10 @@ class Scatter(Interaction):
 
         s = self.s
         m = s.model
-        if self._big():
-            raise ExploreError("these points are too many to list here: read the file in a script with lbd.open, or "
-                               "make some axes sliders so that fewer are shown")
+        if self._big():                                   # read from the file part by part when written (16.9)
+            if self.s.ops_result is not None and self.s.ops_result.applied:
+                raise ExploreError("these points are too many to hold, so the file's are saved: turn the operations off")
+            return PointsTable.of(s, view)
         x = m.series[0][0] / m.xf
         same = [p for p in m.series if p[0].size == x.size]
         columns: List[Tuple[tables.Column, tables.Rows]] = []
@@ -479,3 +480,71 @@ def less_mean(m: sc.ScatterModel) -> sc.ScatterModel:
     ys = np.concatenate([y for _, y, _ in m.series]) if m.series else np.zeros(0)
     mx, my = (float(np.nanmean(v)) if v.size else 0.0 for v in (xs, ys))
     return replace(m, series=[(x - mx, y - my, label) for x, y, label in m.series], whole=None)
+
+
+class PointsTable(tables.Table):
+    """A scatter plot's points too many to hold, as a table (16.9): nothing is read until it is
+    written, then the file is read block by block (`sc.iter_points`), so Save as CSV works for
+    any size. One row per point: x, the value (and which value, when several), the colour; in
+    the stored units, as the plot's other tables. The points' stored indices aren't written:
+    there is no room to hold them. `x` is a list, so the table never joins another panel's."""
+
+    @classmethod
+    def of(cls, s: Any, view: Optional[Dict[str, Any]]) -> "PointsTable":
+        m = s.model
+        several = len(s.spec["values"]) > 1
+        cols = [(tables.Column("value_name", "Which value"), tables.Rows(np.zeros((1, 0))))] if several else []
+        cols.append((tables.Column("y", m.y_text[0], m.y_text[1]), tables.Rows(np.zeros((1, 0)))))
+        if s.spec.get("color") not in (None, "none"):
+            cols.append((tables.Column("colour", m.c_text[0], m.c_text[1]), tables.Rows(np.zeros((1, 0)))))
+        t = cls(x=[], x_col=tables.Column("x", m.x_text[0], m.x_text[1]), values=cols)
+        t.session, t.view, t.several = s, view, several
+        t.colour = any(c.name == "colour" for c, _ in cols)
+        t.comments = tables._comments(s.data, s.spec, "shown", False) + [
+            "every point, read from the file part by part (too many to hold); no stored indices"]
+        return t
+
+    def _blocks(self):
+        """The rows, a block at a time: an array with one row per point (value index first)."""
+        s, m = self.session, self.session.model
+        lim = None
+        if self.view is not None:
+            (xlo, xhi), (ylo, yhi) = sorted(self.view["xlim"]), sorted(self.view["ylim"])
+            lim = (xlo / m.xf, xhi / m.xf, ylo / m.yf, yhi / m.yf)
+        for k, x, y, step, number in sc.iter_points(s.data, s.spec, block_size()):
+            keep = np.ones(x.size, dtype=bool) if lim is None else (x >= lim[0]) & (x <= lim[1]) & (y >= lim[2]) & (y <= lim[3])
+            cols = ([np.full(int(keep.sum()), float(k))] if self.several else []) + [x[keep], y[keep]]
+            if self.colour:
+                c = number if number is not None else (step if step is not None else np.full(x.size, np.nan))
+                cols.append(np.asarray(c, dtype=float)[keep])
+            yield np.column_stack(cols) if cols[0].size else np.zeros((0, len(cols)))
+
+    def _total(self) -> int:
+        return _points_in(self.session)
+
+    def check_matrix(self) -> None:
+        raise ValueError("a scatter plot's points are saved one per row; a table (matrix) needs a grid")
+
+    def estimate(self, layout: str = "rows") -> Dict[str, int]:
+        if layout == "matrix":
+            self.check_matrix()
+        sample = self._sample_text(layout)
+        per = (len(sample) / max(sample.count(",") + sample.count("\n"), 1)) if sample else 8
+        rows, cols = self._total(), len(self.columns())
+        header = sum(len(c) + 3 for c in self.header_lines(layout))
+        return {"bytes": int(header + rows * cols * per), "rows": int(rows), "columns": int(cols)}
+
+    def _sample_text(self, layout: str) -> str:
+        for block in self._blocks():
+            if len(block):
+                return tables._lines(block[:400])
+        return ""
+
+    def _write_rows(self, f, progress) -> None:
+        total, done = max(self._total(), 1), 0
+        for block in self._blocks():
+            if len(block):
+                f.write(tables._lines(block) + "\n")
+            done += len(block)
+            if progress is not None:
+                progress(min(done / total, 1.0))

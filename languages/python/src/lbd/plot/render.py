@@ -512,11 +512,26 @@ def _annotate(ax, d, spec, auto_axes: List[Tuple[str, str]]) -> None:
             raise RenderError(f"annotations[{i}] ({name}): {type(e).__name__}: {e}{versions}") from e
 
 
+LEGEND_DOT_PT = 6.0        # a legend's dots are at least this wide, whatever the plotted points' size (16.11)
+
+
+def readable_dots(legend: Any) -> None:
+    """A legend's markers at least LEGEND_DOT_PT wide, so that their colour can be seen: they copy
+    the plotted points, which may be tiny (a scatter of many points). Bigger ones stay."""
+    if legend is None:
+        return
+    for h in legend.legend_handles:
+        if hasattr(h, "get_sizes") and len(h.get_sizes()):        # a scatter's points (area in pt²)
+            h.set_sizes(np.maximum(h.get_sizes(), LEGEND_DOT_PT ** 2))
+        elif hasattr(h, "get_marker") and h.get_marker() not in (None, "None", "", " "):
+            h.set_markersize(max(h.get_markersize(), LEGEND_DOT_PT))
+
+
 def _legend(ax, a) -> None:
     """The legend, when there is more than one labelled entry (curves, and annotations with a label)."""
     handles, _ = ax.get_legend_handles_labels()
     if a.legend.visible and 1 < len(handles) <= a.legend.max_entries:
-        ax.legend()
+        readable_dots(ax.legend())
 
 
 def pick_dict(file_spec: Dict[str, Any], key: str, check: Callable[[Any], Any], d) -> Dict[str, Any]:

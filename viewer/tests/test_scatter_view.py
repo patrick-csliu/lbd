@@ -315,8 +315,48 @@ def test_cursor_says_why(tight):
     assert "Cursors can't choose a point here" in meta["hidden"][0]
     got = reading.cursors(s, [{"x": 0.0, "y": 0.0}], "cross", {"xlim": meta["xlim"], "ylim": meta["ylim"]}, (300, 200))
     assert got["cursors"] == [None]
-    with pytest.raises(ExploreError, match="too many to list"):
-        export.session_table(s)
+
+
+def test_a_big_scatter_is_saved_as_csv_part_by_part(tight, tmp_path, monkeypatch):
+    """16.9: points too many to hold are written from the file a block at a time: every point,
+    the right numbers, never the whole value read at once."""
+    s = session(tight, TIGHT)
+    done(s)
+    t = export.session_table(s)
+    assert t.estimate()["rows"] == 40_000
+    with pytest.raises(ValueError, match="one per row"):
+        t.estimate("matrix")
+    reads = []
+    real = sc.iter_points
+    monkeypatch.setattr(sc, "iter_points", lambda *a, **k: (reads.append(p[1].size) or p for p in real(*a, **k)))
+    out = t.to_csv(tmp_path / "big.csv")
+    rows = np.loadtxt(out, delimiter=",")
+    d = lbd.load(tight)
+    assert rows.shape == (40_000, 3) and max(reads) < 40_000              # x, y, colour; part by part
+    np.testing.assert_allclose(np.sort(rows[:, 0]), np.sort(d.values["x"].data.ravel()))
+    np.testing.assert_allclose(np.sort(rows[:, 1]), np.sort(d.values["y"].data.ravel()))
+
+
+def test_a_big_scatter_csv_stopped_or_without_room_leaves_no_part(tight, tmp_path, monkeypatch):
+    import errno
+
+    s = session(tight, TIGHT)
+    done(s)
+    t = export.session_table(s)
+
+    def stop(f):
+        raise export.Cancelled()
+    with pytest.raises(export.Cancelled):
+        t.to_csv(tmp_path / "big.csv", progress=stop)
+    assert not list(tmp_path.glob("big.csv*"))
+
+    def full(f):
+        raise OSError(errno.ENOSPC, "No space left on device")
+    jobs = export.Exports()
+    monkeypatch.setattr(kind.PointsTable, "_write_rows", lambda self, f, progress: full(f))
+    info = jobs.wait(jobs.start([(t, tmp_path / "full.csv")], "rows", "t"))
+    assert info["state"] == "failed" and "No space left" in info["error"]
+    assert not list(tmp_path.glob("full.csv*"))
 
 
 def test_a_slice_of_a_big_file_shows_markers(tight, monkeypatch):
