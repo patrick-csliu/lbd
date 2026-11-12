@@ -77,6 +77,16 @@ once, and every figure follows; the data is never touched. More in
 
 ### 1. Install the viewer
 
+One command per system installs (or upgrades) the latest release. It downloads the release's
+installer, checks its SHA-256 checksum against the release's `SHA256SUMS`, and runs it:
+
+| System | Command |
+|---|---|
+| Windows (PowerShell) | `irm https://github.com/patrick-csliu/lbd/releases/latest/download/install.ps1 \| iex` |
+| Linux | `curl -fsSL https://github.com/patrick-csliu/lbd/releases/latest/download/install.sh \| sh` |
+| macOS | `curl -fsSL https://github.com/patrick-csliu/lbd/releases/latest/download/install-macos.sh \| sh` |
+
+Or download the installer from the [release page](https://github.com/patrick-csliu/lbd/releases/latest):
 - **Windows:** run `LBD-Viewer-<version>-windows-x64-setup.exe`. No admin rights are needed.
 - **Linux:** unpack the archive and run `./install.sh`.
 - **macOS:** open the disk image and drag LBD Viewer to Applications; approve it once in

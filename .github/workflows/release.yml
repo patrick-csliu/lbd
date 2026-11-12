@@ -381,9 +381,28 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       VERSION: ${{ needs.check.outputs.version }}
     steps:
+      - uses: actions/checkout@v7
+        with:
+          path: source         # the install scripts (packaging/install*.ps1|sh)
       - uses: actions/download-artifact@v8
         with:
           path: artifacts      # one folder per artifact: notes, mltbx, windows, linux
+
+      # Every file of the release, with the install scripts, and SHA256SUMS of them all (the
+      # install scripts check the download against it; plan 16.27).
+      - name: Install scripts and SHA256SUMS
+        run: |
+          mkdir -p release
+          cp artifacts/windows/*.exe artifacts/linux/*.tar.gz artifacts/macos-*/*.dmg \
+             artifacts/mltbx/LBD.mltbx artifacts/wheels/*.whl release/
+          cp source/packaging/install.ps1 source/packaging/install.sh source/packaging/install-macos.sh release/
+          (cd release && sha256sum -- * > ../SHA256SUMS) && mv SHA256SUMS release/
+          cat release/SHA256SUMS
+          # each system's install script finds its file in SHA256SUMS
+          grep -Eq ' LBD-Viewer-[^ ]+-windows-x64-setup\.exe$' release/SHA256SUMS
+          grep -Eq ' lbd-viewer-[^ ]+-linux-x86_64\.tar\.gz$' release/SHA256SUMS
+          grep -Eq ' LBD-Viewer-[^ ]+-macos-arm64\.dmg$' release/SHA256SUMS
+          grep -Eq ' LBD-Viewer-[^ ]+-macos-x86_64\.dmg$' release/SHA256SUMS
 
       - name: Create the draft (replaces an earlier draft of this version)
         run: |
@@ -400,6 +419,5 @@ jobs:
           fi
           gh release create "$tag" --repo "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" \
             --title "$title" --notes-file artifacts/notes/notes.md \
-            artifacts/windows/*.exe artifacts/linux/*.tar.gz artifacts/macos-*/*.dmg \
-            artifacts/mltbx/LBD.mltbx artifacts/wheels/*.whl
+            release/*
           echo "Draft created: https://github.com/$GITHUB_REPOSITORY/releases (check it, then Publish)" >> "$GITHUB_STEP_SUMMARY"

@@ -147,6 +147,13 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
   it again but showed an error on every panel. Now the view opens again quietly ("Drawing…"), the
   request is done on it, and several requests share one reopening.
 
+- **Install with one command**, on every system: `install.ps1` (Windows, PowerShell),
+  `install.sh` (Linux) and `install-macos.sh` (macOS) come with each release. Each downloads the
+  latest release's installer, checks its SHA-256 checksum against the release's new
+  `SHA256SUMS` file, and runs it (on macOS: copies the app to Applications). The commands are
+  in the README and *Install*. The Linux package's `install.sh` takes `--desktop`, `--no-desktop`,
+  `--menu` and `--no-menu` to answer its shortcut questions.
+
 - **The installers stop a running viewer gently** before replacing it: `lbd-view --stop` asks
   the viewer to stop (labels still waiting are written into their files first) and waits up to
   10 s; only then is it stopped by force. The Linux install keeps `uninstall.sh` next to the

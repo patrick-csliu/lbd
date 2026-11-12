@@ -221,7 +221,7 @@ def linux_package(folder, version):
 
 def linux_home(tmp_path):
     home = tmp_path / "home"
-    (home / "Desktop").mkdir(parents=True)
+    (home / "Desktop").mkdir(parents=True, exist_ok=True)
     env = {"HOME": str(home), "XDG_DATA_HOME": str(home / "data"), "XDG_CONFIG_HOME": str(home / "config"),
            "PATH": __import__("os").environ["PATH"]}
     return home, env
@@ -362,7 +362,7 @@ def test_shell_scripts_have_unix_line_endings():
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[2]
-    scripts = sorted(root.glob("packaging/linux/*.sh")) + sorted(root.glob("scripts/*.sh"))
+    scripts = sorted(root.glob("packaging/**/*.sh")) + sorted(root.glob("scripts/*.sh"))
     assert scripts
     crlf = [str(p.relative_to(root)) for p in scripts if b"\r\n" in p.read_bytes()]
     assert not crlf, f"convert to LF line endings: {crlf}"
@@ -388,3 +388,171 @@ def test_the_upgrade_test_script_loads(load_module):
     up = load_module("scripts/upgrade_test.py")
     with pytest.raises(SystemExit):
         up.main(["--help"])
+
+
+# ---- install scripts from the web (plan 16.27) -------------------------------------------------
+
+
+def fake_release(folder, files):
+    """A local folder that looks like a release: the files and their SHA256SUMS."""
+    import hashlib
+
+    folder.mkdir(parents=True, exist_ok=True)
+    lines = []
+    for name, content in files.items():
+        (folder / name).write_bytes(content)
+        lines.append(f"{hashlib.sha256(content).hexdigest()}  {name}\n")
+    (folder / "SHA256SUMS").write_text("".join(lines), newline="\n")
+    return folder
+
+
+@pytest.mark.parametrize("script", ["install.sh", "install-macos.sh"])
+def test_web_install_scripts_parse(script):
+    import subprocess
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[2] / "packaging" / script
+    r = subprocess.run([_posix_shell(), "-n", str(path)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+
+
+def _powershell():
+    import shutil
+
+    ps = shutil.which("powershell") or shutil.which("pwsh")
+    if not ps:
+        pytest.skip("no PowerShell here")
+    return ps
+
+
+def test_install_ps1_parses():
+    import subprocess
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[2] / "packaging" / "install.ps1"
+    command = (f"$e = $null; [System.Management.Automation.Language.Parser]::ParseFile('{path}', [ref]$null, [ref]$e) "
+               "| Out-Null; if ($e) { $e | ForEach-Object { $_.ToString() }; exit 1 }")
+    r = subprocess.run([_powershell(), "-NoProfile", "-NonInteractive", "-Command", command],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert all(ord(c) < 128 for c in path.read_text(encoding="utf-8")), "Windows PowerShell 5.1 reads it as ANSI"
+
+
+def _web_install(tmp_path, script, release, check_only=True, *args):
+    import os
+    import subprocess
+    from pathlib import Path
+
+    home, env = linux_home(tmp_path)
+    tmp = tmp_path / "tmp"
+    tmp.mkdir(exist_ok=True)
+    env = {**env, "LBD_RELEASE_BASE": str(release), "TMPDIR": str(tmp),
+           "LBD_INSTALL_CHECK_ONLY": "1" if check_only else ""}
+    if os.environ.get("SYSTEMROOT"):
+        env["SYSTEMROOT"] = os.environ["SYSTEMROOT"]
+    path = Path(__file__).resolve().parents[2] / "packaging" / script
+    r = subprocess.run([_posix_shell(), str(path), *args], env=env, stdin=subprocess.DEVNULL,
+                       capture_output=True, text=True)
+    assert not list(tmp.iterdir()), "the download was left behind"
+    return r, home
+
+
+def _arch():
+    import platform
+
+    machine = platform.machine().lower()
+    return {"amd64": "x86_64", "x86_64": "x86_64", "arm64": "arm64", "aarch64": "aarch64"}.get(machine, machine)
+
+
+def test_web_install_sh_checks_the_checksum(tmp_path):
+    _posix_shell()
+    name = f"lbd-viewer-1.3.0-linux-{_arch()}.tar.gz"
+    release = fake_release(tmp_path / "release", {name: b"the package", "install.ps1": b"x"})
+    r, _ = _web_install(tmp_path, "install.sh", release)
+    assert r.returncode == 0 and "ok: " in r.stdout and "not installing" in r.stdout, r.stdout + r.stderr
+
+    (release / name).write_bytes(b"the package, changed")          # not the published file
+    r, _ = _web_install(tmp_path, "install.sh", release)
+    assert r.returncode == 1 and "doesn't match SHA256SUMS" in r.stderr, r.stdout + r.stderr
+
+
+def test_web_install_sh_says_why_it_fails(tmp_path):
+    _posix_shell()
+    r, _ = _web_install(tmp_path, "install.sh", tmp_path / "nothing-here")
+    assert r.returncode == 1 and "couldn't download SHA256SUMS" in r.stderr
+    release = fake_release(tmp_path / "release", {"lbd-viewer-1.3.0-linux-sparc.tar.gz": b"x"})
+    r, _ = _web_install(tmp_path, "install.sh", release)
+    assert r.returncode == 1 and "no Linux package for" in r.stderr
+    r, _ = _web_install(tmp_path, "install.sh", release, True, "--colour")
+    assert r.returncode == 1 and "unknown option --colour" in r.stderr
+
+
+def test_web_install_sh_installs_with_the_options(tmp_path):
+    """The whole way: download, check, unpack, and the package's install.sh with --desktop."""
+    import io
+    import tarfile
+
+    _posix_shell()
+    base = f"lbd-viewer-1.3.0-linux-{_arch()}"
+    pkg = linux_package(tmp_path / "build" / base, "1.3.0")
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as t:
+        t.add(pkg, arcname=base)
+    release = fake_release(tmp_path / "release", {f"{base}.tar.gz": buf.getvalue()})
+    r, home = _web_install(tmp_path, "install.sh", release, False, "--desktop", "--no-fonts")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert (home / "data" / "lbd-viewer" / "VERSION").read_text().strip() == "1.3.0"
+    assert (home / "Desktop" / "lbd-viewer.desktop").is_file()        # --desktop reached install.sh
+
+
+def test_install_macos_sh_checks_the_checksum(tmp_path):
+    _posix_shell()
+    arch = {"x86_64": "x86_64", "arm64": "arm64"}.get(_arch())
+    if not arch:
+        pytest.skip("the macOS script knows only arm64 and x86_64")
+    name = f"LBD-Viewer-1.3.0-macos-{arch}.dmg"
+    release = fake_release(tmp_path / "release", {name: b"a disk image"})
+    r, _ = _web_install(tmp_path, "install-macos.sh", release)
+    assert r.returncode == 0 and "not installing" in r.stdout, r.stdout + r.stderr
+    (release / name).write_bytes(b"another disk image")
+    r, _ = _web_install(tmp_path, "install-macos.sh", release)
+    assert r.returncode == 1 and "doesn't match SHA256SUMS" in r.stderr
+
+
+def test_install_ps1_checks_the_checksum(tmp_path):
+    import os
+    import subprocess
+    from pathlib import Path
+
+    ps = _powershell()
+    name = "LBD-Viewer-1.3.0-windows-x64-setup.exe"
+    release = fake_release(tmp_path / "release", {name: b"a setup program", "install.sh": b"x"})
+    script = Path(__file__).resolve().parents[2] / "packaging" / "install.ps1"
+    tmp = tmp_path / "tmp"
+    tmp.mkdir()
+    env = {**os.environ, "LBD_RELEASE_BASE": str(release), "LBD_INSTALL_CHECK_ONLY": "1", "TEMP": str(tmp),
+           "TMP": str(tmp), "TMPDIR": str(tmp)}
+
+    def run():
+        return subprocess.run([ps, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(script)],
+                              env=env, capture_output=True, text=True)
+
+    r = run()
+    assert r.returncode == 0 and "not installing" in r.stdout, r.stdout + r.stderr
+    (release / name).write_bytes(b"a changed setup program")
+    r = run()
+    assert r.returncode == 1 and "doesn't match SHA256SUMS" in r.stdout, r.stdout + r.stderr
+    assert not list(tmp.iterdir()), "the download was left behind"
+    env["LBD_RELEASE_BASE"] = str(tmp_path / "nothing-here")
+    r = run()
+    assert r.returncode == 1 and "couldn't download SHA256SUMS" in r.stdout
+
+
+def test_the_release_publishes_the_install_scripts_and_checksums():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    wf = (root / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    assert "sha256sum -- * > ../SHA256SUMS" in wf
+    assert "source/packaging/install.ps1 source/packaging/install.sh source/packaging/install-macos.sh release/" in wf
+    assert "release/*" in wf.split("gh release create", 1)[1]

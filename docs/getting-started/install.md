@@ -9,6 +9,62 @@ There are two separate parts:
    modules for **Python, MATLAB and Julia** ([below](#language-modules)); more can be added
    ([Adding a language](../developers/adding-a-language.md)).
 
+## LBD Viewer: one command
+
+The quickest way to install or upgrade the viewer is one command, which gets the latest release
+from GitHub:
+
+=== "Windows"
+
+    In PowerShell (no administrator rights needed):
+
+    ```powershell
+    irm https://github.com/patrick-csliu/lbd/releases/latest/download/install.ps1 | iex
+    ```
+
+    It downloads the setup program, checks it, and runs it silently. The shortcuts are those of
+    the installer: the Start menu yes, the desktop no, or your earlier choice when upgrading.
+    To choose, run it with options:
+
+    ```powershell
+    & ([scriptblock]::Create((irm https://github.com/patrick-csliu/lbd/releases/latest/download/install.ps1))) -DesktopShortcut
+    ```
+
+    `-DesktopShortcut` adds a desktop shortcut, `-NoStartMenu` leaves out the Start menu one.
+
+=== "Linux"
+
+    ```bash
+    curl -fsSL https://github.com/patrick-csliu/lbd/releases/latest/download/install.sh | sh
+    ```
+
+    It downloads the package for this computer, checks it, unpacks it and runs its `install.sh`
+    (below), which takes the default answers. To choose, add options after `sh -s --`:
+    `--desktop` (a desktop shortcut), `--no-menu` (not in the applications menu), `--no-fonts`
+    (skip the Arial check). For example `curl -fsSL … | sh -s -- --desktop`.
+
+=== "macOS"
+
+    In Terminal:
+
+    ```bash
+    curl -fsSL https://github.com/patrick-csliu/lbd/releases/latest/download/install-macos.sh | sh
+    ```
+
+    It downloads the disk image for this Mac (Apple Silicon or Intel), checks it, and copies
+    LBD Viewer to Applications, replacing an older one (it refuses to replace a newer one). A
+    file downloaded this way usually isn't blocked by macOS the way a browser download is (step
+    3 below), but this isn't guaranteed.
+
+**What the scripts check.** Each release has a file `SHA256SUMS` with the SHA-256 checksum of
+every file in it. The script downloads it and the installer, and installs only if the
+installer's checksum matches; otherwise it stops, says so and deletes the download. This catches
+a damaged or changed download; it doesn't prove more than the release page itself does. Each
+script says what it is doing and, when it fails, why (no network, a checksum that doesn't match,
+no permission). Nothing is left half-installed: the download is deleted at the end, and the
+installer runs only when everything is in place. Some lab computers don't allow scripts; then
+use the installer from the release page, as below.
+
 ## LBD Viewer on Windows
 
 1. Run `LBD-Viewer-<version>-windows-x64-setup.exe`. No administrator rights are needed; it installs for
