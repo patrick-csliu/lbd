@@ -576,6 +576,13 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
   viewer's Help), and without `--build` a line says when Help is older than the docs. Its scratch
   folders are deleted when the viewer stops, and those of stopped runs at the next start; never
   one still running, a `--keep-settings` folder or a folder you named.
+- **Large files in the mock data.** `make_mock_data.py` (and `dev_viewer.py`'s new mock data)
+  also writes `Large/`: the four engine tests (`viewer/tests/mock_large.py`, about 214 MB, the
+  same numbers as the Labber logs): a curve of 1 000 000 points with a spike, a dip and a gap,
+  1000 traces × 10 000 points, a 4001 × 4001 map, and a small map with uneven x. `--small` leaves
+  them out. `Panels/` gets uneven grids (a map uneven on both axes, a map on a log-spaced axis, a
+  curve with uneven x), and `mock_live.py --variable` writes a variable sweep live.
+  *Developers → Mock data* says what to look for in each.
 - `scripts/test_all.py` runs the suites side by side (`--jobs`, default 4), the longest first:
   a whole run takes about as long as the browser tests instead of the sum of all. `--changed
   [REF]` runs only the suites the changed files can affect, `--only` names suites. Viewer and

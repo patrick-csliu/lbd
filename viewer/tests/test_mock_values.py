@@ -45,6 +45,22 @@ def test_the_files_for_the_plot_types(tmp_path):
     assert np.all(np.bincount(np.asarray(d.axes["x"].parent)) == 5)
 
 
+@pytest.mark.parametrize("small", [True, False])
+def test_the_uneven_grids(tmp_path, small):
+    paths = {p.name: p for p in mock_values.write_all(tmp_path, small=small)}
+    d = lbd.load(paths["20 uneven map.lbd"])
+    for axis in ("x", "y"):                                             # steps that grow on both axes
+        assert np.all(np.diff(np.diff(d.axes[axis].data)) > 0)
+    v = d.values["value"].data
+    assert v[2, 3] == 3 + 10 * 2 and d.plot["kind"] == "heatmap"     # a cell's value says where it is
+    d = lbd.load(paths["21 log axis map.lbd"])
+    assert np.allclose(np.diff(np.log10(d.axes["f"].data)), np.diff(np.log10(d.axes["f"].data))[0])
+    assert d.plot["x_scale"] == "log"
+    x = lbd.load(paths["22 uneven curve.lbd"]).axes["x"].data
+    steps = np.diff(x)
+    assert np.all(steps > 0) and steps.max() > 10 * steps.min()        # dense near the peak, sparse away
+
+
 def test_the_old_record_is_todays_single_view():
     rec = mock_values.old_record()
     assert "version" not in rec and rec["spec"]["values"] == ["S21"]
