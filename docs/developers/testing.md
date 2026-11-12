@@ -99,6 +99,7 @@ To run single suites:
 | Julia | `cd languages/julia && julia --project=. -e 'using Pkg; Pkg.test()'` |
 | Cross-language | `uv run python tests/crosslang/run_all.py [--only python julia] [--keep DIR]` |
 | Web UI types | `cd viewer/web && npm run typecheck` |
+| Web UI logic (plain Node, `viewer/web/tests`) | `cd viewer/web && npm test` |
 | Docs build | `uv run mkdocs build --strict` |
 | Doc examples | `uv run python scripts/check_doc_examples.py [--lang python matlab julia] [-v]` |
 
