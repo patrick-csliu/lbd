@@ -354,8 +354,8 @@ def test_the_page_has_the_names_for_equations(iq):
 
 def test_an_iq_histogram_operation_is_refused(iq):
     s = session(iq, {**ONE, "values": ["IQ"]})
-    with pytest.raises(ExploreError, match="I/Q histogram makes a map"):
-        s.apply({"ops": [{"op": "iq_histogram", "bins": 20}]})
+    s.apply({"ops": [{"op": "iq_histogram", "bins": 20}]})             # not offered here (16.50)
+    assert s.ops_info()["notes"] == ["left out: I/Q histogram (not offered on Histogram)"]
     s.apply({"ops": [{"op": "iq_histogram", "bins": 20, "on": False}]})
 
 

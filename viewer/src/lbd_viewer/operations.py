@@ -311,6 +311,47 @@ COMPLEX_OPS: Dict[str, Dict[str, float]] = {"delay": {"tau": 0.0}, "rotation": {
                                             "auto_rotate": {}, "iq_histogram": {"bins": 100}}
 
 
+# What each operation is called on the page, for notes.
+TITLES = {"delay": "Electrical delay", "rotation": "Rotation", "auto_rotate": "Auto-rotate",
+          "iq_histogram": "I/Q histogram", "subtract_mean": "Subtract the mean", "normalize": "Normalize",
+          "derivative": "Derivative", "smooth": "Smooth", "subtract_first": "Subtract the first trace",
+          "subtract_previous": "Subtract the previous trace", "average": "Average of the traces",
+          "std": "Std of the traces", "fft": "FFT", "histogram": "Histogram"}
+
+# Which operations each plot type offers (16.50), by its Explore name (kinds.Interaction.name);
+# the page shows exactly these. A type not listed offers none.
+EVERY = list(COMPLEX_OPS) + list(OPS)
+OFFERED: Dict[str, List[str]] = {
+    "curve": EVERY,
+    "heatmap": EVERY,
+    "groupmap": [],                                     # a variable sweep's map
+    "matrix": ["subtract_mean", "normalize"],
+    "bars": ["subtract_mean", "normalize"],
+    "bars3d": ["subtract_mean", "normalize"],
+    # on the numbers, before they are counted
+    "histogram": ["delay", "rotation", "auto_rotate", "subtract_mean", "normalize", "derivative", "smooth"],
+    # on the points (16.8): rotation on the I/Q pair, the mean per axis
+    "scatter": ["rotation", "auto_rotate", "subtract_mean"],
+}
+KIND_TITLES = {"curve": "Curves", "heatmap": "Map", "groupmap": "a variable sweep's map", "matrix": "Matrix",
+               "bars": "Bars", "bars3d": "3D bars", "histogram": "Histogram", "scatter": "Scatter"}
+
+
+def offered_only(kind: str, ops: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], Dict[int, str]]:
+    """The operations with those this plot type doesn't offer turned off (a saved view made on
+    another type), and a note for each of them by its place: "left out: Smooth (not offered on
+    Bars)"."""
+    offered = OFFERED.get(kind, [])
+    out, left = [], {}
+    for i, op in enumerate(ops):
+        if op["op"] in offered:
+            out.append(op)
+        else:
+            out.append({**op, "on": False})
+            left[i] = f"left out: {TITLES.get(op['op'], op['op'])} (not offered on {KIND_TITLES.get(kind, kind)})"
+    return out, left
+
+
 def check(ops: Any) -> List[Dict[str, Any]]:
     """The list as sent by the page, checked: each {op, along?, on?, <parameters>}."""
     if ops is None:

@@ -166,6 +166,12 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
 - **Grid and Equal axes on Curves and Scatter** (Display, Explore and Figure; `options.grid`,
   `options.equal` in `lp.plot`). Grid starts as the style says and can be turned on or off per
   plot. With Sync x, a panel with Equal axes widens only its own view.
+- **Operations per plot type, and three on Scatter** (Explore). Each plot type lists only the
+  operations it offers: Curves and Map all; Matrix, Bars and 3D bars Subtract the mean and
+  Normalize (before: also Derivative, Smooth, Subtract the first and previous trace); Histogram
+  the complex ones, Subtract the mean, Normalize, Derivative and Smooth; Scatter now Rotation,
+  Auto-rotate (on the I/Q plane) and Subtract the mean. An operation a type doesn't offer, from a
+  view made on another type, is left out with a note instead of an error.
 - **Look options are under Display.** Data says what is plotted, Display how it looks: a
   histogram's Bins, Draw and Vertical axis; Scatter's Equal axes and Histograms beside the plot;
   a map's Cells; a matrix's Numbers, Significant digits, Row sums and Colour range; Bars' Bars and

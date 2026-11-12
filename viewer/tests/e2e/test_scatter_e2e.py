@@ -174,3 +174,15 @@ def test_histograms_beside_the_plot_on_the_figure_page(viewer, new_page):
     figure = page.locator("main:not([hidden]) .tab-body:not([hidden])")
     answer = rendered(page, lambda: figure.get_by_role("checkbox", name="Histograms beside the plot").click())
     assert answer["spec"]["options"]["sides"] is True
+
+
+def test_scatter_offers_its_three_operations(viewer, new_page):
+    """16.50 / 16.8: the page lists exactly what the server offers for Scatter."""
+    shots(viewer)
+    page = new_page("Explore")
+    view, _ = open_scatter(page)
+    view.get_by_role("button", name="+ Add operation ▾").click()
+    items = page.locator(".context-menu").get_by_role("menuitem")
+    expect(items).to_have_text(["Rotation", "Auto-rotate each trace", "Subtract the mean"])
+    frames(page, lambda: items.filter(has_text="Rotation").first.click())
+    expect(view.locator(".operations li")).to_have_count(1)

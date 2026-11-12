@@ -1433,11 +1433,11 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
 
       <Section name="processing" title="Processing" open={!!sections.processing} onToggle={setSection}
                badge={opsCount ? `${opsCount} on` : undefined}>
-      {kind === "scatter" ? <p className="muted small">Operations aren't available on a scatter plot yet.</p> : <Operations
+      {<Operations
         kind={kind}
         xLabel={label(along ?? r.x ?? "x")}
         tracesLabel={r.y ? label(r.y) : traceAxis && traceAxis !== "none" && values.length === 1 ? label(traceAxis) : null}
-        shapeOnly={row.shapeOps}
+        noEquations={row.shapeOps || kind === "scatter"}
         ops={settings.ops ?? []}
         on={settings.ops_on !== false}
         info={opsInfo}

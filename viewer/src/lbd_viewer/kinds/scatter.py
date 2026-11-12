@@ -196,6 +196,62 @@ class Scatter(Interaction):
     def _points(self) -> int:
         return sum(x.size for x, _, _ in self.s.model.series)
 
+    # -- operations on the points (16.8): Rotation and Auto-rotate turn the I/Q pair, Subtract the
+    # mean moves each axis by its mean; the strips beside follow the changed points
+
+    operations = "points"
+    TURNS = ("rotation", "auto_rotate")
+
+    def _why_not(self, op: Dict[str, Any]) -> Optional[str]:
+        if self._big():
+            return "not applied: these points are too many to hold, so they can't be changed (show fewer)"
+        if op["op"] in self.TURNS and self.s.spec.get("complex") != "iq":
+            return "not applied: rotation turns the I/Q plane (Complex values: I/Q plane)"
+        return None
+
+    def apply_ops(self, ops: List[Dict[str, Any]], eqs: Dict[str, str]) -> bool:
+        """Run the operations on the points; True when the figure was set up again."""
+        from .. import operations as ops_mod
+        from ..explore import ExploreError
+
+        s = self.s
+        if eqs:
+            raise ExploreError("Equations aren't available on a scatter plot")
+        key = json.dumps(ops)
+        if key == s.ops_key:
+            return False
+        s.ops_key, s.ops_list = None, ops
+        model, notes, applied = s.raw_model, [], 0
+        for op in ops:
+            if not op["on"]:
+                notes.append("off")
+                continue
+            why = self._why_not(op)
+            if why:
+                notes.append(why)
+                continue
+            model = turned(model, op) if op["op"] in self.TURNS else less_mean(model)
+            notes.append(None)
+            applied += 1
+        s.ops_result, s.ops_shown = ops_mod.Result(None, notes, applied), None
+        s.ops_key = key
+        if model is s.model:
+            return False
+        s.model = model
+        s._build()
+        return True
+
+    def calculate(self, what: str, index: int) -> Dict[str, Any]:
+        """Rotation's Calculate: the angle that lays the shown points' spread onto the real axis."""
+        from .. import operations as ops_mod
+        from ..explore import ExploreError
+
+        m = self.s.raw_model
+        if what != "rotation" or self.s.spec.get("complex") != "iq" or self._big():
+            raise ExploreError("Calculate works on the I/Q plane's points here: type the angle instead")
+        z = np.concatenate([x / m.xf + 1j * y / m.yf for x, y, _ in m.series])
+        return {"value": -float(np.degrees(ops_mod._principal_angle(z))), "unit": "°"}
+
     def setup(self) -> None:
         s = self.s
         spec = {**s.spec, "options": {**(s.spec.get("options") or {}), "sides": False}}    # (here: the strips)
@@ -395,3 +451,31 @@ class Scatter(Interaction):
 
 
 INTERACTION = Scatter
+
+
+def turned(m: sc.ScatterModel, op: Dict[str, Any]) -> sc.ScatterModel:
+    """The I/Q points turned: by `phi` degrees (Rotation), or so that their spread lies on the real
+    axis (Auto-rotate: all shown points together)."""
+    from dataclasses import replace
+
+    from .. import operations as ops_mod
+
+    z = [x / m.xf + 1j * y / m.yf for x, y, _ in m.series]
+    if op["op"] == "rotation":
+        phi = np.radians(float(op.get("phi", 0.0)))
+    else:
+        both = np.concatenate(z) if z else np.zeros(0, complex)
+        phi = -ops_mod._principal_angle(both[np.isfinite(both)])
+    turn = np.exp(1j * phi)
+    return replace(m, series=[((w * turn).real * m.xf, (w * turn).imag * m.yf, label) for w, (_, _, label) in zip(z, m.series)],
+                   whole=None)
+
+
+def less_mean(m: sc.ScatterModel) -> sc.ScatterModel:
+    """Each axis minus the mean of all shown points on it."""
+    from dataclasses import replace
+
+    xs = np.concatenate([x for x, _, _ in m.series]) if m.series else np.zeros(0)
+    ys = np.concatenate([y for _, y, _ in m.series]) if m.series else np.zeros(0)
+    mx, my = (float(np.nanmean(v)) if v.size else 0.0 for v in (xs, ys))
+    return replace(m, series=[(x - mx, y - my, label) for x, y, label in m.series], whole=None)

@@ -126,13 +126,22 @@ def test_an_operation_that_keeps_the_shape(tmp_path):
     assert s.model is s.base_model
 
 
-def test_an_operation_that_changes_the_shape_is_refused(tmp_path):
+def test_an_operation_not_offered_is_left_out_with_a_note(tmp_path):
+    """16.50: Matrix offers Subtract the mean and Normalize; FFT (from a view made on another plot
+    type) is left out, saying so, and the others run."""
     s = session(tmp_path, mock.assignment_matrix, {"kind": "matrix"})
     s.apply({"ops": [{"op": "subtract_mean", "along": "x"}, {"op": "fft", "along": "x"}, {"op": "normalize", "along": "x"}]})
     s.render(None, None)
-    notes = s.ops_info()["notes"]
-    assert notes[0] is None and "changes the shape" in notes[1] and "above" in notes[2]
-    assert s.model.z.shape == (3, 3)
+    info = s.ops_info()
+    assert info["notes"] == [None, "left out: FFT (not offered on Matrix)", None]
+    assert info["offered"] == ["subtract_mean", "normalize"] and s.model.z.shape == (3, 3)
+
+
+def test_a_saved_bars_view_with_smooth_says_it_is_left_out(tmp_path):
+    s = session(tmp_path, mock.bars, {"kind": "bars"})
+    s.apply({"ops": [{"op": "smooth", "along": "x", "n": 3}]})
+    s.render(None, None)
+    assert s.ops_info()["notes"] == ["left out: Smooth (not offered on Bars)"]
 
 
 def test_operations_need_one_number_per_cell(tmp_path):

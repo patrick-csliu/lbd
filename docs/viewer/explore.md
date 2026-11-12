@@ -531,6 +531,20 @@ top of the list:
   FFT or a histogram the points are new ones, so only the shown value is read, and a cut can't
   be saved (turn the operations off to save the stored data).
 
+**Which operations each plot type offers.** **+ Add operation** lists only these:
+
+| Plot type | Operations |
+|---|---|
+| Curves, Map | all of them |
+| Matrix, Bars, 3D bars | Subtract the mean, Normalize |
+| Histogram | Electrical delay, Rotation, Auto-rotate, Subtract the mean, Normalize, Derivative, Smooth: on the numbers, before they are counted |
+| Scatter | Rotation and Auto-rotate (they turn the I/Q plane's points; Auto-rotate turns all shown points together), Subtract the mean (each axis minus its mean). The histograms beside the plot follow the changed points. |
+| A variable sweep's map | none yet |
+
+A view saved on one plot type and shown on another keeps its list: an operation this type
+doesn't offer is left out, and its row says so ("left out: Smooth (not offered on Bars)"); the
+others run.
+
 ## Equations
 
 ![Equations, with the names they can use](img/equations.png)

@@ -21,7 +21,8 @@ class Interaction:
     kind = ""
     model: Optional[type] = None
     cursor_types: Tuple[str, ...] = ("cross", "vertical", "horizontal")
-    # False: not available; True: all; "shape": those that keep the shape; "before": the type runs them
+    # False: not available; True: all; "shape": those that keep the shape (ShapeOps); "points": on a
+    # scatter plot's points; "before": the type runs them. Which ones: operations.OFFERED (16.50)
     operations: Any = False
     no_operations = "Operations aren't available on this plot"
     strips: Optional[str] = None  # None, "cuts" or "histograms"

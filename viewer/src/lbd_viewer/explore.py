@@ -662,6 +662,14 @@ class ExploreSession:
         the slice shown. Missing settings keep the plot's own (its style and saved figure
         settings)."""
         settings = dict(settings or {})
+        try:
+            # operations this plot type doesn't offer (a saved view made on another) are left out (16.50)
+            if settings.get("ops"):
+                settings["ops"], self.left_out = ops_mod.offered_only(self.view.name, ops_mod.check(settings["ops"]))
+            else:
+                self.left_out = {}
+        except ops_mod.BadOps as e:
+            raise ExploreError(str(e)) from None
         if settings == self.settings and (getattr(self, "crange_info", None) or {}).get("state") != "working":
             return []                                    # (a range of every slice still coming: again)
         if settings.get("crange", "slice") not in ("slice", "all"):
@@ -842,7 +850,7 @@ class ExploreSession:
         choice changed; True when the figure was set up again for another model."""
         if (any(op["on"] for op in ops) or eqs) and not self.view.operations:
             raise ExploreError(self.view.no_operations)
-        if self.view.operations == "shape":
+        if self.view.operations in ("shape", "points"):
             return self.view.apply_ops(ops, eqs)
         if self.view.operations == "before":             # the type runs them itself, on its numbers
             self.ops_list = ops
@@ -914,6 +922,8 @@ class ExploreSession:
         ops = self.ops_list
         if not 0 <= index < len(ops) or ops[index]["op"] != what:
             raise ExploreError(f"operation {index + 1} is not a {what}")
+        if self.base_kind == "scatter":                  # the points shown (16.8)
+            return self.view.calculate(what, index)
         m = self.raw_model
         xf = m.xf
         traces = None
@@ -929,7 +939,16 @@ class ExploreSession:
     @_locked
     def ops_info(self) -> Dict[str, Any]:
         """For the page: each operation's state (None: applied, "off", or why not), each equation
-        field's (error or note), what is shown, and the names equations can use (the legend)."""
+        field's (error or note), what is shown, the names equations can use (the legend), and
+        which operations this plot type offers (16.50)."""
+        info = self._ops_info()
+        left = getattr(self, "left_out", {})
+        if left:
+            info["notes"] = [left.get(i, n) for i, n in enumerate(info["notes"])]
+        info["offered"] = ops_mod.OFFERED.get(self.view.name, [])
+        return info
+
+    def _ops_info(self) -> Dict[str, Any]:
         if self.view.operations == "before":
             return self.view.ops_info()
         r = self.ops_result

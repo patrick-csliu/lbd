@@ -57,8 +57,8 @@ def test_colour_limits_and_log(tmp_path):
 
 def test_operations_say_why(tmp_path):
     s = session(tmp_path, mock_values.triangle)
-    with pytest.raises(ExploreError, match="variable sweep"):
-        s.apply({"ops": [{"op": "normalize", "on": True}]})
+    s.apply({"ops": [{"op": "normalize", "on": True}]})                # offered none (16.50): left out
+    assert s.ops_info()["notes"] == ["left out: Normalize (not offered on a variable sweep's map)"]
 
 
 def test_a_cursor_reads_the_stored_point(tmp_path):

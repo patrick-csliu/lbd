@@ -32,8 +32,8 @@ interface Props {
   calculate: (what: "delay" | "rotation", index: number) => Promise<number>;
   equations: { x?: string; y?: string; z?: string };
   onEquations: (e: { x?: string; y?: string; z?: string }) => void;
-  /** Only operations that keep the shape of the data, no equations (Matrix, Bars). */
-  shapeOnly?: boolean;
+  /** No equations here (Matrix, Bars, Scatter …). Which operations: `info.offered`, from the server. */
+  noEquations?: boolean;
 }
 
 /** The functions equations can use (equations.py FUNCTIONS, CONSTANTS), in groups for the legend. */
@@ -70,9 +70,11 @@ const KINDS: { op: OpName; name: string; tip: string; along: ("x" | "traces")[];
 ];
 const byOp = new Map(KINDS.map((k) => [k.op, k]));
 
-const KEEP_SHAPE: OpName[] = ["subtract_mean", "normalize", "derivative", "smooth", "subtract_first", "subtract_previous"];
 
-export default function Operations({ kind, xLabel, tracesLabel, ops, on, info, onChange, onOn, complexValues, calculate, equations, onEquations, shapeOnly }: Props) {
+export default function Operations({ kind, xLabel, tracesLabel, ops, on, info, onChange, onOn, complexValues, calculate, equations, onEquations, noEquations }: Props) {
+  // the operations this plot type offers (operations.OFFERED on the server, 16.50); until the
+  // first answer, none
+  const offered = new Set(info?.offered ?? []);
   const [menu, setMenu] = useState<MenuAt | null>(null);
   const [calcNote, setCalcNote] = useState<{ i: number; text: string } | null>(null);
   const runCalc = (i: number, what: "delay" | "rotation") => {
@@ -91,9 +93,10 @@ export default function Operations({ kind, xLabel, tracesLabel, ops, on, info, o
   const add = (e: MouseEvent) => {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const firstReal = ops.findIndex((o) => !isComplex(o));
-    const complexItems: MenuEntry[] = complexValues && !shapeOnly
+    const complexOffered = COMPLEX.filter((c) => offered.has(c.op));
+    const complexItems: MenuEntry[] = complexValues && complexOffered.length
       ? [
-          ...COMPLEX.map((c) => ({
+          ...complexOffered.map((c) => ({
             label: c.name,
             disabled: c.op === "iq_histogram" && ops.some((o) => o.op === "iq_histogram"),
             onClick: () => {
@@ -106,7 +109,7 @@ export default function Operations({ kind, xLabel, tracesLabel, ops, on, info, o
           "-" as const,
         ]
       : [];
-    const items: MenuEntry[] = [...complexItems, ...KINDS.filter((k) => !shapeOnly || KEEP_SHAPE.includes(k.op)).map((k) => ({
+    const items: MenuEntry[] = [...complexItems, ...KINDS.filter((k) => offered.has(k.op)).map((k) => ({
       label: k.name,
       disabled: !tracesLabel && !k.along.includes("x"), // across traces needs several traces
       onClick: () =>
@@ -267,7 +270,7 @@ export default function Operations({ kind, xLabel, tracesLabel, ops, on, info, o
         })}
       </ol>
       <button onClick={add}>+ Add operation ▾</button>
-      {!shapeOnly && (
+      {!noEquations && (
         <Equations
           kind={kind}
           equations={equations}

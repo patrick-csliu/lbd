@@ -374,3 +374,49 @@ def test_sides_of_a_big_file_come_from_the_same_pass(tight):
     meta = done(s)
     assert sum(sum(c) for c in meta["sides"]["x"]["counts"]) == 40_000
     assert len(meta["sides"]["x"]["counts"]) == 2 and meta["strips"] == "histograms"
+
+
+# -- operations on the points (16.8) ------------------------------------------------------------
+
+
+def _iq_points(s):
+    return np.concatenate([x / s.model.xf + 1j * y / s.model.yf for x, y, _ in s.model.series])
+
+
+def test_rotation_turns_the_iq_points_by_the_angle(iq):
+    s = session(iq, IQ)
+    before = _iq_points(s)
+    s.apply({"ops": [{"op": "rotation", "phi": 30.0}]})
+    after = _iq_points(s)
+    np.testing.assert_allclose(after, before * np.exp(1j * np.radians(30.0)))
+    assert s.ops_info()["notes"] == [None]
+    s.apply({"ops": [{"op": "rotation", "phi": 30.0, "on": False}]})
+    np.testing.assert_allclose(_iq_points(s), before)                  # off: the stored points again
+
+
+def test_auto_rotate_and_subtract_the_mean(iq):
+    s = session(iq, IQ)
+    s.apply({"ops": [{"op": "auto_rotate"}, {"op": "subtract_mean"}]})
+    z = _iq_points(s)
+    assert abs(z.real.mean()) < 1e-12 and abs(z.imag.mean()) < 1e-12
+    re, im = z.real, z.imag                                            # the spread lies along Re
+    assert abs(np.mean(re * im)) < 1e-9 * np.mean(re * re) + 1e-30
+    s.apply({"ops": [{"op": "rotation", "phi": 0.0}]})
+    angle = s.calculate("rotation", 0, [0, 1], None)["value"]                # Calculate: the same turn
+    turned = _iq_points(s) * np.exp(1j * np.radians(angle))
+    assert abs(np.mean((turned.real - turned.real.mean()) * (turned.imag - turned.imag.mean()))) < 1e-9
+
+
+def test_rotation_needs_the_iq_plane(iq):
+    s = session(iq, {"kind": "scatter", "values": ["Q"], "x": "I", "all": ["shot", "state"], "index": {"readout_power": 1}})
+    s.apply({"ops": [{"op": "rotation", "phi": 10.0}, {"op": "subtract_mean"}]})
+    notes = s.ops_info()["notes"]
+    assert "I/Q plane" in notes[0] and notes[1] is None
+
+
+def test_scatter_offers_three_operations_and_leaves_out_the_others(iq):
+    s = session(iq, IQ)
+    s.apply({"ops": [{"op": "smooth", "along": "x"}]})
+    info = s.ops_info()
+    assert info["offered"] == ["rotation", "auto_rotate", "subtract_mean"]
+    assert info["notes"] == ["left out: Smooth (not offered on Scatter)"]

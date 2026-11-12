@@ -795,6 +795,7 @@ export interface OpsInfo {
   equations?: Record<string, { error?: string; note?: string }>; // per field (x, y, z)
   names?: { name: string; means: string }[]; // what each name in an equation stands for
   names_note?: string; // why there is no legend (a summarised plot)
+  offered?: string[]; // the operations this plot type offers (16.50)
 }
 
 export interface ExploreFrame {
