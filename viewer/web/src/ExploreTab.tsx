@@ -1214,15 +1214,22 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
               draggable
               onDragStart={(e) => e.dataTransfer.setData(DRAG_VALUE, v.name)}
               onContextMenu={(e) => onValueMenu(e, v.name)}
-              title={third ? "A third unit: show it in another panel (right-click)" : "Drag onto a panel to show it there; right-click for more"}
+              title={
+                kind === "curve" && third
+                  ? "A third unit: clicking shows it here instead (or right-click: in another panel)"
+                  : kind === "curve" && !fits && !on
+                    ? "Different axis: clicking shows it here instead (or right-click: in another panel)"
+                    : "Drag onto a panel to show it there; right-click for more"
+              }
             >
               <input
                 type={kind === "heatmap" ? "radio" : "checkbox"}
                 name="explore-values"
                 checked={on}
-                disabled={(!fits && !on && kind !== "histogram" && kind !== "scatter") || third}
+                // never locked (16.46): a value that can't join the plot replaces it, as on Histogram and Scatter
                 onChange={() => {
                   if (kind === "heatmap") updateSpec({ values: [v.name], x: undefined, y: undefined });
+                  else if (kind === "curve" && !on && (!fits || third)) updateSpec({ values: [v.name], x: undefined, y: undefined, series: undefined });
                   else if (kind === "histogram" && !fits) updateSpec({ values: [v.name], color: undefined, all: undefined, index: undefined });
                   else if (kind === "scatter" && !fits) updateSpec({ values: [v.name], x: undefined, color: undefined, all: undefined, index: undefined, complex: undefined, ...kindOf(kind).starting?.(info, v) });
                   else if (on && values.length > 1) updateSpec({ values: values.filter((n) => n !== v.name) });

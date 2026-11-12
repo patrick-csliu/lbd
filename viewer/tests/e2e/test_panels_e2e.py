@@ -1,6 +1,8 @@
 """Several values at once in the Explore view (plan 4), in a real browser: panels, the active
 panel's controls, synchronized axes and cursors, and what is remembered (LBD's database)."""
 
+import re
+
 import lbd
 import mock_values
 from lbd_viewer.catalog import structure
@@ -310,3 +312,21 @@ def test_two_units_in_one_panel_and_a_third_refused(values_files, new_page):
     box = shown(page).locator(".panel .explore-overlay").nth(0).bounding_box()
     cursor_answers(page, lambda: page.mouse.click(box["x"] + box["width"] * 0.5, box["y"] + box["height"] * 0.5), panels=4)
     expect(shown(page).locator(".cursor-panel .cursor-numbers").first).to_contain_text(" = ")
+
+
+def test_a_value_that_cant_join_the_curves_is_never_locked(values_files, new_page):
+    """16.46: in Curves, a value on another axis isn't greyed: clicking it shows it in that panel
+    instead (its tip says so); the last value stays ticked."""
+    page = new_page("Explore")
+    per_panel(page, lambda: row(page, "8 mixed axes.lbd").dblclick(), panels=4)     # Q_i, S21, S21_ref, f0
+    panel = shown(page).locator(".panel").first                                     # Q_i, over power
+    panel.locator(".panel-title").click()
+    values = explore(page).locator("fieldset.field", has_text="Values")
+    ref = values.locator("label.check", has_text="S21 reference")
+    expect(ref.locator("input")).to_be_enabled()
+    expect(ref).to_have_attribute("title", re.compile("Different axis: clicking shows it here instead"))
+    per_panel(page, lambda: ref.locator("input").click())
+    expect(ref.locator("input")).to_be_checked()                                    # shown alone now
+    expect(values.locator("label.check", has_text="Internal Q").locator("input")).not_to_be_checked()
+    ref.locator("input").click()                                                    # the last one stays
+    expect(ref.locator("input")).to_be_checked()

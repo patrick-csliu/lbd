@@ -124,6 +124,9 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
 
 **Viewer**
 
+- **No value is locked in Curves** (Explore). A value on another axis, or with a third unit, used
+  to be greyed out, and with one value ticked nothing could be changed; now clicking it shows it in
+  that panel instead (its tip says so), as Histogram and Scatter already did.
 - **Fixed: a right-hand axis squashed its curves** (Explore, two units in one panel). On a linear
   vertical scale each side now fills the height with its own range (temperatures beside a
   pressure no longer use 2 % of it); on **Log vertical** the middles of the two ranges line up as
