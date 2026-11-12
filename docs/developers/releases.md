@@ -81,7 +81,9 @@ language module is complete.
 
 ## Building locally
 
-The same build steps as on GitHub, for trying a change to the packaging:
+The same build steps as on GitHub, for trying a change to the packaging. For someone who wants
+to build a release for themselves instead of using its installer, the short version is
+[Build LBD yourself](build-yourself.md).
 
 1. **Check the versions.** `uv run python scripts/check_versions.py` prints the version, or
    fails and lists the places that differ: the viewer (`viewer/pyproject.toml`,

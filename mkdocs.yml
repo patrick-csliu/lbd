@@ -182,4 +182,5 @@ nav:
       - Extending LBD: developers/extending.md
       - Adding a language: developers/adding-a-language.md
       - Releases: developers/releases.md
+      - Build LBD yourself: developers/build-yourself.md
       - Changelog: changelog.md

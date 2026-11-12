@@ -594,6 +594,9 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
 
 **Documentation**
 
+- **Build LBD yourself** (Developers): from the source at a release tag to installing the
+  result, with the tools needed on each system; linked from the README and *Install*.
+
 - **Variable sweeps**: *Concepts* explains axis groups (sweep axes, dimensions, data points) and
   **Grid or group?**, the pros and cons of each; the Python, MATLAB and Julia pages show building,
   writing (by coordinates and by the outer point), `to_dense`, `rows` and `coords`; *Writing

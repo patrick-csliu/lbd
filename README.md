@@ -92,6 +92,8 @@ Or download the installer from the [release page](https://github.com/patrick-csl
 - **macOS:** open the disk image and drag LBD Viewer to Applications; approve it once in
   System Settings → Privacy & Security (it isn't signed by a registered Apple developer).
 
+Or build it yourself from the source: [Build LBD yourself](docs/developers/build-yourself.md).
+
 After that, double-click any `.lbd` file. See [Install](docs/getting-started/install.md).
 
 ### 2. Install the module for your language

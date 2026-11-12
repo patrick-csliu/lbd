@@ -65,6 +65,9 @@ no permission). Nothing is left half-installed: the download is deleted at the e
 installer runs only when everything is in place. Some lab computers don't allow scripts; then
 use the installer from the release page, as below.
 
+Prefer to build the viewer yourself from the source? See
+[Build LBD yourself](../developers/build-yourself.md).
+
 ## LBD Viewer on Windows
 
 1. Run `LBD-Viewer-<version>-windows-x64-setup.exe`. No administrator rights are needed; it installs for
