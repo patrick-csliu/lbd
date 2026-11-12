@@ -58,6 +58,8 @@ longest axis All and the others sliders. A figure saved before this choice keeps
 
 A **variable sweep** (an axis group) is drawn as a heat map with its real coordinates: see
 [Plot types](explore.md#plot-types). The `options` setting `cells` chooses `rows`, `nearest` or `smooth`.
+As curves it is drawn on its real axes too, one curve per outer step: see
+[A value as the horizontal axis](explore.md#a-value-as-the-horizontal-axis).
 
 <div style="clear: both"></div>
 

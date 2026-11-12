@@ -219,6 +219,12 @@ fig = lp.plot("sweep.lbd", "curve", "S21", complex="db", series="none",
               ])
 ```
 
+A **variable sweep** of two levels (an axis group: say Frequency chosen per Power) is drawn as the
+viewer draws it: `lp.plot(d, "curve", "S21")` gives one curve per power against its own real
+frequencies (`x="freq"`, the default), `x="power"` one curve per position inside a step, and
+`x="freq_n"` (the position inside a step) the points numbered. A value with one number per power
+can join with `x="power"`. `lp.table` gives the same lines, each stored point once.
+
 Pass `ax=` to draw into one panel of a larger figure:
 
 ```python

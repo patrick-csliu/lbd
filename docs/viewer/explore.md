@@ -599,6 +599,22 @@ then drawn at its own x. A value against a value that isn't sorted (say a phase 
 magnitude) is drawn point after point as stored, and the note says so; with more than 200 000
 points it is thinned for drawing, keeping the lowest and highest point of each stretch.
 
+**Curves of a variable sweep** (an axis group of two levels, where the inner points depend on the
+outer ones) are drawn on their real axes:
+
+- **Horizontal: the inner coordinate** (Frequency, chosen per Power): one curve per outer step, each
+  with its own points and length. This is where they start. Power is **One curve per**, or a slider.
+- **Horizontal: the outer axis** (Power): one curve per position inside a step ("point 3 of each
+  step"); a step without that point is left out.
+- **Horizontal: the position inside a step** ("Frequency (point in step)"), last in the list: the
+  points of each step numbered 0, 1, 2 ….
+
+A value with one number per outer step (a fitted Q per power) can be shown beside it while Power is
+horizontal; against Frequency it can't, and the panel says why. Cursors read the stored points, and
+**Save as CSV** writes each stored point once, in rows (a table with one column per x point needs
+the same x for every curve, so it is refused, saying why). A sweep of three levels or more is still
+drawn against the point number, with a note.
+
 ## Large data
 
 A screen has far fewer pixels than a large file has numbers: a map of 4001 × 4001 cells shown

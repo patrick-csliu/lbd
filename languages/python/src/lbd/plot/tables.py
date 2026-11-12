@@ -417,6 +417,7 @@ def table(data, kind: Optional[str] = None, values: Any = None, *, numbers: str 
     resolved = _r.resolve_spec(d, full)
     if resolved["kind"] not in ("curve", "heatmap"):
         raise _r.RenderError(f"a table is made of curves or a heat map, not a {resolved['kind']} plot")
+    d = _r.for_kind(d, resolved["kind"])              # curves: a variable sweep on its real axes (16.41)
     s = api._style_for(d, style, file_style)
     prepare = _r.prepare_curves if resolved["kind"] == "curve" else _r.prepare_map
     import matplotlib

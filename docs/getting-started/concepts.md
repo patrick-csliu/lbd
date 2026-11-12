@@ -86,7 +86,7 @@ measurement may stop early (the points not measured stay `NaN`) or a few points 
 | Writing | an index per axis | coordinates (looked up) or `parent=`; float coordinates that differ only by rounding make two points (with a warning) |
 | File format | 1.2: read by every LBD since 1.2 | **2.0: LBD older than 1.3 can't open it** |
 | Other HDF5 tools (h5py, HDFView, `h5read`) | the arrays are the data, as they look | flat arrays plus `._parent` indices: readable, but you follow the parents yourself |
-| LBD Viewer | every plot, Explore, cursors | drawn against the point number for now; drawing against the coordinates comes later |
+| LBD Viewer | every plot, Explore, cursors | maps and curves on the real coordinates (two levels); deeper groups against the point number |
 | Speed | direct | `write` looks coordinates up (in memory, fast); `to_dense` and `coords` copy |
 
 **A grid if you can; a group when a grid would be mostly empty or can't describe the sweep.**

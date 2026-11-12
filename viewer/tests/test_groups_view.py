@@ -1,6 +1,6 @@
 """Files with variable sweeps (axis groups, format 2.0, plan 6c) open in the viewer: a value on two
-levels is a map (plan 15a), as curves it is drawn against its point number, with a notice; the file
-page and the Library show the group."""
+levels is a map (plan 15a), as curves it is drawn on its real axes (16.41); the file page and the
+Library show the group."""
 
 import lbd
 import pytest
@@ -33,14 +33,41 @@ def test_the_library_counts_the_points(client, files):
     assert rows["13 variable sweep.lbd"]["points"] == 44
 
 
-def test_a_value_is_drawn_against_its_point_number_with_a_notice(files):
-    with pytest.warns(rnd.RenderWarning, match="drawn against the point number"):
-        svg, spec = rnd.render_file(str(files["13 variable sweep.lbd"]), {"values": ["S21"], "complex": "db", "kind": "curve"},
-                                    Style(), fmt="svg")
-    assert spec["kind"] == "curve" and spec["x"] == "freq"
-    assert b"point number" in svg
+def test_curves_are_drawn_against_the_real_axes_without_a_notice(files):
+    """16.41: no longer against the point number."""
+    svg, spec = rnd.render_file(str(files["13 variable sweep.lbd"]), {"values": ["S21"], "complex": "db", "kind": "curve"},
+                                Style(), fmt="svg")
+    assert spec["kind"] == "curve" and spec["x"] == "freq" and spec["series"] == "power"
+    assert b"point number" not in svg and b"Frequency" in svg
 
 
+def test_explore_curves_read_a_stored_point(client, files):
+    """16.41 in Explore: S21 against Frequency at −30 dBm; a cursor snaps to a stored frequency
+    of that step and reads its stored number."""
+    path = files["13 variable sweep.lbd"]
+    o = client.post("/api/explore", json={"path": str(path), "width": 600, "height": 400, "dpr": 1,
+                                          "spec": {"kind": "curve", "values": ["S21"], "series": "none",
+                                                   "index": {"power": 2}}})
+    assert o.status_code == 200, o.text
+    o = o.json()
+    sid = o["session"]
+    s = client.app.state.lbd.explore.get(sid)
+    assert s.spec["x"] == "freq" and s.spec["index"] == {"power": 2}
+    real = lbd.open(path)
+    parent = real.axes["freq"].parent
+    f = real.axes["freq"].data[parent == 2]
+    meta = s.render(None, None)[1]
+    assert real.axes["power"].data[2] == -30
+    x = f[3] * s.model.xf
+    c = client.post(f"/api/explore/{sid}/cursors",
+                    json={"cursors": [{"x": float(x), "y": 0.0}], "type": "vertical",
+                          "xlim": meta["xlim"], "ylim": meta["ylim"], "width": 600, "height": 400}).json()
+    cur = c["cursors"][0]
+    k = cur["index"]["freq_n"]                     # a stored point of that step, read as stored
+    shown = {i["role"]: i["value"] for i in cur["items"]}
+    assert shown["x"] == pytest.approx(f[k]) and abs(x - f[k] * s.model.xf) < 2 * (f[1] - f[0]) * s.model.xf
+    assert shown["y"] == pytest.approx(abs(real.values["S21"].data[parent == 2][k]))
+    client.delete(f"/api/explore/{sid}")
 def test_a_two_level_value_opens_as_a_map(files):
     svg, spec = rnd.render_file(str(files["13 variable sweep.lbd"]), {"values": ["S21"], "complex": "db"}, Style(), fmt="svg")
     assert spec["kind"] == "heatmap" and spec["x"] == "freq" and spec["y"] == "power"

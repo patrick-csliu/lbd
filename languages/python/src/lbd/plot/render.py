@@ -44,6 +44,10 @@ SPEC_KEYS = PLOT_SPEC_KEYS
 # Saved-view settings that mean the same for every plot type: kept when another type is chosen
 # (resolve_spec). Axes, series, colours, slices, axis labels and annotations belong to the plot
 # they were made for.
+# Keys of a resolved spec that are answers (what the drawing found), not settings: they are left
+# out when a spec comes back. `levels`: a variable sweep's levels drawn as a map; `real_axes`: the
+# axes and values of a variable sweep's curves (16.41), see `for_kind`.
+ANSWER_KEYS = frozenset({"levels", "real_axes"})
 KIND_FREE_KEYS = frozenset({"values", "complex", "x_scale", "y_scale", "title"})
 
 # rcParams are global in matplotlib, so renders are serialized.
@@ -64,6 +68,16 @@ class RenderWarning(lbd.LBDWarning):
 
 
 # ---- spec resolution ----------------------------------------------------------
+
+
+def for_kind(d: "lbd.Dataset", kind: str) -> "lbd.Dataset":
+    """The view of `d` that plot kind `kind` draws: curves see a variable sweep of two levels on
+    its real axes (`lbd.groups.curve_view`, 16.41); every other kind sees the flat view."""
+    if kind == "curve":
+        from lbd.groups import curve_view
+
+        return curve_view(d)
+    return flat(d)
 
 
 def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: bool = True) -> Dict[str, Any]:
@@ -89,7 +103,7 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
         spec = {}
     if not isinstance(spec, dict):
         raise RenderError(f"plot settings must be a dict, not {type(spec).__name__}")
-    spec = {k: v for k, v in spec.items() if k != "levels"}     # an answer of ours, sent back
+    spec = {k: v for k, v in spec.items() if k not in ANSWER_KEYS}     # answers of ours, sent back
     unknown = sorted(str(k) for k in spec if k not in SPEC_KEYS)
     if unknown:
         raise RenderError(f"unknown plot setting(s) {unknown}; allowed: {sorted(SPEC_KEYS)}")
@@ -177,6 +191,10 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
         return k
 
     kind = pick("kind", check_kind, check_kind("auto"))
+    if kind == "curve":
+        # curves draw a variable sweep on its real axes (16.41): the curve view of the dataset
+        d = for_kind(d, kind)
+        first = d.values[first.name]
 
     # complex
     def check_complex(m: Any) -> str:
@@ -288,7 +306,10 @@ def _resolve_curve_or_map(d, out, values, pick, spec, index_in, warn_unused, fil
             return v
         return _pick(v, axes, role="horizontal axis")
 
-    x = pick("x", check_x, (sweep or swept or axes)[-1])
+    # a variable sweep's curves start on the inner level's real coordinates (16.41)
+    in_step = getattr(d, "_in_step", {})
+    inner = next((in_step[a] for a in reversed(axes) if a in in_step), None)
+    x = pick("x", check_x, inner if inner in x_values else (sweep or swept or axes)[-1])
     out["x"] = x
     along = x
     if x in d.values:
@@ -311,6 +332,13 @@ def _resolve_curve_or_map(d, out, values, pick, spec, index_in, warn_unused, fil
     else:
         for name in values[1:]:
             if x in d.values and d.values[name].axes != axes:
+                steps = [a for a in axes if a in in_step and a not in d.values[name].axes]
+                if steps and set(d.values[name].axes) <= set(axes):
+                    outer = [a for a in d.values[name].axes if a in axes]
+                    raise RenderError(f"'{name}' has one number per step of {', '.join(_label(d, a) for a in outer)}, "
+                                      f"not one per point of {_label(d, x)}, so it can't be drawn against it together "
+                                      f"with '{values[0]}'; with {_label(d, outer[-1]) if outer else 'that axis'} "
+                                      "horizontal they can")
                 raise RenderError(f"'{name}' doesn't have the axes {axes}, so it can't be plotted against '{x}' "
                                   f"together with '{values[0]}'")
             if x not in d.values and x not in d.values[name].axes:
@@ -345,10 +373,33 @@ def _resolve_curve_or_map(d, out, values, pick, spec, index_in, warn_unused, fil
     whole = out.get("all", [])                    # all their points go in: no slider
     out["index"], out["slices"] = _slices(d, [a for a in all_axes if a not in keep and a not in whole], index_in, spec)
     variable = [a for a in all_axes if getattr(d.axes[a], "group", None) is not None]
+    if getattr(d, "_curve_view", False):
+        out["real_axes"] = real_axes(d, out["values"])
     if variable:
         _warn(f"{_where(d)}{', '.join(variable)} {'is' if len(variable) == 1 else 'are'} part of a variable sweep "
-              "(its values differ from point to point): drawn against the point number", RenderWarning)
+              "(its values differ from point to point) of more than two levels: drawn against the point number",
+              RenderWarning)
     return out
+
+
+def _label(d, name: str) -> str:
+    """An axis's or value's label, for messages."""
+    a = d.axes.get(name) or d.values.get(name)
+    return (a.label or name) if a is not None else name
+
+
+def real_axes(d, values: List[str]) -> Dict[str, Any]:
+    """What the controls need of a variable sweep's curves (16.41), as the answer `real_axes`:
+    every axis of the curve view (name, label, unit, length; `in_step` for the position inside a
+    step), every value's axes there (a step's real coordinates are values too), and the
+    coordinates the first drawn value can be drawn against."""
+    in_step = getattr(d, "_in_step", {})
+    return {
+        "axes": [{"name": n, "label": a.label or n, "unit": a.unit, "length": len(a.data), "in_step": n in in_step}
+                 for n, a in d.axes.items()],
+        "values": {n: list(v.axes) for n, v in d.values.items()},
+        "coordinates": [in_step[a] for a in d.values[values[0]].axes if a in in_step],
+    }
 
 
 # ---- annotations ------------------------------------------------------------------
@@ -845,7 +896,7 @@ def prepare_curves(d, spec, style: Style, big: Optional[Any] = None, whole_span:
     position, not only the ones shown, so it stays the same while a slider moves (Explore,
     16.49); the model's `whole` then holds their range (plot units). `two_axes`: a second unit
     gets its own right-hand axis (Explore), so there is no note that the axis shows no unit."""
-    d = flat(d)
+    d = for_kind(d, "curve")
     a = style.figure.axes
     xs, ys = style.axis_style("x"), style.axis_style("y")
     # x is an axis (shared by every curve) or a value (its own x for each curve, see resolve_spec)
@@ -885,7 +936,9 @@ def prepare_curves(d, spec, style: Style, big: Optional[Any] = None, whole_span:
                 norm = mcolors.Normalize(float(np.min(sa.data)), float(np.max(sa.data)))
                 series_mappable = (ScalarMappable(norm=norm, cmap=cmap), sa)
             for j in range(n):
-                lines.append((arr[:, j] if big is None else big.trace(j), _legend_label(sa, sa.data[j], j)))
+                legend = (f"point {j} of each step" if spec["series"] in getattr(d, "_in_step", {})   # 16.41
+                          else _legend_label(sa, sa.data[j], j))
+                lines.append((arr[:, j] if big is None else big.trace(j), legend))
                 line_x.append(x_shown[:, j] if x_is_value else x_shown)
         else:
             lines.append((arr if big is None else big.trace(0), label))

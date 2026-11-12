@@ -492,3 +492,92 @@ def _scatter(arr: np.ndarray, axis: int, where: List[np.ndarray], sizes: Tuple[i
     out = np.full(sizes + moved.shape[1:], fill, dtype=arr.dtype)
     out[tuple(where)] = moved
     return np.moveaxis(out, list(range(len(sizes))), [axis + k for k in range(len(sizes))])
+
+
+# ---- curves on a variable sweep (plan 16, 16.41) ------------------------------------------------
+
+def _position_in_step(parent: np.ndarray) -> np.ndarray:
+    """For each point of a level, its place among the points of its own step (0, 1, 2 …), in the
+    order they are stored."""
+    pos = np.zeros(parent.size, dtype=np.int64)
+    seen: Dict[int, int] = {}
+    for i, p in enumerate(parent.tolist()):
+        pos[i] = seen.get(p, 0)
+        seen[p] = pos[i] + 1
+    return pos
+
+
+def _padded(arr: np.ndarray, axis: int, step: np.ndarray, pos: np.ndarray, steps: int, longest: int) -> np.ndarray:
+    """The points along `axis` placed in a (steps, longest) block: the points of step s at
+    [s, 0 … n_s − 1], the rest missing (NaN). Integers and booleans become floats, so missing can be
+    NaN."""
+    arr = np.moveaxis(np.asarray(arr), axis, 0)
+    kind = "complex128" if np.iscomplexobj(arr) else "float64"
+    out = np.full((steps, longest) + arr.shape[1:], np.nan, dtype=kind)
+    out[step, pos] = arr
+    return np.moveaxis(np.moveaxis(out, 0, axis), 1, axis + 1)
+
+
+def curve_view(d: "Dataset") -> "Dataset":
+    """The dataset as curves draw it (16.41): like the flat view (`io._flat_view`), but a variable
+    sweep of two levels (an axis group A → B) is on real axes. A keeps its coordinates; B becomes a
+    value on (A, `B_n`), padded with NaN after each step's last point, where `B_n` numbers the
+    points inside a step. So S drawn against B is one curve per step of A, each with its own x
+    and length (curves already take a value as x); S drawn against A is one curve per position
+    in a step ("point 3 of each step"; a step without that point is left out); and a value on A
+    alone (a fit result) can join S when A is horizontal. Groups of three levels or more stay as
+    in the flat view (drawn against the point number). Shares no arrays with `d` for the padded
+    values; the others are shared."""
+    import copy
+    import dataclasses
+
+    from .io import _flat_view
+
+    flat = _flat_view(d)
+    if getattr(flat, "_curve_view", False):
+        return flat
+    real = getattr(flat, "_unflat", d)
+    pairs = [g for g in real.groups.values() if len(g.order) == 2]
+    if not pairs:
+        return flat
+    view = copy.copy(flat)
+    view.axes, view.values = dict(flat.axes), dict(flat.values)
+    view._curve_view = True
+    view._in_step = {}                   # a position axis inside a step → the inner coordinate value
+    steps_of: Dict[str, Tuple[str, str, np.ndarray, np.ndarray, int, int]] = {}
+    for g in pairs:
+        outer, inner = g.order
+        a, b = real.axes[outer], real.axes[inner]
+        parent = np.asarray(b.parent, dtype=np.int64)
+        steps = len(a.data)
+        pos = _position_in_step(parent)
+        longest = int(pos.max()) + 1 if pos.size else 0
+        n = f"{inner}_n"
+        while n in real.axes or n in real.values:
+            n += "_"
+        view.axes[outer] = Axis(outer, np.asarray(a.data), unit=a.unit, label=a.label)
+        view.axes[n] = Axis(n, np.arange(longest), label=f"{b.label or inner} (point in step)")
+        view.axes.pop(inner, None)
+        coords = _padded(np.asarray(b.data, dtype=float), 0, parent, pos, steps, longest)
+        view.values[inner] = Value(inner, coords, axes=[outer, n], unit=b.unit, label=b.label or inner,
+                                   shape=coords.shape, dtype="float64", dims=[(outer,), (n,)])
+        steps_of[inner] = (outer, n, parent, pos, steps, longest)
+        view._in_step[n] = inner
+    for name, v in real.values.items():
+        dims = list(getattr(v, "dims", None) or [(a,) for a in v.axes])
+        at = next((i for i, dim in enumerate(dims) if len(dim) == 2 and dim[-1] in steps_of), None)
+        if at is None:
+            continue
+        outer, n, parent, pos, steps, longest = steps_of[dims[at][-1]]
+        fv = flat.values[name]
+        axes = list(fv.axes)
+        axes[at:at + 1] = [outer, n]
+        if v.data is None:              # header only: the shape and type the data will have
+            shape = tuple(fv.shape[:at]) + (steps, longest) + tuple(fv.shape[at + 1:])
+            dtype = "complex128" if fv.dtype.startswith("complex") else "float64"
+            view.values[name] = dataclasses.replace(fv, axes=axes, dims=[(x,) for x in axes], shape=shape, dtype=dtype)
+            continue
+        data = _padded(np.asarray(v.data), at, parent, pos, steps, longest)
+        view.values[name] = dataclasses.replace(fv, data=data, axes=axes, dims=[(x,) for x in axes], shape=data.shape,
+                                                dtype=str(data.dtype), measured=None)
+    return view

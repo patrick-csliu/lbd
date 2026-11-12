@@ -522,13 +522,17 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
   const valuesByName = Object.fromEntries(info.values.map((v) => [v.name, v]));
   const selected = resolved.values ?? [];
   const first = valuesByName[selected[0]];
-  const firstAxes = resolved.levels?.slice(-2) ?? first?.axes ?? []; // a variable sweep's map: its two inner levels
+  // a variable sweep's curves: the axes and values as drawn, on their real axes (16.41)
+  const real = resolved.real_axes;
+  const axesOf = (v: ValueInfo) => real?.values[v.name] ?? v.axes;
+  const inStep = (a: string) => !!real?.axes.find((x) => x.name === a)?.in_step;
+  const firstAxes = resolved.levels?.slice(-2) ?? (first ? axesOf(first) : []); // a variable sweep's map: its two inner levels
   const anyComplex = selected.some((n) => valuesByName[n]?.complex);
   // values with exactly the same axes as the first one: usable point by point in scatter plots
   const sameShape = info.values.filter((v) => v.axes.length > 0 && v.axes.join(",") === firstAxes.join(","));
   const axisLabel = (name: string) => {
-    const a = info.axes.find((x) => x.name === name);
-    return a ? `${a.label.replace(/ \(point number\)$/, resolved.levels ? "" : " (point number)")}${a.unit ? ` (${a.unit})` : ""}` : name;
+    const a = real?.axes.find((x) => x.name === name) ?? info.axes.find((x) => x.name === name);
+    return a ? `${a.label.replace(/ \(point number\)$/, resolved.levels || real ? "" : " (point number)")}${a.unit ? ` (${a.unit})` : ""}` : name;
   };
 
   const toggleValue = (name: string, checked: boolean) => {
@@ -537,7 +541,7 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
   };
 
   // Axes with one point are fixed parameters (not swept): they don't count as dimensions.
-  const lengthOf = (axis: string) => info.axes.find((a) => a.name === axis)?.length ?? 0;
+  const lengthOf = (axis: string) => (real?.axes.find((a) => a.name === axis) ?? info.axes.find((a) => a.name === axis))?.length ?? 0;
   const sweptAxes = (v: ValueInfo) => v.axes.filter((a) => lengthOf(a) > 1);
   /** Whether a value can be drawn as plot kind k (the same rule as the renderer). */
   const fits = (v: ValueInfo, k: string) => (k === "heatmap" ? sweptAxes(v).length >= 2 : v.axes.length > 0);
@@ -550,7 +554,7 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
       ? v.unit === first?.unit && v.complex === first?.complex // overlaid when they share a unit
       : kind === "scatter" && !(x && firstAxes.includes(x))
         ? v.axes.join(",") === firstAxes.join(",")
-        : !!x && v.axes.includes(x);
+        : !!x && (real?.coordinates.includes(x) ? axesOf(v).join(",") === firstAxes.join(",") : axesOf(v).includes(x));
   const here = withAxes.filter(joins);
   const elsewhere = withAxes.filter((v) => !joins(v));
   // Another value on its own: it brings its own axes, so the axis choices start afresh.
@@ -709,7 +713,8 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
           <label className="field">
             <span>Horizontal axis</span>
             <select value={resolved.x ?? ""} onChange={(e) => update({ x: e.target.value, y: undefined, series: undefined, index: {} })}>
-              {firstAxes.map((a) => (
+              {/* a variable sweep's curves: its real coordinates first, the position inside a step last */}
+              {[...(real?.coordinates ?? []), ...firstAxes.filter((a) => !inStep(a)), ...firstAxes.filter(inStep)].map((a) => (
                 <option key={a} value={a}>
                   {axisLabel(a)}
                 </option>
@@ -731,13 +736,13 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
             </select>
           </label>
         )}
-        {kind === "curve" && selected.length === 1 && firstAxes.some((a) => a !== resolved.x && lengthOf(a) > 1) && (
+        {kind === "curve" && selected.length === 1 && firstAxes.some((a) => a !== (resolved.along ?? resolved.x) && lengthOf(a) > 1) && (
           <label className="field">
             <span>One curve per</span>
             <select value={resolved.series ?? "none"} onChange={(e) => update({ series: e.target.value, index: {} })}>
               <option value="none">— (single curve)</option>
               {firstAxes
-                .filter((a) => a !== resolved.x && lengthOf(a) > 1) // a single-point axis would give one curve
+                .filter((a) => a !== (resolved.along ?? resolved.x) && lengthOf(a) > 1) // a single-point axis would give one curve
                 .map((a) => (
                   <option key={a} value={a}>
                     {axisLabel(a)}

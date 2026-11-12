@@ -163,7 +163,10 @@ class ExploreSession:
         self._notes: List[str] = []
         self.last_used = time.monotonic()
         self.header = self._read(lbd.info(path))
-        self.data = self._read(lbd.load(path, values=[]))
+        # the file's data as read (flat view); `self.data` is what the plot kind draws from it
+        # (curves: a variable sweep on its real axes, 16.41)
+        self.flat_data = self._read(lbd.load(path, values=[]))
+        self.data = self.flat_data
         self.dpr = float(min(max(dpr, 1.0), MAX_DPR))
         dpi = 96 * self.dpr                           # 1 CSS pixel = 1/96 inch, as in browsers
         self.fig = Figure(figsize=(width / 96, height / 96), dpi=dpi)
@@ -178,11 +181,12 @@ class ExploreSession:
             warnings.simplefilter("ignore", rnd.RenderWarning)
             resolved = rnd.resolve_spec(self.header, spec, warn_unused=False)
         needed = rnd.needed_values(self.header, resolved)
-        loaded = [n for n, v in self.data.values.items() if v.data is not None]
+        loaded = [n for n, v in self.flat_data.values.items() if v.data is not None]
         if not set(needed) <= set(loaded):
             # whole if they fit in the memory available, else read by part (plan 6d, memory.py)
-            self.data = self._read(memory.load_values(self.path, sorted(set(needed) | set(loaded)), self.version))
-        new = rnd.resolve_spec(self.data, spec, warn_unused=False)
+            self.flat_data = self._read(memory.load_values(self.path, sorted(set(needed) | set(loaded)), self.version))
+        new = rnd.resolve_spec(self.flat_data, spec, warn_unused=False)
+        self.data = rnd.for_kind(self.flat_data, new["kind"])
         if new["kind"] not in KINDS:
             raise ExploreError(f"Explore can't show {rnd.kinds.KINDS[new['kind']].title} plots yet; use the Figure page")
         self.spec, self.base_kind = new, new["kind"]
@@ -205,7 +209,8 @@ class ExploreSession:
         except summaries.NothingToShrink:
             # a summary would be as large as the data: draw the data itself, read whole
             big = None
-            self.data = self._read(lbd.load(self.path, values=sorted(set(needed) | set(loaded))))
+            self.flat_data = self._read(lbd.load(self.path, values=sorted(set(needed) | set(loaded))))
+            self.data = rnd.for_kind(self.flat_data, new["kind"])
         if big is not None:
             self._note_memory(big)
         # The plot as prepared from the data; operations (view setting "ops") draw a model made

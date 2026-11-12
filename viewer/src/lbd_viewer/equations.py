@@ -28,6 +28,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import numpy as np
 
 import lbd
+from lbd.plot import render as rnd
 
 from .operations import Grid, Quantity
 
@@ -194,15 +195,17 @@ def names_of(s, g: Grid, arrays: bool = True) -> Tuple[Dict[str, Any], List[Dict
     else:
         keep = [spec.get("along", spec["x"])] + ([spec["series"]] if spec.get("series") else [])
     plotted_axes = d.values[spec["values"][0]].axes
-    usable = [n for n, v in s.header.values.items()
+    header = rnd.for_kind(s.header, s.base_kind)       # as the plot sees it (curves: real axes, 16.41)
+    usable = [n for n, v in header.values.items()
               if n not in names and v.axes and sorted(v.axes) == sorted(plotted_axes)]
     if arrays and lined_up:                           # the viewer reads only what plots need: read these too
         missing = [n for n in usable if d.values[n].data is None]
         if missing:
-            loaded = [n for n, v in d.values.items() if v.data is not None]
-            s.data = d = s._read(lbd.load(s.path, values=sorted(set(loaded) | set(missing))))
+            loaded = [n for n, v in s.flat_data.values.items() if v.data is not None]
+            s.flat_data = s._read(lbd.load(s.path, values=sorted(set(loaded) | set(missing))))
+            s.data = d = rnd.for_kind(s.flat_data, s.base_kind)
     for vname in usable:
-        v = d.values[vname] if d.values[vname].data is not None else s.header.values[vname]
+        v = d.values[vname] if d.values[vname].data is not None else header.values[vname]
         if not lined_up:
             continue
         if arrays:

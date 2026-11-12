@@ -508,6 +508,16 @@ export interface StyleFileInfo {
   warnings: string[];
 }
 
+/** Curves of a variable sweep on its real axes (16.41): the axes as the curves see them (the
+ * outer level with its real coordinates, the position inside a step), every value's axes there
+ * (a step's real coordinates are values too), and the coordinates the first value can be drawn
+ * against. */
+export interface RealAxes {
+  axes: { name: string; label: string; unit: string; length: number; in_step: boolean }[];
+  values: Record<string, string[]>;
+  coordinates: string[];
+}
+
 export interface PlotSpec {
   kind?: string; // auto, or a plot type (plotKinds.ts)
   values?: string[];
@@ -528,6 +538,8 @@ export interface PlotSpec {
   slices?: Slice[];
   all?: string[]; // axes whose points all go in (no slider)
   levels?: string[]; // answer: a variable sweep's levels, when drawn as a map
+  real_axes?: RealAxes; // answer: a variable sweep's curves on their real axes (16.41)
+  along?: string; // answer: the axis the points of curves run along, when x is a value
   options?: JsonObject; // a plot type's own choices
 }
 

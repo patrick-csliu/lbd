@@ -1159,9 +1159,12 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
   const values = r.values ?? [];
   const first = info.values.find((v) => v.name === values[0]);
   const byName = new Map(info.values.map((v) => [v.name, v]));
+  // a variable sweep's curves: the axes and values as drawn, on their real axes (16.41)
+  const real = r.real_axes;
+  const axesOf = (v: ValueInfo) => real?.values[v.name] ?? v.axes;
   const label = (name: string) => {
-    const a = info.axes.find((x) => x.name === name) ?? byName.get(name);
-    return a ? (a.label || a.name).replace(/ \(point number\)$/, r.levels ? "" : " (point number)") : name;
+    const a = real?.axes.find((x) => x.name === name) ?? info.axes.find((x) => x.name === name) ?? byName.get(name);
+    return a ? (a.label || a.name).replace(/ \(point number\)$/, r.levels || real ? "" : " (point number)") : name;
   };
   const plottable = info.values.filter((v) => v.shape.length > 0);
   const anyComplex = values.some((n) => byName.get(n)?.complex);
@@ -1169,19 +1172,23 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
   const unitOf = (v: ValueInfo) => (v.complex ? `${r.complex ?? "abs"} of ${v.unit}` : v.unit);
   const units = new Set(values.map((n) => byName.get(n)).filter((v): v is ValueInfo => !!v).map(unitOf));
   // x: an axis of the plotted value, or (curves) a real value with the same axes
+  // a variable sweep's curves: its real coordinates first, the position inside a step last
+  const inStep = (a: string) => !!real?.axes.find((x) => x.name === a)?.in_step;
+  const firstAxes = first ? (r.levels?.slice(-2) ?? axesOf(first)) : [];
   const xChoices = first
     ? [
-        ...(r.levels?.slice(-2) ?? first.axes).map((a) => ({ name: a, text: label(a) })),
+        ...(real?.coordinates ?? []).map((c) => ({ name: c, text: label(c) })),
+        ...[...firstAxes.filter((a) => !inStep(a)), ...firstAxes.filter(inStep)].map((a) => ({ name: a, text: label(a) })),
         ...(kind === "curve" || kind === "scatter"
           ? info.values
-              .filter((v) => !values.includes(v.name) && !v.complex && v.shape.length > 0 && v.axes.join() === first.axes.join())
+              .filter((v) => !values.includes(v.name) && !v.complex && v.shape.length > 0 && axesOf(v).join() === firstAxes.join())
               .map((v) => ({ name: v.name, text: `${v.label || v.name} (value)` }))
           : []),
       ]
     : [];
   const along = (r as PlotSpec & { along?: string }).along ?? r.x;
   // a variable sweep's map: its two inner levels
-  const others = first ? (r.levels?.slice(-2) ?? first.axes).filter((a) => a !== along) : [];
+  const others = firstAxes.filter((a) => a !== along);
   // the traces that can be chosen: one per position of the series axis (curves) or map row
   const traceAxis = kind === "curve" ? r.series : kind === "heatmap" ? r.y : undefined;
   const row = kindOf(kind);
@@ -1204,7 +1211,7 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
         {plottable.map((v) => {
           const on = values.includes(v.name);
           // a histogram overlays values of one unit
-          const fits = !first || v.name === first.name || (kind === "curve" && v.axes.includes(along ?? "")) || (kind === "histogram" && unitOf(v) === unitOf(first)) || (kind === "scatter" && r.complex !== "iq" && v.axes.join() === first.axes.join());
+          const fits = !first || v.name === first.name || (kind === "curve" && axesOf(v).includes(along ?? "")) || (kind === "histogram" && unitOf(v) === unitOf(first)) || (kind === "scatter" && r.complex !== "iq" && v.axes.join() === first.axes.join());
           // a panel shows two units (left and right axis); a third goes in another panel
           const third = kind === "curve" && !on && units.size >= 2 && !units.has(unitOf(v));
           return (

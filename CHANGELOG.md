@@ -130,6 +130,12 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
   file, and a short note says what it depends on ("variable sweep: depends on A"). Before, the
   inner axis showed its total like a number of steps, and a note about point numbers that is no
   longer true.
+- **Curves of a variable sweep use its real axes** (Explore, Figure, `lp.plot`, CSV). Against
+  the inner coordinate (Frequency chosen per Power) there is one curve per outer step, each with
+  its own points; against the outer axis, one curve per position in a step ("point 3 of each
+  step"); the position inside a step is last in Horizontal. A value with one number per step (Q
+  per power) joins with Power horizontal, and says why it can't against Frequency. Before, these
+  curves were drawn against the point number. Groups of three levels still are, with a note.
 - **No value is locked in Curves** (Explore). A value on another axis, or with a third unit, used
   to be greyed out, and with one value ticked nothing could be changed; now clicking it shows it in
   that panel instead (its tip says so), as Histogram and Scatter already did.
