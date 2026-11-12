@@ -13,8 +13,9 @@ from playwright.sync_api import expect
 from test_explore_e2e import explore, frames
 
 
-def test_a_view_remembered_before_panels_still_opens(viewer, values_files, new_page):
+def test_a_view_remembered_before_panels_still_opens(viewer, cfg, values_files, new_page):
     """An Explore view remembered by an earlier 1.3.0-dev (one plot, no panels) opens as it was."""
+    cfg.set_explore({"keep": {k: True for k in ("operations", "zoom", "sync", "cursor_options")}})   # (all of it)
     path = viewer.path("10 one value.lbd")
     viewer.state.catalog.remember(path, structure(lbd.info(path)), mock_values.old_record())
     page = new_page("Explore")

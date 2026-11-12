@@ -74,14 +74,16 @@ def remembered(viewer, xlim, ylim):
     })
 
 
-def test_a_remembered_zoom_that_misses_the_data_shows_all_of_it(viewer, small_map, new_page):  # noqa: F811
+def test_a_remembered_zoom_that_misses_the_data_shows_all_of_it(viewer, cfg, small_map, new_page):  # noqa: F811
+    cfg.set_explore({"keep": {"zoom": True}})                          # (not kept by default, 16.44)
     remembered(viewer, [1000.0, 2000.0], [5.0, 45.0])
     page = new_page("Explore")
     meta = frames(page, lambda: row(page, "small_map.lbd").dblclick())
     assert meta["xlim"] == pytest.approx([0.5, 20])                # all the data, not an empty corner
 
 
-def test_a_remembered_zoom_on_the_data_is_kept(viewer, small_map, new_page):  # noqa: F811
+def test_a_remembered_zoom_on_the_data_is_kept(viewer, cfg, small_map, new_page):  # noqa: F811
+    cfg.set_explore({"keep": {"zoom": True}})                          # (not kept by default, 16.44)
     remembered(viewer, [2.0, 8.0], [15.0, 35.0])
     page = new_page("Explore")
     meta = frames(page, lambda: row(page, "small_map.lbd").dblclick())

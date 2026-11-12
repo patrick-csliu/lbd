@@ -246,3 +246,35 @@ def test_a_map_and_curves_bigger_than_memory_are_shown_from_their_summary(viewer
     meta = frames(page, lambda: row(page, "long.lbd").dblclick())
     assert meta["ylim"][0] < 0 and meta["ylim"][1] > 29                   # every trace's range, from the summary
     assert len(summaries.shared().entries()) == 2
+
+
+def test_a_file_opened_again_keeps_its_colours_not_its_zoom_or_cursors(sweep, viewer, cfg, new_page):
+    """16.44: by default the scales come back, the zoom and the cursors don't; untick colours and
+    scales in Settings and they don't either. Reset all starts afresh, and Undo brings it back."""
+    page = new_page("Explore")
+    meta = frames(page, lambda: row(page, "sweep.lbd").dblclick())
+    full = meta["xlim"]
+    frames(page, lambda: explore(page).get_by_role("checkbox", name="Log vertical").check())
+    page.mouse.move(*at(page, meta, 25, 2))
+    frames(page, lambda: page.mouse.wheel(0, -400))
+    page.mouse.click(*at(page, meta, 25, 2))                            # a cursor
+    expect(explore(page).locator(".explore-pick").first).to_be_visible()
+    page.wait_for_timeout(1500)                                         # remembered a moment later
+
+    def reopen():
+        page.reload()
+        return frames(page, lambda: row(page, "sweep.lbd").dblclick())
+    again = reopen()
+    assert again["yscale"] == "log" and again["xlim"] == pytest.approx(full)
+    expect(explore(page).locator(".explore-pick")).to_have_count(0)
+    cfg.set_explore({"keep": {"colours": False}})
+    again = reopen()
+    assert again["yscale"] == "linear"
+    cfg.set_explore({"keep": {"colours": True}})                       # ticked again: it comes back from what was saved
+    again = reopen()
+    assert again["yscale"] == "log"
+    explore(page).get_by_role("button", name="More").first.click()
+    reset = frames(page, lambda: page.locator(".context-menu").get_by_role("menuitem", name="Reset all").click())
+    assert reset["yscale"] == "linear"
+    undone = frames(page, lambda: page.locator(".toast").get_by_role("button", name="Undo").click())
+    assert undone["yscale"] == "log"

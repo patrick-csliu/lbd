@@ -183,6 +183,11 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
 - **Explore opens a new file with its first value**, not four panels: **Settings → Explore →
   Panels for a new file** chooses first value only, at most 2 … 5, or all (up to six). **+ Panel →
   Open all** adds the values not shown, and a panel's menu has **Move left** and **Move right**.
+- **A file opened again in Explore keeps what you choose.** **Settings → Explore → Kept when a
+  file is opened again**: by default panels, plot, traces, colours and scales, colour limits and
+  sliders come back; operations and equations, zoom, sync and cursor options start afresh
+  (before, everything came back, cursors too). Cursor positions always start afresh; a kept zoom
+  is not used once the file changed. **Forget this view** is now **Reset all**.
 - **Look options are under Display.** Data says what is plotted, Display how it looks: a
   histogram's Bins, Draw and Vertical axis; Scatter's Equal axes and Histograms beside the plot;
   a map's Cells; a matrix's Numbers, Significant digits, Row sums and Colour range; Bars' Bars and

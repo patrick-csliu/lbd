@@ -1,6 +1,7 @@
 import { CSSProperties, DragEvent, KeyboardEvent, MouseEvent, MutableRefObject, ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { useResizable } from "./resizable";
 import NumberRange from "./NumberRange";
+import { kept, KEEP_DEFAULTS, KeepParts } from "./keep";
 import { api, CursorRead, CursorsAnswer, ExploreFrameMeta, ExploreOpen, FileInfo, OpsInfo, PlotSpec, ReduceStat, SyncKeys, ValueInfo } from "./api";
 import Operations from "./Operations";
 import Contrast from "./Contrast";
@@ -67,6 +68,8 @@ export interface PanelState {
  * records (one plot) to this shape. */
 export interface Remembered {
   version: 2;
+  /** the file's version when this was remembered: a kept zoom is dropped once the file changed (16.44) */
+  file_version?: string;
   panels: PanelState[];
   active: number;
   layout: "side" | "stacked";
@@ -80,6 +83,11 @@ export const MAX_PANELS = 6;
 let newPanels = 1;
 export function setNewPanels(n: number) {
   newPanels = Math.min(Math.max(Math.round(n) || 1, 1), MAX_PANELS);
+}
+/** The parts of a file's view brought back when it is opened again (Settings → Explore, 16.44). */
+let keepParts: KeepParts = KEEP_DEFAULTS;
+export function setKeepParts(k: KeepParts) {
+  keepParts = { ...KEEP_DEFAULTS, ...k };
 }
 // Drag and drop: a value from the side bar, a panel by its title bar.
 const DRAG_VALUE = "application/x-lbd-value";
@@ -265,6 +273,8 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
     ];
   };
   const disk = useDiskVersion("file", path);
+  /** What is remembered, with the file's version (a kept zoom is used only on the same file, 16.44). */
+  const withVersion = (r: Remembered): Remembered => ({ ...r, file_version: infoRef.current?.version ?? r.file_version });
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
   const failingSince = useRef<number | null>(null);
@@ -281,9 +291,11 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
         if (r.note) onErrorRef.current(r.note);
         // a remembered view (upgraded by the server; panels may lack later keys), else a start from the file
         const st = r.state as unknown as Remembered | null;
+        // only the parts the settings keep (16.44); the saved view itself is left as it is
         setRec(
           st?.panels?.length
-            ? { ...st, panels: st.panels.map(filledPanel), active: Math.min(st.active ?? 0, st.panels.length - 1) }
+            ? kept({ ...st, panels: st.panels.map(filledPanel), active: Math.min(st.active ?? 0, st.panels.length - 1) },
+                   fresh(i), keepParts, i.version ?? null)
             : fresh(i),
         );
       } catch (e) {
@@ -329,12 +341,12 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
   recRef.current = rec;
   useEffect(() => {
     if (!rec) return;
-    const t = window.setTimeout(() => api.remember(path, rec).catch(() => undefined), 1000);
+    const t = window.setTimeout(() => api.remember(path, withVersion(rec)).catch(() => undefined), 1000);
     return () => window.clearTimeout(t);
   }, [rec, path]);
   useEffect(
     () => () => {
-      if (recRef.current) api.remember(path, recRef.current).catch(() => undefined);
+      if (recRef.current) api.remember(path, withVersion(recRef.current)).catch(() => undefined);
     },
     [path],
   );
@@ -661,7 +673,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
     await api.forget(path).catch((e) => onError((e as Error).message));
     setRec(fresh(info));
     setViewKey((k) => k + 1);
-    toast("This file's view is forgotten: it starts afresh.", "info", {
+    toast("Reset all: this file's view starts afresh.", "info", {
       label: "Undo",
       onClick: () => {
         setRec(before);
@@ -781,7 +793,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
         { label: "Copy path", onClick: () => void copyPath(info.path, toast) },
         { label: "Save the whole file as CSV…", onClick: () => setWholeCsv(true) },
         "-",
-        { label: "Forget this view…", onClick: () => void forget() },
+        { label: "Reset all", onClick: () => void forget() },
       ],
     });
   };
@@ -857,7 +869,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
           <button className="ib" aria-label="File info" title="File info: its values, axes and metadata" onClick={() => showInspector("file")}>
             <Icon name="info" />
           </button>
-          <button className="ib" aria-label="More" aria-haspopup="menu" title="More: Library picture, forget this view" onClick={headMenu}>
+          <button className="ib" aria-label="More" aria-haspopup="menu" title="More: Library picture, Reset all" onClick={headMenu}>
             <Icon name="more" />
           </button>
         </span>

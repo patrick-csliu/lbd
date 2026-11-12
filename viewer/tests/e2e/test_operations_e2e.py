@@ -18,7 +18,8 @@ def add(page: Page, name: str):
     return frames(page, lambda: page.locator(".context-menu").get_by_role("menuitem", name=name, exact=True).click())
 
 
-def test_operations_are_added_reordered_switched_off_and_remembered(sweep, new_page):
+def test_operations_are_added_reordered_switched_off_and_remembered(sweep, cfg, new_page):
+    cfg.set_explore({"keep": {"operations": True}})                    # (not kept by default, 16.44)
     page = new_page("Explore")
     meta = frames(page, lambda: row(page, "sweep.lbd").dblclick())
     add(page, "Subtract the mean")
@@ -94,7 +95,8 @@ def test_smoothing_points_can_be_typed_and_a_median_steps_through_odd_numbers(sw
     expect(ops(page)).to_contain_text("median of 15")
 
 
-def test_equations_with_their_legend_and_messages(sweep, new_page):
+def test_equations_with_their_legend_and_messages(sweep, cfg, new_page):
+    cfg.set_explore({"keep": {"operations": True}})                    # (not kept by default, 16.44)
     page = new_page("Explore")
     frames(page, lambda: row(page, "sweep.lbd").dblclick())
     ops(page).locator(".equations > summary").click()                  # folded until used

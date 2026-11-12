@@ -157,7 +157,8 @@ def test_nothing_2d_is_shown(viewer, new_page):
     expect(main.locator(".mouse-at")).to_have_count(0)
 
 
-def test_the_angle_is_remembered(viewer, new_page):
+def test_the_angle_is_remembered(viewer, cfg, new_page):
+    cfg.set_explore({"keep": {"zoom": True}})                          # the view, its angle too (16.44)
     files(viewer)
     page = new_page("Explore")
     open_bars(page)

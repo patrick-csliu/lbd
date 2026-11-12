@@ -13,7 +13,7 @@ import { SidebarToggle } from "./SidebarToggle";
 import { loadLibraryQuery, saveLibraryQuery } from "./libraryQuery";
 import FileView from "./FileView";
 import LibraryPage from "./LibraryPage";
-import ExploreTab, { setNewPanels } from "./ExploreTab";
+import ExploreTab, { setKeepParts, setNewPanels } from "./ExploreTab";
 import ImageView from "./ImageView";
 import StyleFileView from "./StyleFileView";
 import StylesPage from "./StylesPage";
@@ -146,6 +146,7 @@ function Shell() {
   if (state) setDateZone(state.library.date_zone); // before the lists draw their dates
   if (state) setAutoUnits(state.auto_units); // the plots' units that take a prefix, before numbers are written
   if (state) setNewPanels(state.explore.new_panels); // panels a new file opens with (16.45)
+  if (state) setKeepParts(state.explore.keep); // what a file opened again brings back (16.44)
   const [fatal, setFatal] = useState<string | null>(null);
   const [page, setPage] = useState<Page>(loadPage);
   useEffect(() => {

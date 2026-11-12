@@ -3,8 +3,23 @@
 
 import { useEffect, useState } from "react";
 import { api, AppState, ExploreSettings as Settings } from "./api";
+import type { KeepParts } from "./keep";
 import { useToast } from "./toast";
 import { Setting, SettingsGroup } from "./settingsUi";
+
+/** The parts of a file's view that can be kept (keep.ts KeepParts), as the settings list them. */
+const KEEP_LIST: [keyof KeepParts, string, string][] = [
+  ["panels", "Panels and layout", "How many panels, their order, side by side or stacked"],
+  ["plot", "Plot type, values and axes", "What each panel plots"],
+  ["traces", "Traces", "Which traces are drawn, or make a map"],
+  ["colours", "Colours and scales", "The colour map, and log or linear scales"],
+  ["limits", "Colour limits", "The colour range"],
+  ["sliders", "Slider positions", "Where each slider is"],
+  ["operations", "Operations and equations", "Off by default: a file opens as stored"],
+  ["zoom", "Zoom", "The view's limits (and a 3D plot's angle); never after the file changed"],
+  ["sync", "Sync", "Which panels follow each other"],
+  ["cursor_options", "Cursor options", "Cursor type, cuts, every trace at the line, move together"],
+];
 
 export function ExploreSettings({ settings, onSettings }: { settings: Settings; onSettings: (s: AppState) => void }) {
   const toast = useToast();
@@ -52,6 +67,25 @@ export function ExploreSettings({ settings, onSettings }: { settings: Settings; 
           <option value={6}>All values (up to 6)</option>
         </select>
       </Setting>
+    </SettingsGroup>
+    <SettingsGroup title="Kept when a file is opened again">
+      {KEEP_LIST.map(([key, name, help]) => (
+        <Setting key={key} id={`explore.keep.${key}`} name={name} help={help}>
+          <input
+            type="checkbox"
+            aria-label={`Keep ${name.toLowerCase()}`}
+            checked={settings.keep[key]}
+            onChange={async (e) => {
+              try {
+                onSettings(await api.setExplore({ keep: { ...settings.keep, [key]: e.target.checked } }));
+              } catch (err) {
+                toast((err as Error).message, "error");
+              }
+            }}
+          />
+        </Setting>
+      ))}
+      <p className="muted small">Cursor positions always start afresh. A file's ⋯ → Reset all starts its whole view afresh.</p>
     </SettingsGroup>
     <SettingsGroup title="Cursors">
       <Setting

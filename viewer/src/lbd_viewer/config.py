@@ -67,7 +67,12 @@ MEASUREMENTS_DEFAULTS: Dict[str, Any] = {"progress": True, "time": True, "percen
 # this many visible traces (more makes each cursor move slow, and the plot unreadable).
 # `new_panels`: how many panels a file opened for the first time gets, one per value (1: the first
 # value only; 6, the most: every value up to six), 16.45.
-EXPLORE_DEFAULTS: Dict[str, Any] = {"line_traces": 20, "new_panels": 1}
+# `keep`: the parts of a file's Explore view brought back when it is opened again (16.44; the page's
+# keep.ts); cursor positions always start afresh.
+KEEP_DEFAULTS: Dict[str, bool] = {"panels": True, "plot": True, "traces": True, "colours": True, "limits": True,
+                                  "sliders": True, "operations": False, "zoom": False, "sync": False,
+                                  "cursor_options": False}
+EXPLORE_DEFAULTS: Dict[str, Any] = {"line_traces": 20, "new_panels": 1, "keep": dict(KEEP_DEFAULTS)}
 MOST_PANELS = 6                                   # (ExploreTab.tsx MAX_PANELS)
 # The check for a new version (plan 16.25, updates.py), kept by the viewer, not set by the user:
 # when it last asked GitHub (local time, ISO), the newest release then and its page, and the
@@ -498,7 +503,10 @@ def _check_explore(e: Dict[str, Any]) -> Dict[str, Any]:
     n = e.get("new_panels")
     if isinstance(n, bool) or not isinstance(n, int) or not 1 <= n <= MOST_PANELS:
         raise ConfigError(f"Explore setting 'new_panels' must be a whole number from 1 to {MOST_PANELS}, not {n!r}")
-    return {k: e[k] for k in EXPLORE_DEFAULTS}
+    keep = e.get("keep")
+    if not isinstance(keep, dict) or set(keep) - set(KEEP_DEFAULTS) or not all(isinstance(v, bool) for v in keep.values()):
+        raise ConfigError(f"Explore setting 'keep' must say true or false for some of {sorted(KEEP_DEFAULTS)}, not {keep!r}")
+    return {**{k: e[k] for k in EXPLORE_DEFAULTS if k != "keep"}, "keep": {**KEEP_DEFAULTS, **keep}}
 
 
 def _check_updates(u: Dict[str, Any]) -> Dict[str, Any]:

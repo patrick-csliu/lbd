@@ -53,7 +53,7 @@ def test_a_click_reads_a_cell_with_its_cuts_and_keys_move_it(small_map, new_page
     expect(explore(page).locator(".explore-readout")).to_contain_text("Click the plot to read a stored value")
 
 
-def test_max_and_typed_positions_are_on_the_data_and_remembered(small_map, new_page):
+def test_max_and_typed_positions_are_on_the_data(small_map, new_page):
     page = new_page("Explore")
     frames(page, lambda: row(page, "small_map.lbd").dblclick())
     cursor_answer(page, lambda: explore(page).get_by_role("button", name="Max").click())
@@ -63,9 +63,9 @@ def test_max_and_typed_positions_are_on_the_data_and_remembered(small_map, new_p
     cursor_answer(page, lambda: box.press("Enter"))
     expect(readout(page).first).to_contain_text("value = 16 at x = 2, y = 40")
     page.wait_for_timeout(1500)                                        # remembered a moment later
-    page.reload()
-    cursor_answer(page, lambda: row(page, "small_map.lbd").dblclick())
-    expect(readout(page).first).to_contain_text("value = 16 at x = 2, y = 40")
+    page.reload()                                                      # cursor positions start afresh (16.44)
+    frames(page, lambda: row(page, "small_map.lbd").dblclick())
+    expect(readout(page)).to_have_count(0)
 
 
 def test_a_row_is_saved_as_a_file_and_shown_as_a_curve(small_map, viewer, new_page):

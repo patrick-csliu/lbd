@@ -29,7 +29,7 @@ opens it here. For a figure to export, use **Figure** (one click away, see below
    opens it on the file's values and axes.
 
 The header holds the title, the path (**⧉** copies it), **Open in Figure**, **📂** show in folder,
-**ⓘ** file info and **⋯** (**Use as Library picture**, **Forget this view**). Click **?** above
+**ⓘ** file info and **⋯** (**Use as Library picture**, **Reset all**). Click **?** above
 the panels (or press **?** on a plot) for every mouse action and key.
 
 **Any window size.** Explore fills the window and the page itself never scrolls: the controls,
@@ -785,16 +785,22 @@ a file.
 
 ## What is remembered, and where
 
-The viewer remembers how you explored each file: its panels and what each plots, the chosen
-traces, the operations and equations, colours, scales, limits, the zoom, the cursors and what is
-synchronized. Opening the file again shows the same.
+The viewer remembers how you explored each file. Opening the file again brings back the parts
+ticked in **Settings → Explore → Kept when a file is opened again**:
+
+| Kept by default | Started afresh by default |
+|---|---|
+| panels and layout; plot type, values and axes; traces; colours and scales; colour limits; slider positions | operations and equations; zoom (a 3D plot's angle too); sync; cursor options |
+
+Cursor positions always start afresh. All of it is remembered either way: a part unticked and
+ticked again later comes back. A kept zoom is not used once the file changed.
 
 - This is kept **on this computer**, in the viewer's own database (in its settings folder, see
   [Command line and settings](command-line.md)). **Nothing is written into the data file.** The
   file holds the data, its description and the figure's saved view (see
   [Saving views](saving-and-exporting.md)).
 - Without a remembered view, Explore starts from what the file's saved figure view plots.
-- **Forget this view** (**⋯** at the top) starts afresh; **Undo** in the message brings the view back. If a file changed so that a panel no longer
+- **Reset all** (**⋯** at the top) starts afresh; **Undo** in the message brings the view back. If a file changed so that a panel no longer
   fits (a value or axis it used is gone), that panel is left out and a note names it; if none
   fits, Explore starts afresh.
 - Views remembered by an earlier version (one plot, before panels) open as one panel.
