@@ -48,7 +48,9 @@ class App:
         self.token = ""
         self.output: List[str] = []     # everything the viewer prints, read continuously
         # Its own settings and "running viewer" record: never those of an installed viewer.
-        env = {**os.environ, "LBD_CONFIG_DIR": str(config), "LBD_RUNTIME_DIR": str(config / "runtime")}
+        # LBD_NO_UPDATE_CHECK: a test never asks GitHub for a new version.
+        env = {**os.environ, "LBD_CONFIG_DIR": str(config), "LBD_RUNTIME_DIR": str(config / "runtime"),
+               "LBD_NO_UPDATE_CHECK": "1"}
         self.process = subprocess.Popen(
             [*command, "--new", "--no-browser", "--port", str(self.port), "--idle-exit", "120", str(data)],
             env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")

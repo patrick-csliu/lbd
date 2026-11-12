@@ -90,7 +90,8 @@ def test_stop_that_doesnt_end_in_time(monkeypatch, capsys):
 def test_a_real_viewer_stops_gently(tmp_path):
     """Start a viewer in its own process, then `lbd-view --stop`: it ends within 10 s, with its
     "running viewer" record removed (Running.run's normal end, after AppState.close)."""
-    env = {**os.environ, "LBD_RUNTIME_DIR": str(tmp_path / "rt"), "LBD_CONFIG_DIR": str(tmp_path / "cfg")}
+    env = {**os.environ, "LBD_RUNTIME_DIR": str(tmp_path / "rt"), "LBD_CONFIG_DIR": str(tmp_path / "cfg"),
+           "LBD_NO_UPDATE_CHECK": "1"}
     viewer = subprocess.Popen([sys.executable, "-m", "lbd_viewer", "--no-browser", "--new", "--idle-exit", "0"],
                               env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:

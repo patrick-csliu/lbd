@@ -6,6 +6,7 @@ import { onFinished } from "./watch";
 import { api, ApiError, AppState, baseName, fileKind, LibraryQuery, OpenDataIn, SidebarScope, OpenFilesIn, PageCommand, PageEntry, PlotSpec, TabState, Theme, viewerUrl, Workspace } from "./api";
 import FilesSidebar from "./FilesSidebar";
 import { lastSection, SECTIONS, SettingsDialog, SettingsSection } from "./SettingsDialog";
+import { UpdateReminder } from "./Updates";
 import { DRAWER_MEDIA, useMedia } from "./useMedia";
 import { useResizable, widestContent } from "./resizable";
 import { SidebarToggle } from "./SidebarToggle";
@@ -924,6 +925,7 @@ function Shell() {
                 setReadHeaders={setLibraryReadHeaders}
               />
             )}
+            <UpdateReminder onOpenAbout={() => openSettings("about")} />
           </div>
         )}
         <a className="help-button" href={docsUrl()} target="_blank" rel="noopener" title="Open the documentation (works offline)">

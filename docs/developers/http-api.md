@@ -44,6 +44,9 @@ where the details are (`viewer.log`, next to LBD's database); the session stays 
 |---|---|---|
 | `GET /api/ping` | | `{app: "lbd-viewer", version, pid}`. Used by `cli.py` to detect a running viewer. |
 | `POST /api/heartbeat` | | `{ok: true}`. Tabs call it every 10 s; the server stops after `--idle-exit` seconds without one. |
+| `GET /api/updates` | `claim` | The check for a new version (`updates.py`): `{current, latest, url, checked_at, newer, never_for, checking, automatic, install_command, remind}`. With `claim=true`, `remind` is true for the first page that asks after a real start, once, when a newer version is due a reminder. |
+| `POST /api/updates/check` | | Asks GitHub now; the same answer, or 502 with the reason ("no connection to GitHub …"). |
+| `POST /api/updates/remind` | `{choice}` | The reminder's answer: `later`, `install` (both: not again today) or `never` (not for this version). |
 | `POST /api/stop` | | `{stopping: true, pid}`: the server stops gently (labels waiting are written first). Only from this computer (403 otherwise); 409 for a viewer not started by `lbd-view`. Sent by `lbd-view --stop`, which the installers run. |
 | `GET /api/state` | | `{version, lbd_version, roots, default_style, open_files_in, open_data_in, theme, library, styles, platform, config_dir, warnings}`. `library`: `{read_headers, notice_seen, columns}` (the Library's settings, see `PUT /api/settings`). `warnings` also lists folders that no longer exist, a default style that was deleted, and (once) a broken database that was put aside. |
 | `POST /api/open` | `{path}` | `{path}` (resolved). Allows reading a file outside the roots. |

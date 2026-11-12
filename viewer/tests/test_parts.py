@@ -30,7 +30,8 @@ def test_config_settings_roundtrip(tmp_path):
                               "memory": {"reserve_gb": None, "maximum_gb": None, "summary_cache_gb": 20.0},
                               "measurements": {"progress": True, "time": True, "percent": True, "points": True,
                                                "axes": True, "notify": False}, "explore": {"line_traces": 20},
-                              "last_version": None}
+                              "last_version": None,
+                              "updates": {"last_check": None, "latest": None, "url": None, "remind": None}}
     assert cfg.problems() == []
     # the Library's settings: checked, kept
     assert cfg.set_library({"card_main": "file", "card_fields": ["sweep", "tags"], "date_zone": "Europe/Paris"})["card_fields"] == ["sweep", "tags"]

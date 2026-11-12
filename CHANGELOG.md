@@ -147,6 +147,14 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
   it again but showed an error on every panel. Now the view opens again quietly ("Drawing…"), the
   request is done on it, and several requests share one reopening.
 
+- **LBD tells you when a new version is out.** At most once a day, when the viewer starts, it
+  asks GitHub for the latest release (5 s at most, in the background, sending only the program's
+  name and version; quiet without internet). **Settings → About** shows *"LBD X is available"*
+  with its release page, the install command and **Check now**. On the first start of a day with
+  a newer version, one page shows a reminder: Remind later, Install… (Settings → About) or Never
+  remind (this version only). LBD never downloads or installs anything by itself. `--dev` skips
+  the check.
+
 - **Install with one command**, on every system: `install.ps1` (Windows, PowerShell),
   `install.sh` (Linux) and `install-macos.sh` (macOS) come with each release. Each downloads the
   latest release's installer, checks its SHA-256 checksum against the release's new
@@ -647,6 +655,9 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
   a whole run takes about as long as the browser tests instead of the sum of all. `--changed
   [REF]` runs only the suites the changed files can affect, `--only` names suites. Viewer and
   browser tests that fail side by side run again alone, and the summary says so.
+- New endpoints `GET /api/updates`, `POST /api/updates/check` and `POST /api/updates/remind`
+  (`updates.py`; the settings group `updates`); tests never ask GitHub (`LBD_NO_UPDATE_CHECK=1`
+  for a real viewer process).
 - New endpoint `POST /api/stop` (local, with the token). The release workflow's Windows and Linux
   jobs run `scripts/upgrade_test.py`: v1.2.0 from its release, the new build over it, then an
   older-numbered build of the same installer, which must be refused.

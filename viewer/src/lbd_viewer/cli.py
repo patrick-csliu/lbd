@@ -377,6 +377,7 @@ def start(args: argparse.Namespace, files: List[str], dirs: List[str],
     state.on_stop = running.stop                 # POST /api/stop (lbd-view --stop)
     if not args.dev:
         running.notice = _note_version(cfg)
+        _start_update_check(state)
 
     def after_start():
         while not server.started:
@@ -443,6 +444,19 @@ def stop_running(wait: float = 10.0) -> int:
         time.sleep(0.1)
     print("lbd-view: the viewer stopped", flush=True)
     return 0
+
+
+def _start_update_check(state: AppState) -> None:
+    """A real start (not --dev): the check for a new version, in the background, once a day; and
+    the reminder for the first page that asks (updates.py). LBD_NO_UPDATE_CHECK=1 skips it (tests
+    that start a real viewer, so they never ask GitHub)."""
+    if os.environ.get("LBD_NO_UPDATE_CHECK") == "1":
+        return
+    state.updates.automatic = True
+    try:
+        state.updates.start()
+    except ConfigError:
+        pass                                     # unreadable settings: the viewer's page says so
 
 
 def _note_version(cfg: Config) -> Optional[str]:

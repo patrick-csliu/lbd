@@ -904,6 +904,30 @@ async function exploreRender(
   return { meta, image, roundTripMs: performance.now() - t0 };
 }
 
+/** The check for a new version (server updates.py, plan 16.25). */
+export interface UpdatesState {
+  current: string;
+  /** the newest release when last checked, or null (never checked) */
+  latest: string | null;
+  /** its release page on GitHub */
+  url: string;
+  /** when it was last checked (local time, ISO), or null */
+  checked_at: string | null;
+  newer: boolean;
+  /** "Never remind" was chosen for this version */
+  never_for: string | null;
+  /** the automatic check (at the viewer's start) is still running */
+  checking: boolean;
+  /** this viewer checks by itself (a real start, not --dev) */
+  automatic: boolean;
+  /** the one-line install command for this system, or null */
+  install_command: string | null;
+  /** show the reminder window now (only for the page that asked with claim) */
+  remind: boolean;
+}
+
+export type RemindChoice = "later" | "never" | "install";
+
 export const api = {
   /** Open an Explore session for a file, drawn for a panel of width × height CSS pixels. */
   exploreOpen: (path: string, spec: PlotSpec | null, width: number, height: number, dpr: number) =>
@@ -1012,6 +1036,11 @@ export const api = {
   setOpenDataIn: (where: OpenDataIn) => call<AppState>("PUT", "/api/settings", { open_data_in: where }),
   setTheme: (theme: Theme) => call<AppState>("PUT", "/api/settings", { theme }),
   resetSettings: (section: string) => call<AppState>("POST", "/api/settings/reset", { section }),
+  /** What is known about a new version; claim: this page shows the reminder if it is due (once per start). */
+  updates: (claim = false) => call<UpdatesState>("GET", "/api/updates", undefined, claim ? { claim: "true" } : undefined),
+  /** Ask GitHub now; fails with the reason (no internet, ...). */
+  checkUpdates: () => call<UpdatesState>("POST", "/api/updates/check"),
+  remindUpdates: (choice: RemindChoice) => call<UpdatesState>("POST", "/api/updates/remind", { choice }),
   setLibrary: (changes: Partial<LibrarySettings>) => call<AppState>("PUT", "/api/settings", { library: changes }),
   setExplore: (changes: Partial<ExploreSettings>) => call<AppState>("PUT", "/api/settings", { explore: changes }),
   setMemory: (changes: Partial<Pick<MemorySettings, "reserve_gb" | "maximum_gb" | "summary_cache_gb">>) =>

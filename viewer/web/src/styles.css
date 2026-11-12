@@ -1076,3 +1076,9 @@ button.ib:disabled { opacity: 0.4; cursor: default; }
 /* dark theme: curve plots (no colour scale) drawn dark by inverting the picture's lightness; maps
    keep their light picture, since inverting would change what the colours mean */
 :root[data-theme="dark"] .explore-tab .explore-picture.curve { filter: invert(0.88) hue-rotate(180deg); }
+
+/* Settings -> About: a new version (Updates.tsx) */
+.update-info p { margin: 0 0 6px; }
+.update-command { display: flex; gap: 6px; align-items: center; margin: 0 0 6px; }
+.update-command code { flex: 1; min-width: 0; overflow-wrap: anywhere; padding: 4px 6px; border-radius: 4px; background: var(--panel-2); font-size: 12px; }
+.update-reminder { max-width: 30em; }

@@ -203,6 +203,28 @@ install Python: uv downloads the version the viewer is tested with.
 | Uninstall | `uv tool uninstall lbd-viewer`. Your presets and settings in `~/Library/Application Support/lbd` are kept; delete that folder to remove them too. |
 
 
+## Updates
+
+LBD Viewer tells you when a new version is out; it never downloads or installs anything by
+itself.
+
+- **When it checks:** at most once a day, when the viewer starts (a viewer left open overnight
+  doesn't check again). It asks GitHub, in the background, for the latest published release
+  (`api.github.com/repos/patrick-csliu/lbd/releases/latest`), waiting at most 5 seconds.
+- **What it sends:** only that request, with the program's name and version
+  (`User-Agent: LBD-Viewer/<version>`); nothing about your computer, you or your files. It uses
+  the system's proxy settings.
+- **Without internet** the automatic check is quiet and tries again at the next start.
+- **Settings → About** shows what the last check found: *"LBD X is available"* with a link to its
+  release page, the [one-line install command](#lbd-viewer-one-command) for your system, and
+  **Check now**, which says why when it fails (no connection, a proxy, an unexpected answer).
+- **The reminder:** on the first start of a day when a newer version is known, one viewer page
+  (only one, when several are open) asks: **Remind later** (again at a start on a later day),
+  **Install…** (opens Settings → About) or **Never remind** (not for this version; the next new
+  version reminds again, and Settings → About always shows it).
+
+The last check and your choice are kept in the settings (`settings.json`, `updates`).
+
 ## Going back to an older version
 
 A new version replaces the old one; no two versions are installed side by side. The Windows and
