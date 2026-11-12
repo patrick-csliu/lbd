@@ -75,3 +75,24 @@ def test_the_limit_of_a_cursor_line_is_a_setting(new_page):
     page.wait_for_timeout(300)
     page.reload()
     expect(open_settings(page, "Explore").get_by_label("Most traces marked at a cursor line")).to_have_value("7")
+
+
+def test_another_time_zone_keeps_the_setting_readable(new_page):
+    # Library → Show dates in → Another time zone adds a second list: it goes under the first one,
+    # so the name and help text keep their room and both lists stay inside the dialog (16.30)
+    page = new_page()
+    for width in (1280, 760, 600):                                      # normal, narrower, and the narrow layout
+        page.set_viewport_size({"width": width, "height": 800})
+        d = open_settings(page, "Library")
+        d.get_by_label("Show dates in").select_option(label="Another time zone")
+        row = d.locator("[data-setting='library.date_zone']")
+        expect(row.get_by_label("Time zone")).to_be_visible()
+        name = row.locator(".setting-name").bounding_box()
+        assert name["width"] >= 100, f"at {width} px the setting's name is {name['width']:.0f} px wide"
+        main = d.locator(".settings-main").bounding_box()
+        for label in ("Show dates in", "Time zone"):
+            box = row.get_by_label(label).bounding_box()
+            assert main["x"] <= box["x"] and box["x"] + box["width"] <= main["x"] + main["width"], f"at {width} px {label} leaves the dialog"
+        assert page.evaluate("document.querySelector('.settings-main').scrollWidth <= document.querySelector('.settings-main').clientWidth")
+        page.keyboard.press("Escape")
+        expect(d).to_have_count(0)

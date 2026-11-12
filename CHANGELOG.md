@@ -130,6 +130,10 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
 - **Fixed: changing the plot type while a picture was drawn** (for example a map to Scatter on a busy
   computer) could show "This plot can't be shown". Each Explore view now finishes one change before
   the next step reads it.
+- **Fixed: Settings broke after "Another time zone"** (Library → Show dates in). The time zone list
+  stood beside the first one and squeezed the setting's name and help into a strip of single
+  letters, with the list at the window's edge. It now goes under the first list, and every
+  setting's name and help keep a minimum width.
 - **Fixed: label changes refused on a busy computer.** When several programs change labels in one
   folder, a change now waits its turn for up to 15 s (before: 3 s), and the Library shows
   "Saving labels…" while it waits. A change that is refused in the end is shown as an error that
