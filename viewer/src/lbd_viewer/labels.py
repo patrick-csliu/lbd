@@ -11,7 +11,7 @@ format is defined in docs/developers/library-sidecar.md.
   (with a note), and a value that lost is kept in the entry's `history`. Nothing is lost
   silently, even when two computers' clocks disagree.
 - Writing never overwrites another writer's change: a lock file (`.lbd-library.lock`, made
-  exclusively) keeps two LBD programs on one computer apart; just before the sidecar is
+  exclusively, kept fresh while its writer works) keeps two LBD programs on one computer apart; just before the sidecar is
   replaced it is read again, and a change made meanwhile (another computer, through sync) is
   merged first. Sync tools' conflict copies (`.lbd-library_<computer>_<date>_Conflict.json`,
   "… (conflicted copy) …", …) are merged in and then moved to the Recycle Bin.
@@ -25,7 +25,9 @@ import copy
 import json
 import os
 import socket
+import threading
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -37,8 +39,9 @@ SCALARS = ("star", "project", "comment")
 LISTS = ("users", "tags")
 KINDS = ("project", "users", "tags")   # the labels that can be kept without a file (`labels`)
 OWN_KEYS = ("format", "version", "files", "labels", "read_only")   # anything else a newer writer added is kept
-LOCK_STALE = 10.0                      # a lock older than this was left behind (a crash)
-LOCK_WAIT = 3.0                        # how long a writer waits for another one
+LOCK_STALE = 10.0                      # a lock unchanged this long (watched here) was left behind (a crash)
+LOCK_WAIT = 15.0                       # how long a writer waits for another one
+LOCK_REFRESH = 2.0                     # how often a working writer touches its lock file
 
 
 class LabelsError(Exception):
@@ -374,36 +377,96 @@ def conflict_copies(folder: Path) -> List[Path]:
     return sorted(out)
 
 
-def _lock(folder: Path) -> Path:
+class _Lock:
+    """The folder's lock file, held by this writer. While held, a small thread touches the file
+    every LOCK_REFRESH seconds, so a writer that works long (a slow or busy computer) never looks
+    like one that stopped. It holds this writer's text ("computer pid token"); release removes the
+    file only if it still holds that text, so a lock another writer has taken meanwhile stays."""
+
+    def __init__(self, path: Path, text: str):
+        self.path, self.text = path, text
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._keep_fresh, name="labels-lock", daemon=True)
+        self._thread.start()
+
+    def _mine(self) -> bool:
+        try:
+            return self.path.read_text(encoding="utf-8") == self.text
+        except (OSError, ValueError):
+            return False
+
+    def _keep_fresh(self) -> None:
+        while not self._stop.wait(LOCK_REFRESH):
+            try:
+                if self._mine():
+                    os.utime(self.path)
+            except OSError:
+                pass                                   # tried again in a moment
+
+    def release(self) -> None:
+        from .files import _while_in_use
+
+        self._stop.set()
+        self._thread.join()
+        if self._mine():
+            try:
+                _while_in_use(self.path.unlink, wait=2.0)   # a waiter may be looking at it (Windows)
+            except OSError:
+                pass                                   # stays; it counts as left behind after LOCK_STALE
+
+
+def _lock(folder: Path) -> _Lock:
+    """Take the folder's lock, waiting up to LOCK_WAIT for another writer. A lock counts as left
+    behind (a writer that crashed) only when its file's time hasn't changed for LOCK_STALE seconds
+    of this computer's clock while we watch: a working writer refreshes it, and the file's time is
+    only compared with itself, so a clock difference between computers (shared folder) doesn't
+    matter."""
     lock = Path(folder) / LOCK
+    text = f"{computer()} {os.getpid()} {uuid.uuid4().hex[:8]}"
     deadline = time.monotonic() + LOCK_WAIT
+    seen: Optional[Tuple[int, int]] = None            # the lock file's (mtime, size) as last seen
+    since = 0.0                                        # ... unchanged since then (this computer's clock)
     while True:
         try:
             fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.write(fd, f"{computer()} {os.getpid()}".encode())
+            os.write(fd, text.encode())
             os.close(fd)
-            return lock
+            return _Lock(lock, text)
         except FileExistsError:
             try:
-                if time.time() - lock.stat().st_mtime > LOCK_STALE:
-                    lock.unlink()                      # left behind by a writer that stopped
+                st = lock.stat()
+                if seen != (st.st_mtime_ns, st.st_size):
+                    seen, since = (st.st_mtime_ns, st.st_size), time.monotonic()
+                elif time.monotonic() - since > LOCK_STALE:
+                    _remove_left_behind(lock, seen)
+                    seen = None
                     continue
             except FileNotFoundError:
                 continue
             except PermissionError:                    # being removed by its writer (see below)
                 pass
             if time.monotonic() > deadline:
-                raise LabelsError(f"the labels of {folder} are being changed by another LBD program; "
-                                  "try again in a moment") from None
+                raise LabelsError(f"The labels in {folder} were not changed: another LBD program was changing "
+                                  f"them and didn't finish within {LOCK_WAIT:.0f} s. Try again in a moment.") from None
             time.sleep(0.02)
         except PermissionError:
             # On Windows a lock file another writer has just removed stays "delete pending" for a
             # moment, and making it again is denied as if the folder were read-only. So only a
             # denial that lasts means the folder can't be written to.
             if time.monotonic() > deadline:
-                raise LabelsError(f"labels can't be saved in {folder}: the folder is read-only (or not "
-                                  "yours to change); copy the files to a folder you can write to") from None
+                raise LabelsError(f"The labels in {folder} were not changed: the folder is read-only (or not "
+                                  "yours to change); copy the files to a folder you can write to.") from None
             time.sleep(0.02)
+
+
+def _remove_left_behind(lock: Path, seen: Tuple[int, int]) -> None:
+    """Remove a lock left behind, if it is still the one watched (not one just made by another writer)."""
+    try:
+        st = lock.stat()
+        if (st.st_mtime_ns, st.st_size) == seen:
+            lock.unlink()
+    except (FileNotFoundError, PermissionError):
+        pass
 
 
 def update(folder: Path, change: Callable[[Dict[str, Any]], None],
@@ -444,10 +507,7 @@ def update(folder: Path, change: Callable[[Dict[str, Any]], None],
                 notes.append(f"Labels in {c.name} were merged, but it couldn't be removed ({e}).")
         return notes
     finally:
-        try:
-            lock.unlink()
-        except OSError:
-            pass
+        lock.release()
 
 
 def _write(p: Path, doc: Dict[str, Any]) -> None:
@@ -462,8 +522,8 @@ def _write(p: Path, doc: Dict[str, Any]) -> None:
         tmp.write_text(json.dumps(doc, indent=1, ensure_ascii=False), encoding="utf-8")
         _while_in_use(lambda: os.replace(tmp, p))
     except PermissionError:
-        raise LabelsError(f"labels can't be saved in {p.parent}: the folder is read-only (or not yours "
-                          "to change); copy the files to a folder you can write to") from None
+        raise LabelsError(f"The labels in {p.parent} were not changed: the folder is read-only (or not yours "
+                          "to change); copy the files to a folder you can write to.") from None
     finally:
         if tmp.exists():
             tmp.unlink()

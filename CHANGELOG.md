@@ -124,6 +124,12 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
 - **Fixed: changing the plot type while a picture was drawn** (for example a map to Scatter on a busy
   computer) could show "This plot can't be shown". Each Explore view now finishes one change before
   the next step reads it.
+- **Fixed: label changes refused on a busy computer.** When several programs change labels in one
+  folder, a change now waits its turn for up to 15 s (before: 3 s), and the Library shows
+  "Saving labels…" while it waits. A change that is refused in the end is shown as an error that
+  says it was not made, and why. A program that works long keeps its lock fresh, so it is never
+  mistaken for one that crashed, and a lock left behind is recognised by its time not changing,
+  so clocks that differ between computers no longer matter.
 
 - **⚙ Settings are a dialog with sections** (General, Library, Files sidebar, Memory,
   Measurements) instead of one long menu: each setting with its name, a line about it and its

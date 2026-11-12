@@ -70,12 +70,22 @@ two `labels` per label: the newer decision wins.
 Several programs and computers may change one folder's labels (two LBD Viewers, a colleague's
 computer through a synced folder). A writer:
 
-1. creates `.lbd-library.lock` in the folder exclusively (if it exists and is older than 10
-   seconds, it was left behind and may be removed);
-2. reads the file, applies its changes, recording each in `changed`;
-3. just before writing, checks whether the file changed since it was read; if so, reads it
+1. creates `.lbd-library.lock` in the folder exclusively, holding its own text (computer, process
+   id and a random part). If the lock exists, it waits its turn, up to **15 seconds**; then the
+   change is refused with an error that says it was not made;
+2. while it holds the lock, touches the lock file every **2 seconds**, so a writer that works
+   long (a slow or busy computer) never looks like one that stopped;
+3. reads the file, applies its changes, recording each in `changed`;
+4. just before writing, checks whether the file changed since it was read; if so, reads it
    again and **merges** (below) instead of overwriting;
-4. writes a temporary file and renames it over `.lbd-library.json`, then removes the lock.
+5. writes a temporary file and renames it over `.lbd-library.json`, then removes the lock, but
+   only if it still holds its own text (a lock another writer has taken meanwhile stays).
+
+**A lock left behind** (its writer crashed) is one whose file time **doesn't change for 10
+seconds** while a waiting writer watches it, timed on the waiting writer's own clock; it is then
+removed. The lock's time is only compared with itself, never with this computer's clock, so on a
+shared folder a clock difference between two computers can't make a working writer's lock look
+old.
 
 **Merging** two versions of an entry: for `star`, `project` and `comment`, the one with the
 newer `changed` time wins; for every single user and tag, the newer record wins (so an addition

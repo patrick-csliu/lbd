@@ -1,4 +1,4 @@
-import { Dispatch, SetStateAction } from "react";
+import { Dispatch, SetStateAction, useState } from "react";
 import { api, baseName, LabelChanges, LibraryRow } from "./api";
 import { ConfirmRequest, MenuEntry, systemNames } from "./menu";
 import { fileEntries, renameRequest } from "./fileActions";
@@ -40,7 +40,25 @@ export function useFileActions(ctx: FileActionsContext) {
       refresh();
     }
   };
-  const label = (paths: string[], changes: LabelChanges) => run(api.librarySetLabels(paths, changes));
+  /**
+   * Run a change of labels. It may wait its turn (another program changing the same folder's
+   * labels, up to 15 s on the server), so after a second the Library says it is saving; a
+   * refusal comes back as an error that says the change was not made, and why.
+   */
+  const [saving, setSaving] = useState(0); // label changes running for over a second
+  const runLabels = (what: Promise<{ notes: string[] }>, done?: string) => {
+    let shown = false;
+    const timer = window.setTimeout(() => {
+      shown = true;
+      setSaving((n) => n + 1);
+    }, 1000);
+    const finished = what.finally(() => {
+      window.clearTimeout(timer);
+      if (shown) setSaving((n) => n - 1);
+    });
+    return run(finished, done);
+  };
+  const label = (paths: string[], changes: LabelChanges) => runLabels(api.librarySetLabels(paths, changes));
   const toggleStar = (rows: LibraryRow[]) => rows.length && label(rows.map((r) => r.path), { star: !rows.every((r) => r.star) });
 
   const askTrash = (path: string) => {
@@ -127,5 +145,5 @@ export function useFileActions(ctx: FileActionsContext) {
     return items;
   };
 
-  return { run, label, toggleStar, askTrash, askText, askNewMeasurement, askGiveIds, menuEntries };
+  return { run, runLabels, saving: saving > 0, label, toggleStar, askTrash, askText, askNewMeasurement, askGiveIds, menuEntries };
 }
