@@ -246,3 +246,20 @@ def test_max_min_and_peak_are_on_one_line(values_files, new_page):
     page.wait_for_timeout(300)
     assert len(set(tops()[1:])) == 1, tops()                             # the buttons on one line
     assert find.evaluate("(f) => f.scrollWidth - f.clientWidth") <= 1
+
+
+def test_the_cut_strips_are_painted_at_their_size_after_a_resize(values_files, new_page):
+    """16.37: after the panel gets smaller, a cut strip's picture is as wide as the strip (it was
+    painted at the old size: 338 px shown in 218 px)."""
+    page = new_page("Explore")
+    meta = frames(page, lambda: row(page, "7 spectroscopy 3d.lbd").dblclick())
+    overlay = explore(page).locator(".panel .explore-overlay").first
+    b = overlay.bounding_box()
+    overlay.click(position={"x": b["width"] * 0.4, "y": b["height"] * 0.4})   # a cursor: the cuts show
+    strip = explore(page).locator(".explore-cut-top canvas").first
+    expect(strip).to_be_visible()
+    size = page.viewport_size
+    frames(page, lambda: page.set_viewport_size({"width": int(size["width"] * 0.7), "height": size["height"]}))
+    page.wait_for_timeout(500)
+    got = strip.evaluate("c => [c.width, c.clientWidth * (window.devicePixelRatio || 1)]")
+    assert got[0] == pytest.approx(got[1], abs=2), got

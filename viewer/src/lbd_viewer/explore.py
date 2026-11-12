@@ -55,6 +55,10 @@ UNSORTED_LIMIT = 200_000   # a curve with unsorted x and more points than this i
 RASTER_ABOVE = 30
 # Tick labels the layout makes room for, so zooming (more digits) never needs a new layout.
 WIDEST_TICK = "\u22128.888888"
+# A colour bar's tick labels (its range changes with the data, not with zooming), and the part of
+# the last x tick label that hangs over the plot's right edge (half of a label this wide).
+COLORBAR_TICK = "\u22128888"
+OVERHANG_TICK = "\u221288.88"
 MAX_DPR = 2.0
 PICK_RADIUS_PX = 12.0
 FORMATS = ("raw", "png")
@@ -307,38 +311,107 @@ class ExploreSession:
         self.last_lines: Optional[List[Tuple[np.ndarray, np.ndarray]]] = None
 
     def _lay_out(self) -> None:
-        """Place the plot area once, with room for tick labels as wide as zooming in can make
-        them; then keep it, so the plot doesn't move while zooming and no zoom step needs a new
-        layout (that would cost a second drawing). Call under the render lock."""
-        from matplotlib.ticker import FuncFormatter
-
+        """Place the plot box from the picture's size and the style only (16.37): the margins
+        make room for the widest tick labels zooming can bring (WIDEST_TICK), the axis labels,
+        the title, a colour bar and a right-hand axis, all measured from their font sizes, never
+        from what is drawn now. The same size gives the same box, whatever came before (another
+        size, another value, another slider step), and no step needs a new layout. A label too
+        long for its room is shortened with "…". Call under the render lock."""
         if self.bare:
             self._bare_out()
             return
-        kept = [(a, a.get_major_formatter()) for a in (self.ax.xaxis, self.ax.yaxis)]
-        for a, _ in kept:
-            wide = FuncFormatter(lambda v, pos: WIDEST_TICK)
-            wide.set_offset_string("1e−8")              # room for a multiplier too (tiny ranges)
-            a.set_major_formatter(wide)
-        try:
-            self.fig.set_layout_engine("constrained")
-            self.fig.canvas.draw()
-            self.fig.set_layout_engine("none")
-        finally:                                         # the stand-ins never stay
-            for a, formatter in kept:
-                a.set_major_formatter(formatter)
-        # The real tick labels can still hang over the picture's edge (the last x label of a
-        # narrow plot): the plot area moves in by that much.
-        self.fig.canvas.draw()
-        r, width = self.fig.canvas.get_renderer(), self.fig.bbox.width
-        boxes = [t.get_window_extent(r) for t in self.ax.get_xticklabels() if t.get_visible() and t.get_text()]
-        right = max([b.x1 for b in boxes], default=0) - (width - 2)
-        left = 2 - min([b.x0 for b in boxes], default=2)
-        if right > 0 or left > 0:
-            pos = self.ax.get_position()
-            x0, x1 = pos.x0 + max(left, 0) / width, pos.x1 - max(right, 0) / width
-            if x1 - x0 > 0.2:
-                self.ax.set_position([x0, pos.y0, x1 - x0, pos.height])
+        from matplotlib.axes._secondary_axes import SecondaryAxis
+        from matplotlib.font_manager import FontProperties
+
+        fig, ax = self.fig, self.ax
+        fig.set_layout_engine("none")
+        r = fig.canvas.get_renderer()
+        W, H = fig.bbox.width, fig.bbox.height
+        px = fig.dpi / 72                                 # pixels per point
+        family = matplotlib.rcParams["font.family"]
+
+        def size_of(text: str, points: float) -> Tuple[float, float]:
+            w, h, _ = r.get_text_width_height_descent(text, FontProperties(family=family, size=points), ismath=False)
+            return w, h
+
+        def ticks(axis) -> Tuple[float, float, float]:
+            """(tick label size in points, room outside the frame for tick and pad in pixels)."""
+            t = axis.get_major_ticks()[0] if axis.get_major_ticks() else None
+            labelsize = t.label1.get_fontsize() if t else matplotlib.rcParams["font.size"]
+            length = t.tick1line.get_markersize() if t else 3.5
+            pad = t.get_pad() if t else 3.5
+            outward = matplotlib.rcParams[f"{axis.axis_name}tick.direction"] in ("out", "inout")
+            return labelsize, (length if outward else 0) * px + pad * px, length
+
+        def label_room(label) -> float:
+            if not label.get_visible() or not label.get_text():
+                return 0.0
+            lines = label.get_text().count("\n") + 1
+            return size_of("Mg", label.get_fontsize())[1] * 1.2 * lines
+
+        edge = 3 * self.dpr
+        xsize, xout, _ = ticks(ax.xaxis)
+        ysize, yout, _ = ticks(ax.yaxis)
+        xtick_w, xtick_h = size_of(WIDEST_TICK, xsize)
+        ytick_w, ytick_h = size_of(WIDEST_TICK, ysize)
+        xlabel, ylabel = ax.xaxis.label, ax.yaxis.label
+        left = edge + ytick_w + yout + (label_room(ylabel) + ax.yaxis.labelpad * px if label_room(ylabel) else 0)
+        bottom = edge + xtick_h + xout + (label_room(xlabel) + ax.xaxis.labelpad * px if label_room(xlabel) else 0)
+        title = label_room(ax.title)
+        top = edge + max(title + matplotlib.rcParams["axes.titlepad"] * px if title else 0, ytick_h * 1.2)
+        right = edge + size_of(OVERHANG_TICK, xsize)[0] / 2   # the last x tick label hangs over the frame
+
+        # what stands to the right of the plot: a right-hand axis, a colour bar (its own axes, or
+        # inside the plot's as matrices have it)
+        cb_style = self.style.figure.axes.image.colorbar
+        beside: List[Any] = []
+        for other in [*ax.child_axes, *(a for a in fig.axes if a is not ax and a not in ax.child_axes)]:
+            if isinstance(other, SecondaryAxis):
+                size, out, _ = ticks(other.yaxis)
+                right += size_of(WIDEST_TICK, size)[0] + out
+                if label_room(other.yaxis.label):
+                    right += label_room(other.yaxis.label) + other.yaxis.labelpad * px
+            elif hasattr(other, "_colorbar"):
+                size, out, _ = ticks(other.yaxis)
+                bar_w = cb_style.size_pct / 100 * W * 0.6   # as wide as matplotlib's own fraction gives
+                gap = cb_style.pad_pct / 100 * W * 0.6
+                room = gap + bar_w + size_of(COLORBAR_TICK, size)[0] + out
+                if label_room(other.yaxis.label):
+                    room += label_room(other.yaxis.label) + other.yaxis.labelpad * px
+                right += room
+                if other not in ax.child_axes:            # its own axes: placed beside the plot below
+                    beside.append((other, gap, bar_w))
+
+        x0, y0 = left / W, bottom / H
+        w, h = max(W - left - right, W * 0.2) / W, max(H - bottom - top, H * 0.2) / H
+        ax.set_position([x0, y0, w, h])
+        for other, gap, bar_w in beside:
+            other.set_box_aspect(None)                    # as tall as the plot (matplotlib's own: 20:1)
+            other.set_position([x0 + w + gap / W, y0, bar_w / W, h])
+
+        # labels longer than their room are shortened, never cut off at the picture's edge
+        self._shorten(xlabel, w * W, size_of)
+        self._shorten(ylabel, h * H, size_of)
+        self._shorten(ax.title, W - 2 * edge, size_of)
+        for other in fig.axes:
+            if hasattr(other, "_colorbar"):
+                self._shorten(other.yaxis.label, h * H, size_of)
+
+    @staticmethod
+    def _shorten(label: Any, room: float, size_of: Any) -> None:
+        """A label wider than `room` pixels gets "…" in place of its end (the whole text stays in
+        the file and the controls)."""
+        text = label.get_text()
+        if not text or not label.get_visible() or size_of(text, label.get_fontsize())[0] <= room:
+            return
+        lo, hi = 0, len(text)
+        while lo < hi:                                   # the longest start that fits with "…"
+            mid = (lo + hi + 1) // 2
+            if size_of(text[:mid].rstrip() + "…", label.get_fontsize())[0] <= room:
+                lo = mid
+            else:
+                hi = mid - 1
+        label.set_text(text[:lo].rstrip() + "…")
 
     def _bare_out(self) -> None:
         """Only the data, over the whole picture (`bare`). Call under the render lock."""
@@ -1089,16 +1162,7 @@ class ExploreSession:
             pxe, pye = self._pixel_edges(dw, dh)
             note, reduced = self.view.picture(pxe, pye, stat, draft, dw, dh)
             t2 = time.perf_counter()
-            self.fig.canvas.draw()
-            if not _again and not getattr(self.view, "fixed_layout", False) and self._spills():
-                # Text that still doesn't fit (rare: the layout leaves room for wide tick labels):
-                # lay out again, once.
-                self.view.lay_out()
-                left, top, w, h = self._plot_area()
-                if (w, h) != (len(pxe) - 1, len(pye) - 1):        # the plot area changed size
-                    return self.render(xlim, ylim, stat, fmt, draft, _again=True)
-                # the same size: drawn again, as the layout's drawing has stand-in tick labels
-                self.fig.canvas.draw()
+            self.fig.canvas.draw()                    # (the layout never changes here: 16.37)
             rgba = np.asarray(self.fig.canvas.buffer_rgba())
             t3 = time.perf_counter()
         height, width = rgba.shape[:2]

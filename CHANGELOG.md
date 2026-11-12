@@ -112,6 +112,12 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
 
 **Viewer**
 
+- **A plot's layout depends only on its panel's size** (Explore). Two panels of one size have
+  plots of one size, whatever came before (the window resized, F12 opened and closed, another
+  value or slider step), and a colour bar is never pushed out of the picture. The margins are
+  worked out from the style's font sizes; a label too long for its room ends in "…" instead of
+  being cut off.
+
 - **Fixed: a red "This file can't be read" when a measurement finished** while it was selected in
   the Library. The selection now follows the finished file, as open tabs do; a file that is
   briefly gone (renamed, moved) says so plainly instead of being called a bad file.

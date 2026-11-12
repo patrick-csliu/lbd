@@ -598,6 +598,13 @@ export default function ExploreView({
     paintOverlay();
   }, [paintOverlay]);
 
+  // A picture of another size: its strips (cuts, histograms) get their new size from `meta` in
+  // this render, so they are painted again now, at that size (painted before, they kept the old
+  // bitmap: 338 px shown in 218 px, 16.37).
+  useLayoutEffect(() => {
+    paintOverlay();
+  }, [meta?.plot?.[2], meta?.plot?.[3], paintOverlay]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ---- asking for pictures: one at a time, always the newest view
 
   const request = useCallback(() => {
