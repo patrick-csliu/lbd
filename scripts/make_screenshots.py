@@ -162,6 +162,8 @@ def start_viewer(data: Path) -> Tuple[str, uvicorn.Server]:
     cfg.add_root(str(data))
     # the Files sidebar offers every list; most shots open files from its folder tree (see main)
     cfg.set_library({"sidebar_scopes": ["library", "folders", "starred", "recent"]})
+    # the pictures show files with several values in several panels (a new file opens with one, 16.45)
+    cfg.set_explore({"new_panels": 4})
     state = AppState(cfg, token=TOKEN, port=port)
     srv = uvicorn.Server(uvicorn.Config(create_app(state), host="127.0.0.1", port=port, log_level="warning"))
     threading.Thread(target=srv.run, daemon=True).start()
@@ -545,11 +547,12 @@ def files_sidebar(page: Page, url: str, ctx) -> None:
     page.locator(".library-row", has_text="Late resonator sweep").first.wait_for()
     page.get_by_role("tab", name="Figure", exact=True).click()
     page.locator(".files-scope").select_option("library")
+    # narrows the sidebar only (labels match "resonator" too, so the list is long)
+    page.locator(".sidebar").get_by_label("Search in these files").fill("late")
     row = page.locator(".files-row", has_text="Late resonator sweep").first
     row.dblclick()                                       # in Figure: plotted (a click shows what is inside)
     page.locator(".tab-body:not([hidden]) .figure img").first.wait_for()
     settle(page)
-    page.locator(".sidebar").get_by_label("Search in these files").fill("late")   # narrows the sidebar only
     page.locator(".sidebar .files-row.active").wait_for()
     page.wait_for_timeout(400)
     mark(page, [
