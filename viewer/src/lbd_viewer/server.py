@@ -1221,7 +1221,8 @@ def create_app(state: AppState) -> FastAPI:
 
     @app.get("/api/library/status")
     def library_status():
-        """Indexing progress ({indexing, done, total, errors, scans}) and the index's generation:
+        """Indexing progress ({indexing, done, total, errors, scans}), how each open folder is watched
+        (`watching`, library_watch.py) and the index's generation:
         a new one means the list changed."""
         lib = state.library
         lib.last_request = time.monotonic()

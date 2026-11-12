@@ -227,6 +227,7 @@ ELSEWHERE = {   # write only beside the file (the labels file), into LBD's datab
     "/api/library/labels", "/api/library/labels/create", "/api/library/labels/rename", "/api/library/labels/remove",
     "/api/library/missing", "/api/library/preview/want", "/api/library/preview/choose",
     "/api/library/preview/clear", "/api/file/recover", "/api/file-csv",
+    "/api/library/check",   # only reads the folders, into the index
 }
 
 

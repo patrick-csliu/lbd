@@ -306,10 +306,20 @@ export interface LibraryStatus {
   total: number;
   errors: { path: string; error: string }[];
   scans: number;
+  /** how each open folder is watched (library_watch.py): the system's notifications, or timed
+   * checks every `every` seconds (a network drive, notifications that couldn't start: `reason`) */
+  watching: FolderWatch[];
   generation: number;
   notes?: string[]; // about labels (merged sync copies, …): told once
   /** automatic previews: drawn (current) of total files, how many are waiting or being drawn, the mode in effect */
   previews: { drawn: number; total: number; drawing: number; mode: PreviewMode };
+}
+
+export interface FolderWatch {
+  path: string;
+  how: "notifications" | "timed";
+  every: number | null;
+  reason: string;
 }
 
 /** What "Check folders now" found (POST /api/library/check): data files new, changed, gone and

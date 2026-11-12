@@ -155,9 +155,11 @@ def test_an_unreadable_file_and_a_new_file(viewer, library_files, new_page):
 
 
 def test_check_folders_now_says_what_it_found(viewer, new_page, tmp_path):
-    """Check folders now: what it found, and a folder it couldn't read, named."""
+    """Check folders now: what it found, and a folder it couldn't read, named; how the folders
+    are watched, in the status line."""
     page = new_page("Library")
     shows(page, every_file(viewer), 20_000)
+    expect(status(page)).to_contain_text("New files: noticed at once")              # how the folders are watched
     page.get_by_role("button", name="Check folders now").click()
     outcome = page.get_by_role("status", name="Check folders now")
     expect(outcome).to_contain_text("Nothing new")

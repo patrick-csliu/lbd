@@ -25,7 +25,7 @@ import {
 import { docsUrl } from "./help";
 import { FileDetails, FileFacts } from "./FileView";
 import { SortButtons } from "./SortButtons";
-import { useFolderCheck } from "./LibraryCheck";
+import { useFolderCheck, WatchingNote } from "./LibraryCheck";
 import { ConfirmDialog, ConfirmRequest, ContextMenu, isMenuKey, MenuAt, menuAt, MenuEntry, useOutsideClose } from "./menu";
 import { copyPath, fileEntries } from "./fileActions";
 import { useToast } from "./toast";
@@ -814,6 +814,7 @@ export default function LibraryPage(props: Props) {
             </button>
           </span>
           </span>
+          <WatchingNote watching={status?.watching} />
           {status && status.errors.length > 0 && (
             <span className="warn" title={status.errors.map((e) => `${e.path}: ${e.error}`).join("\n")}>
               {status.errors.length} folder(s) or file(s) couldn't be read (point here for which)

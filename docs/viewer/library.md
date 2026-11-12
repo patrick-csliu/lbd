@@ -115,7 +115,8 @@ line, the date tree and the date filter stay as written in the file, so a file m
 ## Files that change
 
 The list keeps itself up to date: a new data file appears, a removed one disappears and a changed
-one is read again within a few seconds, while your selection stays. A file that can't be read
+one is read again, usually within a second or two (see [How the Library notices new
+files](#how-the-library-notices-new-files)), while your selection stays. A file that can't be read
 (damaged, not an LBD file, or from a newer LBD) stays in the list, greyed and marked ⚠; select it
 to see why in plain words (the technical message is under **Details**).
 
@@ -124,6 +125,26 @@ file that should be there but isn't listed yet. It says **Checking the folders�
 found: e.g. **3 new files, 1 changed**, or **Nothing new**, and it names every folder (or file) it
 couldn't read, with why: a network drive that isn't connected, a folder you have no permission
 for. **×** closes the message.
+
+### How the Library notices new files
+
+- **When the viewer starts**, it looks through every open folder.
+- **While it runs**, the system tells it when something changes in an open folder or the
+  folders inside it (the way file managers and sync programs notice files), and only that folder
+  is looked at again: a new file appears in about a second.
+- **Every 7 minutes** it looks through every open folder again, as a safety net: now and then a
+  notice can be lost (many changes at once, a computer waking from sleep). Such a file waits
+  until then, or until you click **Check folders now**.
+- **A folder on a network drive** (a NAS, a mapped drive, `\\server\share`) is looked through
+  **every 60 seconds** instead: notices of files added by another computer don't reliably
+  arrive over the network, and checking less often lets the drive rest.
+- **A folder where notices can't be had** (the system refused, or they stopped) is looked
+  through **every 10 seconds** instead, and the reason is told.
+
+The status line under the search says how the folders are watched: **New files: noticed at
+once**, or how many are checked every 60 or 10 seconds; point at it for each folder and why. A
+file you see in the [Files sidebar](folders-and-files.md#the-files-sidebar) or an open tab is
+checked on its own every 2 seconds, whatever the Library does.
 
 ## Narrow windows
 

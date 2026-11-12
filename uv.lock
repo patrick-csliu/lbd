@@ -1667,6 +1667,7 @@ dependencies = [
     { name = "psutil" },
     { name = "send2trash" },
     { name = "uvicorn" },
+    { name = "watchdog" },
 ]
 
 [package.metadata]
@@ -1677,6 +1678,7 @@ requires-dist = [
     { name = "psutil", specifier = ">=5.9" },
     { name = "send2trash", specifier = ">=1.8" },
     { name = "uvicorn", specifier = ">=0.29" },
+    { name = "watchdog", specifier = ">=4.0" },
 ]
 
 [[package]]
