@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import socket
 import sys
 import threading
@@ -182,16 +183,81 @@ class Running:
         try:
             self.server.run()
         finally:
-            try:
-                self.state.close()               # labels still waiting are written into their files
-            except Exception as e:               # noqa: BLE001 - stopping anyway; said in the log
-                print(f"lbd-view: while stopping: {e}", file=sys.stderr)
+            # Stopping. A second Ctrl+C now would cut short what follows (writing labels), so it
+            # is ignored until the end; closing the window still stops at once.
+            with _ignoring_ctrl_c():
+                _wait_for_requests()             # a save still running finishes first
+                try:
+                    self.state.close()           # labels still waiting are written into their files
+                except Exception as e:           # noqa: BLE001 - stopping anyway; said in the log
+                    print(f"lbd-view: while stopping: {e}", file=sys.stderr)
             if self.lock:
                 try:
                     if json.loads(self.lock.read_text(encoding="utf-8")).get("pid") == os.getpid():
                         self.lock.unlink()
                 except (OSError, ValueError):
                     pass
+
+
+GRACEFUL_STOP = 2.0     # seconds the server waits for running requests (a save) to answer when stopping
+
+
+def _make_server(config, on_stop: Callable[[], None]):
+    """The uvicorn server, with a quick and quiet stop (plan 16.16).
+
+    - `on_stop` runs as the stop begins: the open pages' waiting requests (long polls) answer at
+      once, so the server doesn't wait for them.
+    - Ctrl+C (Ctrl+Break, or the system asking the program to stop) stops it; a second one
+      stops it without waiting. uvicorn's own handler raises the signal again once the server
+      has stopped: that printed a KeyboardInterrupt traceback, and on Windows a Ctrl+Break
+      ended the program before the waiting labels were written. This one doesn't.
+    """
+    import uvicorn  # imported late: it is slow to import and not needed when reusing a server
+
+    class Server(uvicorn.Server):
+        def handle_exit(self, sig, frame) -> None:
+            if self.should_exit:
+                self.force_exit = True
+            else:
+                self.should_exit = True
+
+        async def shutdown(self, sockets=None) -> None:
+            on_stop()
+            await super().shutdown(sockets)
+
+    return Server(config)
+
+
+def _wait_for_requests() -> None:
+    """Wait for requests still running in their threads after the server stopped (a save that
+    takes longer than GRACEFUL_STOP), so the data is written before the program ends."""
+    running = [t for t in threading.enumerate()
+               if t.name == "AnyIO worker thread" and t is not threading.current_thread()]
+    if not running:
+        return
+    for t in running:
+        t.join(timeout=1.0)
+    if any(t.is_alive() for t in running):
+        print("lbd-view: waiting for a save to finish...", file=sys.stderr, flush=True)
+        for t in running:
+            t.join()
+
+
+class _ignoring_ctrl_c:
+    """In the main thread: Ctrl+C and Ctrl+Break do nothing inside the `with` block."""
+
+    SIGNALS = [s for s in (getattr(signal, "SIGINT", None), getattr(signal, "SIGBREAK", None)) if s is not None]
+
+    def __enter__(self):
+        self.saved = {}
+        if threading.current_thread() is threading.main_thread():
+            for s in self.SIGNALS:
+                self.saved[s] = signal.signal(s, signal.SIG_IGN)
+        return self
+
+    def __exit__(self, *exc) -> None:
+        for s, handler in self.saved.items():
+            signal.signal(s, handler)
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -227,7 +293,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             _open_tabs(port, token, files, args.no_browser)
             return 0
 
-    start(args, files, dirs).run()
+    try:
+        start(args, files, dirs).run()
+    except KeyboardInterrupt:                    # Ctrl+C while starting: a normal stop too
+        pass
+    print("LBD viewer stopped", flush=True)
     return 0
 
 
@@ -258,8 +328,9 @@ def start(args: argparse.Namespace, files: List[str], dirs: List[str],
     import uvicorn  # imported late: it is slow to import and not needed when reusing a server
 
     log_config = None if sys.stdout is None else uvicorn.config.LOGGING_CONFIG  # windowed (no console) builds
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning",
-                                           log_config=log_config))
+    server = _make_server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning",
+                                         log_config=log_config, timeout_graceful_shutdown=GRACEFUL_STOP),
+                          on_stop=state.pages.close)
 
     lock = None
     if not args.dev:

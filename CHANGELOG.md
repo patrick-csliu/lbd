@@ -112,6 +112,11 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
 
 **Viewer**
 
+- **Ctrl+C stops the viewer within a second or two**, and it prints one line, "LBD viewer
+  stopped", not error text (before: 8 to 15 s with a page open, and three `Traceback` blocks). A
+  save in progress finishes first, and labels still waiting are written into their files.
+- **A preview worker no longer stays behind** when the viewer is killed or crashes: it stops by
+  itself within a few seconds (before, it kept running, holding memory and keeping files open).
 - **⚙ Settings are a dialog with sections** (General, Library, Files sidebar, Memory,
   Measurements) instead of one long menu: each setting with its name, a line about it and its
   control (switches, choices side by side); **Find a setting…**; a dot on a section that was

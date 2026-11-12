@@ -147,6 +147,7 @@ class Pages:
         self._listed: Optional[list] = None         # the page list last sent (pages_changed)
         self._command_ids = itertools.count(1)
         self._changed = threading.Condition(threading.RLock())
+        self.closed = False                         # the viewer is stopping: no poll waits any more (close)
 
     # ---- pages ----------------------------------------------------------------------------------
 
@@ -285,16 +286,25 @@ class Pages:
                 self._pages_changed()
             return page.polls
 
+    def close(self) -> None:
+        """The viewer is stopping: every waiting long poll answers at once (with its command, if
+        one is queued, else nothing), so the server doesn't wait for them to time out."""
+        with self._changed:
+            self.closed = True
+            self._changed.notify_all()
+
     def wait_for_command(self, page_id: str, poll: int, timeout: float) -> Optional[Command]:
         """The long poll started by `start_poll`: wait up to `timeout` real seconds for the first
         unconfirmed command. Returns None after the timeout, or at once if the connection
-        dropped or a newer poll of the same page replaced this one."""
+        dropped, a newer poll of the same page replaced this one, or the viewer is stopping (`close`)."""
         deadline = time.monotonic() + timeout
         with self._changed:
             while True:
                 page = self.page(page_id)
                 if page.polls != poll or page.offline_since is not None:
                     return None
+                if self.closed:
+                    return page.queue[0] if page.queue else None
                 page.last_seen = self.clock()
                 left = deadline - time.monotonic()
                 if page.queue or left <= 0:
