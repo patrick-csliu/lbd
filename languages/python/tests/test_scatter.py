@@ -50,7 +50,7 @@ def test_every_source():
     m, _ = model_of(d, values="IQ", complex="iq")
     z = d.values["IQ"].data.ravel()
     assert np.allclose(m.series[0][0] / m.xf, z.real) and np.allclose(m.series[0][1] / m.yf, z.imag)
-    assert m.xf == m.yf and "Re I/Q" in m.x_label and "Im I/Q" in m.y_label and m.equal is True
+    assert m.xf == m.yf and "Re I/Q" in m.x_label and "Im I/Q" in m.y_label and m.equal is False   # equal axes only when asked (16.32)
 
 
 def test_all_and_a_slider():
@@ -230,7 +230,7 @@ def test_sides_with_a_colour_bar():
 
 
 def test_sides_keep_equal_axes():
-    fig, ax = figure(shots(), values="IQ", complex="iq", color="state", options={"sides": True})
+    fig, ax = figure(shots(), values="IQ", complex="iq", color="state", options={"sides": True, "equal": True})
     FigureCanvasAgg(fig).draw()                         # (with the figure's layout)
     box = ax.get_window_extent()
     per_x = box.width / np.ptp(ax.get_xlim())

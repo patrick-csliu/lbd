@@ -126,3 +126,26 @@ def test_a_right_hand_axis_fills_the_height_on_a_linear_scale(tmp_path):
     s.apply({"yscale": "linear"})
     assert not s.model.units_apart["log"] and right_share() > 0.8
     s.close()
+
+
+def test_equal_curves_widen_the_view_in_stored_units(tmp_path):
+    """16.32: Explore's curves with Equal axes: the view asked for is kept (meta asked), the view
+    shown is widened so one stored unit has as many pixels both ways."""
+    import lbd
+    import numpy as np
+
+    t = np.linspace(0, 2e-3, 50)
+    d = lbd.Dataset("ramp")
+    d.add_axis("t", t, unit="s")
+    d.add_value("v", t * 1e3, axes="t", unit="V")
+    p = d.save(tmp_path / "ramp.lbd")
+    s = ExploreSession(p, "v", {"kind": "curve", "options": {"equal": True}}, lp.load_style(), 600, 400, 1)
+    asked = s.full
+    meta = s.render(*asked)[1]
+    assert meta["equal"] and [list(v) for v in meta["asked"]] == [list(asked[0]), list(asked[1])]
+    box = s.ax.get_window_extent()
+    m = s.model
+    per_x = box.width / ((meta["xlim"][1] - meta["xlim"][0]) / m.xf)
+    per_y = box.height / ((meta["ylim"][1] - meta["ylim"][0]) / m.yf)
+    assert per_x == pytest.approx(per_y, rel=1e-3) and m.xf != m.yf
+    s.close()

@@ -1,4 +1,5 @@
 import { AxesChoice, ChoiceAxis, startingAxes } from "./AxesChoice";
+import { EqualAxes, GridTick } from "./CurveControls";
 import type { FileInfo, PlotSpec, ValueInfo } from "./api";
 import type { KindControlsProps, PlotKind } from "./plotKinds";
 
@@ -31,14 +32,12 @@ function ScatterControls({ info, resolved, update, page }: KindControlsProps) {
 }
 
 /** How a scatter plot looks: equal axes, histograms beside it (Display, 16.47). */
-function ScatterDisplay({ resolved, update, page }: KindControlsProps) {
-  const equal = resolved.options?.equal ?? resolved.complex === "iq";
+function ScatterDisplay(props: KindControlsProps) {
+  const { resolved, update, page } = props;
   return (
     <>
-      <label className="check" title="The same scale both ways, so that a circle looks like a circle">
-        <input type="checkbox" checked={!!equal} onChange={(e) => update({ options: { ...(resolved.options ?? {}), equal: e.target.checked } })} />
-        Equal axes
-      </label>
+      <GridTick {...props} />
+      <EqualAxes {...props} />
       {page === "figure" && (
         <label className="check" title="Histograms of the points in the figure's limits, above and beside the plot">
           <input type="checkbox" checked={!!resolved.options?.sides} onChange={(e) => update({ options: { ...(resolved.options ?? {}), sides: e.target.checked } })} />

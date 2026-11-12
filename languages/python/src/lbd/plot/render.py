@@ -46,8 +46,9 @@ SPEC_KEYS = PLOT_SPEC_KEYS
 # they were made for.
 # Keys of a resolved spec that are answers (what the drawing found), not settings: they are left
 # out when a spec comes back. `levels`: a variable sweep's levels drawn as a map; `real_axes`: the
-# axes and values of a variable sweep's curves (16.41), see `for_kind`.
-ANSWER_KEYS = frozenset({"levels", "real_axes"})
+# axes and values of a variable sweep's curves (16.41), see `for_kind`; `style_grid`: whether the
+# style draws a grid (LBD Viewer: where the Grid tick starts, 16.32).
+ANSWER_KEYS = frozenset({"levels", "real_axes", "style_grid"})
 KIND_FREE_KEYS = frozenset({"values", "complex", "x_scale", "y_scale", "title"})
 
 # rcParams are global in matplotlib, so renders are serialized.
@@ -983,6 +984,21 @@ def prepare_curves(d, spec, style: Style, big: Optional[Any] = None, whole_span:
         whole=None if whole is None else (whole[0] * yf, whole[1] * yf))
 
 
+def look_options(ax, spec: Dict[str, Any], xf: float = 1.0, yf: float = 1.0) -> None:
+    """Grid and Equal axes (16.32), for curves and scatter plots: `options.grid` (True or False)
+    overrides the style's grid; `options.equal` gives one stored unit the same length on both
+    axes (also when the axes show other prefixes), on linear axes only. The viewer's Explore
+    widens its view itself instead (kinds.Interaction.frame)."""
+    options = spec.get("options") or {}
+    if options.get("grid") is not None:
+        if options["grid"]:
+            ax.grid(True, which=matplotlib.rcParams["axes.grid.which"])
+        else:
+            ax.grid(False, which="both")
+    if options.get("equal") and ax.get_xscale() == ax.get_yscale() == "linear":
+        ax.set_aspect(xf / yf, adjustable="datalim")
+
+
 def draw_curves(fig: Figure, ax, model: CurveModel, d, spec, style: Style,
                 data: Optional[List[Tuple[np.ndarray, np.ndarray]]] = None) -> List[Any]:
     """Draw a CurveModel; `data` replaces each line's (x, y), e.g. by a reduced copy. Returns the lines."""
@@ -999,6 +1015,7 @@ def draw_curves(fig: Figure, ax, model: CurveModel, d, spec, style: Style,
         ax.set_ylim(*model.ylim)
     _element_axis(ax.xaxis, model.x_ticks)
     ax.margins(x=0)
+    look_options(ax, spec, model.xf, model.yf)
     _annotate(ax, d, spec, model.auto_axes)
     if model.series_bar is not None:
         _colorbar(fig, model.series_bar[0], ax, style, model.series_bar[1])

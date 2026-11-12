@@ -13,6 +13,7 @@ class Curve(Interaction):
     def setup(self):
         self.s.model = self.s._units_apart(self.s.model)
         self.s._setup_curves()
+        self.s.ax.set_aspect("auto")                     # equal axes: `frame` widens the view itself
 
     def limits(self):
         return self.s._curve_limits()

@@ -115,7 +115,7 @@ def test_a_saved_scatter_view_opens_as_scatter(viewer, new_page):
     meta = frames(page, lambda: row(page, "iq.lbd").dblclick())
     expect(explore(page).get_by_label("Plot type")).to_have_value("scatter")
     expect(explore(page).locator(".explore-error")).to_have_count(0)
-    assert meta["note"] == "every point shown" and meta["equal"]
+    assert meta["note"] == "every point shown" and "equal" not in meta         # equal axes only when asked (16.32)
 
 
 def drag(page: Page, handle, dx: float, dy: float):

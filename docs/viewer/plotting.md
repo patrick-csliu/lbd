@@ -114,7 +114,8 @@ These changes are not saved until you use **Save this view to the file**
 
 ## Scatter
 
-Scatter has the same **Colour by** and **All of …** as Explore, plus **Equal axes**. In Figure, **Colour by** can also
+Scatter has the same **Colour by** and **All of …** as Explore, plus **Grid** and **Equal axes** (under
+Display, as for curves; Equal axes starts off). In Figure, **Colour by** can also
 be another value with the same axes. **Histograms beside the plot** adds a histogram of the points in the
 figure's limits above and to the right of the plot, on its axes; a legend then goes under the figure. Their
 size and opacity are in the style (`figure.axes.scatter`, `sides_size_mm`, `sides_alpha`).

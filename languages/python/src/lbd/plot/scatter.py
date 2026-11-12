@@ -21,6 +21,7 @@ from . import kinds
 from .histogram import BLOCK, _parts, auto_bins, count_bins
 from .points import Points, _fixed
 from .points import points_of as read_points
+from .render import look_options
 from .render import (SCATTER_RASTER_ABOVE, RenderError, RenderWarning, _annotate, _auto_prefix, _axis_quantity, _check_log,
                      _colorbar, _fits_curve, _is_point, _legend, _legend_label, _norm, _slices, _swept, _unit_scale,
                      apply_complex, find_quantity, flat, whole_numbers, whole_range)
@@ -266,7 +267,7 @@ def prepare_scatter(d: Any, spec: Dict[str, Any], style: Style, big: Optional[Sp
         series=[(x * xf, y * yf, lab) for x, y, lab in raw], index=index, groups=groups, cvals=cvals, cnorm=cnorm, cmap=cmap,
         xf=xf, yf=yf, x_label=axis_label(spec.get("x_label") or xlab, xunit, xs.label.unit_format),
         y_label=axis_label(spec.get("y_label") or ylab, yunit, ys.label.unit_format), c_label=clabel,
-        x_scale=spec["x_scale"], y_scale=y_scale, equal=(spec.get("options") or {}).get("equal", mode == "iq"),
+        x_scale=spec["x_scale"], y_scale=y_scale, equal=bool((spec.get("options") or {}).get("equal", False)),
         auto_axes=auto_axes, ylim=ylim, x_text=(xlab, stored_x), y_text=(ylab, stored_y), c_text=c_text, cf=cf,
         whole=None if whole is None else ((whole[0][0] * xf, whole[0][1] * xf), (whole[1][0] * yf, whole[1][1] * yf)))
 
@@ -312,8 +313,7 @@ def _finish(fig: Any, ax: Any, model: ScatterModel, d: Any, spec: Dict[str, Any]
     ax.set_yscale(model.y_scale)
     if model.ylim is not None:
         ax.set_ylim(*model.ylim)
-    if model.equal:
-        ax.set_aspect("equal", adjustable="datalim")
+    look_options(ax, spec, model.xf, model.yf)         # grid, equal axes (16.32)
     _annotate(ax, d, spec, model.auto_axes)
     if mappable is not None:
         _colorbar(fig, mappable, ax, style, label)

@@ -560,6 +560,7 @@ export interface PlotSpec {
   all?: string[]; // axes whose points all go in (no slider)
   levels?: string[]; // answer: a variable sweep's levels, when drawn as a map
   real_axes?: RealAxes; // answer: a variable sweep's curves on their real axes (16.41)
+  style_grid?: boolean; // answer: whether the style draws a grid (where the Grid tick starts, 16.32)
   along?: string; // answer: the axis the points of curves run along, when x is a value
   options?: JsonObject; // a plot type's own choices
 }

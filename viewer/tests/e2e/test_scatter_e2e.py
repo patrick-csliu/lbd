@@ -29,11 +29,14 @@ def test_iq_starts_with_two_clouds_at_one_power(viewer, new_page):
     expect(view.get_by_label("Complex values")).to_have_value("iq")
     expect(view.get_by_label("Colour by")).to_have_value("state")
     expect(view.get_by_role("checkbox", name="All of Shot")).to_be_checked()
-    expect(view.get_by_role("checkbox", name="Equal axes")).to_be_checked()
+    equal = view.get_by_role("checkbox", name="Equal axes")
+    expect(equal).not_to_be_checked()                              # off unless asked (16.32)
     slider = view.get_by_role("slider")
     expect(slider).to_have_count(1)
     expect(view.get_by_label("Horizontal axis")).to_have_count(0)
-    assert meta["equal"] and meta["note"] == "every point shown"
+    assert not meta.get("equal") and meta["note"] == "every point shown"
+    meta = frames(page, lambda: equal.click())
+    assert meta["equal"]
     import json
 
     got = []

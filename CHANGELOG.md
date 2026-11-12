@@ -161,6 +161,11 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
   (.lbd and CSV) with that step's stored points; a column is the cursor's place in each step,
   against the outer axis. Drawn as nearest points or smooth, they stay greyed, now with a tip
   saying why; the plot's right-click menu greys them the same way (before, it didn't).
+- **Equal axes no longer starts on for the I/Q plane.** Tick it under Display. It now counts
+  stored units, so a circle stays a circle when the two axes show other prefixes.
+- **Grid and Equal axes on Curves and Scatter** (Display, Explore and Figure; `options.grid`,
+  `options.equal` in `lp.plot`). Grid starts as the style says and can be turned on or off per
+  plot. With Sync x, a panel with Equal axes widens only its own view.
 - **Look options are under Display.** Data says what is plotted, Display how it looks: a
   histogram's Bins, Draw and Vertical axis; Scatter's Equal axes and Histograms beside the plot;
   a map's Cells; a matrix's Numbers, Significant digits, Row sums and Colour range; Bars' Bars and

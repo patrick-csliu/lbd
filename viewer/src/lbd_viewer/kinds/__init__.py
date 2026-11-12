@@ -52,15 +52,26 @@ class Interaction:
         """The whole data: x and y limits."""
         raise NotImplementedError
 
+    def equal(self) -> bool:
+        """Equal axes asked for (`options.equal`, 16.32) and both scales linear."""
+        ax = self.s.ax
+        return bool((self.s.spec.get("options") or {}).get("equal")) and ax.get_xscale() == ax.get_yscale() == "linear"
+
     def frame(self, xlim: Tuple[float, float], ylim: Tuple[float, float]) -> None:
-        """Show this view on the axes."""
+        """Show this view on the axes. Equal axes: one stored unit is as long both ways, by
+        widening the view asked for around its middle, so that all of it is seen (the widening is
+        never sent back: the page keeps the view it asked for, 16.49)."""
+        if self.equal():
+            xlim, ylim = equal_view(xlim, ylim, self.s.ax.get_window_extent(),
+                                    getattr(self.s.model, "xf", 1.0), getattr(self.s.model, "yf", 1.0))
         self.s.ax.set_xlim(*xlim)
         self.s.ax.set_ylim(*ylim)
         self.s._plain_tick_numbers()
 
     def shown_limits(self, xlim: Tuple[float, float], ylim: Tuple[float, float]) -> Tuple[Any, Any]:
         """The view really shown, after `frame` (equal axes may have widened it)."""
-        return xlim, ylim
+        ax = self.s.ax
+        return (tuple(ax.get_xlim()), tuple(ax.get_ylim())) if self.equal() else (xlim, ylim)
 
     def apply(self, settings: Dict[str, Any], chosen: Optional[set], clim: Any) -> None:
         """View settings, on the artists."""
@@ -122,7 +133,18 @@ class Interaction:
 
     def meta(self) -> Dict[str, Any]:
         """Added to the frame's `meta`."""
-        return {}
+        return {"equal": True} if self.equal() else {}
+
+
+def equal_view(xlim: Tuple[float, float], ylim: Tuple[float, float], box: Any, xf: float = 1.0,
+               yf: float = 1.0) -> Tuple[Tuple[float, float], Tuple[float, float]]:
+    """The view (plot units) widened so that one stored unit has as many pixels both ways, all of
+    the asked view inside it; `box`: the axes in pixels; `xf`, `yf`: plot units per stored unit
+    (a prefix shown on an axis doesn't change the shape)."""
+    per = max((xlim[1] - xlim[0]) / xf / box.width, (ylim[1] - ylim[0]) / yf / box.height)  # stored units per pixel
+    mid_x, mid_y = sum(xlim) / 2, sum(ylim) / 2
+    half_x, half_y = per * xf * box.width / 2, per * yf * box.height / 2
+    return (mid_x - half_x, mid_x + half_x), (mid_y - half_y, mid_y + half_y)
 
 
 def _classes() -> List[Type[Interaction]]:

@@ -234,25 +234,6 @@ class Scatter(Interaction):
             y = tuple(m.ylim)
         return x, y
 
-    def _equal(self) -> bool:
-        ax = self.s.ax
-        return self.s.model.equal and ax.get_xscale() == ax.get_yscale() == "linear"
-
-    def frame(self, xlim: Tuple[float, float], ylim: Tuple[float, float]) -> None:
-        """Equal axes: the same units per pixel both ways, by widening the view asked for, so that
-        all of it is seen."""
-        if self._equal():
-            box = self.s.ax.get_window_extent()
-            per = max((xlim[1] - xlim[0]) / box.width, (ylim[1] - ylim[0]) / box.height)
-            mid_x, mid_y = sum(xlim) / 2, sum(ylim) / 2
-            xlim = (mid_x - per * box.width / 2, mid_x + per * box.width / 2)
-            ylim = (mid_y - per * box.height / 2, mid_y + per * box.height / 2)
-        super().frame(xlim, ylim)
-
-    def shown_limits(self, xlim: Tuple[float, float], ylim: Tuple[float, float]) -> Tuple[Any, Any]:
-        ax = self.s.ax
-        return (tuple(ax.get_xlim()), tuple(ax.get_ylim())) if self._equal() else (xlim, ylim)
-
     def picture(self, pxe: np.ndarray, pye: np.ndarray, stat: str, draft: bool, w: int, h: int) -> Tuple[str, bool]:
         s = self.s
         scales = (s.ax.get_xscale(), s.ax.get_yscale())
@@ -401,7 +382,7 @@ class Scatter(Interaction):
 
     def meta(self) -> Dict[str, Any]:
         m = self.s.model
-        out: Dict[str, Any] = {"equal": True} if self._equal() else {}
+        out: Dict[str, Any] = super().meta()
         if self._big():
             out["crange"] = self.s.crange_info
         if self.sides is not None:

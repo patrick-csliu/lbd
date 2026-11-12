@@ -331,3 +331,26 @@ def test_a_value_that_cant_join_the_curves_is_never_locked(values_files, new_pag
     expect(values.locator("label.check", has_text="Internal Q").locator("input")).not_to_be_checked()
     ref.locator("input").click()                                                    # the last one stays
     expect(ref.locator("input")).to_be_checked()
+
+
+def test_an_equal_panel_widens_its_own_view_not_the_others(values_files, new_page):
+    """16.32: x synced, panel 1 with Equal axes: a zoom in panel 2 gives every panel the same
+    asked range; panel 1 shows more (widened to equal axes) and that widening isn't sent back."""
+    import pytest
+
+    page = new_page("Explore")
+    per_panel(page, lambda: row(page, "6 rabi.lbd").dblclick(), panels=4)
+    shown(page).locator(".panel").nth(0).click()
+    ctl = explore(page).get_by_role("complementary", name="Controls")
+    per_panel(page, lambda: ctl.get_by_role("checkbox", name="Equal axes").click())
+    box = shown(page).locator(".panel .explore-overlay").nth(1).bounding_box()
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    got = per_panel(page, lambda: page.mouse.wheel(0, -600), panels=4)
+    equal = [m for m in got.values() if m.get("equal")]
+    plain = [m for m in got.values() if not m.get("equal")]
+    assert len(equal) == 1 and len(plain) == 3
+    asked = plain[0]["xlim"]
+    assert all(m["xlim"] == pytest.approx(asked) for m in plain)
+    assert equal[0]["asked"][0] == pytest.approx(asked)                # the synced range, as asked
+    lo, hi = equal[0]["xlim"]
+    assert lo <= asked[0] + 1e-12 and hi >= asked[1] - 1e-12             # shows at least that much

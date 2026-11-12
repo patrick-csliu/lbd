@@ -331,8 +331,10 @@ the longest axis All and the others sliders, and a complex value in the I/Q plan
 two clouds at one setting, and the slider moves them. A view saved in the file is shown as it was saved:
 before this choice existed, a scatter plot drew all its points.
 
-**Equal axes** gives both axes the same scale, so that a circle looks like a circle. It is on for the I/Q
-plane. Zooming then shows at least the box drawn, widened to keep the scale.
+**Equal axes** (Display) gives both axes the same scale, so that a circle looks like a circle: one stored
+unit is as long on both axes, also when the axes show other prefixes. It starts off, the I/Q plane too;
+linear axes only. Zooming then shows at least the box drawn, widened to keep the scale; a panel whose x
+follows the others (Sync x) widens only its own view.
 
 **Many points.** Up to 200 000 points are drawn as markers. Above that, each pixel shows how many points
 are there, and a note says so. Every point is counted, and a pixel with a single point stays visible, so
@@ -620,6 +622,13 @@ horizontal; against Frequency it can't, and the panel says why. Cursors read the
 **Save as CSV** writes each stored point once, in rows (a table with one column per x point needs
 the same x for every curve, so it is refused, saying why). A sweep of three levels or more is still
 drawn against the point number, with a note.
+
+## Grid and Equal axes on curves
+
+**Grid** (Display, Curves and Scatter) draws grid lines at the ticks. It starts as the style says
+(`figure.axes.grid`); ticking or unticking it here overrides the style for this plot, and **Open in
+Figure** keeps it. The lines' colour and width stay the style's. **Equal axes** works on curves as on
+a scatter plot (see [Scatter](#scatter)).
 
 ## Large data
 

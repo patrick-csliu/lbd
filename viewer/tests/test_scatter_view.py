@@ -82,7 +82,7 @@ def test_limits_are_the_data_with_a_margin(tmp_path):
 
 
 def test_equal_axes_report_the_limits_really_shown(iq):
-    s = session(iq, IQ)
+    s = session(iq, {**IQ, "options": {"equal": True}})
     meta = frame(s)
     assert meta["equal"]
     ax = s.ax
@@ -196,7 +196,7 @@ def test_it_reads_the_stored_index(iq):
     z = lbd.load(iq).values["IQ"].data[want["readout_power"], want["state"], want["shot"]]
     assert c["items"][0]["value"] == pytest.approx(z.real) and c["items"][1]["value"] == pytest.approx(z.imag)
     colour = c["items"][2]
-    assert colour["role"] == "series" and colour["text"] == "ground" and meta["equal"]
+    assert colour["role"] == "series" and colour["text"] == "ground" and "equal" not in meta   # off unless asked (16.32)
 
 
 def test_a_colour_value_is_read_in_stored_units(iq):

@@ -1424,6 +1424,8 @@ def create_app(state: AppState) -> FastAPI:
         changes = {k: getattr(body, k) for k in ("spec", "style", "style_name") if k in body.model_fields_set}
         if not changes:
             raise HTTPException(400, "nothing to change: send spec, style and/or style_name")
+        if isinstance(changes.get("spec"), dict):      # answers sent back with the settings aren't saved
+            changes["spec"] = {k: v for k, v in changes["spec"].items() if k not in rnd.ANSWER_KEYS}
         try:
             state.pages.check_unlocked(str(p))
         except PageError as e:
@@ -1469,6 +1471,7 @@ def create_app(state: AppState) -> FastAPI:
             # type are expected here and not reported.
             svg, spec = rnd.render_file(str(p), body.spec, style, fmt="svg", display=True, creator=CREATOR,
                                         warn_unused=False, load=_load_for_view)
+        spec = {**spec, "style_grid": style.figure.axes.grid.visible}   # where the Grid tick starts (16.32)
         return {"svg": svg.decode("utf-8"), "spec": spec, "preset": preset,
                 "size_mm": [style.figure.width_mm, style.figure.height_mm], "warnings": notes + warns}
 
@@ -1512,7 +1515,7 @@ def create_app(state: AppState) -> FastAPI:
             style = cfg.resolve(preset=preset, file_style=header.style)
             s = ExploreSession(p, file_version(p), body.spec or {}, style, body.width, body.height, body.dpr)
         state.explore.add(s)
-        return {"session": s.id, "spec": s.spec, "kind": s.kind, "cells": getattr(s.model, "cells", None), "preset": preset,
+        return {"session": s.id, "spec": {**s.spec, "style_grid": s.style.figure.axes.grid.visible}, "kind": s.kind, "cells": getattr(s.model, "cells", None), "preset": preset,
                 "full": [list(s.full[0]), list(s.full[1])], "warnings": notes + warns + s.take_notes()}
 
     @app.post("/api/explore/{session_id}/render")
@@ -1572,7 +1575,7 @@ def create_app(state: AppState) -> FastAPI:
         s = _session(session_id)
         with collect_warnings() as warns:
             s.set_spec(body.spec)
-        return {"session": s.id, "spec": s.spec, "kind": s.kind, "cells": getattr(s.model, "cells", None),
+        return {"session": s.id, "spec": {**s.spec, "style_grid": s.style.figure.axes.grid.visible}, "kind": s.kind, "cells": getattr(s.model, "cells", None),
                 "full": [list(s.full[0]), list(s.full[1])], "warnings": warns + s.take_notes()}
 
     @app.post("/api/explore/{session_id}/pick")

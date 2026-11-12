@@ -20,7 +20,7 @@ set win over the ones saved in the file.
 | `y_label` | text | the value's label | Replaces the vertical axis label. With several values, the default is `Value`, since the legend names them. |
 | `z_label` | text | the label | Replaces the colour bar label (heat maps, coloured scatter). |
 | `annotations` | list | none | Extra drawing on the plot: lines, text, arrows, shapes. See [Annotations](#annotations). |
-| `options` | object | none | A plot type's own choices. Matrix: `numbers` (true), `digits` (3), `range` (`auto`, `unit` for 0 to 1, `signed` for −1 to 1), `row_sums` (false). Bars: `layout` (`grouped`, `stacked`), `numbers` (false: the numbers at the bars). 3D bars: `elev`, `azim` (degrees), `zoom`. |
+| `options` | object | none | A plot type's own choices. Curves and Scatter: `grid` (true or false; missing: the style's), `equal` (false: one stored unit as long on both axes, linear axes only). Matrix: `numbers` (true), `digits` (3), `range` (`auto`, `unit` for 0 to 1, `signed` for −1 to 1), `row_sums` (false). Bars: `layout` (`grouped`, `stacked`), `numbers` (false: the numbers at the bars). 3D bars: `elev`, `azim` (degrees), `zoom`. |
 
 **Scatter modes**
 
