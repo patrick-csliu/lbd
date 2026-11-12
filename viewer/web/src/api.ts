@@ -855,6 +855,10 @@ export interface CursorRead {
   line?: ([number, number] | null)[]; // the trace as drawn (plot units), to highlight it
   stored?: { label: string; unit: string; value: number | null }; // with operations on: the stored value behind it
   cell?: [number, number, number, number]; // maps: the cell, x0 y0 x1 y1 (plot units)
+  /** a variable sweep's map drawn as rows (16.10): the curve settings that show its row or column */
+  curves?: Record<"row" | "column", { x: string; index: Record<string, number> }>;
+  /** a variable sweep's map: why its rows and columns can't be shown or saved */
+  cuts_why?: string;
   at?: [number, number]; // maps: the cell's column and row in the map as shown
   bin?: { lo: number; hi: number; unit: string; rows: BinRow[] }; // a histogram: the bin at the cursor
 }

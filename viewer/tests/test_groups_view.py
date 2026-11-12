@@ -3,10 +3,12 @@ levels is a map (plan 15a), as curves it is drawn on its real axes (16.41); the 
 Library show the group."""
 
 import lbd
+import numpy as np
 import pytest
 
 from lbd.plot import render as rnd
 from lbd.plot.style import Style
+from lbd_viewer import export as csv_export, reading
 from lbd_viewer.server import file_summary
 
 
@@ -87,3 +89,66 @@ def test_a_preview_is_drawn(client, files):
     client.app.state.lbd.library.scan()
     r = client.get("/api/library/preview", params={"path": str(files["14 triangle.lbd"])}).json()
     assert r["state"] in ("ready", "queued", "drawing"), r
+
+
+def _rows_map(client, path, cells="rows"):
+    o = client.post("/api/explore", json={"path": str(path), "width": 600, "height": 400, "dpr": 1,
+                                          "spec": {"kind": "heatmap", "values": ["S21"], "complex": "abs",
+                                                   "options": {"cells": cells}}})
+    assert o.status_code == 200, o.text
+    sid = o.json()["session"]
+    s = client.app.state.lbd.explore.get(sid)
+    meta = s.render(None, None)[1]
+    return sid, s, meta
+
+
+def _cursor_on(client, sid, s, meta, point):
+    m = s.model
+    i = int(np.flatnonzero(m.point == point)[0])
+    c = client.post(f"/api/explore/{sid}/cursors",
+                    json={"cursors": [{"x": float(m.x[i]), "y": float(m.y[i])}], "type": "cross",
+                          "xlim": meta["xlim"], "ylim": meta["ylim"], "width": 600, "height": 400})
+    assert c.status_code == 200, c.text
+    return c.json()["cursors"][0]
+
+
+def test_a_row_of_a_rows_map_is_the_curve_of_its_step(client, files, tmp_path):
+    """16.10: on 13 drawn as Rows, a cursor on a point of the step at −30 dBm: its row is the
+    curve against Frequency at that step, its column the curve against Power at its place in the
+    step; Save row writes that step's stored points (.lbd and CSV)."""
+    path = files["13 variable sweep.lbd"]
+    real = lbd.open(path)
+    parent = np.asarray(real.axes["freq"].parent)
+    point = int(np.flatnonzero(parent == 2)[3])                   # the 4th point of the −30 dBm step
+    sid, s, meta = _rows_map(client, path)
+    cur = _cursor_on(client, sid, s, meta, point)
+    assert cur["curves"] == {"row": {"x": "freq", "index": {"power": 2}},
+                             "column": {"x": "power", "index": {"freq_n": 3}}}
+    saved = client.post(f"/api/explore/{sid}/save-cut",
+                        json={"which": "row", "index": cur["index"], "path": str(path.with_name("row cut.lbd"))})
+    assert saved.status_code == 200, saved.text
+    row = lbd.open(saved.json()["path"])
+    np.testing.assert_array_equal(row.axes["freq"].data, real.axes["freq"].data[parent == 2])
+    np.testing.assert_array_equal(row["S21"].data, real.values["S21"].data[parent == 2])
+    column = reading.save_cut(s, "column", cur["index"], tmp_path / "column.lbd")
+    col = lbd.open(column)
+    places = [np.flatnonzero(parent == k)[3] for k in range(len(real.axes["power"].data))]
+    np.testing.assert_array_equal(col.axes["power"].data, real.axes["power"].data)
+    np.testing.assert_array_equal(col["S21"].data, real.values["S21"].data[places])
+    t, where = csv_export.cut_table(s, "row", cur["index"], None, "both")
+    assert where == {"power": 2} and t.x_col.name == "freq"
+    t.to_csv(tmp_path / "row.csv")
+    rows = np.loadtxt(tmp_path / "row.csv", delimiter=",")
+    np.testing.assert_allclose(rows[:, 0], real.axes["freq"].data[parent == 2])
+    np.testing.assert_allclose(rows[:, 1], np.abs(real.values["S21"].data[parent == 2]))
+    client.delete(f"/api/explore/{sid}")
+
+
+def test_scattered_points_have_no_rows_and_say_so(client, files, tmp_path):
+    sid, s, meta = _rows_map(client, files["13 variable sweep.lbd"], cells="nearest")
+    cur = _cursor_on(client, sid, s, meta, 5)
+    assert "curves" not in cur and "no rows" in cur["cuts_why"]
+    r = client.post(f"/api/explore/{sid}/save-cut", json={"which": "row", "index": cur["index"],
+                                                           "path": str(files["13 variable sweep.lbd"].with_name("x.lbd"))})
+    assert r.status_code == 400 and "no rows" in r.json()["detail"]
+    client.delete(f"/api/explore/{sid}")

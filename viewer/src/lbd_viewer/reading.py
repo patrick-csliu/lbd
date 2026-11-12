@@ -769,6 +769,28 @@ def _fixed_text(s: "ExploreSession", fixed: Dict[str, int]) -> str:
     return ", ".join(parts)
 
 
+def _save_group_cut(s: "ExploreSession", group, path: Path) -> Path:
+    """A variable sweep's row or column (16.10) as a new file: its stored points against their
+    real coordinates, sorted along them."""
+    a, x, v, data, at, where = group
+    order = np.argsort(x, kind="stable")
+    src = s.flat_data._unflat
+    d = lbd.Dataset(title=f"{src.title or s.path.stem} – {_at_text(at)}",
+                    description=f"Cut from '{s.path.name}' by LBD Viewer's Explore view.")
+    d.add_axis(a.name, x[order], unit=a.unit, label=a.label)
+    d.add_value(v.name, data[order], axes=a.name, unit=v.unit, label=v.label)
+    d.meta = {"cut_from": s.path.name, "cut_index": {k: int(i) for k, i in where.items()},
+              "cut_at": _at_text(at)}
+    if src.meta:
+        d.meta["source_meta"] = src.meta
+    d.plot = {"kind": "curve", "values": [v.name]}
+    if np.iscomplexobj(data):
+        d.plot["complex"] = s.spec["complex"]
+    d._parent_id = src.id
+    d.save(path)
+    return path
+
+
 def si_text(v: float, unit: str) -> str:
     """A number with an SI prefix for its unit, e.g. 0.0003 A -> '300 µA' (file names, titles)."""
     if unit and v != 0 and np.isfinite(v):
@@ -779,10 +801,32 @@ def si_text(v: float, unit: str) -> str:
     return f"{v:.6g}" + (f" {unit}" if unit else "")
 
 
+def _group_cut(s: "ExploreSession", which: str, index: Dict[str, int]):
+    """A row or column of a variable sweep's map (16.10), or None for any other plot."""
+    if getattr(s.view, "name", None) != "groupmap":
+        return None
+    if which not in ("row", "column"):
+        raise ExploreError("a map's cut is a 'row' or a 'column'")
+    try:
+        point = int(index[s.spec["x"]])
+    except (KeyError, TypeError, ValueError):
+        raise ExploreError("place cursor 1 on the map first") from None
+    return s.view.cut_points(which, point)
+
+
+def _at_text(at: Dict[str, Any]) -> str:
+    return ", ".join(k if v is None else f"{k} = {si_text(v[0], v[1])}" for k, v in at.items())
+
+
 def suggest_cut_path(s: "ExploreSession", which: str, index: Dict[str, int], trace: Optional[int] = None) -> Path:
-    keep, fixed, _ = cut_plan(s, which, index, trace)
-    new = {a: i for a, i in fixed.items() if (s.spec.get("index") or {}).get(a) != i or a not in (s.spec.get("index") or {})}
-    text = _fixed_text(s, new or fixed).replace("/", "-").replace(":", "-").replace("\\", "-")
+    group = _group_cut(s, which, index)
+    if group is not None:
+        text = _at_text(group[4])
+    else:
+        keep, fixed, _ = cut_plan(s, which, index, trace)
+        new = {a: i for a, i in fixed.items() if (s.spec.get("index") or {}).get(a) != i or a not in (s.spec.get("index") or {})}
+        text = _fixed_text(s, new or fixed)
+    text = text.replace("/", "-").replace(":", "-").replace("\\", "-")
     base = f"{s.path.stem} – {text}"
     path = s.path.with_name(base + ".lbd")
     n = 2
@@ -797,7 +841,9 @@ def save_cut(s: "ExploreSession", which: str, index: Dict[str, int], path: Path,
     """Write a cut (a map's row or column, or one trace) as a new .lbd file: the stored data
     (complex values stay complex) along the kept axis, with metadata saying where it came from.
     The source file is never changed; an existing file is never overwritten."""
-    keep, fixed, names = cut_plan(s, which, index, trace)
+    group = _group_cut(s, which, index)
+    if group is None:
+        keep, fixed, names = cut_plan(s, which, index, trace)
     path = Path(path)
     if path.suffix.lower() != ".lbd":
         raise ExploreError(f"a cut is saved as a .lbd file, not '{path.name}'")
@@ -805,6 +851,8 @@ def save_cut(s: "ExploreSession", which: str, index: Dict[str, int], path: Path,
         raise ExploreError(f"'{path.name}' exists already; choose another name")
     if not path.parent.is_dir():
         raise ExploreError(f"the folder '{path.parent}' doesn't exist")
+    if group is not None:
+        return _save_group_cut(s, group, path)
     src = s.data
     d = lbd.Dataset(title=f"{src.title or s.path.stem} – {_fixed_text(s, fixed)}",
                     description=f"Cut from '{s.path.name}' by LBD Viewer's Explore view.")

@@ -4,7 +4,7 @@ import { LabelPathInput } from "./labelPath";
 import { FormEvent, KeyboardEvent, MouseEvent, RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 /** One entry of a right-click menu; "-" is a separator line. */
-export type MenuEntry = { label: string; onClick: () => void; danger?: boolean; disabled?: boolean } | "-";
+export type MenuEntry = { label: string; onClick: () => void; danger?: boolean; disabled?: boolean; title?: string } | "-";
 
 export interface MenuAt {
   x: number;
@@ -121,6 +121,7 @@ export function ContextMenu({ menu, onClose }: { menu: MenuAt; onClose: () => vo
             role="menuitem"
             className={item.danger ? "danger" : ""}
             disabled={item.disabled}
+            title={item.title}
             onClick={() => {
               onClose();
               item.onClick();

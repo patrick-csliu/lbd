@@ -106,6 +106,9 @@ def cut_table(s: "ExploreSession", which: str, index: Dict[str, int], trace: Opt
     stored), read from the file. Returns it and where it lies ({fixed axis: position})."""
     from . import reading                          # (reading imports what this module imports)
 
+    group = reading._group_cut(s, which, index)
+    if group is not None:                          # a variable sweep's row or column (16.10)
+        return _group_cut_table(s, which, group, numbers)
     keep, fixed, names = reading.cut_plan(s, which, index, trace)
     why = cut_options(s).get(numbers)
     if why:
@@ -121,6 +124,24 @@ def cut_table(s: "ExploreSession", which: str, index: Dict[str, int], trace: Opt
     t.comments = tables._comments(s.data, {**s.spec, "values": names, "slices": []}, numbers, False)
     t.comments.append(f"cut: {which} at {reading._fixed_text(s, fixed)}")
     return t, fixed
+
+
+def _group_cut_table(s: "ExploreSession", which: str, group, numbers: str) -> Tuple[Table, Dict[str, int]]:
+    """A variable sweep's row or column as a table: its stored points against their real
+    coordinates (complex mode applied, or as stored)."""
+    from . import reading
+
+    a, x, v, data, at, where = group
+    order = np.argsort(x, kind="stable")
+    mode = s.spec["complex"]
+    _, label, unit = rnd.apply_complex(np.ones(1, dtype=v.dtype), v.label, v.unit, mode)
+    stored = data[order][None, :]
+    columns = tables._value_columns(v.name, label, unit, tables.Rows(rnd.apply_complex(stored, v.label, v.unit, mode)[0]),
+                                    v, numbers, lambda part: tables.Rows(stored, part=part))
+    t = Table(x=x[order], x_col=Column(a.name, a.label, a.unit), values=columns, kind="curve")
+    t.comments = tables._comments(s.data, {**s.spec, "slices": []}, numbers, False)
+    t.comments.append(f"cut: {which} at {reading._at_text(at)}")
+    return t, where
 
 
 def one_cut(parts: Sequence[Tuple[Table, Dict[str, int]]]) -> Tuple[Table, List[int]]:

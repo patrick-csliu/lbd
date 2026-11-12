@@ -156,6 +156,11 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
 - **Check folders now** in the Library (next to the search box) looks through the open folders
   at once, for a file that should be listed but isn't yet. It says what it found ("3 new files",
   "Nothing new", changed, moved and gone files) and names every folder it couldn't read, with why.
+- **Row as curve and Save row on a variable sweep's map** (Explore, drawn as Rows). The row
+  through the cursor is its step: shown as a curve against the real inner coordinate, or saved
+  (.lbd and CSV) with that step's stored points; a column is the cursor's place in each step,
+  against the outer axis. Drawn as nearest points or smooth, they stay greyed, now with a tip
+  saying why; the plot's right-click menu greys them the same way (before, it didn't).
 - **No value is locked in Curves** (Explore). A value on another axis, or with a third unit, used
   to be greyed out, and with one value ticked nothing could be changed; now clicking it shows it in
   that panel instead (its tip says so), as Histogram and Scatter already did.

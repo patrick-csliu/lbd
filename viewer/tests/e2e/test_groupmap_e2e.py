@@ -21,7 +21,32 @@ def test_open_a_sweep_as_a_map_and_read_a_point(viewer, new_page):
     page.mouse.click(*at(page, meta, 2, 4))
     expect(explore(page).locator(".explore-readout .explore-pick").first).to_contain_text("at")
     expect(explore(page).locator(".explore-cut-top canvas")).to_be_visible()
-    expect(explore(page).get_by_role("button", name="Row as curve")).to_be_disabled()
+    expect(explore(page).get_by_role("button", name="Row as curve")).to_be_enabled()                  # rows: a step as a curve (16.10)
+
+
+def test_a_row_of_a_rows_map_opens_its_step_as_a_curve(viewer, new_page):
+    """16.10: drawn as Rows, Row as curve shows the step under the cursor against its real B;
+    Column as curve, the cursor's place in each step against A. Drawn as nearest points the
+    buttons and the menu entries are greyed, saying why."""
+    group_files(viewer)
+    page = new_page("Explore")
+    frames(page, lambda: row(page, "triangle.lbd").dblclick())
+    meta = frames(page, lambda: explore(page).get_by_label("Cells", exact=True).select_option("rows"))
+    page.mouse.click(*at(page, meta, 2, 4))                              # B = 2 in the step A = 4
+    button = explore(page).get_by_role("button", name="Row as curve")
+    expect(button).to_be_enabled()
+    explore(page).locator(".explore-overlay").click(button="right", position={"x": 60, "y": 60})
+    expect(page.locator(".context-menu").get_by_role("menuitem", name="Show row as curve")).to_be_enabled()
+    page.keyboard.press("Escape")
+    frames(page, lambda: button.click())
+    expect(explore(page).get_by_label("Plot type")).to_have_value("curve")
+    expect(explore(page).get_by_label("Horizontal axis")).to_have_value("B")
+    expect(explore(page).get_by_role("slider")).to_have_value("3")                    # A = 4
+    frames(page, lambda: explore(page).get_by_role("button", name="◂ Back to the map").click())
+    frames(page, lambda: explore(page).get_by_label("Cells", exact=True).select_option("nearest"))
+    page.mouse.click(*at(page, meta, 2, 4))
+    expect(button).to_be_disabled()
+    expect(button).to_have_attribute("title", "These points have no rows (the map is drawn as nearest points): choose Cells: Rows")
 
 
 def test_the_strips_show_on_rows_only(viewer, new_page):

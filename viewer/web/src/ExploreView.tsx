@@ -188,7 +188,7 @@ interface Props {
   /** Move the first slider by one step (keys [ and ]). */
   onStepSlider: (by: number) => void;
   /** Show a map's row or column (through cursor 1) as a curve in this tab. */
-  onShowCut: (which: "row" | "column", index: Record<string, number>) => void;
+  onShowCut: (which: "row" | "column", cursor: CursorRead) => void;
   /** The operations' state with each picture (which applied, what the plot shows). */
   onOpsInfo: (info: OpsInfo | null) => void;
   /** Another panel's zoom to follow (several panels, synchronized); a new `seq` applies it. */
@@ -1353,7 +1353,7 @@ export default function ExploreView({
     saveCut,
     showCut: (which) => {
       const c = readingRef.current?.cursors[0];
-      if (c) onShowCut(which, c.index);
+      if (c) onShowCut(which, c);
     },
     typed: (i, axis, stored) => {
       const r = readingRef.current;
@@ -1423,10 +1423,10 @@ export default function ExploreView({
       "-",
       ...(map
         ? ([
-            { label: "Show row as curve", onClick: () => c1 && onShowCut("row", c1.index), disabled: !c1 },
-            { label: "Show column as curve", onClick: () => c1 && onShowCut("column", c1.index), disabled: !c1 },
-            { label: "Save row as .lbd…", onClick: () => saveCut("row"), disabled: !c1 },
-            { label: "Save column as .lbd…", onClick: () => saveCut("column"), disabled: !c1 },
+            { label: "Show row as curve", onClick: () => c1 && onShowCut("row", c1), disabled: !c1 || !!c1.cuts_why, title: c1?.cuts_why },
+            { label: "Show column as curve", onClick: () => c1 && onShowCut("column", c1), disabled: !c1 || !!c1.cuts_why, title: c1?.cuts_why },
+            { label: "Save row as .lbd…", onClick: () => saveCut("row"), disabled: !c1 || !!c1.cuts_why, title: c1?.cuts_why },
+            { label: "Save column as .lbd…", onClick: () => saveCut("column"), disabled: !c1 || !!c1.cuts_why, title: c1?.cuts_why },
           ] as MenuEntry[])
         : kindRef.current === "curve"
           ? ([{ label: "Save trace as .lbd…", onClick: () => saveCut("trace"), disabled: !c1 }] as MenuEntry[])

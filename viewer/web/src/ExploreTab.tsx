@@ -1,7 +1,7 @@
 import { CSSProperties, DragEvent, KeyboardEvent, MouseEvent, MutableRefObject, ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { useResizable } from "./resizable";
 import NumberRange from "./NumberRange";
-import { api, CursorsAnswer, ExploreFrameMeta, ExploreOpen, FileInfo, OpsInfo, PlotSpec, ReduceStat, SyncKeys, ValueInfo } from "./api";
+import { api, CursorRead, CursorsAnswer, ExploreFrameMeta, ExploreOpen, FileInfo, OpsInfo, PlotSpec, ReduceStat, SyncKeys, ValueInfo } from "./api";
 import Operations from "./Operations";
 import Contrast from "./Contrast";
 import CursorPanel, { OtherPanel } from "./CursorPanel";
@@ -441,14 +441,20 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
           if (i !== sl.index) updateSpec({ index: { ...(r.index ?? {}), [sl.axis]: i } });
         },
         // A map's row or column through cursor 1, as a curve in this panel (the map is kept to go back to).
-        onShowCut: (which: "row" | "column", index: Record<string, number>) => {
+        onShowCut: (which: "row" | "column", cursor: CursorRead) => {
           const r = liveRef.current[id]?.resolved?.spec;
           if (!r?.x || !r.y) return;
           const fixed = which === "row" ? r.y : r.x;
+          // a variable sweep's map: the curve on its real axes through that step or place (16.10)
+          const along = cursor.curves?.[which];
+          if (r.levels && !along) return;
+          const shown = along
+            ? { x: along.x, index: { ...(r.index ?? {}), ...along.index } }
+            : { x: which === "row" ? r.x : r.y, index: { ...(r.index ?? {}), [fixed]: cursor.index[fixed] } };
           updatePanel(id, (s) => ({
             ...s,
             back: s.spec,
-            spec: { ...s.spec, kind: "curve", x: which === "row" ? r.x : r.y, y: undefined, series: "none", index: { ...(r.index ?? {}), [fixed]: index[fixed] } },
+            spec: { ...s.spec, kind: "curve", ...shown, y: undefined, series: "none" },
             settings: { ...s.settings, select: undefined },
             cursors: { ...s.cursors, at: [], active: 0 },
             view: null,
@@ -783,7 +789,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
   const cursorPanel = resolved && (
     <CursorPanel
       kind={resolved.kind}
-      noCutOut={!!resolved.spec.levels}
+      noCutOut={resolved.spec.levels ? (actLive.reading?.cursors[0]?.cuts_why ?? "") : ""}
       cursors={act.cursors}
       onCursors={actApi.onCursors}
       reading={actLive.reading}

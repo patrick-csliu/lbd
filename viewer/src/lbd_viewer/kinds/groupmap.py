@@ -1,7 +1,9 @@
 """A map of a variable sweep in an Explore session (lbd.plot.groupmap): for the user it is a Map.
 
 The picture is made per view, from the stored points. A cursor sits on a stored point, found in
-pixels, and reads that point's own coordinates. Only a map with rows has cuts.
+pixels, and reads that point's own coordinates. Only a map with rows has cuts; on a sweep of two
+levels drawn as rows, a row or column through a cursor can be shown as a curve or saved (16.10):
+along a step its own points, across the steps the same position in each step.
 """
 
 from typing import Any, Dict, List, Optional, Tuple
@@ -142,6 +144,74 @@ class GroupMap(Interaction):
         a, b = float(edges[k]), float(edges[k + 1])
         return [a, float(lo), b, float(hi)] if m.rows_on == "y" else [float(lo), a, float(hi), b]
 
+    # -- a row or column as a curve, or saved (16.10)
+
+    NO_ROWS = "These points have no rows (the map is drawn as nearest points): choose Cells: Rows"
+    DEEPER = "A row of a sweep of more than two levels can't be shown or saved yet"
+
+    def no_cuts(self) -> Optional[str]:
+        """Why this map's rows and columns can't be shown as curves or saved, or None."""
+        if self.s.model.cells != "rows":
+            return self.NO_ROWS
+        if len(self.s.spec.get("levels") or []) != 2:
+            return self.DEEPER
+        return None
+
+    def _step_and_place(self, point: int) -> Tuple[int, int]:
+        """A point of the inner level: its step (the outer point) and its place in that step."""
+        from lbd.groups import _position_in_step
+
+        inner = self.s.spec["levels"][-1]
+        parent = np.asarray(self.s.flat_data._unflat.axes[inner].parent, dtype=np.int64)
+        if getattr(self, "_places_of", None) is not parent:
+            self._places, self._places_of = _position_in_step(parent), parent
+        return int(parent[point]), int(self._places[point])
+
+    def _along_step(self, which: str) -> bool:
+        """Whether `which` (row or column) runs along a step (else across the steps)."""
+        return (which == "row") == (self.s.model.rows_on == "y")
+
+    def curve_cut(self, which: str, point: int) -> Dict[str, Any]:
+        """The curve settings that show this row or column (C2's curves on real axes): along a step,
+        against the inner coordinate at that step; across, against the outer axis at that place in
+        each step."""
+        from ..explore import ExploreError
+
+        why = self.no_cuts()
+        if why:
+            raise ExploreError(why)
+        outer, inner = self.s.spec["levels"]
+        step, place = self._step_and_place(point)
+        if self._along_step(which):
+            return {"x": inner, "index": {outer: step}}
+        in_step = {v: k for k, v in getattr(rnd.for_kind(self.s.header, "curve"), "_in_step", {}).items()}
+        return {"x": outer, "index": {in_step[inner]: place}}
+
+    def cut_points(self, which: str, point: int):
+        """The stored points of this row or column: (axis, its coordinates, value, its stored
+        numbers, where it lies {axis label: coordinate}). Along a step: that step's points against
+        the inner coordinate; across: the point at this place of every step that has one, against
+        the outer axis."""
+        from ..explore import ExploreError
+
+        why = self.no_cuts()
+        if why:
+            raise ExploreError(why)
+        src = self.s.flat_data._unflat
+        outer, inner = self.s.spec["levels"]
+        step, place = self._step_and_place(point)
+        parent = np.asarray(src.axes[inner].parent, dtype=np.int64)
+        v = src.values[self.s.spec["values"][0]]
+        if self._along_step(which):
+            sel = np.flatnonzero(parent == step)
+            a = src.axes[inner]
+            at = {src.axes[outer].label or outer: (float(np.asarray(src.axes[outer].data, dtype=float)[step]), src.axes[outer].unit)}
+            return a, np.asarray(a.data, dtype=float)[sel], v, np.asarray(v.data)[sel], at, {outer: step}
+        sel = np.flatnonzero(self._places == place)
+        a = src.axes[outer]
+        at = {f"point {place} of each step of {src.axes[outer].label or outer}": None}
+        return a, np.asarray(a.data, dtype=float)[parent[sel]], v, np.asarray(v.data)[sel], at, {"place": place}
+
     def read(self, cursor, kind, geo):
         from .. import reading
 
@@ -157,6 +227,10 @@ class GroupMap(Interaction):
         out = {"x": x if free or kind == "horizontal" else float(m.x[i]),
                "y": y if free or kind == "vertical" else float(m.y[i]), "free": free, "items": items,
                "index": {s.spec["x"]: point}, "at": [i, int(m.row[i])]}
+        if self.no_cuts() is None:                     # the curves through it (16.10)
+            out["curves"] = {w: self.curve_cut(w, point) for w in ("row", "column")}
+        else:
+            out["cuts_why"] = self.no_cuts()
         box = self._box(i)
         if box:
             out["cell"] = box

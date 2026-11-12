@@ -184,7 +184,12 @@ outer ones) is a map too, with its real coordinates:
 
 **Cells** chooses; **Automatic** takes Rows when most rows have a few points of their own. A cursor sits
 on a stored point and reads its own coordinates. Across the rows of a cut, each entry says where it
-really is. Operations and **Row as curve** aren't available on such a map yet.
+really is. Drawn as Rows, the cut along a step is that step's own points: **Row as curve** shows
+the step as a curve against its real coordinates (Frequency at that Power), and **Save row** writes
+its stored points. The cut across the steps takes the cursor's place in each step ("point 3 of each
+step", against Power; a step without that point is left out). With **Nearest point** or **Smooth**
+the points have no rows: these are greyed, and their tip says why. Operations aren't available on
+such a map yet; a sweep of more than two levels can't show or save its rows yet.
 
 ### Matrix
 
