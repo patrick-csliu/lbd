@@ -8,7 +8,7 @@ const CELLS: [string, string, string][] = [
 ];
 
 /** A map of a variable sweep: how its stored points become a picture. */
-export function GroupMapControls({ resolved, update }: KindControlsProps) {
+export function GroupMapDisplay({ resolved, update }: KindControlsProps) {
   if (!resolved.levels) return null;
   const cells = String(resolved.options?.cells ?? "auto");
   return (

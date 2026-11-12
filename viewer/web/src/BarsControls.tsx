@@ -6,8 +6,6 @@ import type { KindControlsProps, PlotKind } from "./plotKinds";
 
 function BarsControls({ info, resolved: r, update }: KindControlsProps) {
   const values = r.values ?? [];
-  const options = (r.options ?? {}) as { layout?: string; numbers?: boolean };
-  const set = (patch: { layout?: string; numbers?: boolean }) => update({ options: { ...(r.options ?? {}), ...patch } });
   const singles = values.length > 0 && info.values.find((v) => v.name === values[0])?.shape.length === 0;
   const axes = axisChoices(info, r, [r.x, r.series]);
   const anyComplex = values.some((n) => info.values.find((v) => v.name === n)?.complex);
@@ -59,6 +57,16 @@ function BarsControls({ info, resolved: r, update }: KindControlsProps) {
         </label>
       )}
       {anyComplex && <ComplexSelect r={r} update={update} />}
+    </>
+  );
+}
+
+/** Grouped or stacked, the numbers on the bars (Display, 16.47). */
+function BarsDisplay({ resolved: r, update }: KindControlsProps) {
+  const options = (r.options ?? {}) as { layout?: string; numbers?: boolean };
+  const set = (patch: { layout?: string; numbers?: boolean }) => update({ options: { ...(r.options ?? {}), ...patch } });
+  return (
+    <>
       <label className="field">
         <span>Bars</span>
         <select aria-label="Bars" value={options.layout ?? "grouped"} onChange={(e) => set({ layout: e.target.value })}>
@@ -80,6 +88,7 @@ export const kindRow: PlotKind = {
   kind: "bars",
   explore: true,
   controls: BarsControls,
+  display: BarsDisplay,
   cursorTypes: ["cross", "horizontal"],
   strips: null,
   darkInverted: true,

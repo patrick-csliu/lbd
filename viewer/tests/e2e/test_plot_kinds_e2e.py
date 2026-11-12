@@ -40,3 +40,27 @@ def test_curves_and_maps_work_as_before(viewer, new_page):
     expect(kind).to_have_value("curve")
     frames(page, lambda: kind.select_option("heatmap"))
     expect(explore(page).get_by_role("button", name="Cuts", exact=True)).to_be_visible()
+
+
+LOOKS = [   # 16.47: the file, the plot type, a look option of that type (under Display, not Data)
+    ("16 density matrix.lbd", "matrix", "Significant digits"),
+    ("18 bars.lbd", "bars", "Bars"),
+    ("16 density matrix.lbd", "bars3d", "Elevation"),
+    ("9 many values.lbd", "histogram", "Bins"),
+    ("11 single shot iq.lbd", "scatter", "Equal axes"),
+]
+
+
+def test_look_options_are_under_display(values_files, viewer, new_page):
+    page = new_page("Explore")
+    for name, kind, option in LOOKS:
+        frames(page, lambda: row(page, name).dblclick())
+        ctl = explore(page).get_by_role("complementary", name="Controls")
+        frames(page, lambda: ctl.get_by_label("Plot type").select_option(kind))
+        data = ctl.locator("details.controls-section").filter(has=page.locator("summary", has_text="Data"))
+        display = ctl.locator("details.controls-section").filter(has=page.locator("summary", has_text="Display"))
+        expect(data.get_by_label(option, exact=True)).to_have_count(0)
+        expect(display.get_by_label(option, exact=True)).to_have_count(1)
+        if kind == "histogram":                                            # one log switch: Log vertical
+            expect(ctl.get_by_label("Log", exact=True)).to_have_count(0)
+            expect(display.get_by_text("Log vertical")).to_have_count(1)

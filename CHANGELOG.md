@@ -161,6 +161,11 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
   (.lbd and CSV) with that step's stored points; a column is the cursor's place in each step,
   against the outer axis. Drawn as nearest points or smooth, they stay greyed, now with a tip
   saying why; the plot's right-click menu greys them the same way (before, it didn't).
+- **Look options are under Display.** Data says what is plotted, Display how it looks: a
+  histogram's Bins, Draw and Vertical axis; Scatter's Equal axes and Histograms beside the plot;
+  a map's Cells; a matrix's Numbers, Significant digits, Row sums and Colour range; Bars' Bars and
+  Values on the bars; 3D bars' angle. The Figure page has a Display section for them too.
+  Histogram's second log switch (**Log**, the same as **Log vertical**) is gone.
 - **No value is locked in Curves** (Explore). A value on another axis, or with a third unit, used
   to be greyed out, and with one value ticked nothing could be changed; now clicking it shows it in
   that panel instead (its tip says so), as Histogram and Scatter already did.

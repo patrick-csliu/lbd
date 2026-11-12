@@ -3,7 +3,7 @@ import type { CursorType, FileInfo, PlotSpec, ValueInfo } from "./api";
 import type { Angle, ViewSettings } from "./ExploreView";
 import { kindRow as bars } from "./BarsControls";
 import { kindRow as bars3d } from "./Bars3dControls";
-import { GroupMapControls } from "./GroupMapControls";
+import { GroupMapDisplay } from "./GroupMapControls";
 import { kindRow as histogram } from "./HistogramControls";
 import { kindRow as matrix } from "./MatrixControls";
 import { kindRow as scatter } from "./ScatterControls";
@@ -28,7 +28,8 @@ export interface KindControlsProps {
 export interface PlotKind {
   kind: string;
   explore: boolean; // Explore can show it
-  controls: ComponentType<KindControlsProps> | null; // null: no controls of its own
+  controls: ComponentType<KindControlsProps> | null; // its Data part (what is plotted); null: none of its own
+  display?: ComponentType<KindControlsProps>; // its Display part (how it looks, 16.47): under Display
   cursorTypes: CursorType[];
   strips: "cuts" | "histograms" | null; // beside the plot
   darkInverted: boolean; // the picture is inverted in the dark theme, as curves are
@@ -49,7 +50,7 @@ const common = { explore: true, controls: null, cursorTypes: ALL_CURSORS, openIn
 
 const BUILT_IN: PlotKind[] = [
   { ...common, kind: "curve", strips: null, darkInverted: true },
-  { ...common, kind: "heatmap", controls: GroupMapControls, strips: "cuts", darkInverted: false },
+  { ...common, kind: "heatmap", display: GroupMapDisplay, strips: "cuts", darkInverted: false },
 ];
 
 const OWN = [matrix, bars, bars3d, histogram, scatter].filter((k): k is PlotKind => k !== null);

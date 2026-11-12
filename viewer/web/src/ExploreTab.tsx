@@ -1162,6 +1162,7 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
   const r = resolved.spec;
   const kind = resolved.kind;
   const Controls = kindOf(kind).controls;
+  const Display = kindOf(kind).display; // the plot type's look options (16.47)
   const values = r.values ?? [];
   const first = info.values.find((v) => v.name === values[0]);
   const byName = new Map(info.values.map((v) => [v.name, v]));
@@ -1344,9 +1345,10 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
 
       </Section>
 
-      {(scales.length > 0 || kind === "heatmap") && (
+      {(scales.length > 0 || kind === "heatmap" || Display) && (
       <Section name="display" title="Display" open={!!sections.display} onToggle={setSection}
                badge={settings.xscale === "log" || settings.yscale === "log" || settings.cscale === "log" ? "log" : undefined}>
+      {Display && <Display info={info} spec={r} resolved={r} update={updateSpec} settings={settings} updateSettings={updateSettings} page="explore" angle={angle} setAngle={setAngle} />}
       <fieldset className="field">
         <legend>Scales</legend>
         {scales.includes("x") && (

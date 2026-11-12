@@ -44,7 +44,19 @@ export function GridAxes({ info, r, update, kind }: { info: FileInfo; r: PlotSpe
   );
 }
 
+/** Which value, rows and columns, complex mode (Data). */
 function MatrixControls({ info, resolved: r, update }: KindControlsProps) {
+  const complex = info.values.find((v) => v.name === r.values?.[0])?.complex;
+  return (
+    <>
+      <GridAxes info={info} r={r} update={update} kind="matrix" />
+      {complex && <ComplexSelect r={r} update={update} />}
+    </>
+  );
+}
+
+/** The numbers in the cells, row sums, the colour range (Display, 16.47). */
+function MatrixDisplay({ info, resolved: r, update }: KindControlsProps) {
   const options = (r.options ?? {}) as { numbers?: boolean; digits?: number; range?: string; row_sums?: boolean };
   const set = (patch: { numbers?: boolean; digits?: number; range?: string; row_sums?: boolean }) => {
     const next = { ...(r.options ?? {}), ...patch };
@@ -55,8 +67,6 @@ function MatrixControls({ info, resolved: r, update }: KindControlsProps) {
   const reIm = !!complex && r.complex === "re_im";
   return (
     <>
-      <GridAxes info={info} r={r} update={update} kind="matrix" />
-      {complex && <ComplexSelect r={r} update={update} />}
       <div className="field">
         <label className="check" title="The number of each cell, in the cell; left out when a cell is too small for it">
           <input type="checkbox" checked={options.numbers !== false} onChange={(e) => set({ numbers: e.target.checked })} />
@@ -96,6 +106,7 @@ export const kindRow: PlotKind = {
   kind: "matrix",
   explore: true,
   controls: MatrixControls,
+  display: MatrixDisplay,
   cursorTypes: ["cross"],
   strips: null,
   darkInverted: false,

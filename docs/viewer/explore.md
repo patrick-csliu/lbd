@@ -15,7 +15,8 @@ opens it here. For a figure to export, use **Figure** (one click away, see below
 3. **The controls**, in three folding sections: **Data** (curves or a map, the values, the axes,
    one curve per …, complex values, a [slider](#sync-panels-that-follow-each-other) for each
    other dimension, which traces),
-   **Display** (scales, colours, what a pixel shows when it stands for several cells) and
+   **Display** (how it looks: scales, colours, what a pixel shows when it stands for several cells,
+   and each plot type's own look options, such as a histogram's bins or a matrix's numbers) and
    **Processing** (operations and equations).
 4. **The panel's toolbar**: its name, then **⟲** reset the view, **⇔** type the limits,
    **✂** cuts (maps), **⤓** data (save as CSV, copy the picture) and **⋯** (mouse and keys,
@@ -278,7 +279,7 @@ and give no colours.
 **Several values** are overlaid as outlines, on the same bins, when they have the same unit. Ticking a
 value of another unit shows that value alone.
 
-**Bins.** Empty means Auto, chosen from the numbers (Freedman-Diaconis, at most 200 bins; whole numbers
+**Bins**, **Draw** and **Vertical axis** are under Display. **Bins.** Empty means Auto, chosen from the numbers (Freedman-Diaconis, at most 200 bins; whole numbers
 in a small range get a bin each). A number from 2 to 10000 is used as it is. Zooming shows part of the
 bins; it doesn't count again.
 
@@ -286,7 +287,7 @@ bins; it doesn't count again.
 |---|---|
 | **Draw** | Filled **Bars** or an **Outline**. Several series are always outlines. |
 | **Vertical axis** | **Count**, **Fraction** of each series, or **Density** (per unit of x, so the area is 1). Changing it counts nothing again. |
-| **Log** | A logarithmic vertical axis; empty bins are left out. |
+| **Log vertical** (Display) | A logarithmic vertical axis; empty bins are left out. |
 | **Complex values** | Complex numbers are counted after this choice (magnitude, phase …). The two-dimensional count of the I/Q plane is the operation I/Q histogram. |
 
 Numbers that aren't finite are not counted, and a note says how many.

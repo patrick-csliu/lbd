@@ -33,23 +33,32 @@ function BinsField({ bins, onBins }: { bins: unknown; onBins: (bins: number | "a
   );
 }
 
-/** What a histogram counts (Colour by, and a slider or All per axis) and how it is drawn. */
-function HistogramControls({ info, resolved, update, settings, updateSettings, page }: KindControlsProps) {
-  const options = resolved.options ?? {};
-  const setOption = (patch: Record<string, string | number>) => update({ options: { ...options, ...patch } });
-  const values = resolved.values ?? [];
-  const first = info.values.find((v) => v.name === values[0]);
-  const axes = (first?.axes ?? []).flatMap((name) => {
+function axesOf(info: KindControlsProps["info"], resolved: KindControlsProps["resolved"]) {
+  const first = info.values.find((v) => v.name === resolved.values?.[0]);
+  return (first?.axes ?? []).flatMap((name) => {
     const a = info.axes.find((x) => x.name === name);
     return a && !a.group ? [{ name, label: a.label || a.name, length: a.length, elements: a.elements }] : [];
   });
+}
+
+/** What a histogram counts: Colour by, and a slider or All per axis (Data). */
+function HistogramControls({ info, resolved, update }: KindControlsProps) {
+  const axes = axesOf(info, resolved);
+  if (!axes.length) return null;
+  return <AxesChoice axes={axes} color={resolved.color ?? "none"} all={resolved.all ?? []} onChange={update} />;
+}
+
+/** How a histogram is drawn: bins, bars or outlines, what the vertical axis counts (Display,
+ * 16.47). Its log scale is Display's Log vertical. */
+function HistogramDisplay({ info, resolved, update }: KindControlsProps) {
+  const options = resolved.options ?? {};
+  const setOption = (patch: Record<string, string | number>) => update({ options: { ...options, ...patch } });
+  const values = resolved.values ?? [];
   const color = resolved.color ?? "none";
-  const steps = axes.find((a) => a.name === color)?.length ?? 1;
+  const steps = axesOf(info, resolved).find((a) => a.name === color)?.length ?? 1;
   const several = values.length * steps > 1;
-  const log = page === "explore" ? (settings?.yscale ?? resolved.y_scale) === "log" : resolved.y_scale === "log";
   return (
     <>
-      {axes.length > 0 && <AxesChoice axes={axes} color={color} all={resolved.all ?? []} onChange={update} />}
       <BinsField bins={options.bins} onBins={(bins) => setOption({ bins })} />
       <label className="field" title={several ? "Several series are always outlines, so that they can be told apart." : undefined}>
         <span>Draw</span>
@@ -66,19 +75,6 @@ function HistogramControls({ info, resolved, update, settings, updateSettings, p
           <option value="density">Density</option>
         </select>
       </label>
-      <label className="check">
-        <input
-          type="checkbox"
-          aria-label="Log"
-          checked={log}
-          onChange={(e) => {
-            const scale = e.target.checked ? "log" : "linear";
-            if (page === "explore") updateSettings?.({ yscale: scale });
-            else update({ y_scale: scale });
-          }}
-        />
-        Log
-      </label>
     </>
   );
 }
@@ -87,6 +83,7 @@ export const kindRow: PlotKind = {
   kind: "histogram",
   explore: true,
   controls: HistogramControls,
+  display: HistogramDisplay,
   cursorTypes: ["vertical"],
   strips: null,
   darkInverted: true,

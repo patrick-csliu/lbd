@@ -29,8 +29,19 @@ function AngleBox({ label, value, low, high, onSet }: { label: string; value: nu
   );
 }
 
-function Bars3dControls({ info, resolved: r, update, page, angle, setAngle }: KindControlsProps) {
+/** Which value, rows and columns, complex mode (Data). */
+function Bars3dControls({ info, resolved: r, update }: KindControlsProps) {
   const complex = info.values.find((v) => v.name === r.values?.[0])?.complex;
+  return (
+    <>
+      <GridAxes info={info} r={r} update={update} kind="bars3d" />
+      {complex && <ComplexSelect r={r} update={update} more={[["abs_phase", "Height |z|, colour the phase"]]} />}
+    </>
+  );
+}
+
+/** The angle the bars are seen from (Display, 16.47). */
+function Bars3dDisplay({ resolved: r, update, page, angle, setAngle }: KindControlsProps) {
   const options = (r.options ?? {}) as { elev?: number; azim?: number };
   const onFigure = page === "figure";
   const elev = (onFigure ? options.elev : angle?.elev) ?? 35;
@@ -50,8 +61,6 @@ function Bars3dControls({ info, resolved: r, update, page, angle, setAngle }: Ki
   };
   return (
     <>
-      <GridAxes info={info} r={r} update={update} kind="bars3d" />
-      {complex && <ComplexSelect r={r} update={update} more={[["abs_phase", "Height |z|, colour the phase"]]} />}
       <AngleBox label="Elevation" value={elev} low={-90} high={90} onSet={(v) => set({ elev: Math.min(90, Math.max(-90, v)) })} />
       <AngleBox label="Azimuth" value={azim} onSet={(v) => set({ azim: v })} />
       <div className="field">
@@ -67,6 +76,7 @@ export const kindRow: PlotKind = {
   kind: "bars3d",
   explore: true,
   controls: Bars3dControls,
+  display: Bars3dDisplay,
   cursorTypes: [],
   strips: null,
   darkInverted: false,

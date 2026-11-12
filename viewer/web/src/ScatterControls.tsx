@@ -14,7 +14,7 @@ function starting(info: FileInfo, v: ValueInfo | undefined): PlotSpec {
   return { ...startingAxes(axesOf(info, v)), ...(v?.complex ? { complex: "iq" } : {}) };
 }
 
-/** What a scatter plot shows besides x and y: Colour by, a slider or All per axis, equal axes. */
+/** What a scatter plot shows besides x and y: Colour by, a slider or All per axis (Data). */
 function ScatterControls({ info, resolved, update, page }: KindControlsProps) {
   const first = info.values.find((v) => v.name === resolved.values?.[0]);
   const axes = axesOf(info, first);
@@ -27,10 +27,14 @@ function ScatterControls({ info, resolved, update, page }: KindControlsProps) {
   // Figure also colours by another value; a saved view doing so stays shown in Explore
   const sameAxes = info.values.filter((v) => v.axes.join() === first?.axes.join());
   const values = (page === "figure" ? sameAxes : sameAxes.filter((v) => v.name === color)).map((v) => ({ name: v.name, label: `${v.label || v.name} (value)` }));
-  const equal = resolved.options?.equal ?? iq;
+  return <AxesChoice axes={axes} color={color} all={all} drawn={drawn} values={values} onChange={update} />;
+}
+
+/** How a scatter plot looks: equal axes, histograms beside it (Display, 16.47). */
+function ScatterDisplay({ resolved, update, page }: KindControlsProps) {
+  const equal = resolved.options?.equal ?? resolved.complex === "iq";
   return (
     <>
-      <AxesChoice axes={axes} color={color} all={all} drawn={drawn} values={values} onChange={update} />
       <label className="check" title="The same scale both ways, so that a circle looks like a circle">
         <input type="checkbox" checked={!!equal} onChange={(e) => update({ options: { ...(resolved.options ?? {}), equal: e.target.checked } })} />
         Equal axes
@@ -49,6 +53,7 @@ export const kindRow: PlotKind = {
   kind: "scatter",
   explore: true,
   controls: ScatterControls,
+  display: ScatterDisplay,
   cursorTypes: ["cross"],
   strips: "histograms",
   darkInverted: true,

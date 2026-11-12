@@ -126,7 +126,7 @@ SVG and PDF files). The points per pixel are only Explore's way of showing very 
 
 **Histogram** counts how many numbers fall in each bin. It has the controls it has in Explore: **Colour by**
 (an outline per step of one axis, or None), **All of …** for each other axis (unticked: a slider), **Bins**
-(empty: Auto), **Draw** (Bars or Outline), **Vertical axis** (Count, Fraction or Density) and **Log**. Values
+(empty: Auto), **Draw** (Bars or Outline), **Vertical axis** (Count, Fraction or Density) and **Log y**. Values
 of the same unit can be ticked together, as outlines. Complex values are counted after **Complex data as**.
 
 A large file is read part by part while the figure is drawn. The bars' opacity and the outlines' width are

@@ -518,6 +518,7 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
   const kind = resolved.kind ?? "auto";
   const kindRow = kindOf(kind);
   const KindControls = kindRow.controls;
+  const KindDisplay = kindRow.display; // the plot type's look options (16.47)
   const logScales = kindRow.scales ?? ["x", "y"];
   const valuesByName = Object.fromEntries(info.values.map((v) => [v.name, v]));
   const selected = resolved.values ?? [];
@@ -788,6 +789,13 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
           </div>
         )}
       </fieldset>
+
+      {KindDisplay && (
+        <fieldset aria-label="Display">
+          <legend>Display</legend>
+          <KindDisplay info={info} spec={resolved} resolved={resolved} update={update} page="figure" />
+        </fieldset>
+      )}
 
       <fieldset>
         <legend>
