@@ -132,6 +132,10 @@ class Bars(ShapeOps):
         xa = s.data.axes[s.spec["x"]]
         comments = ([f"{xa.label or xa.name}: " + ", ".join(f"{k} = {t}" for k, t in enumerate(xa.elements))]
                     if xa.elements is not None else [])
+        if s.spec.get("all"):                            # one bar stands for many numbers (16.48)
+            stat = bars.STATS[(s.spec.get("options") or {}).get("stat", "mean")][0].lower()
+            whole = ", ".join(s.data.axes[a].label or a for a in s.spec["all"])
+            comments.append(f"Each bar: the {stat} of all {whole} (empty points left out)")
         t = Table(x=np.asarray(xa.data, dtype=float), x_col=Column(xa.name, xa.label, xa.unit), values=list(names.values()),
                   comments=comments, kind="bars")
         if view is not None:

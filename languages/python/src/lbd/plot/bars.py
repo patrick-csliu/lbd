@@ -26,9 +26,16 @@ LAYOUTS = ("grouped", "stacked")
 SERIES_AT_MOST = 12        # a second axis longer than this starts as a slider, not as bars in a group
 MARGIN = 0.05              # of the vertical range, as matplotlib's default
 
+# With All of an axis one bar stands for many numbers: what it shows of them (16.48). The
+# nan-functions leave empty points out.
+STATS = {"mean": ("Mean", np.nanmean), "median": ("Median", np.nanmedian), "max": ("Max", np.nanmax),
+         "min": ("Min", np.nanmin), "sum": ("Sum", np.nansum)}
+
 OPTIONS = {
     "layout": (lambda v: v in LAYOUTS, f"layout must be one of {LAYOUTS}"),
     "numbers": (lambda v: isinstance(v, bool), "numbers must be true or false"),
+    "stat": (lambda v: v in STATS, f"stat must be one of {tuple(STATS)}"),
+    "errors": (lambda v: isinstance(v, bool), "errors must be true or false"),
 }
 
 
@@ -50,6 +57,7 @@ class BarSet:
     factors: List[float]       # plot units per stored unit, per axis
     right_scale: float         # drawn height / right axis number (bars of the right axis)
     auto_axes: List[Tuple[str, str]]
+    spread: Optional[np.ndarray] = None    # with All: one standard deviation per bar, plot units as `heights`
 
 
 def fits(d, name: str) -> Optional[str]:
@@ -64,17 +72,19 @@ def starting_x(d, value) -> str:
     return (named or sorted(swept, key=lambda a: size[a]))[0]
 
 
-def starting_series(d, value, x: str) -> Optional[str]:
-    """A second short axis gives the bars in a group. A vector in each point has one bar per element."""
+def starting_series(d, value, x: str, whole: Tuple[str, ...] = ()) -> Optional[str]:
+    """A second short axis gives the bars in a group, but not one chosen as All (`whole`). A vector
+    in each point has one bar per element."""
     if r._is_point(d, x):
         return None
     size = dict(zip(value.axes, value.shape))
-    short = [a for a in r._swept(value) if a != x and size[a] <= SERIES_AT_MOST]
+    short = [a for a in r._swept(value) if a != x and a not in whole and size[a] <= SERIES_AT_MOST]
     return min(short, key=lambda a: size[a]) if short else None
 
 
 def resolve(d, out, values, pick, spec, index_in, warn_unused, file_spec) -> Dict[str, Any]:
-    """`x`: the groups; `series`: the bars in a group (one value only); every other axis gets a slider."""
+    """`x`: the groups; `series`: the bars in a group (one value only); every other axis gets a slider,
+    or with `all` its points all go into each bar (16.48)."""
     checked_options(d, out, spec, OPTIONS)
     single = [n for n in values if not d.values[n].shape]
     if single:
@@ -95,16 +105,24 @@ def resolve(d, out, values, pick, spec, index_in, warn_unused, file_spec) -> Dic
         others = [a for a in axes if a != x]
         chosen = spec.get("series") if spec.get("series") not in (None, "") else file_spec.get("series")
         if chosen != "none":
-            series = pick("series", lambda v: r._pick(v, others, role="the bars in a group"), starting_series(d, first, x))
+            series = pick("series", lambda v: r._pick(v, others, role="the bars in a group"), starting_series(d, first, x, tuple(out.get("all", []))))
             if series:
                 out["series"] = series
                 keep.append(series)
     elif spec.get("series") not in (None, "", "none") and warn_unused:
         _warn(f"series={spec['series']!r} is ignored: several values are plotted", r.RenderWarning)
+    drawn = [a for a in out.get("all", []) if a in keep]
+    if drawn and warn_unused and spec.get("all") is not None:
+        roles = {x: "the groups", out.get("series"): "the bars in a group"}
+        _warn(f"all: {', '.join(f'{a!r} gives {roles[a]}' for a in drawn)}, so it can't be All too; ignored",
+              r.RenderWarning)
+    whole = [a for a in out.pop("all", []) if a not in keep]
+    if whole:
+        out["all"] = whole
     every: List[str] = []
     for name in values:
         every += [a for a in d.values[name].axes if a not in every]
-    out["index"], out["slices"] = r._slices(d, [a for a in every if a not in keep], index_in, spec)
+    out["index"], out["slices"] = r._slices(d, [a for a in every if a not in keep + whole], index_in, spec)
     return out
 
 
@@ -117,6 +135,19 @@ class _Row:
     numbers: np.ndarray
     labels: List[str]
     units: List[str]
+    spread: Optional[np.ndarray] = None      # with All: one standard deviation of each bar's numbers
+
+
+def _statistic(numbers: np.ndarray, stat: str) -> Tuple[np.ndarray, np.ndarray]:
+    """(what each bar shows, its standard deviation) of `numbers` (groups, many each); a group
+    with no numbers has no bar (NaN), also for Sum."""
+    flat = numbers.reshape(numbers.shape[0], -1)
+    some = np.isfinite(flat).any(axis=1)
+    out, spread = np.full(len(flat), np.nan), np.full(len(flat), np.nan)
+    if some.any():
+        out[some] = STATS[stat][1](flat[some], axis=1)
+        spread[some] = np.nanstd(flat[some], axis=1)
+    return out, spread
 
 
 def _parts(numbers: np.ndarray, v, mode: str) -> List[Tuple[str, np.ndarray, str, str]]:
@@ -143,18 +174,24 @@ def _rows(d, spec) -> Tuple[List[str], List[_Row]]:
         return [mathsafe(v.label) for v in values], rows
     x, series = spec["x"], spec.get("series")
     groups = position_labels(d.axes[x])
+    stat = (spec.get("options") or {}).get("stat", "mean")
     rows = []
     for v in values:
+        whole = [a for a in spec.get("all", []) if a in v.axes]     # after the groups: each bar's many numbers
         if series:
-            arr = r._take(v, [series, x], spec["index"])
+            arr = r._take(v, [series, x, *whole], spec["index"])
             sa = d.axes[series]
             traces = [(r._legend_label(sa, sa.data[j], j), f"{v.name}_{j}", arr[j]) for j in range(arr.shape[0])]
         else:
-            traces = [(mathsafe(v.label) if len(values) > 1 else "", v.name, r._take(v, [x], spec["index"]))]
+            traces = [(mathsafe(v.label) if len(values) > 1 else "", v.name, r._take(v, [x, *whole], spec["index"]))]
         for name, column, numbers in traces:
             for part, shown, label, unit in _parts(np.asarray(numbers), v, mode):
+                shown, spread = np.asarray(shown, dtype=float), None
+                if spec.get("all"):
+                    shown, spread = _statistic(shown, stat)
+                    label = f"{STATS[stat][0]} of {label}"
                 rows.append(_Row(", ".join(t for t in (name, part) if t), f"{column}_{part.lower()}" if part else column,
-                                 np.asarray(shown, dtype=float), [label] * len(groups), [unit] * len(groups)))
+                                 shown, [label] * len(groups), [unit] * len(groups), spread))
     return groups, rows
 
 
@@ -176,27 +213,33 @@ def read_bars(d, spec, style: Style) -> BarSet:
     q = r.find_quantity(style, first.name, first.label, spec["complex"] if first.dtype.startswith("complex") else None)
     auto = style.axis_style("y").label.auto_prefix
     factors, shown_units, texts, auto_axes = [], [], [], []
-    heights = np.array(raw)
+    scale = np.ones_like(raw)                            # drawn height per stored unit, per bar
+    many = STATS[(spec.get("options") or {}).get("stat", "mean")][0] if spec.get("all") else ""
     for k, unit in enumerate(units):
         mine = unit_of == k
         f, shown = r._unit_scale(raw[mine], unit, q if k == 0 else r.QuantityStyle(), auto)
         factors.append(f)
         shown_units.append(shown)
         names = list(dict.fromkeys(str(t) for t in labels[mine & (labels != "")]))
-        texts.append(names[0] if len(names) == 1 else ", ".join(names) if k else "Value" if len(units) == 1 else ", ".join(names))
-        heights[mine] = raw[mine] * f
+        several = f"{many} of values" if many else "Value"
+        texts.append(names[0] if len(names) == 1 else ", ".join(names) if k else several if len(units) == 1 else ", ".join(names))
+        scale[mine] = f
         if k == 0 and r._auto_prefix(q, unit, auto):
             auto_axes.append((first.name, shown))
+    heights = raw * scale
     right_scale = 1.0
     if len(units) == 2:                                  # both from zero, the tallest bars equally tall
         left, right = np.abs(heights[unit_of == 0]), np.abs(heights[unit_of == 1])
         tops = np.nanmax(left), np.nanmax(right)
         right_scale = float(tops[0] / tops[1]) if tops[0] > 0 and tops[1] > 0 else 1.0
-        heights[unit_of == 1] *= right_scale
+        scale[unit_of == 1] *= right_scale
+        heights = raw * scale
+    spread = (np.array([row.spread for row in rows], dtype=float) * scale
+              if all(row.spread is not None for row in rows) else None)
     names = [row.name for row in rows]
     return BarSet(groups=groups, names=names if len(names) > 1 else [""], heights=heights, raw=raw, unit_of=unit_of,
                   bar_labels=labels, bar_units=units_each, columns=[row.column for row in rows], units=units, labels=texts, shown_units=shown_units, factors=factors, right_scale=right_scale,
-                  auto_axes=auto_axes)
+                  auto_axes=auto_axes, spread=spread)
 
 
 @dataclass
@@ -221,6 +264,7 @@ class BarsModel:
     numbers: bool
     stacked: bool
     xf: float = 1.0
+    errors: Optional[np.ndarray] = None    # error bars: one standard deviation each way, plot units
     lines: Tuple = ()
     artists: Dict[str, Any] = field(default_factory=dict)    # what `draw` made
 
@@ -233,9 +277,12 @@ def _stacked(heights: np.ndarray) -> np.ndarray:
     return np.where(h >= 0, up, down)
 
 
-def _vertical_limits(heights: np.ndarray, bottom: np.ndarray, q, f: float, log: bool, numbers: bool) -> Tuple[float, float]:
-    """Zero is always in the axis (a log axis has none: its lowest bar's top, lower)."""
+def _vertical_limits(heights: np.ndarray, bottom: np.ndarray, q, f: float, log: bool, numbers: bool,
+                     errors: Optional[np.ndarray] = None) -> Tuple[float, float]:
+    """Zero is always in the axis (a log axis has none: its lowest bar's top, lower). Error bars fit in."""
     tops = bottom + heights
+    if errors is not None:
+        tops = np.concatenate([np.ravel(tops), np.ravel(tops + errors), np.ravel(tops - errors)])
     finite = tops[np.isfinite(tops)]
     if log:
         above = finite[finite > 0]
@@ -269,7 +316,8 @@ def prepare(d, spec, style: Style, **kw) -> BarsModel:
     if y_scale == "log":
         r._check_log(bars.heights, "the vertical axis")
     numbers = options.get("numbers", False)
-    ylim = _vertical_limits(bars.heights, bottom, q, bars.factors[0], y_scale == "log", numbers)
+    errors = bars.spread if options.get("errors") else None        # only with All: one bar, many numbers
+    ylim = _vertical_limits(bars.heights, bottom, q, bars.factors[0], y_scale == "log", numbers, errors)
     xs, ys = style.axis_style("x"), style.axis_style("y")
     xa = d.axes[spec["x"]] if spec.get("x") else None
     named = xa is not None and not r._is_point(d, spec["x"])      # a data point's axis: its value says it
@@ -282,18 +330,19 @@ def prepare(d, spec, style: Style, **kw) -> BarsModel:
         y_label=axis_label(spec.get("y_label") or bars.labels[0], bars.shown_units[0], ys.label.unit_format),
         right_label=(axis_label(bars.labels[1], bars.shown_units[1], ys.label.unit_format)
                      if len(bars.units) == 2 else ""),
-        y_scale=y_scale, numbers=numbers, stacked=stacked)
+        y_scale=y_scale, numbers=numbers, stacked=stacked, errors=errors)
 
 
 def operated(m: BarsModel, raw: np.ndarray, factor: float, unit: str, label: str, y_label: str, style: Style) -> BarsModel:
-    """The same bars with other numbers (`raw` in stored units), for Explore's operations."""
+    """The same bars with other numbers (`raw` in stored units), for Explore's operations; error bars,
+    of the numbers before, are left out."""
     heights = raw * factor
     bottom = _stacked(heights) if m.stacked else m.bottom
     bars = dataclasses.replace(m.bars, heights=heights, raw=raw, factors=[factor], shown_units=[unit], labels=[label],
-                               bar_labels=np.full(raw.shape, label, dtype=object))
+                               bar_labels=np.full(raw.shape, label, dtype=object), spread=None)
     ylim = _vertical_limits(heights, bottom, r.QuantityStyle(), factor, False, m.numbers)
     return dataclasses.replace(m, bars=bars, bottom=bottom, y=np.ravel(heights), z=heights, yf=factor, zf=factor,
-                               limits=(m.limits[0], ylim), y_label=y_label, artists={})
+                               limits=(m.limits[0], ylim), y_label=y_label, errors=None, artists={})
 
 
 def _colours(m: BarsModel, style: Style) -> np.ndarray:
@@ -347,6 +396,12 @@ def draw(fig, ax, m: BarsModel, d, spec, style: Style) -> List[Any]:
         name = m.bars.names[k]
         drawn.append(ax.bar(m.left[k], m.z[k], m.width * (1 - a.bars.gap), bottom=m.bottom[k], align="edge", color=colours,
                             edgecolor=a.frame.color, linewidth=a.bars.edge_width_pt, label=name or None))
+    if m.errors is not None:                             # at each bar's end, in the frame's colour
+        ok = np.isfinite(m.z) & np.isfinite(m.errors)
+        centres, ends = (m.left + m.width / 2)[ok], (m.bottom + m.z)[ok]
+        lw = style.to_rcparams()["axes.linewidth"]
+        m.artists["errors"] = ax.errorbar(centres, ends, yerr=m.errors[ok], fmt="none", ecolor=a.frame.color,
+                                          elinewidth=lw, capthick=lw, capsize=3, zorder=2.5)
     ax.axhline(0, color=a.frame.color, linewidth=style.to_rcparams()["axes.linewidth"], zorder=1.5)
     ax.set_axisbelow(True)
     ax.set_xlabel(m.x_label)
@@ -372,4 +427,4 @@ def draw(fig, ax, m: BarsModel, d, spec, style: Style) -> List[Any]:
 
 
 KIND = Kind("bars", "Bars", fits, resolve, prepare, draw,
-            frozenset({"x", "series", "index", "y_scale", "x_label", "y_label", "annotations", "re_im"}))
+            frozenset({"x", "series", "index", "all", "y_scale", "x_label", "y_label", "annotations", "re_im"}))

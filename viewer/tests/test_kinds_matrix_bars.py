@@ -283,6 +283,27 @@ def test_bars_have_no_cuts_or_sync(tmp_path):
     assert meta["strips"] is None and meta["sync"] == {}
 
 
+def power_sweep(small):
+    d = lbd.Dataset(title="t")
+    d.add_axis("power", [-30.0, -20.0], label="Power", unit="dBm")
+    d.add_axis("frequency", [4e9, 5e9, 6e9], label="Frequency", unit="Hz")
+    d.add_value("v", [[1.0, 2.0, 6.0], [4.0, np.nan, 8.0]], axes=["power", "frequency"], label="Level", unit="V")
+    return d
+
+
+def test_all_of_an_axis_on_bars(tmp_path):
+    s = session(tmp_path, power_sweep, {"kind": "bars", "x": "power", "series": "none", "all": ["frequency"],
+                                        "options": {"stat": "mean", "errors": True}})
+    assert s.spec["all"] == ["frequency"] and s.spec["slices"] == []
+    got = items(read(s, 1, 1))
+    assert got["z"]["value"] == 6.0 and got["z"]["label"] == "Mean of Level"      # 4 and 8: the empty point left out
+    assert s.model.errors is not None and "errors" in s.model.artists
+    t = export.session_table(s)
+    t.to_csv(tmp_path / "t.csv")
+    assert np.loadtxt(tmp_path / "t.csv", delimiter=",").tolist() == [[-30, 3.0], [-20, 6.0]]
+    assert "Each bar: the mean of all Frequency (empty points left out)" in (tmp_path / "t.csv").read_text(encoding="utf-8")
+
+
 def test_a_preview_of_bars(tmp_path):
     mock.bars(False).save(tmp_path / "x.lbd")
     s = ExploreSession(tmp_path / "x.lbd", "v", {"kind": "bars", "values": ["population", "error", "lifetime"]},

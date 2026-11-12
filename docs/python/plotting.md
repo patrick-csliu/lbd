@@ -194,6 +194,14 @@ fig = lp.plot(d, "histogram", "S21", complex="db", color="none", all=["freq", "p
               options={"bins": 40, "hist_style": "outline", "hist_y": "density"})
 ```
 
+Bars take `all` too: each bar then stands for all the numbers of those axes, and `options` says
+what it shows, `stat` (`"mean"`, `"median"`, `"max"`, `"min"`, `"sum"`; empty points are left out),
+and whether `errors` (one standard deviation) are drawn on it:
+
+```python
+fig = lp.plot(d, "bars", "S21", x="power", series="none", all=["freq"], options={"stat": "median", "errors": True})
+```
+
 To count numbers of your own, `count_bins` does what the plot does:
 
 ```python
