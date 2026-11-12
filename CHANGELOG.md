@@ -124,6 +124,10 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
 
 **Viewer**
 
+- **Clearer section titles in Values & axes** (Explore's inspector at the right or below, the
+  Library, the Figure page). Values, Axes and Metadata are a little larger, in the text colour,
+  with a line under them and more space above each section; in the narrow list at the right the
+  names are no longer bold and the lines between them are lighter, so the sections stand out.
 - **No value is locked in Curves** (Explore). A value on another axis, or with a third unit, used
   to be greyed out, and with one value ticked nothing could be changed; now clicking it shows it in
   that panel instead (its tip says so), as Histogram and Scatter already did.

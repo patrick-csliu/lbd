@@ -3,6 +3,8 @@
   --panel: #ffffff;
   --panel-2: #f0f2f5;
   --border: #dde1e6;
+  --line-soft: #eef0f3;   /* between items in a list, lighter than --border */
+  --line-title: #b9c0c9;  /* under a section title, stronger than --border */
   --text: #1c2026;
   --muted: #5d6673;
   --accent: #0072b2;
@@ -25,6 +27,8 @@
   --panel: #1d2126;
   --panel-2: #252a30;
   --border: #343a42;
+  --line-soft: #282d33;
+  --line-title: #56606b;
   --text: #e6e9ed;
   --muted: #9aa4b1;
   --accent: #4aa8e0;
@@ -245,6 +249,11 @@ table { border-collapse: collapse; width: 100%; font-size: 13px; }
 th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--border); }
 th { color: var(--muted); font-weight: 600; font-size: 12px; }
 td.num { font-variant-numeric: tabular-nums; }
+/* the titles Values, Axes, Metadata (plan 16, 16.29): one style wherever a file's contents are shown
+   (Explore's inspector at the right or below, the Library, the Figure page): stronger than the
+   column headings, a line under each, and more space above every section after the first */
+.details > h3 { font-size: 12px; font-weight: 700; color: var(--text); letter-spacing: 0.03em; margin: 18px 0 4px; padding-bottom: 3px; border-bottom: 1px solid var(--line-title); }
+.details > h3:first-child { margin-top: 6px; }
 .meta { list-style: none; margin: 0; padding-left: 14px; }
 .details > .meta { padding-left: 0; }
 .meta li { padding: 1px 0; }
@@ -995,15 +1004,15 @@ button.ib:disabled { opacity: 0.4; cursor: default; }
 .inspector-tabs [role=tab].on { color: var(--accent); border-bottom-color: var(--accent); background: var(--panel); font-weight: 600; }
 .inspector-fold { display: none !important; align-self: center; margin-right: 4px; }
 .inspector-body { min-height: 0; min-width: 0; overflow: auto; padding: 8px 10px 12px; container: inspector / inline-size; }
-.inspector-body .details h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); margin: 6px 0 4px; }
 .inspector-body .details table { font-size: 12px; width: 100%; }
 /* a narrow panel: each value and axis as a small block, so nothing needs sideways scrolling */
 @container inspector (max-width: 420px) {
   .inspector-body .details table, .inspector-body .details tbody, .inspector-body .details tr { display: block; }
   .inspector-body .details thead { display: none; }
-  .inspector-body .details tr { padding: 4px 0; border-bottom: 1px solid var(--border); }
+  .inspector-body .details tr { padding: 4px 0; border-bottom: 1px solid var(--line-soft); }
+  .inspector-body .details tr:last-child { border-bottom: none; }   /* the next title has its own line */
   .inspector-body .details td { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 6px; padding: 1px 0; border: none; overflow-wrap: anywhere; }
-  .inspector-body .details td:first-child { display: block; font-weight: 600; }
+  .inspector-body .details td:first-child { display: block; }   /* the name, not bold: the titles stand out */
   .inspector-body .details td[data-label]::before { content: attr(data-label); color: var(--muted); }
   .inspector-body .details td:empty { display: none; }
 }
