@@ -180,6 +180,9 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
 - **A new page starts on the Library**, not on an empty Explore. A page opened for a file still
   starts on that file, and a reload stays where it was. Going to Explore or Figure with nothing
   open there shows the Files bar (in a narrow window, its drawer), even if it was hidden.
+- **Explore opens a new file with its first value**, not four panels: **Settings → Explore →
+  Panels for a new file** chooses first value only, at most 2 … 5, or all (up to six). **+ Panel →
+  Open all** adds the values not shown, and a panel's menu has **Move left** and **Move right**.
 - **Look options are under Display.** Data says what is plotted, Display how it looks: a
   histogram's Bins, Draw and Vertical axis; Scatter's Equal axes and Histograms beside the plot;
   a map's Cells; a matrix's Numbers, Significant digits, Row sums and Colour range; Bars' Bars and

@@ -87,17 +87,18 @@ truth. (Packing the chosen rows together would move them.)
 
 A measurement often records several values at each point: I, Q and a population, or an
 amplitude and a phase. (Labber calls them *log channels*; in LBD they are **values**, and what
-was swept, Labber's *step channels*, are the **axes**.) A file with several values opens in
-Explore with **one panel per value**, side by side: up to four at first, up to six in all. A file
-with one value shows one plot, as always. Single numbers never get a panel.
+was swept, Labber's *step channels*, are the **axes**.) A file opened for the first time shows its
+first value; **Settings → Explore → Panels for a new file** can give it **one panel per value**
+instead, side by side: at most 2 … 5, or all (up to six). Single numbers never get a panel.
 
-1. **+ Panel ▾** adds a panel for a value. The two layout icons arrange the panels **side by
+1. **+ Panel ▾** adds a panel for a value; **Open all** at its end adds one for every value not
+   shown yet, up to six panels (a note names those left out). The two layout icons arrange the panels **side by
    side** or **stacked**; their grid follows from how many there are.
 2. **The active panel** is outlined: click anywhere in a panel (or press **1** … **6**). The side
    panel shows its controls ("Panel 2: Q"): what you change there changes that panel only. Each
    panel has its own plot type, values, operations, equations, scales and colours.
 3. **A panel's title bar**: drag it to move the panel; **×** removes it; right-click it (or **⋯**) to
-   **Duplicate** it (the same value twice, for example with and without an operation, or at two
+   **Move left** or **Move right**, or to **Duplicate** it (the same value twice, for example with and without an operation, or at two
    slider positions).
 4. **Values** in the side panel: tick one to add it to the active panel, drag one onto a panel
    to add it there (or onto the bar above the panels for a new panel), right-click one for

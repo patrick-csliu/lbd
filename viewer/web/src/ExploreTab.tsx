@@ -73,9 +73,14 @@ export interface Remembered {
   sync: { x: boolean; y: boolean; sliders: boolean; cursors: boolean };
 }
 
-/** At most this many panels (each is a plot drawn by the server); a new file opens with up to FIRST_PANELS. */
+/** At most this many panels (each is a plot drawn by the server). */
 export const MAX_PANELS = 6;
-const FIRST_PANELS = 4;
+/** How many panels a file opened for the first time gets (Settings → Explore, 16.45); App sets it
+ * from the viewer's settings. */
+let newPanels = 1;
+export function setNewPanels(n: number) {
+  newPanels = Math.min(Math.max(Math.round(n) || 1, 1), MAX_PANELS);
+}
 // Drag and drop: a value from the side bar, a panel by its title bar.
 const DRAG_VALUE = "application/x-lbd-value";
 const DRAG_PANEL = "application/x-lbd-panel";
@@ -86,13 +91,13 @@ const newId = () => Math.random().toString(36).slice(2, 10);
 const freshPanel = (spec: PlotSpec): PanelState => ({ id: newId(), spec, settings: { crange: "all" }, stat: "max", view: null, cursors: NO_CURSORS });
 
 /** A file opened for the first time: panel 1 from the file's saved figure view, then one panel
- * per other value with axes (up to FIRST_PANELS), like Labber's panels for its log channels. */
+ * per other value with axes, up to the setting's number (Settings → Explore: 1 by default). */
 function fresh(info: FileInfo): Remembered {
   const first = startSpec(info);
   const names = info.values.filter((v) => v.shape.length > 0).map((v) => v.name);
   if (names.length > 1 && !first.values) first.values = [names[0]];
   const inFirst = first.values ?? names.slice(0, 1); // the server's default: the first value with axes
-  const rest = names.filter((name) => !inFirst.includes(name)).slice(0, FIRST_PANELS - 1);
+  const rest = names.filter((name) => !inFirst.includes(name)).slice(0, newPanels - 1);
   return {
     version: 2,
     panels: [freshPanel(first), ...rest.map((name) => freshPanel({ values: [name] }))],
@@ -726,14 +731,30 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
     setMenu({
       x: r.left,
       y: r.bottom,
-      items: plottable.map((v) => ({
-        label: `${v.label || v.name}${v.unit ? ` (${unitText(v.unit)})` : ""}`,
-        disabled: full,
-        onClick: () => addPanel({ values: [v.name] }),
-      })),
+      items: [
+        ...plottable.map((v) => ({
+          label: `${v.label || v.name}${v.unit ? ` (${unitText(v.unit)})` : ""}`,
+          disabled: full,
+          onClick: () => addPanel({ values: [v.name] }),
+        })),
+        "-" as const,
+        { label: "Open all", onClick: openAll, disabled: full || !notShown.length },
+      ],
     });
   };
+  // Open all (16.45): a panel for each value with axes not shown yet, up to MAX_PANELS
+  const notShown = plottable.filter((v) => !rec.panels.some((p) => (p.spec.values ?? []).includes(v.name)));
+  const openAll = () => {
+    const room = MAX_PANELS - rec.panels.length;
+    const added = notShown.slice(0, room);
+    setRec((r) => r && { ...r, panels: [...r.panels, ...added.map((v) => freshPanel({ values: [v.name] }))], active: r.panels.length });
+    const left = notShown.length - added.length;
+    if (left > 0) toast(`${MAX_PANELS} panels at most: ${left} value${left === 1 ? "" : "s"} left out (${notShown.slice(room).map((v) => v.label || v.name).join(", ")}).`);
+  };
   const panelEntries = (i: number): MenuEntry[] => [
+    { label: "Move left", onClick: () => movePanel(i, i - 1), disabled: i === 0 },
+    { label: "Move right", onClick: () => movePanel(i, i + 1), disabled: i === n - 1 },
+    "-",
     { label: "Duplicate panel", onClick: () => duplicatePanel(i), disabled: full },
     { label: "Remove panel", onClick: () => removePanel(i), disabled: n <= 1, danger: true },
   ];

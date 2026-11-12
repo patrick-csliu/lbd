@@ -57,6 +57,7 @@ export interface LiveStatus {
 /** Memory for data (plan 6d): GB; null = automatic (reserve) / no maximum. */
 export interface ExploreSettings {
   line_traces: number; // a cursor line marks every trace up to this many
+  new_panels: number; // panels a file opened for the first time gets: 1 (the first value) … 6 (16.45)
 }
 
 export interface MemorySettings {

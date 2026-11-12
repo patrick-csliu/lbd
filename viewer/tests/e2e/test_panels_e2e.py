@@ -3,6 +3,8 @@ panel's controls, synchronized axes and cursors, and what is remembered (LBD's d
 
 import re
 
+import pytest
+
 import lbd
 import mock_values
 from lbd_viewer.catalog import structure
@@ -354,3 +356,36 @@ def test_an_equal_panel_widens_its_own_view_not_the_others(values_files, new_pag
     assert equal[0]["asked"][0] == pytest.approx(asked)                # the synced range, as asked
     lo, hi = equal[0]["xlim"]
     assert lo <= asked[0] + 1e-12 and hi >= asked[1] - 1e-12             # shows at least that much
+
+
+@pytest.mark.parametrize("setting, count", [(1, 1), (3, 3), (6, 6)])
+def test_the_panels_for_a_new_file_follow_the_setting(values_files, viewer, cfg, new_page, setting, count):
+    """16.45: Settings → Explore, Panels for a new file: first value only (the default), at most N,
+    or all (up to 6). 9 many values.lbd has more than six values."""
+    cfg.set_explore({"new_panels": setting})
+    page = new_page("Explore")
+    frames(page, lambda: row(page, "9 many values.lbd").dblclick())
+    expect(panels(page)).to_have_count(count)
+
+
+def test_open_all_stops_at_six_and_says_what_is_left_out(values_files, viewer, cfg, new_page):
+    cfg.set_explore({"new_panels": 1})
+    page = new_page("Explore")
+    frames(page, lambda: row(page, "9 many values.lbd").dblclick())
+    shown(page).get_by_role("button", name="+ Panel ▾").click()
+    page.locator(".context-menu").get_by_role("menuitem", name="Open all").click()
+    expect(panels(page)).to_have_count(6)
+    expect(page.locator(".toast").filter(has_text="6 panels at most")).to_be_visible()
+
+
+def test_move_right_twice(values_files, new_page):
+    page = new_page("Explore")
+    frames(page, lambda: row(page, "6 rabi.lbd").dblclick())
+    expect(panels(page)).to_have_count(4)
+    first = titles(page)[0]
+    for _ in range(2):
+        panels(page).nth(titles(page).index(first)).locator(".panel-title").click(button="right")
+        page.locator(".context-menu").get_by_role("menuitem", name="Move right").click()
+    assert titles(page)[2] == first
+    panels(page).nth(3).locator(".panel-title").click(button="right")
+    expect(page.locator(".context-menu").get_by_role("menuitem", name="Move right")).to_be_disabled()

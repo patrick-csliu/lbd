@@ -65,7 +65,10 @@ MEASUREMENTS_DEFAULTS: Dict[str, Any] = {"progress": True, "time": True, "percen
                                          "axes": True, "notify": False}
 # Explore (plan 13): a vertical or horizontal cursor marks every trace at its line for at most
 # this many visible traces (more makes each cursor move slow, and the plot unreadable).
-EXPLORE_DEFAULTS: Dict[str, Any] = {"line_traces": 20}
+# `new_panels`: how many panels a file opened for the first time gets, one per value (1: the first
+# value only; 6, the most: every value up to six), 16.45.
+EXPLORE_DEFAULTS: Dict[str, Any] = {"line_traces": 20, "new_panels": 1}
+MOST_PANELS = 6                                   # (ExploreTab.tsx MAX_PANELS)
 # The check for a new version (plan 16.25, updates.py), kept by the viewer, not set by the user:
 # when it last asked GitHub (local time, ISO), the newest release then and its page, and the
 # reminder's choice: {"later": "YYYY-MM-DD"} (not again that day) or {"never": "X.Y.Z"} (not for
@@ -492,6 +495,9 @@ def _check_explore(e: Dict[str, Any]) -> Dict[str, Any]:
     x = e.get("line_traces")
     if isinstance(x, bool) or not isinstance(x, int) or x < 0:
         raise ConfigError(f"Explore setting 'line_traces' must be a whole number of traces (≥ 0), not {x!r}")
+    n = e.get("new_panels")
+    if isinstance(n, bool) or not isinstance(n, int) or not 1 <= n <= MOST_PANELS:
+        raise ConfigError(f"Explore setting 'new_panels' must be a whole number from 1 to {MOST_PANELS}, not {n!r}")
     return {k: e[k] for k in EXPLORE_DEFAULTS}
 
 

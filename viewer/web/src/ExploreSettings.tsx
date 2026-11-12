@@ -26,7 +26,33 @@ export function ExploreSettings({ settings, onSettings }: { settings: Settings; 
     }
   };
 
+  const setPanels = async (n: number) => {
+    try {
+      onSettings(await api.setExplore({ new_panels: n }));
+    } catch (e) {
+      toast((e as Error).message, "error");
+    }
+  };
+
   return (
+    <>
+    <SettingsGroup title="Panels">
+      <Setting
+        id="explore.new_panels"
+        name="Panels for a new file"
+        help="A file opened in Explore for the first time shows its first value; or a panel per value, up to this many. + Panel → Open all opens the others later."
+      >
+        <select aria-label="Panels for a new file" value={settings.new_panels} onChange={(e) => setPanels(Number(e.target.value))}>
+          <option value={1}>First value only</option>
+          {[2, 3, 4, 5].map((n) => (
+            <option key={n} value={n}>
+              At most {n} values
+            </option>
+          ))}
+          <option value={6}>All values (up to 6)</option>
+        </select>
+      </Setting>
+    </SettingsGroup>
     <SettingsGroup title="Cursors">
       <Setting
         id="explore.line_traces"
@@ -46,5 +72,6 @@ export function ExploreSettings({ settings, onSettings }: { settings: Settings; 
         </span>
       </Setting>
     </SettingsGroup>
+    </>
   );
 }

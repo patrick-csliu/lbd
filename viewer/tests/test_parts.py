@@ -29,10 +29,16 @@ def test_config_settings_roundtrip(tmp_path):
                                           "data_file_edits": "in_place"},
                               "memory": {"reserve_gb": None, "maximum_gb": None, "summary_cache_gb": 20.0},
                               "measurements": {"progress": True, "time": True, "percent": True, "points": True,
-                                               "axes": True, "notify": False}, "explore": {"line_traces": 20},
+                                               "axes": True, "notify": False}, "explore": {"line_traces": 20, "new_panels": 1},
                               "last_version": None,
                               "updates": {"last_check": None, "latest": None, "url": None, "remind": None}}
     assert cfg.problems() == []
+    # panels for a new file (16.45): 1 to 6
+    assert cfg.set_explore({"new_panels": 6})["new_panels"] == 6
+    for bad in (0, 7, 2.5, True, "all"):
+        with pytest.raises(ConfigError, match="new_panels"):
+            cfg.set_explore({"new_panels": bad})
+    cfg.set_explore({"new_panels": 1})
     # the Library's settings: checked, kept
     assert cfg.set_library({"card_main": "file", "card_fields": ["sweep", "tags"], "date_zone": "Europe/Paris"})["card_fields"] == ["sweep", "tags"]
     assert cfg.set_library({"card_main": "title", "card_fields": ["date"], "date_zone": "local"})["date_zone"] == "local"

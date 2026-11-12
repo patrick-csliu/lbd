@@ -122,6 +122,9 @@ def viewer(cfg, data_dir, monkeypatch):
         raise server.HTTPException(501, "no save dialog in the tests")
 
     monkeypatch.setattr(server, "native_save_dialog", no_dialog)
+    # most tests look at several panels, as a new file opened before 16.45; the default (1) and
+    # the setting are tested in test_panels_e2e.py
+    cfg.set_explore({"new_panels": 4})
     v = Viewer(cfg, data_dir)
     yield v
     v.stop()
