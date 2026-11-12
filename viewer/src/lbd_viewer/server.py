@@ -609,7 +609,49 @@ def jsonable(x: Any) -> Any:
     return x
 
 
+def variable_sweeps(real: "lbd.Dataset") -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+    """What the Values & axes table shows for variable sweeps (axis groups, 16.42), from the real
+    dataset (not the flat view): per axis of a group its label, its range over the file, its points
+    in all and, below the first level, its points per step and the axis it depends on; per value
+    on a group's level its axes and its shape in steps ("40 steps × 1–40 (820 points)"). Cheap: the
+    `_parent` arrays are small next to the data."""
+    axes: Dict[str, Dict[str, Any]] = {}
+    for g in real.groups.values():
+        for k, name in enumerate(g.order):
+            a = real.axes[name]
+            data = np.asarray(a.data, dtype=float)
+            finite = data[np.isfinite(data)]
+            info: Dict[str, Any] = {"label": a.label, "total": int(data.size),
+                                    "min": jsonable(finite.min()) if finite.size else None,
+                                    "max": jsonable(finite.max()) if finite.size else None}
+            if k and a.parent is not None:
+                above = real.axes[g.order[k - 1]]
+                counts = np.bincount(np.asarray(a.parent, dtype=np.int64), minlength=len(above.data))
+                info.update(steps=int(counts.size), per_step=[int(counts.min()), int(counts.max())] if counts.size else [0, 0],
+                            depends_on=above.label or above.name)
+            axes[name] = info
+    values: Dict[str, Dict[str, Any]] = {}
+    for v in real.values.values():
+        dims = getattr(v, "dims", None) or [(a,) for a in v.axes]
+        if not any(real.axes[dim[-1]].group is not None for dim in dims if dim and dim[-1] in real.axes):
+            continue
+        parts = []
+        for dim in dims:
+            info = axes.get(dim[-1])
+            if info is None:
+                parts.append(str(len(real.axes[dim[-1]].data)))
+            elif "per_step" in info:
+                lo, hi = info["per_step"]
+                parts.append(f"{info['steps']} steps × {lo if lo == hi else f'{lo}–{hi}'} ({info['total']} points)")
+            else:
+                parts.append(str(info["total"]))
+        parts += [str(n) for n in getattr(v, "point_shape", ())]
+        values[v.name] = {"axes": [a for dim in dims for a in dim], "shape": " × ".join(parts)}
+    return axes, values
+
+
 def file_summary(d: "lbd.Dataset") -> Dict[str, Any]:
+    sweeps, swept_values = variable_sweeps(d)      # the real axes of variable sweeps (16.42)
     d = rnd.flat(d)                     # the page shows one axis per dimension, a data point's too
     # HDF5 lists group members alphabetically; show axes in the order the values use them.
     order: List[str] = []
@@ -625,10 +667,12 @@ def file_summary(d: "lbd.Dataset") -> Dict[str, Any]:
             "elements": a.elements, "role": a.role, "group": a.group,
             "min": jsonable(finite.min()) if finite.size else None,
             "max": jsonable(finite.max()) if finite.size else None,
+            **({"variable": sweeps[a.name]} if a.name in sweeps else {}),
         })
     values = [{"name": v.name, "unit": v.unit, "label": v.label, "axes": v.axes, "shape": list(v.shape),
                "point_axes": [a for a in v.axes if d.axes[a].role == "point"],
-               "dtype": v.dtype, "complex": v.dtype.startswith("complex")} for v in d.values.values()]
+               "dtype": v.dtype, "complex": v.dtype.startswith("complex"),
+               **({"variable": swept_values[v.name]} if v.name in swept_values else {})} for v in d.values.values()]
     numbers = _single_numbers(d)
     for v in values:
         if v["name"] in numbers:

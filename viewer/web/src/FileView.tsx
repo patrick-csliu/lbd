@@ -1,7 +1,7 @@
 import { kindOf } from "./plotKinds";
 import { PlotKindSelect } from "./PlotKindSelect";
 import { MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, ApiError, AxisValues, baseName, figurePng, FileInfo, formatBytes, Json, JsonObject, lastDownloadWarnings, PlotSpec, RenderResult, Slice, TabState, ValueInfo } from "./api";
+import { api, ApiError, AxisInfo, AxisValues, baseName, figurePng, FileInfo, formatBytes, Json, JsonObject, lastDownloadWarnings, PlotSpec, RenderResult, Slice, TabState, ValueInfo } from "./api";
 import { deepMerge, isEmptyObject } from "./util";
 import { copyPng } from "./clipboard";
 import { ConfirmDialog, ConfirmRequest } from "./menu";
@@ -990,6 +990,15 @@ export function SliceControl({ path, version, slice: s, onIndex }: { path: strin
  * Library's selected file, whose description, date and size are shown beside the preview
  * (FileFacts): here only the tables (without columns empty in every row), the metadata in
  * columns, and at the end, folded, what wrote the file. */
+/** An axis's points: a variable sweep's inner axis counts its points per step (16.42). */
+function pointsText(a: AxisInfo): string {
+  const v = a.variable;
+  if (!v) return String(a.length);
+  if (!v.per_step) return String(v.total);
+  const [lo, hi] = v.per_step;
+  return `${lo === hi ? lo : `${lo}–${hi}`} per step (${v.total} in all)`;
+}
+
 export function FileDetails({ info, metaFilter = false, layout = "explore", part = "all" }: { info: FileInfo; metaFilter?: boolean; layout?: "explore" | "library"; part?: "all" | "tables" | "meta" }) {
   const tables = part !== "meta", metaShown = part !== "tables";
   const [filter, setFilter] = useState("");
@@ -1038,8 +1047,8 @@ export function FileDetails({ info, metaFilter = false, layout = "explore", part
               <td><code>{v.name}</code></td>
               {vCols.label && <td data-label="Label">{v.label}</td>}
               {vCols.unit && <td data-label="Unit">{v.unit}</td>}
-              <td data-label="Axes">{v.axes.join(", ") || "—"}</td>
-              <td className="num" data-label="Shape">{v.shape.length ? v.shape.join(" × ") : `single number: ${v.text ?? "?"}`}</td>
+              <td data-label="Axes">{(v.variable?.axes ?? v.axes).join(", ") || "—"}</td>
+              <td className="num" data-label="Shape">{v.variable ? v.variable.shape : v.shape.length ? v.shape.join(" × ") : `single number: ${v.text ?? "?"}`}</td>
               <td data-label="Type">{v.dtype}</td>
             </tr>
           ))}
@@ -1063,14 +1072,16 @@ export function FileDetails({ info, metaFilter = false, layout = "explore", part
             <tr key={a.name}>
               <td><code>{a.name}</code></td>
               {aCols.label && <td data-label="Label">
-                {a.label}
+                {a.variable?.label ?? a.label}
                 {a.role === "point" && <span className="muted small"> (inside each data point)</span>}
-                {a.group && info.groups?.[a.group] && (
-                  <span className="muted small"> (variable sweep {info.groups[a.group].join(" → ")}: points, numbered)</span>
+                {a.variable?.depends_on && (
+                  <span className="muted small" title={`The points differ from one step of ${a.variable.depends_on} to the next`}>
+                    {" "}(variable sweep: depends on {a.variable.depends_on})
+                  </span>
                 )}
               </td>}
               {aCols.unit && <td data-label="Unit">{a.unit}</td>}
-              <td className="num" data-label="Points">{a.length}</td>
+              <td className="num" data-label="Points">{pointsText(a)}</td>
               {a.elements ? (
                 <td colSpan={2} data-label="Elements" title={a.elements.join(", ")}>
                   {a.elements.slice(0, 6).join(", ")}
@@ -1078,8 +1089,8 @@ export function FileDetails({ info, metaFilter = false, layout = "explore", part
                 </td>
               ) : (
                 <>
-                  <td className="num" data-label="From">{fmt(a.min)}</td>
-                  <td className="num" data-label="To">{fmt(a.max)}</td>
+                  <td className="num" data-label="From">{fmt(a.variable ? a.variable.min : a.min)}</td>
+                  <td className="num" data-label="To">{fmt(a.variable ? a.variable.max : a.max)}</td>
                 </>
               )}
             </tr>

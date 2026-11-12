@@ -335,3 +335,17 @@ def test_a_file_is_found_by_the_id_in_a_csv(viewer, new_page):
     expect(page.locator(".library-row")).to_contain_text("Only one")
     box.fill("00000000-0000-7000-8000-000000000000")
     expect(page.locator(".library-empty")).to_contain_text("No file with this id in the open folders")
+
+
+def test_a_variable_sweep_s_table_counts_per_step(viewer, values_files, new_page):
+    """16.42 and 16.40: the Values & axes table of a variable sweep: the value's real axes and its
+    shape in steps; the inner axis counts its points per step and says what it depends on."""
+    page = new_page("Library")
+    page.get_by_label("Search the files").fill("triangle")
+    expect(rows(page)).to_have_count(1)
+    rows(page).first.click()
+    detail = page.locator(".library-detail")
+    expect(detail.locator("td[data-label='Axes']", has_text="A, B")).to_have_count(1)
+    expect(detail.locator("td[data-label='Shape']").first).to_contain_text("steps ×")
+    expect(detail.locator("td[data-label='Points']", has_text="per step")).to_have_count(1)
+    expect(detail.locator("td[data-label='Label']", has_text="variable sweep: depends on A")).to_have_count(1)

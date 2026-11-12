@@ -124,6 +124,12 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
 
 **Viewer**
 
+- **Values & axes of a variable sweep say what they are.** A value shows its real axes (A, B,
+  not only B) and its shape in steps ("40 steps × 1–40 (820 points)"); the inner axis counts its
+  points per step ("1–40 per step (820 in all)"), its From and To are its real values over the
+  file, and a short note says what it depends on ("variable sweep: depends on A"). Before, the
+  inner axis showed its total like a number of steps, and a note about point numbers that is no
+  longer true.
 - **No value is locked in Curves** (Explore). A value on another axis, or with a third unit, used
   to be greyed out, and with one value ticked nothing could be changed; now clicking it shows it in
   that panel instead (its tip says so), as Histogram and Scatter already did.

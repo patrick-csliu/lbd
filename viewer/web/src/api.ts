@@ -401,6 +401,9 @@ export interface AxisInfo {
   role?: string | null;
   /** the axis group it is in (format 2.0): its points are listed with the group's other axes */
   group?: string | null;
+  /** an axis of a variable sweep (16.42): its real label and range, its points in all, and below
+   * the first level its points per step and the axis it depends on */
+  variable?: { label: string; total: number; min: number | null; max: number | null; steps?: number; per_step?: [number, number]; depends_on?: string };
 }
 
 export interface ValueInfo {
@@ -415,6 +418,8 @@ export interface ValueInfo {
   point_axes?: string[];
   /** a single number (no axes), as text with a unit prefix: "21 µs" */
   text?: string;
+  /** a value on a variable sweep (16.42): its real axes, and its shape in steps */
+  variable?: { axes: string[]; shape: string };
 }
 
 export interface AxisValues {
