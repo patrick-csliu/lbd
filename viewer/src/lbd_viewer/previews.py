@@ -56,6 +56,9 @@ from lbd.plot.style import Style
 
 PREVIEW_SIZE = (640, 480)           # drawn as a 640×480 Explore panel (text in proportion), 4:3
 PREVIEW_DPR = 2.0                   # 1280×960 pixels: sharp up to 640×480 on a high-density (2×, e.g. 4K) screen
+# The price of 2× (plan 16, 16.4): 1.78 times the pixels of 1.5×, so many curves take longer to
+# paint (paint_lines). The benchmark's 1000 traces × 10 000 points: about 1.2 s at 1.5×, 1.75 s
+# at 2× (since 2026-11-04, commit d4a48a0). Kept: previews are drawn once, in a worker process.
 PREVIEW_QUALITY = 80                # WebP quality (0-100); lines and text stay readable
 BACKGROUND = (255, 255, 255, 255)   # around the panels
 PANEL_GAP = 8                       # CSS pixels between the panels of a chosen picture (several panels)
