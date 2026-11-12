@@ -2,6 +2,8 @@ import { CSSProperties, DragEvent, KeyboardEvent, MouseEvent, MutableRefObject, 
 import { useResizable } from "./resizable";
 import NumberRange from "./NumberRange";
 import { kept, KEEP_DEFAULTS, KeepParts } from "./keep";
+import { LabelsEditor } from "./LabelsEditor";
+import type { LabelChanges, LibraryFacets, LibraryRow } from "./api";
 import { api, CursorRead, CursorsAnswer, ExploreFrameMeta, ExploreOpen, FileInfo, OpsInfo, PlotSpec, ReduceStat, SyncKeys, ValueInfo } from "./api";
 import Operations from "./Operations";
 import Contrast from "./Contrast";
@@ -869,6 +871,9 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
           <button className="ib" aria-label="File info" title="File info: its values, axes and metadata" onClick={() => showInspector("file")}>
             <Icon name="info" />
           </button>
+          <button className="ib" aria-label="Labels" title="Labels: star, project, users, tags, comment" onClick={() => showInspector("labels")}>
+            <Icon name="tag" />
+          </button>
           <button className="ib" aria-label="More" aria-haspopup="menu" title="More: Library picture, Reset all" onClick={headMenu}>
             <Icon name="more" />
           </button>
@@ -1074,6 +1079,7 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
               {inspTab === "cursors" && (cursorPanel ?? <p className="muted small">Opening…</p>)}
               {inspTab === "file" && <FileDetails info={info} layout="library" part="tables" />}
               {inspTab === "meta" && <FileDetails info={info} metaFilter layout="library" part="meta" />}
+              {inspTab === "labels" && <FileLabels path={path} />}
             </div>
           </aside>
         </div>
@@ -1091,11 +1097,12 @@ export default function ExploreTab({ path, onOpenInFigure, onError, onMenu, onTi
   );
 }
 
-type InspectorTab = "cursors" | "file" | "meta";
+type InspectorTab = "cursors" | "file" | "meta" | "labels";
 const INSPECTOR_TABS: [InspectorTab, string][] = [
   ["cursors", "Cursors"],
   ["file", "Values & axes"],
   ["meta", "Metadata"],
+  ["labels", "Labels"],
 ];
 /** The panel bar's sync chips: what each shares between panels. */
 const SYNC_TIPS = {
@@ -1490,6 +1497,43 @@ function ExploreControls({ heading, info, resolved, settings, updateSpec, update
 
       </Section>
       {children}
+    </div>
+  );
+}
+
+/** The Labels tab (16.31): the file's star and labels, edited as in the Library (the Library sees
+ * a change at once: it is the same index). A file outside the Library's folders has no labels. */
+function FileLabels({ path }: { path: string }) {
+  const toast = useToast();
+  const [row, setRow] = useState<LibraryRow | null | undefined>(undefined);
+  const [facets, setFacets] = useState<LibraryFacets | null>(null);
+  const [login, setLogin] = useState("");
+  const load = useCallback(() => {
+    api.libraryFile(path).then((f) => setRow(f.row)).catch((e) => toast((e as Error).message, "error"));
+    api.libraryFacets(null, "").then(setFacets).catch(() => setFacets(null));
+  }, [path, toast]);
+  useEffect(() => {
+    load();
+    api.state().then((s) => setLogin(s.login)).catch(() => undefined);
+  }, [load]);
+  if (row === undefined) return <p className="muted small">Reading the labels…</p>;
+  if (row === null)
+    return <p className="small">This file isn't in the Library's folders; its labels are shown once its folder is added.</p>;
+  const change = async (c: LabelChanges) => {
+    try {
+      const r = await api.librarySetLabels([path], c);
+      for (const n of r.notes) toast(n, "info");
+    } catch (e) {
+      toast((e as Error).message, "error");
+    }
+    load();
+  };
+  return (
+    <div className="explore-labels details">
+      <button className={"star-button" + (row.star ? " on" : "")} aria-pressed={row.star} onClick={() => change({ star: !row.star })} title="Star">
+        {row.star ? "★ Starred" : "☆ Star"}
+      </button>
+      <LabelsEditor compact rows={[row]} facets={facets} login={login} onChange={change} />
     </div>
   );
 }

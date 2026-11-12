@@ -672,6 +672,25 @@ class LibraryIndex:
             r["star"] = bool(r["star"])
         return {"rows": rows, "total": total, "generation": self.generation}
 
+    def row(self, path: str) -> Optional[Dict[str, Any]]:
+        """One file's row as `list` gives it (its labels too), or None when the Library doesn't
+        list it: outside its open folders, or in a folder it skips (scan.SKIP_DIRS)."""
+        p = Path(path).resolve()
+        root = next((r for r in self.roots() if is_inside(str(p), r)), None)
+        if root is None or any(scan._skip_dir(part) for part in Path(os.path.relpath(p, root)).parts[:-1]):
+            return None
+        with self._lock:
+            found = self._connect().execute(f"SELECT {', '.join(ROW_FIELDS)} FROM files WHERE path = ?",
+                                            [str(p)]).fetchone()
+        if found is None:
+            return None
+        r = dict(zip(ROW_FIELDS, found))
+        r["writing"] = writing_status(r["path"])
+        r["users"] = [u for u in (r["users"] or "").split("\n") if u]
+        r["tags"] = [t for t in (r["tags"] or "").split("\n") if t]
+        r["star"] = bool(r["star"])
+        return r
+
     def folder_summary(self, folder: str) -> Dict[str, Any]:
         """What leaves the Library with `folder` (an open folder being removed): its files, how
         many have labels, and the labels no file elsewhere has, per kind."""

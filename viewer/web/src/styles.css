@@ -1007,8 +1007,9 @@ button.ib:disabled { opacity: 0.4; cursor: default; }
 .explore-failed { padding: 18px; }
 /* the inspector: cursors, the file's values & axes, its metadata */
 .explore-inspector { grid-area: insp; min-height: 0; min-width: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); background: var(--panel); border-left: 1px solid var(--border); }
-.inspector-tabs { display: flex; border-bottom: 1px solid var(--border); background: var(--panel-2); }
-.inspector-tabs [role=tab] { flex: 1; font: inherit; font-size: 13px; border: none; border-bottom: 2px solid transparent; background: none; padding: 7px 6px; cursor: pointer; color: var(--muted); white-space: nowrap; }
+.inspector-tabs { display: flex; flex-wrap: wrap; border-bottom: 1px solid var(--border); background: var(--panel-2); }
+.inspector-tabs [role=tab] { flex: 1 0 auto; font: inherit; font-size: 13px; border: none; border-bottom: 2px solid transparent; background: none; padding: 7px 8px; cursor: pointer; color: var(--muted); white-space: nowrap; }
+.explore-labels .star-button { margin-bottom: 8px; }
 .inspector-tabs [role=tab].on { color: var(--accent); border-bottom-color: var(--accent); background: var(--panel); font-weight: 600; }
 .inspector-fold { display: none !important; align-self: center; margin-right: 4px; }
 .inspector-body { min-height: 0; min-width: 0; overflow: auto; padding: 8px 10px 12px; container: inspector / inline-size; }

@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
 
 export type IconName =
   | "reset" | "limits" | "cuts" | "download" | "folder" | "info" | "more" | "link" | "side" | "stacked"
-  | "gear" | "copy" | "help" | "swap" | "close" | "files";
+  | "gear" | "copy" | "help" | "swap" | "close" | "files" | "tag";
 
 const PATHS: Record<IconName, ReactNode> = {
   reset: (
@@ -75,6 +75,12 @@ const PATHS: Record<IconName, ReactNode> = {
   ),
   swap: <path d="M3 5h9.5M10 2.5 12.5 5 10 7.5M13 11H3.5M6 8.5 3.5 11 6 13.5" />,
   close: <path d="M4 4l8 8M12 4l-8 8" />,
+  tag: (
+    <>
+      <path d="M2 2.5h5.5l6.5 6.5-5 5-6.5-6.5z" />
+      <circle cx="5" cy="5.5" r="1" />
+    </>
+  ),
   files: (
     <>
       <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" />

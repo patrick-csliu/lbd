@@ -319,3 +319,21 @@ def test_a_file_is_found_by_its_id(tmp_path):
     assert names(f"# made from: {ident}") == both
     assert names("00000000-0000-7000-8000-000000000000") == []
     assert "other.lbd" not in names("original") and "original.lbd" in names("original")   # a plain word as ever
+
+
+def test_a_file_s_row_only_where_the_library_lists_it(client, data_dir):
+    """16.31: /api/library/file gives the row (labels) of a file the Library lists; none for a
+    file in a folder it skips, though the file can be read."""
+    import lbd
+
+    (data_dir / "@eaDir").mkdir(exist_ok=True)
+    for where in (data_dir / "seen.lbd", data_dir / "@eaDir" / "skipped.lbd"):
+        d = lbd.Dataset(title=where.stem)
+        d.add_axis("x", [1.0, 2.0])
+        d.add_value("y", [1.0, 2.0], axes="x")
+        d.save(where)
+    client.app.state.lbd.library.scan()
+    seen = client.get("/api/library/file", params={"path": str(data_dir / "seen.lbd")}).json()
+    assert seen["row"]["name"] == "seen.lbd" and seen["row"]["tags"] == []
+    skipped = client.get("/api/library/file", params={"path": str(data_dir / "@eaDir" / "skipped.lbd")}).json()
+    assert skipped["title"] == "skipped" and skipped["row"] is None

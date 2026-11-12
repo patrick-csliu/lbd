@@ -1165,7 +1165,8 @@ def create_app(state: AppState) -> FastAPI:
             raise HTTPException(404, f"not a file: {path}")
         with collect_warnings() as warns:
             summary = state.library.file(str(p))
-        return {**summary, **state.labels_note(str(p)), "warnings": warns}
+        # its row (labels), for Explore's Labels tab (16.31); None outside the Library's folders
+        return {**summary, **state.labels_note(str(p)), "row": state.library.row(str(p)), "warnings": warns}
 
     def _labels_follow(action) -> None:
         """Labels follow a file LBD renamed or recycled (when the Library is in use)."""

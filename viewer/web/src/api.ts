@@ -1130,7 +1130,7 @@ export const api = {
   libraryMissing: () => call<{ missing: MissingLabels[] }>("GET", "/api/library/missing"),
   libraryMissingResolve: (entry: MissingLabels, path: string | null) =>
     call<{ notes: string[] }>("POST", "/api/library/missing", { entry, path }),
-  libraryFile: (path: string) => call<FileInfo>("GET", "/api/library/file", undefined, { path }),
+  libraryFile: (path: string) => call<FileInfo & { row: LibraryRow | null }>("GET", "/api/library/file", undefined, { path }),
   libraryStatus: () => call<LibraryStatus>("GET", "/api/library/status"),
   /** Check the open folders now (waits for a check that is running): what it found. */
   libraryCheck: () => call<LibraryCheck>("POST", "/api/library/check"),

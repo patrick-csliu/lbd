@@ -25,11 +25,13 @@ opens it here. For a figure to export, use **Figure** (one click away, see below
    cursor 2's line (see [Reading values](#reading-values)).
 6. **The plot.** Zoom, pan and click on it, see [Moving around](#moving-around).
 7. **The inspector:** **Cursors** (all the numbers, typed positions, Max / Min / Peak, Remove cursors),
-   **Values & axes** (the file's tables) and **Metadata** (with a filter). **ⓘ** at the top
-   opens it on the file's values and axes.
+   **Values & axes** (the file's tables), **Metadata** (with a filter) and **Labels** (the star,
+   project, users, tags and comment, as in the [Library](library.md); a change shows there at
+   once). **ⓘ** at the top opens it on the file's values and axes, the tag button on its labels. A
+   file outside the Library's folders has no labels; the tab says so.
 
 The header holds the title, the path (**⧉** copies it), **Open in Figure**, **📂** show in folder,
-**ⓘ** file info and **⋯** (**Use as Library picture**, **Reset all**). Click **?** above
+**ⓘ** file info, the tag button (labels) and **⋯** (**Use as Library picture**, **Reset all**). Click **?** above
 the panels (or press **?** on a plot) for every mouse action and key.
 
 **Any window size.** Explore fills the window and the page itself never scrolls: the controls,

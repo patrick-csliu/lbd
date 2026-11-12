@@ -188,6 +188,10 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
   sliders come back; operations and equations, zoom, sync and cursor options start afresh
   (before, everything came back, cursors too). Cursor positions always start afresh; a kept zoom
   is not used once the file changed. **Forget this view** is now **Reset all**.
+- **A Labels tab in Explore** (the inspector, or the tag button beside ⓘ): the file's star,
+  project, users, tags and comment, edited as in the Library, which shows a change at once. The
+  inspector's tabs wrap rather than being cut in a narrow panel, and a label picker stays inside
+  the window.
 - **Look options are under Display.** Data says what is plotted, Display how it looks: a
   histogram's Bins, Draw and Vertical axis; Scatter's Equal axes and Histograms beside the plot;
   a map's Cells; a matrix's Numbers, Significant digits, Row sums and Colour range; Bars' Bars and
