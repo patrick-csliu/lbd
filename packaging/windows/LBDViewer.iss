@@ -10,6 +10,8 @@
 #ifndef DistDir
   #error Pass /DDistDir=<folder containing lbd-view.exe>
 #endif
+; The installed version is in the uninstall entry Windows keeps for AppId (below): "{AppId}_is1".
+#define UninstallKey "{99E94BF7-613F-40EE-9E44-A0E148634E8E}_is1"
 
 [Setup]
 ; Fixed AppId: Windows uses it to recognise upgrades. Never change it.
@@ -85,12 +87,99 @@ Filename: "{app}\lbd-view.exe"; Description: "Open LBD Viewer now"; Flags: nowai
 FinishedLabel=LBD Viewer is installed. Double-click any .lbd file to open it, or start LBD Viewer from its shortcut.%n%nTo write .lbd files from your own programs, open LBD Viewer and go to "Language modules".
 
 [Code]
-// Stop a running viewer from this installation (only lbd-view.exe processes whose program file
-// is inside the install folder; other copies, e.g. a development one, are left alone).
+// ---- versions: X.Y.Z, or X.Y.Z-dev while X.Y.Z is in development (before X.Y.Z, after the one
+// before it), as in lbd_viewer/updates.py and scripts/check_versions.py.
+
+// The parts of a version; False if Text isn't one.
+function SplitVersion(Text: String; var Major, Minor, Patch, Release: Integer): Boolean;
+var
+  P: Integer;
+begin
+  Result := False;
+  Release := 1;
+  P := Pos('-', Text);
+  if P > 0 then
+  begin
+    if Copy(Text, P, Length(Text)) <> '-dev' then
+      exit;
+    Release := 0;                              // a development version comes before its release
+    Text := Copy(Text, 1, P - 1);
+  end;
+  P := Pos('.', Text);
+  if P = 0 then
+    exit;
+  Major := StrToIntDef(Copy(Text, 1, P - 1), -1);
+  Text := Copy(Text, P + 1, Length(Text));
+  P := Pos('.', Text);
+  if P = 0 then
+    exit;
+  Minor := StrToIntDef(Copy(Text, 1, P - 1), -1);
+  Patch := StrToIntDef(Copy(Text, P + 1, Length(Text)), -1);
+  Result := (Major >= 0) and (Minor >= 0) and (Patch >= 0);
+end;
+
+// True if version A is newer than version B (False if either isn't a version).
+function IsNewerVersion(A, B: String): Boolean;
+var
+  A1, A2, A3, A4, B1, B2, B3, B4: Integer;
+begin
+  Result := False;
+  if not SplitVersion(A, A1, A2, A3, A4) or not SplitVersion(B, B1, B2, B3, B4) then
+    exit;
+  if A1 <> B1 then
+    Result := A1 > B1
+  else if A2 <> B2 then
+    Result := A2 > B2
+  else if A3 <> B3 then
+    Result := A3 > B3
+  else
+    Result := A4 > B4;
+end;
+
+// The installed version, from the uninstall entry Inno Setup made for this AppId; '' if none.
+function InstalledVersion(): String;
+var
+  Key: String;
+begin
+  Result := '';
+  Key := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{#UninstallKey}';
+  if not RegQueryStringValue(HKCU, Key, 'DisplayVersion', Result) then
+    if not RegQueryStringValue(HKLM, Key, 'DisplayVersion', Result) then
+      Result := '';
+end;
+
+// An older version is never installed over a newer one: going back means uninstalling first.
+function InitializeSetup(): Boolean;
+var
+  Installed: String;
+begin
+  Result := True;
+  Installed := InstalledVersion();
+  if IsNewerVersion(Installed, '{#AppVersion}') then
+  begin
+    Log('Refused: LBD Viewer ' + Installed + ' is installed, newer than this installer ({#AppVersion}).');
+    SuppressibleMsgBox('LBD Viewer ' + Installed + ' is installed, newer than this installer ({#AppVersion}).' + #13#10#13#10 +
+                       'To go back to {#AppVersion}, uninstall ' + Installed + ' first (Settings > Apps), ' +
+                       'then run this installer. Your settings and Library are kept.',
+                       mbCriticalError, MB_OK, IDOK);
+    Result := False;
+  end;
+end;
+
+// Stop a running viewer from this installation: first gently (`lbd-view.exe --stop` asks it to
+// stop, so labels still waiting are written into their files, and waits up to 10 s for it to
+// end), then by force what is still running: only lbd-view.exe processes whose program file is
+// inside the install folder; other copies, e.g. a development one, are left alone.
+// A version before 1.3.0 doesn't know --stop: it ends at once, and is then stopped by force.
 procedure StopViewer(Dir: String);
 var
   ResultCode: Integer;
 begin
+  if FileExists(Dir + '\lbd-view.exe') then
+  begin
+    Exec(Dir + '\lbd-view.exe', '--stop', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Log('lbd-view.exe --stop ended with ' + IntToStr(ResultCode));
+  end;
   Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
     '-NoProfile -NonInteractive -Command "Get-Process lbd-view -ErrorAction SilentlyContinue | ' +
     'Where-Object { $_.Path -like ''' + Dir + '\*'' } | Stop-Process -Force"',

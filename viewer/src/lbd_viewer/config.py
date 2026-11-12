@@ -66,6 +66,11 @@ MEASUREMENTS_DEFAULTS: Dict[str, Any] = {"progress": True, "time": True, "percen
 # Explore (plan 13): a vertical or horizontal cursor marks every trace at its line for at most
 # this many visible traces (more makes each cursor move slow, and the plot unreadable).
 EXPLORE_DEFAULTS: Dict[str, Any] = {"line_traces": 20}
+# The check for a new version (plan 16.25, updates.py), kept by the viewer, not set by the user:
+# when it last asked GitHub (local time, ISO), the newest release then and its page, and the
+# reminder's choice: {"later": "YYYY-MM-DD"} (not again that day) or {"never": "X.Y.Z"} (not for
+# that version).
+UPDATES_DEFAULTS: Dict[str, Any] = {"last_check": None, "latest": None, "url": None, "remind": None}
 # The sections of the Settings dialog (SettingsDialog.tsx) and the settings in each, as
 # "key" (top level) or "group.key"; "Reset this section" puts these back to their defaults.
 GENERAL_DEFAULTS: Dict[str, Any] = {"theme": "system", "open_files_in": "viewer", "open_data_in": "explore"}
@@ -133,7 +138,8 @@ class Config:
         if data is None:
             return {"roots": [], "default_style": None, "open_files_in": "viewer", "open_data_in": "explore",
                     "theme": "system", "library": dict(LIBRARY_DEFAULTS), "memory": dict(MEMORY_DEFAULTS),
-                    "measurements": dict(MEASUREMENTS_DEFAULTS), "explore": dict(EXPLORE_DEFAULTS)}
+                    "measurements": dict(MEASUREMENTS_DEFAULTS), "explore": dict(EXPLORE_DEFAULTS),
+                    "last_version": None, "updates": dict(UPDATES_DEFAULTS)}
         if not isinstance(data, dict):
             raise ConfigError(f"{self.settings_path} must contain a JSON object; fix or delete the file")
         roots = data.get("roots", [])
@@ -171,9 +177,17 @@ class Config:
             explore = _check_explore({**EXPLORE_DEFAULTS, **(data.get("explore") or {})})
         except ConfigError as e:
             raise ConfigError(f"{self.settings_path}: {e}; fix or delete the file") from None
+        try:
+            updates = _check_updates({**UPDATES_DEFAULTS, **(data.get("updates") or {})})
+        except ConfigError as e:
+            raise ConfigError(f"{self.settings_path}: {e}; fix or delete the file") from None
+        last_version = data.get("last_version")     # the viewer that used these settings last
+        if last_version is not None and not isinstance(last_version, str):
+            raise ConfigError(f"{self.settings_path}: 'last_version' must be text; fix or delete the file")
         return {"roots": list(roots), "default_style": default or None, "open_files_in": open_in,
                 "open_data_in": open_data, "theme": theme, "library": library, "memory": memory,
-                "measurements": measurements, "explore": explore}
+                "measurements": measurements, "explore": explore, "last_version": last_version,
+                "updates": updates}
 
     def settings(self) -> Dict[str, Any]:
         """{"roots": [...], "default_style": name, "open_files_in": ..., "open_data_in": ...,
@@ -184,7 +198,8 @@ class Config:
             default = "default"
         return {"roots": stored["roots"], "default_style": default, "open_files_in": stored["open_files_in"],
                 "open_data_in": stored["open_data_in"], "theme": stored["theme"], "library": stored["library"],
-                "memory": stored["memory"], "measurements": stored["measurements"], "explore": stored["explore"]}
+                "memory": stored["memory"], "measurements": stored["measurements"], "explore": stored["explore"],
+                "last_version": stored["last_version"], "updates": stored["updates"]}
 
     def problems(self) -> List[str]:
         """Things the user should know about the settings (shown as warnings in the viewer)."""
@@ -199,7 +214,32 @@ class Config:
         return out
 
     def _save_settings(self, settings: Dict[str, Any]) -> None:
-        _write_json(self.settings_path, settings)
+        """Write the settings. Settings this version doesn't know (a newer viewer's, used on this
+        computer before) are kept as they are, so going back to the newer one finds them."""
+        with self._lock:
+            try:
+                on_disk = _read_json(self.settings_path)
+            except ConfigError:
+                on_disk = None                    # unreadable: replaced (the viewer said so)
+            if isinstance(on_disk, dict):
+                merged = dict(on_disk)
+                for key, new in settings.items():
+                    old = on_disk.get(key)
+                    # a group (library, memory, ...): its unknown keys stay too
+                    merged[key] = {**old, **new} if isinstance(old, dict) and isinstance(new, dict) else new
+                settings = merged
+            _write_json(self.settings_path, settings)
+
+    def note_version(self, version: str) -> Optional[str]:
+        """Record `version` as the viewer that used these settings last (at each real start);
+        returns the version recorded before (None the first time)."""
+        with self._lock:
+            s = self.settings()
+            before = s["last_version"]
+            if before != version:
+                s["last_version"] = version
+                self._save_settings(s)
+            return before
 
     def add_root(self, path: str) -> List[str]:
         p = Path(path).expanduser()
@@ -299,6 +339,17 @@ class Config:
             s["measurements"] = _check_measurements({**s["measurements"], **changes})
             self._save_settings(s)
             return s["measurements"]
+
+    def set_updates(self, changes: Dict[str, Any]) -> Dict[str, Any]:
+        """Change what the check for a new version keeps (UPDATES_DEFAULTS); returns it all."""
+        unknown = sorted(set(changes) - set(UPDATES_DEFAULTS))
+        if unknown:
+            raise ConfigError(f"unknown update setting(s) {unknown}; known: {sorted(UPDATES_DEFAULTS)}")
+        with self._lock:
+            s = self.settings()
+            s["updates"] = _check_updates({**s["updates"], **changes})
+            self._save_settings(s)
+            return s["updates"]
 
     def reset_section(self, section: str) -> None:
         """Put the settings of one Settings section back to their defaults."""
@@ -442,6 +493,19 @@ def _check_explore(e: Dict[str, Any]) -> Dict[str, Any]:
     if isinstance(x, bool) or not isinstance(x, int) or x < 0:
         raise ConfigError(f"Explore setting 'line_traces' must be a whole number of traces (≥ 0), not {x!r}")
     return {k: e[k] for k in EXPLORE_DEFAULTS}
+
+
+def _check_updates(u: Dict[str, Any]) -> Dict[str, Any]:
+    for key in ("last_check", "latest", "url"):
+        if u.get(key) is not None and not isinstance(u.get(key), str):
+            raise ConfigError(f"update setting '{key}' must be text or empty, not {u.get(key)!r}")
+    remind = u.get("remind")
+    if remind is not None and not (isinstance(remind, dict) and len(remind) == 1
+                                   and next(iter(remind)) in ("later", "never")
+                                   and isinstance(next(iter(remind.values())), str)):
+        raise ConfigError(f"update setting 'remind' must be {{\"later\": date}}, {{\"never\": version}} or empty, "
+                          f"not {remind!r}")
+    return {k: u[k] for k in UPDATES_DEFAULTS}
 
 
 def _check_measurements(m: Dict[str, Any]) -> Dict[str, Any]:

@@ -14,6 +14,7 @@ import { DateZoneSetting } from "./DateZoneSetting";
 import { PreviewSettings } from "./LibraryPage";
 import { Segmented, Setting, SettingsGroup, Switch } from "./settingsUi";
 import { useToast } from "./toast";
+import { UpdateSettings } from "./Updates";
 
 export type SettingsSection = "about" | "general" | "library" | "sidebar" | "explore" | "memory" | "measurements";
 
@@ -77,6 +78,7 @@ export const SECTIONS: { id: SettingsSection; title: string; settings: { id: str
     title: "About",
     settings: [
       { id: "about.version", name: "LBD Viewer", words: "version release number" },
+      { id: "about.updates", name: "New version", words: "update upgrade check release install newer" },
       { id: "about.format", name: "File format", words: "version lbd format" },
     ],
   },
@@ -292,6 +294,7 @@ export function SettingsDialog({
               <Setting id="about.format" name="File format">
                 <span>{state.lbd_version}</span>
               </Setting>
+              <UpdateSettings />
             </SettingsGroup>
           )}
         </div>

@@ -2,16 +2,23 @@
 # Install LBD Viewer for the current user (no root needed).
 #   ./install.sh               (asks about shortcuts, and to install Arial if it is missing)
 #   ./install.sh --no-fonts    (skip the font check, e.g. for scripted installs)
+#   ./install.sh --desktop | --no-desktop | --menu | --no-menu   (answer a shortcut question)
 # Installs to ~/.local/share/lbd-viewer, adds `lbd-view` to ~/.local/bin, and makes
 # double-clicking .lbd files open the viewer. Asks whether to show it in the applications menu
 # (default yes) and to add a desktop shortcut (default no); without a terminal, the defaults.
 set -eu
 
 CHECK_FONTS=1
+MENU_ANSWER=""
+DESKTOP_ANSWER=""
 for arg in "$@"; do
     case "$arg" in
         --no-fonts) CHECK_FONTS=0 ;;
-        *) echo "usage: $0 [--no-fonts]" >&2; exit 2 ;;
+        --menu) MENU_ANSWER=y ;;
+        --no-menu) MENU_ANSWER=n ;;
+        --desktop) DESKTOP_ANSWER=y ;;
+        --no-desktop) DESKTOP_ANSWER=n ;;
+        *) echo "usage: $0 [--no-fonts] [--menu|--no-menu] [--desktop|--no-desktop]" >&2; exit 2 ;;
     esac
 done
 
@@ -24,6 +31,51 @@ if [ ! -x "$HERE/LBDViewer/lbd-view" ]; then
     echo "error: $HERE/LBDViewer/lbd-view not found; run this script from the unpacked folder" >&2
     exit 1
 fi
+
+# ---- versions: X.Y.Z, or X.Y.Z-dev while X.Y.Z is in development (before X.Y.Z, after the one
+# before it), as in lbd_viewer/updates.py. The VERSION file is written next to the app by the build.
+# version_fields 1.3.0-dev -> "1 3 0 0", 1.3.0 -> "1 3 0 1"; fails for anything else.
+version_fields() {
+    v=$1; rel=1
+    case "$v" in *-dev) rel=0; v=${v%-dev} ;; esac
+    echo "$v" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || return 1
+    echo "$v $rel" | tr . ' '
+}
+# version_newer A B: A is newer than B (false if either isn't a version).
+version_newer() {
+    a=$(version_fields "$1") || return 1
+    b=$(version_fields "$2") || return 1
+    awk -v a="$a" -v b="$b" 'BEGIN { split(a, x, " "); split(b, y, " ")
+        for (i = 1; i <= 4; i++) { if (x[i] + 0 > y[i] + 0) exit 0; if (x[i] + 0 < y[i] + 0) exit 1 }
+        exit 1 }'
+}
+
+NEW_VERSION=$(cat "$HERE/LBDViewer/VERSION" 2>/dev/null || true)
+if [ -z "$NEW_VERSION" ]; then
+    echo "error: $HERE/LBDViewer/VERSION is missing; this package is incomplete, download it again" >&2
+    exit 1
+fi
+OLD_VERSION=$(cat "$APPDIR/VERSION" 2>/dev/null || true)     # none before 1.3.0
+if version_newer "$OLD_VERSION" "$NEW_VERSION"; then
+    echo "LBD Viewer $OLD_VERSION is installed, newer than this installer ($NEW_VERSION)." >&2
+    echo "To go back to $NEW_VERSION, run uninstall.sh first ($APPDIR/uninstall.sh), then run this installer." >&2
+    echo "Your settings and Library are kept." >&2
+    exit 1
+fi
+
+# Stop a running viewer of this installation: first gently (lbd-view --stop writes the labels
+# still waiting and waits up to 10 s), then by force what still runs from the program folder.
+# A version before 1.3.0 doesn't know --stop: it says so, and is then stopped by force.
+stop_viewer() {
+    [ -x "$APPDIR/lbd-view" ] || return 0
+    "$APPDIR/lbd-view" --stop >/dev/null 2>&1 || true
+    for proc in /proc/[0-9]*; do
+        exe=$(readlink "$proc/exe" 2>/dev/null) || continue
+        case "$exe" in
+            "$APPDIR"/*) kill -9 "${proc#/proc/}" 2>/dev/null || true ;;
+        esac
+    done
+}
 
 # ask "question" default: true for yes. The default is used without a terminal (scripted).
 ask() {
@@ -38,15 +90,33 @@ ask() {
 
 MENU=0
 DESKTOP=0
-ask "Show LBD Viewer in the applications menu?" y && MENU=1
-ask "Add a shortcut to the desktop?" n && DESKTOP=1
+# An option answers its question (e.g. from the web install script, which has no terminal).
+case "$MENU_ANSWER" in
+    y) MENU=1 ;;
+    n) ;;
+    *) ask "Show LBD Viewer in the applications menu?" y && MENU=1 ;;
+esac
+case "$DESKTOP_ANSWER" in
+    y) DESKTOP=1 ;;
+    n) ;;
+    *) ask "Add a shortcut to the desktop?" n && DESKTOP=1 ;;
+esac
 
-echo "Installing LBD Viewer to $APPDIR"
+if [ -n "$OLD_VERSION" ]; then
+    echo "Replacing LBD Viewer $OLD_VERSION with $NEW_VERSION in $APPDIR"
+elif [ -d "$APPDIR" ]; then
+    echo "Replacing the earlier LBD Viewer with $NEW_VERSION in $APPDIR"
+else
+    echo "Installing LBD Viewer $NEW_VERSION to $APPDIR"
+fi
+stop_viewer
 rm -rf "$APPDIR"
 mkdir -p "$APPDIR" "$BINDIR" "$DATA/applications" "$DATA/mime/packages" \
          "$DATA/icons/hicolor/256x256/apps" "$DATA/icons/hicolor/256x256/mimetypes" \
          "$DATA/icons/hicolor/scalable/apps" "$DATA/icons/hicolor/scalable/mimetypes"
 cp -a "$HERE/LBDViewer/." "$APPDIR/"
+cp "$HERE/uninstall.sh" "$APPDIR/uninstall.sh"      # so it is there without the unpacked folder
+chmod +x "$APPDIR/uninstall.sh"
 ln -sf "$APPDIR/lbd-view" "$BINDIR/lbd-view"
 
 cp "$HERE/lbd.png" "$DATA/icons/hicolor/256x256/apps/lbd-viewer.png"

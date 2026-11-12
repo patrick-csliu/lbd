@@ -11,6 +11,18 @@ from lbd_viewer.server import AppState, create_app
 
 
 @pytest.fixture(autouse=True)
+def no_github(monkeypatch):
+    """No test asks GitHub for a new version (updates.py); test_updates.py gives fake answers."""
+    from lbd_viewer import updates
+
+    def offline(timeout=updates.TIMEOUT):
+        raise updates.CheckError("no connection to GitHub (the tests don't ask it)")
+
+    offline.real = updates.ask_github           # for the tests of the request itself
+    monkeypatch.setattr(updates, "ask_github", offline)
+
+
+@pytest.fixture(autouse=True)
 def plenty_of_memory(monkeypatch):
     """10 GB of room for the viewer, whatever else runs on the computer: with the real memory, a
     computer short of it (suites side by side) has almost none available, and test files above the

@@ -116,6 +116,12 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
   fields you tick on a second line), **one line**, or as **columns** that sort the sidebar only,
   with column widths dragged and kept; the name is the title or the file name.
 
+- **The installers refuse an older version.** On Windows and Linux, installing a version older
+  than the one installed stops with a message: to go back, uninstall first, then install the
+  older one (settings and Library are kept). On macOS, an older app started after a newer one
+  says so once, and carries on. Settings that only a newer version knows are now kept when an
+  older one saves its settings.
+
 **Viewer**
 
 - **Fixed: a right-hand axis squashed its curves** (Explore, two units in one panel). On a linear
@@ -146,6 +152,26 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
   unused for 10 minutes; the first click, key, zoom, cursor, Peak or size change after that opened
   it again but showed an error on every panel. Now the view opens again quietly ("Drawing…"), the
   request is done on it, and several requests share one reopening.
+
+- **LBD tells you when a new version is out.** At most once a day, when the viewer starts, it
+  asks GitHub for the latest release (5 s at most, in the background, sending only the program's
+  name and version; quiet without internet). **Settings → About** shows *"LBD X is available"*
+  with its release page, the install command and **Check now**. On the first start of a day with
+  a newer version, one page shows a reminder: Remind later, Install… (Settings → About) or Never
+  remind (this version only). LBD never downloads or installs anything by itself. `--dev` skips
+  the check.
+
+- **Install with one command**, on every system: `install.ps1` (Windows, PowerShell),
+  `install.sh` (Linux) and `install-macos.sh` (macOS) come with each release. Each downloads the
+  latest release's installer, checks its SHA-256 checksum against the release's new
+  `SHA256SUMS` file, and runs it (on macOS: copies the app to Applications). The commands are
+  in the README and *Install*. The Linux package's `install.sh` takes `--desktop`, `--no-desktop`,
+  `--menu` and `--no-menu` to answer its shortcut questions.
+
+- **The installers stop a running viewer gently** before replacing it: `lbd-view --stop` asks
+  the viewer to stop (labels still waiting are written into their files first) and waits up to
+  10 s; only then is it stopped by force. The Linux install keeps `uninstall.sh` next to the
+  app (`~/.local/share/lbd-viewer/uninstall.sh`).
 
 - **Fixed: changing the plot type while a picture was drawn** (for example a map to Scatter on a busy
   computer) could show "This plot can't be shown". Each Explore view now finishes one change before
@@ -582,6 +608,9 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
 
 **Documentation**
 
+- **Build LBD yourself** (Developers): from the source at a release tag to installing the
+  result, with the tools needed on each system; linked from the README and *Install*.
+
 - **Variable sweeps**: *Concepts* explains axis groups (sweep axes, dimensions, data points) and
   **Grid or group?**, the pros and cons of each; the Python, MATLAB and Julia pages show building,
   writing (by coordinates and by the outer point), `to_dense`, `rows` and `coords`; *Writing
@@ -632,6 +661,12 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
   a whole run takes about as long as the browser tests instead of the sum of all. `--changed
   [REF]` runs only the suites the changed files can affect, `--only` names suites. Viewer and
   browser tests that fail side by side run again alone, and the summary says so.
+- New endpoints `GET /api/updates`, `POST /api/updates/check` and `POST /api/updates/remind`
+  (`updates.py`; the settings group `updates`); tests never ask GitHub (`LBD_NO_UPDATE_CHECK=1`
+  for a real viewer process).
+- New endpoint `POST /api/stop` (local, with the token). The release workflow's Windows and Linux
+  jobs run `scripts/upgrade_test.py`: v1.2.0 from its release, the new build over it, then an
+  older-numbered build of the same installer, which must be refused.
 
 ## 1.2.0 (2026-10-28)
 

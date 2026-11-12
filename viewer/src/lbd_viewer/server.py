@@ -50,6 +50,7 @@ from .label_writer import LabelWriter  # noqa: E402
 from .library import LibraryIndex, writing_status  # noqa: E402
 from .previews import PreviewCache, PreviewError, Previewer  # noqa: E402
 from . import live, memory, reading, summaries, versions  # noqa: E402
+from .updates import CheckError, Updates  # noqa: E402
 from . import export as csv_export  # noqa: E402
 from .explore import KINDS as EXPLORE_KINDS, ExploreClosed, ExploreError, ExploreSession, Sessions  # noqa: E402
 from .pages import PageError, Pages, UnknownPage  # noqa: E402
@@ -125,6 +126,8 @@ class AppState:
         self._previews: Optional[Previewer] = None
         self.started = time.monotonic()
         self.last_heartbeat: Optional[float] = None
+        self.on_stop: Any = None            # stops the server: set by cli.start (POST /api/stop)
+        self.updates = Updates(config)      # the check for a new version; automatic only at a real start (cli)
 
     @property
     def catalog(self) -> Catalog:
@@ -789,6 +792,55 @@ def deliver_files(state: AppState, files: List[str], dirs: List[str]) -> Dict[st
     return {"delivered": not unplaced, "shown": offer.shown, "busy": offer.busy, "unplaced": unplaced}
 
 
+LOCAL_CLIENTS = ("127.0.0.1", "::1")
+
+
+def add_stop_route(app: FastAPI, state: AppState) -> None:
+    """POST /api/stop: stop this viewer gently (`lbd-view --stop`, run by the installers before
+    they replace the program). The server stops as after its idle time: labels still waiting are
+    written into their files and the previews are stopped (AppState.close, run by cli.Running).
+    Only from this computer, with the session token (from server.json) like every /api request."""
+
+    @app.post("/api/stop")
+    def stop(request: Request):
+        client = request.client.host if request.client else ""
+        if client not in LOCAL_CLIENTS:
+            raise HTTPException(403, f"the viewer can only be stopped from this computer, not from {client}")
+        if state.on_stop is None:
+            raise HTTPException(409, "this viewer wasn't started by lbd-view, so it can't stop itself; "
+                                     "stop it where it was started")
+        state.on_stop()
+        return {"stopping": True, "pid": os.getpid()}
+
+
+class RemindBody(_Body):
+    choice: str
+
+
+def add_update_routes(app: FastAPI, state: AppState) -> None:
+    """The check for a new version (updates.py): what is known, a check by hand, the reminder's
+    choice. Only the page that passes claim=true can get the reminder, and only once per start."""
+
+    @app.get("/api/updates")
+    def updates_state(claim: bool = False):
+        remind = state.updates.claim_reminder() if claim else False
+        return {**state.updates.state(), "remind": remind}
+
+    @app.post("/api/updates/check")
+    def updates_check():
+        try:
+            return {**state.updates.check_now(), "remind": False}
+        except CheckError as e:
+            raise HTTPException(502, f"Couldn't check for a new version: {e}.") from None
+
+    @app.post("/api/updates/remind")
+    def updates_remind(body: RemindBody):
+        try:
+            return {**state.updates.remind(body.choice), "remind": False}
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from None
+
+
 class _UiFiles(StaticFiles):
     """The built web UI. Its page (index.html) is checked again on every load, so a browser never
     keeps showing an older viewer after an update; the scripts it names have a content hash in
@@ -902,6 +954,9 @@ def create_app(state: AppState) -> FastAPI:
     def heartbeat():
         state.last_heartbeat = time.monotonic()
         return {"ok": True}
+
+    add_stop_route(app, state)
+    add_update_routes(app, state)
 
     # -- summaries of maps bigger than memory (summaries.py)
 

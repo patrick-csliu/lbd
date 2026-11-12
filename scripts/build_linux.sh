@@ -50,6 +50,7 @@ STAGE="$OUT/$NAME"
 rm -rf "$STAGE"
 mkdir -p "$STAGE"
 cp -a "$OUT/dist/LBDViewer" "$STAGE/LBDViewer"
+echo "$VERSION" > "$STAGE/LBDViewer/VERSION"     # install.sh compares it with the installed one
 cp packaging/linux/install.sh packaging/linux/uninstall.sh packaging/linux/lbd-viewer.desktop \
    packaging/linux/lbd-mime.xml packaging/icons/lbd.png packaging/icons/lbd.svg "$STAGE/"
 chmod +x "$STAGE/install.sh" "$STAGE/uninstall.sh" "$STAGE/LBDViewer/lbd-view"
@@ -59,7 +60,7 @@ LBD Viewer $VERSION for Linux
 Install (for the current user, no root needed):
     ./install.sh
 Uninstall:
-    ./uninstall.sh
+    ./uninstall.sh   (also in ~/.local/share/lbd-viewer after installing)
 
 After installing, open "LBD Viewer" from the applications menu, run lbd-view, or
 double-click an .lbd file. The language modules (one per programming language) are in
