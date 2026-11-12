@@ -232,3 +232,29 @@ def test_release_leaves_another_writers_lock(tmp_path):
         lock.write_text("other-computer 7 abcd")
     labels.update(tmp_path, taken_over)
     assert lock.read_text() == "other-computer 7 abcd"
+
+
+def test_nothing_is_imported_while_the_lock_is_held(tmp_path):
+    """16.3: a first import inside the lock took seconds on a busy computer, and the other writers
+    ran out of their 15 s. In a fresh program, a change imports nothing while it holds the lock."""
+    import subprocess
+    import sys
+
+    code = f"""
+import sys
+from pathlib import Path
+from lbd_viewer import labels
+seen = {{}}
+real_init, real_release = labels._Lock.__init__, labels._Lock.release
+def init(self, *a):
+    seen["taken"] = set(sys.modules)
+    real_init(self, *a)
+def release(self):
+    seen["new"] = set(sys.modules) - seen["taken"]
+    real_release(self)
+labels._Lock.__init__, labels._Lock.release = init, release
+labels.update(Path(r"{tmp_path}"), lambda doc: None)
+print(sorted(seen["new"]))
+"""
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout.strip()
+    assert out == "[]", f"imported while the lock was held: {out}"

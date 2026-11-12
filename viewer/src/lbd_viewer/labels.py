@@ -32,6 +32,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+# (here, not inside the lock: a first import takes seconds on a busy computer, and other writers
+# would wait for it, 16.3)
+from .files import _while_in_use
+
 SIDECAR = ".lbd-library.json"
 LOCK = ".lbd-library.lock"
 FORMAT, VERSION = "lbd-library", 1
@@ -404,8 +408,6 @@ class _Lock:
                 pass                                   # tried again in a moment
 
     def release(self) -> None:
-        from .files import _while_in_use
-
         self._stop.set()
         self._thread.join()
         if self._mine():
@@ -511,8 +513,6 @@ def update(folder: Path, change: Callable[[Dict[str, Any]], None],
 
 
 def _write(p: Path, doc: Dict[str, Any]) -> None:
-    from .files import _while_in_use
-
     if not doc["files"] and not any(kept(doc).values()):    # nothing left to keep: no file
         if p.exists():
             _while_in_use(lambda: p.unlink())
