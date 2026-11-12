@@ -20,6 +20,8 @@
   now; the other, at lower priority, the rest. The setting (config.py PREVIEW_MODES) says what
   is drawn without being asked: every file ("all"), the rows near the selection ("nearby"), or
   nothing ("off").
+- A worker stops by itself within a few seconds when the viewer is gone (killed, crashed), and
+  ignores Ctrl+C: the viewer stops it (plan 16.2, 16.16).
 """
 
 from __future__ import annotations
@@ -28,6 +30,7 @@ import io
 import logging
 import multiprocessing
 import os
+import signal
 import sqlite3
 import sys
 import threading
@@ -51,6 +54,7 @@ FIRST_PANELS = 4                    # as Explore (ExploreTab.tsx FIRST_PANELS)
 BACKGROUND = (255, 255, 255, 255)   # around the panels
 CACHE_FILE, CACHE_SCHEMA = "previews.sqlite", 2   # 2: data only (no axes, labels, colour bar), at 2×
 REDRAW_EVERY = 30.0                 # a file that keeps changing (being written) is redrawn in the background at most this often
+PARENT_CHECK = 2.0                  # a worker checks this often (seconds) that the viewer is still running
 NOW, NEAR, ALL = 0, 1, 2            # priorities: what the user looks at, the rows near it, every file
 log = logging.getLogger("lbd_viewer")
 
@@ -241,6 +245,43 @@ class PreviewCache:
 # ---- the worker processes
 
 
+def _worker_init(parent_pid: int, lower: bool) -> None:
+    """Runs first in each worker process.
+
+    - Ctrl+C in a console reaches every program started from it, so the worker would print an
+      error and stop in the middle of a picture. It ignores Ctrl+C instead; the viewer stops it.
+    - A thread checks every PARENT_CHECK seconds that the viewer (`parent_pid`) still runs, and
+      ends the worker when it doesn't (the viewer was killed or crashed): else the worker stays,
+      holding memory and keeping files open. The viewer's start time is compared too, so another
+      program that got the same process number later doesn't keep the worker alive.
+    - `lower`: the background worker runs below normal priority.
+    """
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    if hasattr(signal, "SIGBREAK"):                    # Windows: Ctrl+Break
+        signal.signal(signal.SIGBREAK, signal.SIG_IGN)
+    if lower:
+        _lower_priority()
+    threading.Thread(target=_watch_parent, args=(parent_pid,), name="watch-viewer", daemon=True).start()
+
+
+def _process_started(pid: int) -> Optional[float]:
+    """When process `pid` started (seconds since 1970), or None if no such process runs."""
+    import psutil
+
+    try:
+        return psutil.Process(pid).create_time()
+    except (psutil.NoSuchProcess, psutil.ZombieProcess):
+        return None
+
+
+def _watch_parent(parent_pid: int) -> None:
+    started = _process_started(parent_pid)
+    while True:
+        if started is None or _process_started(parent_pid) != started:
+            os._exit(0)                                # the viewer is gone; nothing of the worker's to save
+        time.sleep(PARENT_CHECK)
+
+
 def _lower_priority() -> None:
     """In the background worker: below normal priority, so the computer stays responsive."""
     try:
@@ -254,6 +295,17 @@ def _lower_priority() -> None:
             os.nice(10)
     except Exception:                                  # only a nicety: drawing works without it
         pass
+
+
+def _end_workers(pool: Executor) -> None:
+    """Stop a pool now, also a worker in the middle of a picture (it only reads files)."""
+    if isinstance(pool, ProcessPoolExecutor):
+        if hasattr(pool, "terminate_workers"):         # Python 3.14+
+            pool.terminate_workers()
+            return
+        for process in list((getattr(pool, "_processes", None) or {}).values()):
+            process.terminate()
+    pool.shutdown(wait=False, cancel_futures=True)
 
 
 def work(job: Dict[str, Any]) -> Tuple[Optional[bytes], Optional[str]]:
@@ -386,24 +438,27 @@ class Previewer:
             self._threads.append(t)
 
     def close(self) -> None:
+        """Stop drawing at once: a picture being drawn is dropped (it is drawn again next time)."""
         self._stop = True
         with self._cond:
             self._cond.notify_all()
+        for lane, pool in self._pools.items():
+            if pool is not None:
+                _end_workers(pool)
+            self._pools[lane] = None
         for t in self._threads:
             t.join(timeout=5)
         self._threads = []
-        for lane, pool in self._pools.items():
-            if pool is not None:
-                pool.shutdown(wait=False, cancel_futures=True)
-            self._pools[lane] = None
         self.cache.close()
 
     def _pool(self, lane: str) -> Executor:
+        if self._stop:                                # closing: no new worker (the drawing thread stops)
+            raise RuntimeError("the previews are stopping")
         pool = self._pools[lane]
         if pool is None:
             if self.processes:
                 pool = ProcessPoolExecutor(max_workers=1, mp_context=multiprocessing.get_context("spawn"),
-                                           initializer=_lower_priority if lane == "background" else None)
+                                           initializer=_worker_init, initargs=(os.getpid(), lane == "background"))
             else:
                 pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"previews-draw-{lane}")
             self._pools[lane] = pool
@@ -462,8 +517,12 @@ class Previewer:
             self._pools[lane] = None
             picture, error = None, f"Drawing this file stopped the drawing process ({e or 'it ended unexpectedly'})."
         except Exception as e:
+            if self._stop:
+                return
             log.exception("Previews: %s couldn't be drawn", path)
             picture, error = None, f"The preview couldn't be drawn ({e}); the details are in the log."
+        if self._stop:                               # stopped while drawing (close): not a fault of the file
+            return
         if file_version(path) != version:            # changed while drawing: drawn again a little later
             with self._cond:
                 self._queue.setdefault(path, (NEAR, time.monotonic() + REDRAW_EVERY))

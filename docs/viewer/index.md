@@ -105,4 +105,10 @@ page open the matching page of this documentation.
   file to the running viewer, instead of starting a second server.
 - **Automatic shutdown:** open tabs tell the viewer every 10 seconds that they are still there.
   About 90 seconds after the last tab closes, the viewer stops by itself. If no tab connects at
-  all after a start, it waits at least 60 seconds first.
+  all after a start, it waits at least 60 seconds first. While a tab is open the viewer keeps
+  running, however long nothing happens, also after the computer slept: on waking, the tabs get
+  15 seconds to say they are still there.
+- **Stopping it yourself:** Ctrl+C in the terminal where it runs stops it within a second or
+  two (it prints "LBD viewer stopped"). A save in progress finishes first, and labels not yet
+  written go into their files. The drawing processes of the Library's previews stop with it, and
+  also stop by themselves if the viewer was ended another way (killed, crashed).
