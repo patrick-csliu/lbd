@@ -205,6 +205,29 @@ def test_a_vector_as_bars_with_a_slider(viewer, new_page):
     expect(explore(page).locator(".controls").get_by_text("(point 1 of 6)")).to_be_visible()       # its slider
 
 
+def test_all_of_an_axis_on_bars(viewer, new_page):
+    name, = files(viewer, mock.one_value)
+    page = new_page("Explore")
+    open_as(page, name, "bars")
+    ui = explore(page)
+    expect(ui.get_by_label("Groups")).to_have_value("power")
+    expect(ui.get_by_label("Frequency position")).to_have_count(1)               # a slider: one number per bar
+    expect(ui.get_by_label("Bar shows")).to_have_count(0)
+    expect(ui.get_by_label("Error bars")).to_have_count(0)
+    meta = frames(page, lambda: ui.get_by_label("All of Frequency").click())
+    expect(ui.get_by_label("Frequency position")).to_have_count(0)               # no slider any more
+    expect(ui.get_by_label("Bar shows")).to_have_value("mean")
+    cursor_answer(page, lambda: page.mouse.click(*at(page, meta, 1, meta["ylim"][0] + 0.2 * (meta["ylim"][1] - meta["ylim"][0]))))
+    expect(ui.locator(".cursor-numbers")).to_contain_text("Mean of |S21|")
+    frames(page, lambda: ui.get_by_label("Bar shows").select_option("max"))
+    expect(ui.locator(".cursor-numbers")).to_contain_text("Max of |S21|")
+    frames(page, lambda: ui.get_by_label("Error bars").click())
+    expect(ui.get_by_label("Error bars")).to_be_checked()
+    frames(page, lambda: ui.get_by_label("All of Frequency").click())
+    expect(ui.get_by_label("Bar shows")).to_have_count(0)
+    expect(ui.get_by_label("Error bars")).to_have_count(0)
+
+
 def test_grouped_and_stacked(viewer, new_page):
     name, = files(viewer, mock.assignment_matrix)
     page = new_page("Explore")

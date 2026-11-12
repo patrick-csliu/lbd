@@ -166,6 +166,12 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
   a map's Cells; a matrix's Numbers, Significant digits, Row sums and Colour range; Bars' Bars and
   Values on the bars; 3D bars' angle. The Figure page has a Display section for them too.
   Histogram's second log switch (**Log**, the same as **Log vertical**) is gone.
+- **All of an axis on Bars** (Explore, Figure, `lp.plot`). An axis that isn't Groups or Bars in a
+  group can be **All** instead of a slider, as on Histogram and Scatter: each bar then stands for
+  all its numbers, and **Bar shows** chooses Mean (the default), Median, Max, Min or Sum; empty
+  points are left out, and the vertical axis says which ("Mean of |S21|"). **Error bars** (under
+  Display, off at first) draw one standard deviation on each bar. In `lp.plot`: `all=[...]`,
+  `options={"stat": "median", "errors": True}`.
 - **No value is locked in Curves** (Explore). A value on another axis, or with a third unit, used
   to be greyed out, and with one value ticked nothing could be changed; now clicking it shows it in
   that panel instead (its tip says so), as Histogram and Scatter already did.

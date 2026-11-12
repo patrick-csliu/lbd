@@ -230,6 +230,11 @@ menu.
 - **Bars** chooses Grouped or Stacked; stacked bars pile positive numbers up from zero and negative
   ones down from it, and need one unit.
 - **Values on the bars** writes each number at the end of its bar, unless the bars are too narrow.
+- Every other axis is a slider, or ticked **All of …**: its points all go into each bar. One bar
+  then stands for many numbers, and **Bar shows** chooses what of them: **Mean** (at first),
+  **Median**, **Max**, **Min** or **Sum**. Empty points are left out (a bar with none is not
+  drawn), and the vertical axis says which, for example *Mean of \|S21\|*. **Error bars**, under
+  Display, draws one standard deviation of each bar's numbers; it is there while an axis is All.
 - **Complex values:** the usual choices, or **Re and Im**, two bars side by side.
 - Two units get a second vertical axis, as curves do; a third is refused, saying which.
 - A click selects a bar: its group, name and value are in the Cursors tab. The **Horizontal** cursor

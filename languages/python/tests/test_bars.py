@@ -205,3 +205,100 @@ def test_a_saved_view_keeps_the_bars(tmp_path):
     d.save(tmp_path / "b.lbd")
     spec = render.resolve_spec(lbd.load(tmp_path / "b.lbd"), {})
     assert spec["kind"] == "bars" and spec["values"] == ["fidelity", "visibility"]
+
+
+# ---- All of an axis: one bar stands for many numbers (16.48) ----------------------------------
+
+
+def power_sweep():
+    """As `10 one value.lbd`: a complex S21 over power and frequency, with one empty point."""
+    d = lbd.Dataset(title="t")
+    d.add_axis("power", [-30.0, -20.0, -10.0], label="Power", unit="dBm")
+    d.add_axis("frequency", np.linspace(4e9, 5e9, 5), label="Frequency", unit="Hz")
+    s21 = (np.arange(15.0).reshape(3, 5) + 1) * np.exp(0.3j * np.arange(5))
+    s21[1, 2] = np.nan                                        # one empty point
+    d.add_value("S21", s21, axes=["power", "frequency"], label="S21")
+    return d, np.abs(s21)
+
+
+def test_all_of_an_axis_gives_one_bar_per_group_the_mean():
+    d, magnitude = power_sweep()
+    b, spec = bar_set(d, values="S21", x="power", series="none", all=["frequency"])
+    assert spec["all"] == ["frequency"] and spec["slices"] == [] and "series" not in spec
+    assert len(b.groups) == 3 and b.names == [""]
+    assert b.raw[0] == pytest.approx(np.nanmean(magnitude, axis=1))
+    assert np.isfinite(b.raw).all()                            # the empty point is left out, not NaN
+
+
+@pytest.mark.parametrize("stat,f", [("median", np.nanmedian), ("max", np.nanmax), ("min", np.nanmin),
+                                     ("sum", np.nansum)])
+def test_each_statistic(stat, f):
+    d, magnitude = power_sweep()
+    b, _ = bar_set(d, values="S21", x="power", series="none", all=["frequency"], options={"stat": stat})
+    assert b.raw[0] == pytest.approx(f(magnitude, axis=1))
+
+
+def test_an_empty_point_is_left_out():
+    d, magnitude = power_sweep()
+    b, _ = bar_set(d, values="S21", x="power", series="none", all=["frequency"])
+    assert b.raw[0, 1] == pytest.approx(np.mean(magnitude[1, [0, 1, 3, 4]]))
+
+
+def test_a_group_with_no_numbers_has_no_bar():
+    d = lbd.Dataset(title="t")
+    d.add_axis("a", [0.0, 1.0])
+    d.add_axis("b", [0.0, 1.0, 2.0])
+    d.add_value("v", [[1.0, 2.0, 3.0], [np.nan] * 3], axes=["a", "b"])
+    b, _ = bar_set(d, values="v", x="a", series="none", all=["b"], options={"stat": "sum"})
+    assert b.raw[0, 0] == 6.0 and np.isnan(b.raw[0, 1])       # not a sum of 0
+
+
+def test_the_axis_title_says_which_statistic():
+    d, _ = power_sweep()
+    ax = lp.plot(d, "bars", "S21", x="power", series="none", all=["frequency"], options={"stat": "median"}).axes[0]
+    assert ax.get_ylabel().startswith("Median of |S21|")
+    assert lp.plot(d, "bars", "S21", x="power", series="none").axes[0].get_ylabel().startswith("|S21|")
+
+
+def test_all_keeps_bars_in_a_group():
+    d, magnitude = power_sweep()
+    d.add_axis("rep", [0.0, 1.0])
+    d.add_value("v", np.stack([magnitude, 2 * magnitude], axis=-1), axes=["power", "frequency", "rep"])
+    b, spec = bar_set(d, values="v", x="power", series="rep", all=["frequency"])
+    assert b.raw.shape == (2, 3) and b.raw[1] == pytest.approx(2 * np.nanmean(magnitude, axis=1))
+
+
+def test_an_all_axis_is_not_chosen_for_the_bars_in_a_group():
+    d, magnitude = power_sweep()
+    d.add_axis("rep", [0.0, 1.0])
+    d.add_value("v", np.stack([magnitude, 2 * magnitude], axis=-1), axes=["power", "frequency", "rep"])
+    _, spec = bar_set(d, values="v", x="power", all=["rep"])          # rep alone would start as the bars
+    assert spec["all"] == ["rep"] and spec["series"] == "frequency"
+
+
+def test_a_wrong_statistic_says_why():
+    d, _ = power_sweep()
+    with pytest.raises(render.RenderError, match="stat must be one of"):
+        lp.plot(d, "bars", "S21", x="power", all=["frequency"], options={"stat": "mode"})
+
+
+def error_bars(ax):
+    return [c for c in ax.containers if type(c).__name__ == "ErrorbarContainer"]
+
+
+def test_error_bars_only_with_all():
+    d, magnitude = power_sweep()
+    with_all = lp.plot(d, "bars", "S21", x="power", series="none", all=["frequency"], options={"errors": True}).axes[0]
+    (drawn,) = error_bars(with_all)
+    segments = drawn.lines[2][0].get_segments()
+    spread = [s[1][1] - s[0][1] for s in segments]
+    assert spread == pytest.approx(2 * np.nanstd(magnitude, axis=1))    # one standard deviation each way
+    assert not error_bars(lp.plot(d, "bars", "S21", x="power", series="none", options={"errors": True}).axes[0])
+    assert not error_bars(lp.plot(d, "bars", "S21", x="power", series="none", all=["frequency"]).axes[0])
+
+
+def test_all_of_a_drawn_axis_is_ignored_with_a_warning():
+    d, _ = power_sweep()
+    with pytest.warns(render.RenderWarning, match="all.*'power'.*groups"):
+        _, spec = bar_set(d, values="S21", x="power", series="none", all=["power", "frequency"])
+    assert spec["all"] == ["frequency"]
