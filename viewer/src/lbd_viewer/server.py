@@ -360,6 +360,11 @@ class WantBody(_Body):
     now: bool = False                        # the selected file (or Show preview); else rows near it
 
 
+class UpdatePreviewBody(_Body):
+    paths: List[str]
+    replace_chosen: bool = False             # the page asked: a picture chosen in Explore is replaced too
+
+
 class ChooseBody(_Body):
     path: str
     panels: List[Dict[str, Any]]             # Explore's panels as shown: spec, settings, stat, view
@@ -1249,9 +1254,28 @@ def create_app(state: AppState) -> FastAPI:
         if answer.get("error"):
             return {"state": "error", "reason": answer["error"]}
         if answer["state"] == "writing":
-            return {"state": "writing", "reason": "No preview while it is being written; it gets one once it is "
-                                                  "finished (or recovered)."}
+            return {"state": "writing", "reason": "Live: no preview while it is being measured; it gets one once "
+                                                  "it is finished (or recovered)."}
         return {"state": answer["state"], "reason": None}
+
+    @app.post("/api/library/preview/update")
+    def library_preview_update(body: UpdatePreviewBody):
+        """Update preview (right-click in the Library, 16.43): draw these files' automatic
+        previews again now, as a file without one gets it (its saved figure view, else its first
+        value). A file with a picture chosen in Explore keeps it unless `replace_chosen` (the
+        page asks first: that picture can't be drawn again); those are listed in `chosen`."""
+        paths = [str(state.check_allowed(p)) for p in body.paths]
+        kept: List[str] = []
+        for p in paths:
+            chosen = state.chosen_preview(p)
+            if chosen is not None:
+                if not body.replace_chosen:
+                    kept.append(p)
+                    continue
+                state.catalog.forget_preview([chosen["key"]])
+            state.previews.update(p)
+        state.library.generation += 1                 # Library pages ask for the pictures again
+        return {"updated": len(paths) - len(kept), "chosen": kept}
 
     @app.post("/api/library/preview/want")
     def library_preview_want(body: WantBody):
@@ -1285,12 +1309,14 @@ def create_app(state: AppState) -> FastAPI:
 
     @app.delete("/api/library/preview/choose")
     def library_preview_reset(path: str = Query(...)):
-        """Reset a file's preview: the automatic one again."""
+        """Reset a file's preview: the automatic one again, drawn now of the file as it is (an
+        automatic picture from before the choice would be out of date)."""
         p = str(state.check_allowed(path))
         chosen = state.chosen_preview(p)
         if chosen is None:
             return {"forgotten": 0}
         forgotten = state.catalog.forget_preview([chosen["key"]])
+        state.previews.update(p)
         state.library.generation += 1
         return {"forgotten": forgotten}
 

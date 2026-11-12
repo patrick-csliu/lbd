@@ -1097,6 +1097,10 @@ export const api = {
   libraryPreviewWant: (paths: string[], now: boolean) => call<{ ok: boolean }>("POST", "/api/library/preview/want", { paths, now }),
   libraryPreviewChoose: (path: string, panels: PreviewPanel[], grid: [number, number], preset: string | null) =>
     call<{ chosen_at: number; warnings: string[] }>("POST", "/api/library/preview/choose", { path, panels, grid, preset }),
+  /** Update preview: draw these files' automatic previews again; `chosen` lists the files that kept a
+   *  picture chosen in Explore (send them again with `replaceChosen` once the user agreed). */
+  libraryPreviewUpdate: (paths: string[], replaceChosen = false) =>
+    call<{ updated: number; chosen: string[] }>("POST", "/api/library/preview/update", { paths, replace_chosen: replaceChosen }),
   libraryPreviewReset: (path: string) => call<{ forgotten: number }>("DELETE", "/api/library/preview/choose", undefined, { path }),
   libraryPreviewCache: () => call<{ count: number; bytes: number }>("GET", "/api/library/preview/cache"),
   libraryPreviewClear: () => call<{ freed: number }>("POST", "/api/library/preview/clear"),

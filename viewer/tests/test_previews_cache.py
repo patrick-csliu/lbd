@@ -69,7 +69,8 @@ def test_every_file_is_drawn_in_the_background(world):
     assert wait_for(lambda: world.p.status["drawn"] == 3 and world.p.status["total"] == 3)
 
 
-def test_a_current_picture_is_given_at_once_and_a_changed_file_drawn_again(world):
+def test_a_changed_file_keeps_its_picture_until_update_preview(world):
+    """16.43 rule 1: a preview stays when its file changes; Update preview draws it again."""
     path = world.add("a.lbd")
     world.p.start()
     assert wait_for(lambda: world.drawn(path))
@@ -78,9 +79,25 @@ def test_a_current_picture_is_given_at_once_and_a_changed_file_drawn_again(world
     time.sleep(0.02)
     write(path, n=80)                                   # more data
     world.files[path] = file_version(path)
-    assert world.p.answer(path) == {"state": "drawing"}
+    world.generation += 1                               # the index saw the change
+    world.p.want([path], now=True)
+    time.sleep(1.5)
+    assert world.p.answer(path)["picture"] == first["picture"]
+    world.p.update(path)                                 # Update preview
     assert wait_for(lambda: world.drawn(path))
     assert world.p.answer(path)["picture"] != first["picture"]
+
+
+def test_update_preview_follows_a_figure_view_saved_later(world):
+    path = world.add("a.lbd")
+    world.p.start()
+    assert wait_for(lambda: world.drawn(path))
+    first = world.p.answer(path)["picture"]
+    lbd.set_plot(path, spec={"kind": "scatter", "values": ["y"]})
+    world.files[path] = file_version(path)
+    world.p.update(path)
+    assert wait_for(lambda: world.drawn(path))
+    assert world.p.answer(path)["picture"] != first
 
 
 def test_a_style_change_keeps_the_pictures(world, cfg):
@@ -148,19 +165,40 @@ def test_a_file_that_cant_be_drawn_says_why_and_isnt_tried_again(world):
     assert answer["picture"] is None and answer["error"]
 
 
-def test_a_file_that_keeps_changing_is_redrawn_in_the_background_at_most_every_30_s(world):
+def test_a_file_that_couldnt_be_drawn_is_tried_again_once_it_changed(world):
+    """No picture means no preview yet: a file that is fixed later gets one."""
+    bad = world.folder / "bad.lbd"
+    bad.write_bytes(b"not an hdf5 file")
+    world.files[str(bad)] = file_version(str(bad))
+    world.generation += 1
+    world.p.start()
+    assert wait_for(lambda: world.p.cache.get(str(bad)) is not None)
+    time.sleep(0.02)
+    bad.unlink()
+    world.add("bad.lbd")
+    assert world.p.answer(str(bad)) == {"state": "drawing"}
+    assert wait_for(lambda: (world.p.answer(str(bad)).get("picture") or b"")[:4] == b"RIFF")
+
+
+def test_a_file_that_changed_while_it_was_drawn_is_drawn_again_a_little_later(world, monkeypatch):
     world.mode = "nearby"
     path = world.add("a.lbd")
+    real = previews.work
+
+    def changing(job):                                  # the file changes during the drawing
+        out = real(job)
+        write(path, n=60)
+        return out
+
+    monkeypatch.setattr(previews, "work", changing)
     world.p.start()
-    world.p.want([path], now=False)
-    assert wait_for(lambda: world.drawn(path))
-    write(path, n=60)
-    world.p.want([path], now=False)                      # a row near the selection: held back
+    world.p.want([path], now=True)
+    again = lambda: world.p._queue.get(path, (0, 0.0))[1] > 0      # queued again, held back
+    assert wait_for(again)
+    assert world.p.cache.get(path) is None              # not kept: it isn't the file as it is
     with world.p._cond:
         _, not_before = world.p._queue[path]
     assert not_before - time.monotonic() > previews.REDRAW_EVERY - 2
-    world.p.want([path], now=True)                       # selected: drawn at once
-    assert wait_for(lambda: world.drawn(path))
 
 
 def test_emptying_the_cache_draws_them_again(world):

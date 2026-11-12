@@ -1569,7 +1569,7 @@ function SelectedFile({
       )}
       {status}
       <div className="file-top">
-        {preview && !row?.error && <PreviewBox path={path} version={`${version}-${generation}`} />}
+        {preview && !row?.error && <PreviewBox path={path} version={`${version}-${generation}`} stopped={row?.writing === "stopped"} />}
         <div className="file-facts">
           {shown && <FileFacts info={shown} />}
           {labels}
@@ -1656,8 +1656,9 @@ function dateTime(seconds: number): string {
   return new Date(seconds * 1000).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
-/** The selected file's preview, with what it shows and, for a chosen one, Reset. */
-function PreviewBox({ path, version }: { path: string; version: string }) {
+/** The selected file's preview, with what it shows and, for a chosen one, Reset. A file being
+ *  measured shows "Live" instead (`stopped`: its measurement ended without finishing it). */
+function PreviewBox({ path, version, stopped = false }: { path: string; version: string; stopped?: boolean }) {
   const toast = useToast();
   const [nonce, setNonce] = useState(0);
   const { preview, url, error } = usePreview(path, version, true, nonce);
@@ -1683,6 +1684,15 @@ function PreviewBox({ path, version }: { path: string; version: string }) {
         <button onClick={show}>Show preview</button>
       </span>
     );
+  else if (!preview.picture && preview.state === "writing")
+    // a file being measured: "Live" in place of its picture, which it gets once it is finished
+    inside = stopped ? (
+      <span className="muted">No preview while it isn't finished; it gets one once it is recovered.</span>
+    ) : (
+      <span className="muted">
+        <strong className="preview-live">Live</strong> — no preview while it is being measured; it gets one once it is finished.
+      </span>
+    );
   else if (!preview.picture)
     // a reason that already says so ("No preview while …") is shown as it is
     inside = <span className="muted">{/^no preview\b/i.test(preview.reason ?? "") ? preview.reason : `No preview: ${preview.reason}`}</span>;
@@ -1705,12 +1715,15 @@ function PreviewBox({ path, version }: { path: string; version: string }) {
               Chosen in Explore on {dateTime(preview.chosen_at)}
               {preview.changed_since && <span className="warn"> — before the file last changed; choose again in Explore to show its data now</span>}
               .{" "}
-              <button className="link" onClick={reset} title="Show the automatic preview again (as Explore first shows the file)">
+              <button className="link" onClick={reset} title="Show the automatic preview again, drawn of the file as it is now">
                 Reset preview
               </button>
             </>
           ) : (
-            <>As Explore first shows the file. To show another view here: Explore → Library preview.</>
+            <>
+              Drawn on {dateTime(preview.drawn_at)}; it stays when the file changes. Right-click → Update preview draws it again; to show
+              another view here: Explore → ⋯ → Use as Library picture.
+            </>
           )}
         </div>
       )}
@@ -1758,7 +1771,7 @@ function PictureCard({
           <img src={url} alt="" />
         ) : (
           <span className="muted small" title={row.error ?? (preview && !preview.picture ? preview.reason ?? undefined : undefined)}>
-            {row.error ? "Can't be read" : !preview || (!preview.picture && preview.state === "drawing") ? "Drawing…" : !preview.picture && preview.state === "off" ? "Previews are off" : "No preview"}
+            {row.error ? "Can't be read" : row.writing && row.writing !== "stopped" ? "Live" : !preview || (!preview.picture && preview.state === "drawing") ? "Drawing…" : !preview.picture && preview.state === "off" ? "Previews are off" : "No preview"}
           </span>
         )}
       </div>
