@@ -25,7 +25,12 @@ From a fresh clone to a test viewer full of mock data, in three steps:
    ```
    It serves http://127.0.0.1:8765/?token=dev until Ctrl+C.
    - Without a folder, `dev_viewer.py` makes new mock data in a scratch folder itself.
-   - `--build` builds the web UI first.
+   - `--build` first builds the web UI and the docs (`mkdocs build --strict` into `site/`, which
+     Help shows when the viewer runs from source); a failed build stops it. Without `--build`, a
+     line says when Help is older than `docs/`.
+   - The scratch folder (settings, mock data) is deleted when the viewer stops, and old ones left
+     by stopped runs at the next start. Never one whose `dev_viewer.py` still runs, a
+     `--keep-settings` folder or a folder you named.
    - `--live` adds a measurement being written.
    - For live UI editing, also run `cd viewer/web && npm run dev` (http://localhost:5173, which
      forwards to it). See [Working on the viewer](#working-on-the-viewer).

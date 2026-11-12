@@ -18,7 +18,8 @@ Building on your own computer is only for trying a change to the packaging (see
    - look at the images and commit them.
 3. **Tests:** `uv run python scripts/test_all.py --perf`: everything, with the Explore benchmark
    ([Performance](testing.md#performance)).
-4. **Try it by hand** on mock data: `uv run python scripts/dev_viewer.py` (see
+4. **Try it by hand** on mock data: `uv run python scripts/dev_viewer.py --build` (builds the
+   web UI and the docs, so Help is up to date; see
    [Quick start for developers](index.md#quick-start-for-developers)).
 
 ## How to release
