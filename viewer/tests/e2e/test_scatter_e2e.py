@@ -16,10 +16,38 @@ def shots(viewer):
     d.save(viewer.data / "iq.lbd")
 
 
+def scatter_frame(page, action):
+    """Do `action`; the mapping of the scatter panel's last picture. The file opens with several
+    panels, so another panel's picture may come last (16.3): the scatter's has the strips' counts."""
+    import json
+
+    got = []
+
+    def collect(r):
+        if r.url.endswith("/render") and r.ok and "x-lbd-frame" in r.headers:
+            got.append(json.loads(r.headers["x-lbd-frame"]))
+    page.on("response", collect)
+    try:
+        frames(page, action)
+        for _ in range(100):                                       # its own picture, once it is here
+            mine = [m for m in got if "sides" in m]
+            if mine:
+                break
+            page.wait_for_timeout(200)
+        else:
+            raise AssertionError("no picture of this panel came")
+        n = len(got)
+        page.wait_for_timeout(400)                                 # and no later one of it
+        mine = [m for m in got if "sides" in m] if len(got) > n else mine
+    finally:
+        page.remove_listener("response", collect)
+    return mine[-1]
+
+
 def open_scatter(page, name="iq.lbd"):
     frames(page, lambda: row(page, name).dblclick())
     view = explore(page)
-    return view, frames(page, lambda: view.get_by_label("Plot type").select_option("scatter"))
+    return view, scatter_frame(page, lambda: view.get_by_label("Plot type").select_option("scatter"))
 
 
 def test_iq_starts_with_two_clouds_at_one_power(viewer, new_page):
@@ -122,13 +150,7 @@ def test_zooming_counts_the_view(viewer, new_page):
         page.mouse.move(box["x"] + left + width * 0.4, box["y"] + top + height * 0.4, steps=4)   # (equal axes: a square-ish box)
         page.mouse.up()
 
-    import json
-
-    got = []                                                       # every panel's pictures: x is synced (16.3)
-    page.on("response", lambda r: got.append(json.loads(r.headers["x-lbd-frame"]))
-            if r.url.endswith("/render") and r.ok and "x-lbd-frame" in r.headers else None)
-    frames(page, zoom)
-    after = [m for m in got if "sides" in m][-1]                  # this scatter's own picture
+    after = scatter_frame(page, zoom)                              # x is synced: every panel draws (16.3)
     assert sum(sum(c) for c in after["sides"]["x"]["counts"]) < whole
 
 

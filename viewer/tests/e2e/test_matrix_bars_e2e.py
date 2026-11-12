@@ -289,7 +289,7 @@ def test_open_in_figure_keeps_the_bars(viewer, new_page):
     open_as(page, name, "bars")
     frames(page, lambda: explore(page).get_by_label("Bars", exact=True).select_option("stacked"))
     explore(page).get_by_role("button", name="Open in Figure").click()
-    body = page.locator(".tab-body:not([hidden])")
+    body = page.locator("main:not([hidden]) .tab-body:not([hidden])")      # the Figure page's (Explore's is still there)
     expect(plot_type(page)).to_have_value("bars")
     expect(body.get_by_label("Bars", exact=True)).to_have_value("stacked")
     expect(body.get_by_label("Error")).to_be_checked()

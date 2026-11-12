@@ -119,7 +119,7 @@ def test_copy_picture_of_a_panel_and_of_all(sweep, viewer, context, new_page):
     def copy(entry="Copy picture"):
         explore(page).get_by_role("button", name="Data", exact=True).first.click()
         page.get_by_role("menuitem", name=entry).click()
-        expect(page.get_by_text("Picture copied")).to_be_visible()
+        expect(page.get_by_text("Picture copied").last).to_be_visible()   # (an earlier one may still show: 16.3)
         return clipboard_png(page)
 
     w, h = copy()                                            # as on screen: the stage (with the cuts' room)

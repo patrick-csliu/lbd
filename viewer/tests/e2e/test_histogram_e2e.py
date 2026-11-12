@@ -12,11 +12,39 @@ def shots(viewer):
     mock_values.single_shot_iq(True).save(viewer.data / "iq.lbd")
 
 
+def histogram_frame(page, action):
+    """Do `action`; the mapping of the histogram panel's last picture. The file opens with several
+    panels, so another panel's picture may come last (16.3): a histogram's shares no y."""
+    import json
+
+    got = []
+
+    def collect(r):
+        if r.url.endswith("/render") and r.ok and "x-lbd-frame" in r.headers:
+            got.append(json.loads(r.headers["x-lbd-frame"]))
+    page.on("response", collect)
+    try:
+        frames(page, action)
+        for _ in range(100):                                       # its own picture, once it is here
+            mine = [m for m in got if str((m.get("sync") or {}).get("y", "")).startswith("counts of")]
+            if mine:
+                break
+            page.wait_for_timeout(200)
+        else:
+            raise AssertionError("no picture of this panel came")
+        n = len(got)
+        page.wait_for_timeout(400)                                 # and no later one of it
+        mine = [m for m in got if str((m.get("sync") or {}).get("y", "")).startswith("counts of")] if len(got) > n else mine
+    finally:
+        page.remove_listener("response", collect)
+    return mine[-1]
+
+
 def open_histogram(page, name="iq.lbd"):
     """The first panel (value `I` of the file) as a histogram."""
     frames(page, lambda: row(page, name).dblclick())
     view = explore(page)
-    return view, frames(page, lambda: view.get_by_label("Plot type").select_option("histogram"))
+    return view, histogram_frame(page, lambda: view.get_by_label("Plot type").select_option("histogram"))
 
 
 def test_choose_histogram_and_its_controls(viewer, new_page):
@@ -32,7 +60,7 @@ def test_choose_histogram_and_its_controls(viewer, new_page):
     expect(view.get_by_label("Draw", exact=True)).to_be_disabled()
     expect(view.get_by_label("Horizontal axis")).to_have_count(0)
     assert meta["note"].startswith("400 numbers in ") and meta["strips"] is None
-    after = frames(page, lambda: slider.press("ArrowRight"))
+    after = histogram_frame(page, lambda: slider.press("ArrowRight"))
     assert after["full"] != meta["full"]
 
 

@@ -182,10 +182,12 @@ def test_two_cursors_are_read_without_cutting(values_files, new_page, size):
             break
     page.wait_for_timeout(800)
     overlay.click(position={"x": b["width"] * 0.3, "y": b["height"] * 0.25})
+    picks = explore(page).locator(".panel .explore-readout").first.locator(".explore-pick")
+    expect(picks).to_have_count(1)                                         # cursor 1 is read (a busy computer: later)
     page.keyboard.down("Shift")
     overlay.click(position={"x": b["width"] * 0.6, "y": b["height"] * 0.75})
     page.keyboard.up("Shift")
-    expect(explore(page).locator(".panel .explore-readout").first.locator(".explore-pick")).to_have_count(3)
+    expect(picks).to_have_count(3)
     explore(page).get_by_role("tab", name="Cursors").click()
     cut = page.evaluate(
         """() => {

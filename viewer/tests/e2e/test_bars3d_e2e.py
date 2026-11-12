@@ -20,7 +20,15 @@ def open_bars(page: Page, name: str = "assign.lbd"):
 
 
 def middle(page: Page):
-    box = explore(page).locator(".explore-overlay").first.bounding_box()
+    """The picture's middle, once the picture stays where it is (on a busy computer the panel's
+    layout settles later, 16.3: a drag that starts before would be measured from elsewhere)."""
+    overlay = explore(page).locator(".explore-overlay").first
+    box = None
+    for _ in range(40):
+        was, box = box, overlay.bounding_box()
+        if was == box:
+            break
+        page.wait_for_timeout(150)
     return box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
 
 
