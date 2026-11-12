@@ -112,6 +112,11 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
 
 **Viewer**
 
+- **Fixed: a red "This plot can't be shown" after leaving Explore idle.** The server closes a view
+  unused for 10 minutes; the first click, key, zoom, cursor, Peak or size change after that opened
+  it again but showed an error on every panel. Now the view opens again quietly ("Drawing…"), the
+  request is done on it, and several requests share one reopening.
+
 - **Fixed: changing the plot type while a picture was drawn** (for example a map to Scatter on a busy
   computer) could show "This plot can't be shown". Each Explore view now finishes one change before
   the next step reads it.

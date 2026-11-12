@@ -340,7 +340,39 @@ export default function ExploreView({
   const wanted = useRef<View | null>(null);
   const inflight = useRef(false);
   const dirty = useRef(false); // a picture is needed although the view didn't change
-  const reopen = useRef<() => void>(() => {});
+  const reopen = useRef<(quiet?: boolean) => void>(() => {});
+  // A session closed on the server (unused for 10 minutes, or the viewer restarted): opened again
+  // once, however many requests found it closed; they all wait for the same reopening (16.38).
+  const reopening = useRef<Promise<string | null> | null>(null);
+  const reopened = useRef<((sid: string | null) => void) | null>(null);
+  const reopenOnce = useCallback((): Promise<string | null> => {
+    if (!reopening.current) {
+      reopening.current = new Promise<string | null>((resolve) => {
+        reopened.current = resolve;
+        reopen.current(true);
+      }).finally(() => {
+        reopening.current = null;
+      });
+    }
+    return reopening.current;
+  }, []);
+  /** A request to this panel's server session. If the server closed it (404), it is opened again
+   * quietly ("Drawing…") and the request repeated on the new one, so a click, key or zoom made
+   * after a long pause isn't lost. Gives the session the answer came from, to drop answers of an
+   * old session. */
+  const onSession = useCallback(
+    async <T,>(sid: string, ask: (sid: string) => Promise<T>): Promise<[string, T]> => {
+      try {
+        return [sid, await ask(sid)];
+      } catch (e) {
+        if (!(e instanceof ApiError && e.status === 404)) throw e;
+        const now = session.current && session.current !== sid ? session.current : await reopenOnce();
+        if (!now) throw e;
+        return [now, await ask(now)];
+      }
+    },
+    [reopenOnce],
+  );
   const statRef = useRef(stat);
   statRef.current = stat;
   const formatRef = useRef(format);
@@ -664,7 +696,7 @@ export default function ExploreView({
       })
       .catch((e) => {
         if (e instanceof ApiError && e.status === 404 && session.current === sid) {
-          reopen.current();
+          reopenOnce(); // the picture is asked for again once it is open
           return;
         }
         setError(e instanceof Error ? e.message : String(e));
@@ -689,10 +721,11 @@ export default function ExploreView({
     const sid = session.current, st = cursorsRef.current, gone = cursorsGone.current;
     if (!sid || !at.length) return Promise.resolve();
     const cuts = st.cuts && !!kindOf(kindRef.current).strips;
-    return api
-      .exploreCursors(sid, { cursors: at, type: st.type, xlim: m.view.xlim, ylim: m.view.ylim, width: m.plot[2], height: m.plot[3], cuts, every: st.every !== false, at_line: st.at_line ?? "interpolated", together: !!st.together })
-      .then((a) => {
-        if (session.current !== sid || cursorsGone.current !== gone) return;
+    return onSession(sid, (id) =>
+      api.exploreCursors(id, { cursors: at, type: st.type, xlim: m.view.xlim, ylim: m.view.ylim, width: m.plot[2], height: m.plot[3], cuts, every: st.every !== false, at_line: st.at_line ?? "interpolated", together: !!st.together }),
+    )
+      .then(([used, a]) => {
+        if (session.current !== used || cursorsGone.current !== gone) return;
         readingRef.current = a;
         setReading(a);
         onReadingRef.current(a);
@@ -913,8 +946,8 @@ export default function ExploreView({
     const wasAll = !!f && !!wanted.current && same(wanted.current, { xlim: f.meta.full[0], ylim: f.meta.full[1] });
     const keepView = wasAll ? null : wanted.current ?? initialViewRef.current;
     initialViewRef.current = null;
-    const open = () => {
-      setStatus("Opening… (large files take a moment: the data is read and prepared once)");
+    const open = (quiet = false) => {
+      setStatus(quiet ? "Drawing…" : "Opening… (large files take a moment: the data is read and prepared once)");
       const s = specRef.current;
       openedSpecKey.current = JSON.stringify(s);
       api
@@ -926,6 +959,8 @@ export default function ExploreView({
           }
           sid = o.session;
           session.current = o.session;
+          reopened.current?.(o.session); // requests that found the old session closed go on with this one
+          reopened.current = null;
           setOpens((k) => k + 1);
           setOpened(o);
           onOpenedRef.current(o);
@@ -933,12 +968,16 @@ export default function ExploreView({
           if (o.warnings.length) setNote(o.warnings.map((w) => w.replace(/^[^:]*\.lbd: /, "")).join(" "));
           // the zoom to keep, else all the data as the server finds it (with the view settings applied)
           // (a zoom remembered from before can miss the data as it is drawn now: all of it then)
-          const usable = keepView && onData(keepView.xlim, o.full[0]) && onData(keepView.ylim, o.full[1]) ? keepView : null;
+          // opened again after the server closed it (16.38): the view asked for now, not the first one
+          const keepNow = quiet ? wanted.current ?? keepView : keepView;
+          const usable = keepNow && onData(keepNow.xlim, o.full[0]) && onData(keepNow.ylim, o.full[1]) ? keepNow : null;
           wanted.current = usable;
           showAll.current = !usable;
           request();
         })
         .catch((e) => {
+          reopened.current?.(null);
+          reopened.current = null;
           if (!cancelled) {
             const msg = e instanceof Error ? e.message : String(e);
             setError(msg);
@@ -982,10 +1021,14 @@ export default function ExploreView({
         request();
       })
       .catch((e) => {
+        if (e instanceof ApiError && e.status === 404 && session.current === sid) {
+          reopenOnce(); // opened again with these settings
+          return;
+        }
         setError(e instanceof Error ? e.message : String(e));
         setStatus("");
       });
-  }, [specKey, request, opens]);
+  }, [specKey, request, opens, reopenOnce]);
 
   // Other view settings (chosen traces, colours, scales): the same session draws them. A new
   // x or y scale shows all the data (the old limits may not exist on a log axis).
@@ -1206,10 +1249,9 @@ export default function ExploreView({
   const pickBar = (x: number, y: number) => {
     const sid = session.current, dpr = frame.current?.meta.dpr ?? 1;
     if (!sid) return;
-    api
-      .explorePick(sid, x * dpr, y * dpr)
-      .then(({ pick: p }) => {
-        if (session.current !== sid) return;
+    onSession(sid, (id) => api.explorePick(id, x * dpr, y * dpr))
+      .then(([used, { pick: p }]) => {
+        if (session.current !== used) return;
         picked.current = p ? [p.at[0] / dpr, p.at[1] / dpr] : null;
         const item = (role: "x" | "y", label: string, text: string) => ({ role, name: role, label, unit: "", value: null, text });
         const a: CursorsAnswer | null = p && {
@@ -1238,33 +1280,32 @@ export default function ExploreView({
         xlim = [Math.min(c1.x, c2.x), Math.max(c1.x, c2.x)];
         if (kindRef.current === "heatmap") ylim = [Math.min(c1.y, c2.y), Math.max(c1.y, c2.y)];
       }
-      api
-        .exploreFind(sid, what, xlim, ylim, kindRef.current === "curve" ? c1?.trace : undefined)
-        .then((p) => {
+      onSession(sid, (id) => api.exploreFind(id, what, xlim, ylim, kindRef.current === "curve" ? c1?.trace : undefined))
+        .then(([, p]) => {
           const rest = (r?.cursors ?? []).slice(1).filter((c): c is CursorRead => !!c).map(askOf);
           moveCursors([{ x: p.x, y: p.y, ...(p.trace !== undefined ? { trace: p.trace } : {}) }, ...rest]);
           onCursorsRef.current({ ...cursorsRef.current, active: 0 });
         })
         .catch((e) => setNote(e instanceof Error ? e.message : String(e)));
     },
-    [current, moveCursors],
+    [current, moveCursors, onSession],
   );
 
   const saveCut = useCallback(
     (which: "row" | "column" | "trace") => {
       const sid = session.current, c = readingRef.current?.cursors[0];
       if (!sid || !c) return;
-      api
-        .exploreSaveCut(sid, which, c.index, c.trace)
-        .then(async ({ path }) => {
+      onSession(sid, (id) => api.exploreSaveCut(id, which, c.index, c.trace))
+        .then(async ([used, { path }]) => {
           const cut = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1;
           const dir = path.slice(0, cut), name = path.slice(cut);
           const what = which === "trace" ? "this trace" : `this ${which}`;
           try {
             // the system's Save dialog says where; only without one (501) the name is typed below
             const picked = await api.pickSave(info.path, name, "lbd", `Save ${what} as a new file`);
-            if (picked.path === null) return;
-            const saved = await api.exploreSaveCut(sid, which, c.index, c.trace, picked.path);
+            const where = picked.path;
+            if (where === null) return;
+            const [, saved] = await onSession(used, (id) => api.exploreSaveCut(id, which, c.index, c.trace, where));
             setNote(`Saved ${saved.path}`);
             return;
           } catch (e) {
@@ -1280,14 +1321,14 @@ export default function ExploreView({
               check: (v) => (!v.trim() ? "Give the file a name." : !v.toLowerCase().endsWith(".lbd") ? "The name must end in .lbd." : /[\\/:*?"<>|]/.test(v) ? "A name can't contain \\ / : * ? \" < > |" : null),
             },
             onConfirm: async (v) => {
-              const saved = await api.exploreSaveCut(sid, which, c.index, c.trace, dir + v.trim());
+              const [, saved] = await onSession(used, (id) => api.exploreSaveCut(id, which, c.index, c.trace, dir + v.trim()));
               setNote(`Saved ${saved.path}`);
             },
           });
         })
         .catch((e) => setNote(e instanceof Error ? e.message : String(e)));
     },
-    [info.name, info.path],
+    [info.name, info.path, onSession],
   );
 
   const setAngle = (a: Partial<Angle> | null) => {
@@ -1329,13 +1370,13 @@ export default function ExploreView({
       onCursorsRef.current({ ...cursorsRef.current, active: 0 });
     },
     help: () => setHelp((h) => !h),
-    histogram: (st) => (session.current ? api.exploreHistogram(session.current, st) : Promise.resolve(null)),
+    histogram: (st) => (session.current ? onSession(session.current, (id) => api.exploreHistogram(id, st)).then(([, h]) => h) : Promise.resolve(null)),
     calculate: async (what, index) => {
       const sid = session.current, m = current(), r = readingRef.current;
       if (!sid || !m) throw new Error("the plot isn't open yet");
       const [c1, c2] = r?.cursors ?? [];
       const xlim = c1 && c2 ? [Math.min(c1.x, c2.x), Math.max(c1.x, c2.x)] : [...m.view.xlim];
-      const res = await api.exploreCalculate(sid, what, index, xlim, kindRef.current === "curve" ? c1?.trace : undefined);
+      const [, res] = await onSession(sid, (id) => api.exploreCalculate(id, what, index, xlim, kindRef.current === "curve" ? c1?.trace : undefined));
       return res.value;
     },
     cutSource: (which) => {
