@@ -249,3 +249,23 @@ def test_quick():
     assert fig.axes[0].collections[0].get_offsets().shape == (200, 2)
     fig = lp.quick(x, np.arange(3.0), z=np.ones((3, 20)), z_label="Z")
     assert len(fig.axes) == 2
+
+
+def test_two_units_on_one_vertical_axis_say_so_only_where_there_is_one_axis():
+    """16.51: a figure has one vertical axis, so two units get a note; Explore puts the second on
+    a right-hand axis (`two_axes`), so it gets none."""
+    import warnings
+
+    import numpy as np
+    from lbd.plot import render as rnd
+
+    d = lbd.Dataset()
+    d.add_axis("t", np.arange(5.0), unit="s")
+    d.add_value("a", np.arange(5.0), axes="t", unit="V")
+    d.add_value("b", np.arange(5.0), axes="t", unit="K")
+    spec = rnd.resolve_spec(d, {"kind": "curve", "values": ["a", "b"]})
+    with pytest.warns(rnd.RenderWarning, match="different units"):
+        rnd.prepare_curves(d, spec, lp.load_style())
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        rnd.prepare_curves(d, spec, lp.load_style(), two_axes=True)

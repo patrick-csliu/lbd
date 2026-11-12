@@ -98,3 +98,31 @@ def test_a_label_shortened_at_a_small_size_is_whole_again_at_a_larger_one(values
     s.render(None, None)
     assert s.ax.xaxis.label.get_text() == whole == s.sync_keys()["x"]
     s.close()
+
+
+def test_a_right_hand_axis_fills_the_height_on_a_linear_scale(tmp_path):
+    """16.52: two units, the second on a right-hand axis: on a linear scale each side fits its own
+    range (temperatures of at most 300 K no longer use 2 % of the height beside a pressure of
+    1000 mbar); on a log scale the middles line up as before."""
+    import numpy as np
+    import lbd
+
+    t = np.linspace(0, 10, 200)
+    d = lbd.Dataset("fridge")
+    d.add_axis("time", t, unit="s")
+    d.add_value("P", 1000 * np.exp(-t), axes="time", unit="Pa")
+    d.add_value("T", 50 + 250 * np.exp(-t / 3), axes="time", unit="K")
+    p = d.save(tmp_path / "fridge.lbd")
+    s = ExploreSession(p, "v", {"kind": "curve", "values": ["P", "T"]}, lp.load_style(), 600, 400, 1)
+
+    def right_share():
+        apart = s.model.units_apart
+        right = np.concatenate([s.model.lines[k][0] for k in apart["right"]])
+        (_, _), (y0, y1) = s.full
+        return (right.max() - right.min()) / (y1 - y0)
+    assert right_share() > 0.8                                        # linear: it fills the height
+    s.apply({"yscale": "log"})
+    assert s.model.units_apart["log"] and s.ax.get_yscale() == "log"
+    s.apply({"yscale": "linear"})
+    assert not s.model.units_apart["log"] and right_share() > 0.8
+    s.close()

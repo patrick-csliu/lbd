@@ -118,6 +118,12 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
 
 **Viewer**
 
+- **Fixed: a right-hand axis squashed its curves** (Explore, two units in one panel). On a linear
+  vertical scale each side now fills the height with its own range (temperatures beside a
+  pressure no longer use 2 % of it); on **Log vertical** the middles of the two ranges line up as
+  before. **Fixed:** two units in one Explore panel no longer show a red "the vertical axis shows
+  no unit": each has its own axis there (the Figure page, with one axis, still says so in its
+  notes).
 - **A slider no longer moves the plot** (Explore, curves and scatter). While a slider steps
   through a measurement, the unit prefix, the plot's size and (until you zoom) its limits stay the
   same at every step, so the steps can be compared; before, a step could change the unit (mV to V)

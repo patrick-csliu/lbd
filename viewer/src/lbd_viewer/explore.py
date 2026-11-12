@@ -213,7 +213,7 @@ class ExploreSession:
         with rnd.RENDER_LOCK, matplotlib.rc_context(self.style.to_rcparams()):
             self._check_open()
             if self.base_kind == "curve":
-                self.base_model = rnd.prepare_curves(self.data, self.spec, self.style, big=big, whole_span=True)
+                self.base_model = rnd.prepare_curves(self.data, self.spec, self.style, big=big, whole_span=True, two_axes=True)
             elif self.base_kind != "heatmap":
                 self.base_model = kinds.interactions()[self.base_kind].prepare(self)
             else:
@@ -450,8 +450,12 @@ class ExploreSession:
         axis' lines, label and mapping; None when the plot has one unit. A third unit can't be
         shown (an ExploreError says to use another panel). Operations and equations give one
         quantity (no unit), so they show one axis."""
-        if getattr(m, "units_apart", None):
-            return m                                     # already worked out for this model
+        log = getattr(self, "units_log", False)
+        done = getattr(m, "units_apart", None)
+        if done:
+            if done["log"] == log:
+                return m                                 # already worked out for this model and scale
+            m = done["base"]                             # Log vertical changed: worked out again
         values = self.spec["values"]
         operated = self.ops_result is not None and self.ops_result.applied > 0
         if len(values) < 2 or len(m.lines) != len(values) or operated:
@@ -477,9 +481,9 @@ class ExploreSession:
         left, right = left[np.isfinite(left)], right[np.isfinite(right)]
         a, b = 1.0, 0.0
         if left.size and right.size:
-            if left.min() > 0 and right.min() > 0:       # ratios kept: a log scale shows both
+            if log and left.min() > 0 and right.min() > 0:   # a log scale: the middles (geometric) line up
                 a = float(np.sqrt(left.min() * left.max()) / np.sqrt(right.min() * right.max()))
-            else:                                        # the right's range over the left's
+            else:                                        # each side fills the height: the right's range over the left's (16.52)
                 span_l, span_r = np.ptp(left) or 1.0, np.ptp(right) or 1.0
                 a = float(span_l / span_r)
                 b = float(left.min() - a * right.min())
@@ -488,7 +492,7 @@ class ExploreSession:
         out = dataclasses.replace(m, lines=lines, yf=f1, ylim=None,
                                   y_label=f"{names[0]} ({u1})" if u1 else names[0])
         out.units_apart = {"per_line": per_line, "right": groups[1], "a": a, "b": b, "f2": f2,
-                           "label": f"{names[1]} ({u2})" if u2 else names[1]}
+                           "label": f"{names[1]} ({u2})" if u2 else names[1], "log": log, "base": m}
         return out
 
     def _plotted_unit(self, name: str) -> str:
@@ -656,6 +660,13 @@ class ExploreSession:
             raise ExploreError(str(e)) from None
         if changed:
             self.settings = {}                           # a new figure: every setting again
+        apart = getattr(self.model, "units_apart", None) if self.kind == "curve" else None
+        if apart and (settings.get("yscale", self.base_scales[1]) == "log") != apart["log"]:
+            # a right-hand axis is placed one way on a linear scale and another on a log one (16.52)
+            self.units_log = not apart["log"]
+            self.model = apart["base"]
+            self._build()
+            self.settings = {}
         with rnd.RENDER_LOCK, matplotlib.rc_context(self.style.to_rcparams()):
             self._check_open()
             self.log_refused: List[str] = []

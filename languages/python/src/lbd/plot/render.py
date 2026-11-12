@@ -836,13 +836,15 @@ class MapModel:
     y_ticks: Optional[Tuple[np.ndarray, List[str]]] = None
 
 
-def prepare_curves(d, spec, style: Style, big: Optional[Any] = None, whole_span: bool = False) -> CurveModel:
+def prepare_curves(d, spec, style: Style, big: Optional[Any] = None, whole_span: bool = False,
+                   two_axes: bool = False) -> CurveModel:
     """`big`: stands for the curves when they are too big to read whole (LBD Viewer's
     summaries.BigCurves, one value): `big.trace(j)` for each line, `big.range()` their lowest and
     highest number, `trace * factor` scaled; the model's lines are then read part by part.
     `whole_span`: the vertical unit prefix is chosen from the values' numbers at every slider
     position, not only the ones shown, so it stays the same while a slider moves (Explore,
-    16.49); the model's `whole` then holds their range (plot units)."""
+    16.49); the model's `whole` then holds their range (plot units). `two_axes`: a second unit
+    gets its own right-hand axis (Explore), so there is no note that the axis shows no unit."""
     d = flat(d)
     a = style.figure.axes
     xs, ys = style.axis_style("x"), style.axis_style("y")
@@ -894,7 +896,7 @@ def prepare_curves(d, spec, style: Style, big: Optional[Any] = None, whole_span:
         yall = np.asarray(big.range(), dtype=float)
     else:
         yall = np.concatenate([np.ravel(y) for y, _ in lines]) if lines else np.array([])
-    if len(set(units)) > 1:
+    if len(set(units)) > 1 and not (two_axes and len(set(units)) == 2):
         _warn(f"the curves have different units {sorted(set(units))}; the vertical axis shows no unit", RenderWarning)
     common_unit = units[0] if len(set(units)) == 1 else ""
     whole = None
