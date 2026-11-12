@@ -1,5 +1,6 @@
 """scripts/make_mock_data.py: one command makes a whole folder of mock data, with every kind of
-label (stars, nested projects, users and tags, comments, labels kept without a file).
+label (stars, nested projects, users and tags, comments, labels kept without a file) and, unless
+small, the large files (engine tests); mock_live.py --variable writes a variable sweep.
 scripts/dev_viewer.py is tested in test_dev_viewer.py."""
 
 import importlib.util
@@ -7,7 +8,10 @@ import json
 import sys
 from pathlib import Path
 
+import numpy as np
 import pytest
+
+import lbd
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -36,3 +40,47 @@ def test_a_folder_of_mock_data_with_every_kind_of_label(tmp_path):
     assert set(kept) == {"project", "users", "tags"}
     with pytest.raises(SystemExit):                                                          # never over files
         make.make(root, files=5, small=True)
+
+
+def test_the_large_files_are_made_unless_small(tmp_path, monkeypatch):
+    """Without --small the mock data has Large/ (the engine tests); with it, none. The large
+    makers are swapped for the small one here, so the test stays quick."""
+    pytest.importorskip("lbd_viewer")
+    make = load("make_mock_data")                      # puts viewer/tests on sys.path
+    import mock_large
+
+    monkeypatch.setattr(mock_large, "MAKERS", {"4 small map.lbd": mock_large.small_map})
+    made = make.make(tmp_path / "full", files=5, with_labels=False)
+    assert made["large"] == 1 and (tmp_path / "full" / "Large" / "4 small map.lbd").is_file()
+    assert any("Large: 1 large files" in line for line in make.report(tmp_path / "full", made))
+    made = make.make(tmp_path / "small", files=5, with_labels=False, small=True)
+    assert made["large"] == 0 and not (tmp_path / "small" / "Large").exists()
+
+
+def test_the_engine_tests_numbers():
+    """mock_large's generator is the engine test's: s = (1664525 s + 1013904223) mod 2^32,
+    returning s / 2^32, the same as a step-by-step loop, also across its blocks of 65 536."""
+    load("make_mock_data")
+    import mock_large
+
+    n, s, expected = 70_000, 1, []
+    for _ in range(n):
+        s = (1664525 * s + 1013904223) % 2 ** 32
+        expected.append(s / 2 ** 32)
+    assert np.array_equal(mock_large.rng(1, n), expected)
+    assert mock_large.rng(1, 1)[0] == 1015568748 / 2 ** 32
+
+    d = mock_large.small_map()                         # engine test 4: value = column + 5 x row
+    assert list(d.axes["x"].data) == [1, 2, 4, 8, 16] and d.values["value"].data[3, 4] == 4 + 5 * 3
+    assert list(mock_large.MAKERS) == ["1 accuracy.lbd", "2 traces.lbd", "3 map.lbd", "4 small map.lbd"]
+
+
+def test_a_variable_sweep_written_live(tmp_path):
+    """mock_live.py --variable: a variable sweep with lbd.Writer, a power a step."""
+    load("make_mock_data")
+    import mock_live
+
+    path = mock_live.measure_variable(tmp_path, seconds=0)    # two powers, no waiting
+    d = lbd.load(path)
+    assert d.lbd_version == "2.0" and list(d.groups) == ["scan"]
+    assert d.values["Q"].data.shape == (2,) and len(d.axes["freq"].data) == 46 + 40

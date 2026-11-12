@@ -48,7 +48,13 @@ WIDTH, HEIGHT = 900, 600
 # -- the data -------------------------------------------------------------------------------------
 
 def make_data() -> Dict[str, Path]:
-    """The three benchmark files (made on first use, ~10 s; the same numbers every time)."""
+    """The three benchmark files (made on first use, ~10 s; the same numbers every time).
+
+    They are shaped like engine tests 3, 2 and 1 but are not the same files: the noise comes from
+    numpy's generator, and the long curve has only the spike (engine test 1 also has a
+    three-point dip and a gap of 100 points). The exact engine tests are in
+    viewer/tests/mock_large.py; these stay as they are, so the times stay comparable with the
+    earlier runs (the baselines)."""
     import lbd
 
     files = {"traces": DATA / "traces.lbd", "map": DATA / "map.lbd", "points": DATA / "points.lbd"}
@@ -79,7 +85,7 @@ def make_data() -> Dict[str, Path]:
     d.add_value("S21", z, axes=["flux", "freq"], unit="dB")
     d.save(files["map"])
 
-    n = 1_000_000                                   # points: one long noisy curve with a spike
+    n = 1_000_000                                   # points: one long noisy curve with a spike (no dip, no gap)
     x = np.arange(n) / (n - 1)
     y = np.sin(2 * np.pi * 3 * x) + 0.02 * (rng.random(n) - 0.5)
     y[731_234] = 5

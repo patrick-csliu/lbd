@@ -5,8 +5,9 @@
 writes the `.lbd` files into FOLDER. Each is made for a part of the panels: several recorded
 values against one axis, 3-D maps with a slider, values over different axes, many values, one
 value (nothing changes), single-shot I/Q readout, data points with a shape, and variable sweeps
-(axis groups, format 2.0: frequencies chosen per power, a triangle, an adaptive map). The tests use `small=True`: the same
-structure with few points. Simulated data, with a fixed random seed, so the files are always the
+(axis groups, format 2.0: frequencies chosen per power, a triangle, an adaptive map), and grids
+with uneven steps (a map uneven on both axes, a map on a log-spaced axis, a curve with uneven x).
+The tests use `small=True`: the same structure with few points. Simulated data, with a fixed random seed, so the files are always the
 same.
 """
 
@@ -21,7 +22,7 @@ import lbd
 NAMES = ["6 rabi.lbd", "7 spectroscopy 3d.lbd", "8 mixed axes.lbd", "9 many values.lbd",
          "10 one value.lbd", "11 single shot iq.lbd", "12 tomography.lbd", "13 variable sweep.lbd",
          "14 triangle.lbd", "15 adaptive map.lbd", "16 density matrix.lbd", "17 assignment matrix.lbd",
-         "18 bars.lbd", "19 curved grid.lbd"]
+         "18 bars.lbd", "19 curved grid.lbd", "20 uneven map.lbd", "21 log axis map.lbd", "22 uneven curve.lbd"]
 
 
 def rabi(small: bool) -> lbd.Dataset:
@@ -276,8 +277,48 @@ def curved_grid(small: bool) -> lbd.Dataset:
     return d
 
 
+def uneven_map(small: bool) -> lbd.Dataset:
+    """A map whose x and y steps both grow: cells get wider to the right and taller to the top,
+    each edge halfway between two stored values. value = column + 10 x row, so a cell's value
+    says where it is."""
+    x = np.array([0.0, 0.1, 0.3, 0.7, 1.5, 3.1] if small else [0.0, 0.1, 0.3, 0.7, 1.5, 3.1, 6.3, 12.7])
+    y = np.array([0.0, 1, 3, 7] if small else [0.0, 1, 3, 7, 15, 31])
+    d = lbd.Dataset(title="Uneven map", description="Mock data: a map with uneven steps on both axes")
+    d.add_axis("y", y, unit="V", label="Gate")
+    d.add_axis("x", x, unit="V", label="Bias")
+    d.add_value("value", np.arange(float(x.size))[None, :] + 10 * np.arange(float(y.size))[:, None], axes=["y", "x"])
+    d.plot = {"kind": "heatmap", "x": "x", "y": "y"}
+    return d
+
+
+def log_axis_map(small: bool) -> lbd.Dataset:
+    """A map against a log-spaced axis (six decades, ten points per decade; two when small) and an even one,
+    saved with a log x scale, on which its cells have the same width."""
+    f = np.logspace(1, 7, 13 if small else 61)
+    a = np.linspace(0, 1, 5 if small else 21)
+    roll = 1 / (1 + (f[None, :] / (1e3 * 10 ** (3 * a[:, None]))) ** 2)     # a corner that moves up with a
+    d = lbd.Dataset(title="Log axis map", description="Mock data: a map against a log-spaced axis")
+    d.add_axis("a", a, label="Setting")
+    d.add_axis("f", f, unit="Hz", label="Frequency")
+    d.add_value("gain", 10 * np.log10(roll), axes=["a", "f"], unit="dB", label="Gain")
+    d.plot = {"kind": "heatmap", "x": "f", "y": "a", "x_scale": "log"}
+    return d
+
+
+def uneven_curve(small: bool) -> lbd.Dataset:
+    """A curve whose points are dense near a peak and sparse away from it (uneven x)."""
+    rng = np.random.default_rng(22)
+    u = np.linspace(-1, 1, 21 if small else 201)
+    x = 0.5 + 0.5 * u ** 3                                                    # dense around 0.5
+    d = lbd.Dataset(title="Uneven curve", description="Mock data: a curve with uneven x steps")
+    d.add_axis("x", x, unit="V", label="Bias")
+    d.add_value("signal", 1 / (1 + ((x - 0.5) / 0.02) ** 2) + rng.normal(0, 0.01, x.size), axes="x", label="Signal")
+    return d
+
+
 MAKERS = dict(zip(NAMES, [rabi, spectroscopy_3d, mixed_axes, many_values, one_value, single_shot_iq, tomography,
-                          variable_sweep, triangle, adaptive_map, density_matrix, assignment_matrix, bars, curved_grid]))
+                          variable_sweep, triangle, adaptive_map, density_matrix, assignment_matrix, bars, curved_grid,
+                          uneven_map, log_axis_map, uneven_curve]))
 
 
 def write_all(folder: Path, small: bool = False) -> List[Path]:

@@ -1,6 +1,6 @@
 """Files being written, for trying LBD Viewer by hand (plan 6b).
 
-    uv run python viewer/tests/mock_live.py FOLDER [--seconds 120]
+    uv run python viewer/tests/mock_live.py FOLDER [--seconds 120] [--variable]
 
 Writes `FOLDER/live sweep.lbd` slowly with lbd.Writer (a power sweep, one trace every second,
 and a growing temperature log), so the Library shows it as "measuring…" and Explore shows it as
@@ -11,6 +11,9 @@ script with Ctrl+C to see a running measurement become "stopped before finishing
 With `--copy-to OTHER --as-computer LAB-PC`, the file being written and its heartbeat are also
 copied into OTHER every few traces, as a sync tool would bring them from another computer (no
 lock travels): open OTHER in the viewer to see "Measuring on LAB-PC", then "No sign …".
+
+With `--variable`, it writes `FOLDER/live variable sweep.lbd` instead: a variable sweep (an axis
+group, format 2.0), one power a step, each with its own frequencies (as mock_values.variable_sweep).
 """
 
 import argparse
@@ -87,13 +90,46 @@ def measure(folder: Path, seconds: float, copy_to: Optional[Path] = None, comput
     return w.path
 
 
+def measure_variable(folder: Path, seconds: float) -> Path:
+    """A variable sweep written live (format 2.0, as mock_values.variable_sweep): for each
+    power, the frequencies are chosen around where the resonance is at that power, and Q is
+    fitted once per power; one power a step."""
+    rng = np.random.default_rng(13)
+    powers = np.linspace(-60, 0, max(2, int(seconds)))
+    w = lbd.Writer(folder / "live variable sweep.lbd", title="live variable sweep",
+                   description="written by viewer/tests/mock_live.py --variable")
+    w.add_group("scan")
+    w.add_axis("power", group="scan", unit="dBm", label="Power")
+    w.add_axis("freq", group="scan", unit="Hz", label="Frequency")
+    w.add_value("S21", axes=["power", "freq"], dtype="complex128")
+    w.add_value("Q", axes="power", label="Quality factor")
+    with w:
+        for i, p in enumerate(powers):
+            f0 = 7e9 - 2e6 * 10 ** (p / 20)                  # the resonance moves down at high power
+            n = 40 + int(-p / 10)                            # more points at low power
+            f = np.linspace(f0 - 3e6, f0 + 3e6, n)
+            w.write(power=p, freq=f, S21=1 - 0.8 / (1 + 2j * (f - f0) / 0.6e6) + 0.01 * rng.normal(size=n))
+            w.write(power=p, Q=1e4 * (1 + 0.1 * rng.normal()))
+            print(f"\r{i + 1} of {len(powers)} powers", end="", flush=True)
+            time.sleep(seconds / len(powers))
+    print()
+    return w.path
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("folder", type=Path)
     ap.add_argument("--seconds", type=float, default=120.0, help="how long the live measurement takes")
     ap.add_argument("--copy-to", type=Path, help="also copy it there every few traces, as a sync tool would")
     ap.add_argument("--as-computer", default="OTHER-PC", help="the computer the copies' heartbeat names")
+    ap.add_argument("--variable", action="store_true",
+                    help="write a variable sweep (frequencies chosen per power) instead of the power sweep")
     args = ap.parse_args()
     args.folder.mkdir(parents=True, exist_ok=True)
+    if args.variable:
+        if args.copy_to is not None:
+            ap.error("--copy-to goes with the power sweep: leave out --variable or --copy-to")
+        print("finished", measure_variable(args.folder, args.seconds))
+        raise SystemExit(0)
     print("left", stopped(args.folder))
     print("finished", measure(args.folder, args.seconds, args.copy_to, args.as_computer))
