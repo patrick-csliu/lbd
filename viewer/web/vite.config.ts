@@ -15,5 +15,8 @@ export default defineConfig({
   build: {
     outDir: "../src/lbd_viewer/static",
     emptyOutDir: true,
+    // One script for the whole page (about 600 kB, 190 kB compressed) is right here: the page is
+    // loaded from this computer, so Vite's 500 kB hint for websites doesn't apply.
+    chunkSizeWarningLimit: 1000,
   },
 });

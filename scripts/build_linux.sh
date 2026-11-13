@@ -21,7 +21,8 @@ VERSION=$(uv run python scripts/check_versions.py)
 echo "    version $VERSION"
 
 step "Python build environment ($UV_PROJECT_ENVIRONMENT)"
-uv sync --all-packages --group docs
+export NO_MKDOCS_2_WARNING=1   # Material's notice about MkDocs 2; pyproject keeps mkdocs below 2
+uv sync --all-packages --group docs --quiet
 
 step "Web UI"
 (cd viewer/web && npm ci && npm run build)

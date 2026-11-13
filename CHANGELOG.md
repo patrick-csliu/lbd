@@ -714,6 +714,11 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
 
 **For developers**
 
+- The installer builds without warnings: `uv` runs quietly in the build scripts (PowerShell showed
+  its progress as errors), esbuild's install step is approved in `package.json`, Vite's
+  chunk-size hint is raised for this local page, Material's MkDocs 2 notice is off
+  (`NO_MKDOCS_2_WARNING`; mkdocs stays below 2), and the viewer depends on `tzdata` on Windows
+  (PyInstaller asked for it: time zone names for Python's `zoneinfo`).
 - The viewer depends on `watchdog` (the Library's notifications, `library_watch.py`; bundled in
   every installer). `LibraryIndex.scan(folders=...)` checks only some folders; `scan()` returns
   what it found (`ScanResult`).

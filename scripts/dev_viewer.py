@@ -73,7 +73,9 @@ def build_docs() -> int:
               "then again with --build.", file=sys.stderr)
         return 2
     print("Building the docs (mkdocs build --strict)...")
-    code = subprocess.call([sys.executable, "-m", "mkdocs", "build", "--strict", "--quiet"], cwd=REPO)
+    # (NO_MKDOCS_2_WARNING: Material's notice about MkDocs 2; pyproject keeps mkdocs below 2)
+    code = subprocess.call([sys.executable, "-m", "mkdocs", "build", "--strict", "--quiet"], cwd=REPO,
+                           env={**os.environ, "NO_MKDOCS_2_WARNING": "1"})
     if code:
         print(f"The docs build failed (exit code {code}): see its output above.", file=sys.stderr)
     return code
