@@ -174,10 +174,9 @@ def test_check_folders_now_says_what_it_found(viewer, new_page, tmp_path):
     expect(outcome).to_have_count(0)
 
 
-def test_the_notice_and_names_only(viewer, library_files, new_page):
+def test_names_only(viewer, library_files, new_page):
     viewer.state.config.set_library({"read_headers": False})            # before the first index
     page = new_page("Library")
-    expect(page.locator(".library-notice")).to_have_count(0)            # headers off: nothing to warn about
     expect(status(page)).to_contain_text("names only")
     shows(page, every_file(viewer), 20_000)
     page.get_by_label("Search the files").fill("late resonator")       # names only: the file name is found
@@ -186,16 +185,10 @@ def test_the_notice_and_names_only(viewer, library_files, new_page):
     late.click()
     expect(page.locator(".library-detail")).to_contain_text("Frequency")   # read when selected ...
     expect(lib_row(page, "Late resonator sweep")).to_contain_text("2026-03-14 23:30", timeout=10_000)  # ... and its row fills in
-    # on again: the notice, once
+    # on again: the details are read (the first start asks about cloud folders now, 18.8: no notice)
     viewer.state.config.set_library({"read_headers": True})
     page.reload()
-    notice = page.locator(".library-notice")
-    expect(notice).to_contain_text("cloud folder")
-    notice.get_by_role("button", name="OK").click()
-    expect(notice).to_have_count(0)
-    page.reload()
     expect(status(page)).to_contain_text("files", timeout=10_000)
-    expect(page.locator(".library-notice")).to_have_count(0)
 
 
 def test_the_panes_are_dragged_wider_and_the_sidebar_hidden(viewer, new_page):

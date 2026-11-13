@@ -152,7 +152,8 @@ class Config:
             return {"roots": [], "default_style": None, "open_files_in": "viewer", "open_data_in": "explore",
                     "theme": "system", "library": dict(LIBRARY_DEFAULTS), "memory": dict(MEMORY_DEFAULTS),
                     "measurements": dict(MEASUREMENTS_DEFAULTS), "explore": dict(EXPLORE_DEFAULTS),
-                    "last_version": None, "updates": dict(UPDATES_DEFAULTS)}
+                    "last_version": None, "updates": dict(UPDATES_DEFAULTS),
+                    "first_start_done": False, "check_updates": None}
         if not isinstance(data, dict):
             raise ConfigError(f"{self.settings_path} must contain a JSON object; fix or delete the file")
         roots = data.get("roots", [])
@@ -194,13 +195,21 @@ class Config:
             updates = _check_updates({**UPDATES_DEFAULTS, **(data.get("updates") or {})})
         except ConfigError as e:
             raise ConfigError(f"{self.settings_path}: {e}; fix or delete the file") from None
+        # The first start's questions (18.8): asked until answered. Settings from before them with
+        # folders in them are past their first start; the version-check question is still asked.
+        done = data.get("first_start_done", bool(roots))
+        if not isinstance(done, bool):
+            raise ConfigError(f"{self.settings_path}: 'first_start_done' must be true or false; fix or delete the file")
+        check_updates = data.get("check_updates")
+        if check_updates is not None and not isinstance(check_updates, bool):
+            raise ConfigError(f"{self.settings_path}: 'check_updates' must be true, false or empty; fix or delete the file")
         last_version = data.get("last_version")     # the viewer that used these settings last
         if last_version is not None and not isinstance(last_version, str):
             raise ConfigError(f"{self.settings_path}: 'last_version' must be text; fix or delete the file")
         return {"roots": list(roots), "default_style": default or None, "open_files_in": open_in,
                 "open_data_in": open_data, "theme": theme, "library": library, "memory": memory,
                 "measurements": measurements, "explore": explore, "last_version": last_version,
-                "updates": updates}
+                "updates": updates, "first_start_done": done, "check_updates": check_updates}
 
     def settings(self) -> Dict[str, Any]:
         """{"roots": [...], "default_style": name, "open_files_in": ..., "open_data_in": ...,
@@ -212,7 +221,8 @@ class Config:
         return {"roots": stored["roots"], "default_style": default, "open_files_in": stored["open_files_in"],
                 "open_data_in": stored["open_data_in"], "theme": stored["theme"], "library": stored["library"],
                 "memory": stored["memory"], "measurements": stored["measurements"], "explore": stored["explore"],
-                "last_version": stored["last_version"], "updates": stored["updates"]}
+                "last_version": stored["last_version"], "updates": stored["updates"],
+                "first_start_done": stored["first_start_done"], "check_updates": stored["check_updates"]}
 
     def problems(self) -> List[str]:
         """Things the user should know about the settings (shown as warnings in the viewer)."""
@@ -382,6 +392,25 @@ class Config:
             self.set_measurements(groups["measurements"])
         if "explore" in groups:
             self.set_explore(groups["explore"])
+
+    def set_first_start_done(self, done: bool) -> None:
+        """The first start's questions were answered (18.8): they aren't asked again."""
+        if not isinstance(done, bool):
+            raise ConfigError(f"first_start_done must be true or false, not {done!r}")
+        with self._lock:
+            s = self.settings()
+            s["first_start_done"] = done
+            self._save_settings(s)
+
+    def set_check_updates(self, on: bool) -> None:
+        """Whether the viewer asks GitHub for a newer version, once a day at a real start (16.25;
+        asked at the first start, 18.8). Until answered (None) it doesn't."""
+        if not isinstance(on, bool):
+            raise ConfigError(f"check_updates must be true or false, not {on!r}")
+        with self._lock:
+            s = self.settings()
+            s["check_updates"] = on
+            self._save_settings(s)
 
     def set_theme(self, theme: str) -> None:
         """The viewer's colours: "system" (follow the operating system), "light" or "dark"."""

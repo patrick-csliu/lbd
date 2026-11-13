@@ -1,3 +1,4 @@
+import { FirstStart, firstStartNeeded } from "./FirstStart";
 import { setDateZone } from "./libraryColumns";
 import { setAutoUnits } from "./units";
 import { CSSProperties, KeyboardEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -962,6 +963,7 @@ function Shell() {
               />
             )}
             <UpdateReminder onOpenAbout={() => openSettings("about")} />
+            {firstStartNeeded(state) && <FirstStart state={state} onSettings={setState} />}
           </div>
         )}
         <a className="help-button" href={docsUrl()} target="_blank" rel="noopener" title="Open the documentation (works offline)">
@@ -986,7 +988,6 @@ function Shell() {
             closeTabs([path]);
             setLibraryPath((a) => (a === path ? null : a));
           }}
-          onOpenSettings={() => openSettings("library")}
         />
       )}
 

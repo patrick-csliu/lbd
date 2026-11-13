@@ -4,6 +4,8 @@ import type { View, ViewSettings } from "./ExploreView";
 
 export interface AppState {
   version: string;
+  first_start_done: boolean; // the first start's questions answered (18.8)
+  check_updates: boolean | null; // ask GitHub for a newer version at a real start; null: not answered yet
   lbd_version: string;
   roots: string[];
   default_style: string;
@@ -1084,6 +1086,7 @@ export const api = {
   setOpenFilesIn: (where: OpenFilesIn) => call<AppState>("PUT", "/api/settings", { open_files_in: where }),
   setOpenDataIn: (where: OpenDataIn) => call<AppState>("PUT", "/api/settings", { open_data_in: where }),
   setTheme: (theme: Theme) => call<AppState>("PUT", "/api/settings", { theme }),
+  setFirstStart: (changes: { first_start_done?: boolean; check_updates?: boolean }) => call<AppState>("PUT", "/api/settings", changes),
   resetSettings: (section: string) => call<AppState>("POST", "/api/settings/reset", { section }),
   /** What is known about a new version; claim: this page shows the reminder if it is due (once per start). */
   updates: (claim = false) => call<UpdatesState>("GET", "/api/updates", undefined, claim ? { claim: "true" } : undefined),

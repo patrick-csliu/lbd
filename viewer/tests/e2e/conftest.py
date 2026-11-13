@@ -125,6 +125,9 @@ def viewer(cfg, data_dir, monkeypatch):
     # most tests look at several panels, as a new file opened before 16.45; the default (1) and
     # the setting are tested in test_panels_e2e.py
     cfg.set_explore({"new_panels": 4})
+    # past the first start's questions (18.8), never online; test_first_start_e2e.py asks them
+    cfg.set_first_start_done(True)
+    cfg.set_check_updates(False)
     v = Viewer(cfg, data_dir)
     yield v
     v.stop()

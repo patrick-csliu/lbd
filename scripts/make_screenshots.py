@@ -164,6 +164,9 @@ def start_viewer(data: Path) -> Tuple[str, uvicorn.Server]:
     cfg.set_library({"sidebar_scopes": ["library", "folders", "starred", "recent"]})
     # the pictures show files with several values in several panels (a new file opens with one, 16.45)
     cfg.set_explore({"new_panels": 4})
+    # past the first start's questions (18.8), never online
+    cfg.set_first_start_done(True)
+    cfg.set_check_updates(False)
     state = AppState(cfg, token=TOKEN, port=port)
     srv = uvicorn.Server(uvicorn.Config(create_app(state), host="127.0.0.1", port=port, log_level="warning"))
     threading.Thread(target=srv.run, daemon=True).start()
@@ -478,7 +481,6 @@ def give_labels(page: Page) -> None:
 def library(page: Page, url: str, ctx) -> None:
     fresh(page, url, "Library")
     page.locator(".library-row").first.wait_for(timeout=60_000)   # the index reads the files first
-    page.get_by_role("button", name="OK", exact=True).click()     # the first-time notice (described in the text)
     give_labels(page)
     page.get_by_label("Search the files").fill("resonator")       # a search, shown as it is used
     rows = page.locator(".library-row", has_text="Late resonator sweep")
@@ -502,9 +504,6 @@ def library(page: Page, url: str, ctx) -> None:
 def library_pictures(page: Page, url: str, ctx) -> None:
     fresh(page, url, "Library")
     page.locator(".library-row").first.wait_for(timeout=60_000)
-    notice = page.get_by_role("button", name="OK", exact=True)
-    if notice.is_visible():
-        notice.click()
     page.get_by_role("button", name="Pictures", exact=True).click()
     cards = page.locator(".library-card:not(.loading)")
     cards.nth(1).click()
@@ -540,9 +539,6 @@ def folders(page: Page, url: str, ctx) -> None:
 def files_sidebar(page: Page, url: str, ctx) -> None:
     fresh(page, url, "Library")
     page.locator(".library-row").first.wait_for(timeout=60_000)
-    notice = page.get_by_role("button", name="OK", exact=True)
-    if notice.is_visible():
-        notice.click()
     page.get_by_label("Search the files").fill("resonator")
     page.locator(".library-row", has_text="Late resonator sweep").first.wait_for()
     page.get_by_role("tab", name="Figure", exact=True).click()

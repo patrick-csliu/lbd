@@ -3,8 +3,8 @@
 // appears on the first start of a day when a newer version is known; the server hands it to one
 // page only. LBD never downloads or installs anything itself.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, RemindChoice, UpdatesState } from "./api";
-import { Setting } from "./settingsUi";
+import { api, AppState, RemindChoice, UpdatesState } from "./api";
+import { Setting, Switch } from "./settingsUi";
 
 function when(iso: string | null): string {
   if (!iso) return "never";
@@ -35,7 +35,18 @@ function InstallCommand({ command }: { command: string }) {
 }
 
 /** Settings → About: the newest version, its page, the install command, Check now. */
-export function UpdateSettings() {
+export function UpdateSettings({ checkUpdates, onSettings }: { checkUpdates: boolean | null; onSettings: (s: AppState) => void }) {
+  const [saving, setSaving] = useState(false);
+  const setCheck = async (on: boolean) => {
+    setSaving(true);
+    try {
+      onSettings(await api.setFirstStart({ check_updates: on }));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
   const [state, setState] = useState<UpdatesState | null>(null);
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,10 +65,18 @@ export function UpdateSettings() {
     }
   };
   return (
+    <>
+    <Setting
+      id="about.check_updates"
+      name="Check for new versions online"
+      help="Once a day when LBD Viewer starts it asks GitHub for the latest release, sending only the program's name and version. Off: it never goes online. From the next start."
+    >
+      <Switch label="Check for new versions online" checked={checkUpdates === true} onChange={setCheck} disabled={saving} waits />
+    </Setting>
     <Setting
       id="about.updates"
       name="New version"
-      help="Asks GitHub for the latest release once a day when LBD Viewer starts, sending only the program's name and version. LBD never downloads or installs anything by itself."
+      help="LBD never downloads or installs anything by itself. Check now asks GitHub at once, also when the daily check is off."
     >
       <div className="update-info">
         {state?.newer ? (
@@ -86,6 +105,7 @@ export function UpdateSettings() {
         {error && <p className="dialog-error" role="alert">{error}</p>}
       </div>
     </Setting>
+    </>
   );
 }
 

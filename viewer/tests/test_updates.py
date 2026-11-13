@@ -153,7 +153,8 @@ def test_a_check_by_hand_says_why_it_failed(cfg):
 
 
 def test_dev_and_tests_dont_check(tmp_path, monkeypatch):
-    """--dev (and dev_viewer.py, which uses it) skip the check; a real start runs it."""
+    """--dev (and dev_viewer.py, which uses it) skip the check; a real start runs it once the first
+    start's question was answered yes (18.8)."""
     import uvicorn
 
     asked = []
@@ -163,6 +164,15 @@ def test_dev_and_tests_dont_check(tmp_path, monkeypatch):
     dev = cli.start(cli.build_parser().parse_args(["--dev"]), [], [], on_started=lambda r: None)
     dev.stop()
     assert not dev.state.updates.automatic and dev.state.updates.start() is None and asked == []
+    # not answered yet at the first start (18.8): no check
+    unasked = cli.start(cli.build_parser().parse_args(["--port", "8126"]), [], [], on_started=lambda r: None)
+    unasked.stop()
+    assert not unasked.state.updates.automatic and asked == []
+    Config().set_check_updates(False)                                       # answered no: no check
+    no = cli.start(cli.build_parser().parse_args(["--port", "8129"]), [], [], on_started=lambda r: None)
+    no.stop()
+    assert not no.state.updates.automatic and asked == []
+    Config().set_check_updates(True)                                        # answered yes: a real start checks
     real = cli.start(cli.build_parser().parse_args(["--port", "8127"]), [], [], on_started=lambda r: None)
     real.stop()
     assert real.state.updates.automatic

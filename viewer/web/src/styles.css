@@ -1103,3 +1103,15 @@ button.ib:disabled { opacity: 0.4; cursor: default; }
 .update-command code { flex: 1; min-width: 0; overflow-wrap: anywhere; padding: 4px 6px; border-radius: 4px; background: var(--panel-2); font-size: 12px; }
 .update-reminder { max-width: 30em; }
 .setting-control .settings-note { display: block; max-width: 34ch; }
+/* the first start's questions (18.8): a dialog that can't be closed */
+.first-start { width: min(560px, 92vw); border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); color: var(--text); padding: 18px 22px; }
+.first-start::backdrop { background: rgba(0, 0, 0, 0.45); }
+.first-start h2 { margin: 0 0 10px; }
+.first-start section > p { margin: 6px 0 10px; }
+.first-start-folders { list-style: none; padding: 0; margin: 6px 0; max-height: 160px; overflow: auto; }
+.first-start-folders li { padding: 2px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono, monospace); font-size: 12px; }
+.first-start .row-controls input { flex: 1; min-width: 0; }
+.first-start-kind { border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 10px; margin: 0 0 8px; }
+.first-start-kind legend { font-weight: 600; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.first-start-choice { align-items: flex-start; margin: 6px 0; }
+.first-start-buttons { justify-content: flex-end; margin-top: 14px; }

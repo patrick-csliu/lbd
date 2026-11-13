@@ -34,7 +34,8 @@ def test_config_settings_roundtrip(tmp_path):
                                   "sliders": True, "operations": False, "zoom": False, "sync": False,
                                   "cursor_options": False}},
                               "last_version": None,
-                              "updates": {"last_check": None, "latest": None, "url": None, "remind": None}}
+                              "updates": {"last_check": None, "latest": None, "url": None, "remind": None},
+                              "first_start_done": False, "check_updates": None}
     assert cfg.problems() == []
     # panels for a new file (16.45): 1 to 6
     assert cfg.set_explore({"new_panels": 6})["new_panels"] == 6
@@ -771,3 +772,26 @@ def test_reset_puts_the_explore_section_back(cfg):
     cfg.set_explore({"new_panels": 4, "line_traces": 3, "keep": {"zoom": True}, "looks": {"curve": {"grid": True}}})
     cfg.reset_section("explore")
     assert cfg.settings()["explore"] == EXPLORE_DEFAULTS
+
+
+
+def test_the_first_start_questions_and_an_upgrade(cfg, tmp_path):
+    """18.8: a new settings file starts with the first start's questions unanswered; settings from
+    before them with folders in them are past the first start, but the version check is unanswered."""
+    import json
+
+    from lbd_viewer.config import Config
+
+    assert cfg.settings()["first_start_done"] is False and cfg.settings()["check_updates"] is None
+    cfg.set_check_updates(True)
+    cfg.set_first_start_done(True)
+    assert cfg.settings()["first_start_done"] is True and cfg.settings()["check_updates"] is True
+    with pytest.raises(ConfigError):
+        cfg.set_check_updates("yes")
+    old = tmp_path / "old"
+    old.mkdir()
+    (old / "settings.json").write_text(json.dumps({"roots": [str(tmp_path)]}), encoding="utf-8")   # from 1.2
+    upgraded = Config(old)
+    assert upgraded.settings()["first_start_done"] is True and upgraded.settings()["check_updates"] is None
+    (old / "settings.json").write_text(json.dumps({"roots": []}), encoding="utf-8")                # no folders yet
+    assert Config(old).settings()["first_start_done"] is False

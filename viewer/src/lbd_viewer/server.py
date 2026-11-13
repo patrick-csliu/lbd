@@ -405,6 +405,8 @@ class SettingsBody(_Body):
     memory: Optional[Dict[str, Any]] = None   # {reserve_gb?, maximum_gb?, summary_cache_gb?} (config.MEMORY_DEFAULTS)
     measurements: Optional[Dict[str, Any]] = None   # {progress?, time?, percent?, points?, axes?, notify?}
     explore: Optional[Dict[str, Any]] = None  # {line_traces?} (config.EXPLORE_DEFAULTS)
+    first_start_done: Optional[bool] = None   # the first start's questions answered (18.8)
+    check_updates: Optional[bool] = None      # ask GitHub for a newer version at a real start (18.8)
 
 
 class SectionBody(_Body):
@@ -1043,6 +1045,7 @@ def create_app(state: AppState) -> FastAPI:
             "version": VERSION, "lbd_version": lbd.FORMAT_VERSION,
             "roots": s["roots"], "default_style": s["default_style"], "styles": names,
             "open_files_in": s["open_files_in"], "open_data_in": s["open_data_in"], "theme": s["theme"],
+            "first_start_done": s["first_start_done"], "check_updates": s["check_updates"],
             "library": s["library"], "memory": {**s["memory"], **memory_now()}, "measurements": s["measurements"], "explore": s["explore"], "login": getpass.getuser(), "platform": sys.platform, "config_dir": str(cfg.dir), "warnings": problems + warns,
             "defaults": section_defaults(),
             # the page writes its numbers with the plots' prefix rule (one list, in lbd.plot.units)
@@ -1932,9 +1935,14 @@ def create_app(state: AppState) -> FastAPI:
     def put_settings(body: SettingsBody):
         if (body.default_style is None and body.open_files_in is None and body.open_data_in is None
                 and body.theme is None and body.library is None and body.memory is None
-                and body.measurements is None and body.explore is None):
+                and body.measurements is None and body.explore is None and body.first_start_done is None
+                and body.check_updates is None):
             raise HTTPException(400, "nothing to change: send default_style, open_files_in, open_data_in, theme, "
-                                     "library, memory, measurements and/or explore")
+                                     "library, memory, measurements, explore, first_start_done and/or check_updates")
+        if body.check_updates is not None:
+            cfg.set_check_updates(body.check_updates)     # from the next real start (cli._start_update_check)
+        if body.first_start_done is not None:
+            cfg.set_first_start_done(body.first_start_done)
         if body.measurements is not None:
             cfg.set_measurements(body.measurements)
         if body.explore is not None:
@@ -1957,7 +1965,7 @@ def create_app(state: AppState) -> FastAPI:
                 state.wake_library()                      # read what is missing (or stop reading)
         if (body.open_files_in is not None or body.open_data_in is not None or body.theme is not None
                 or body.library is not None or body.memory is not None or body.measurements is not None
-                or body.explore is not None):
+                or body.explore is not None or body.first_start_done is not None or body.check_updates is not None):
             state.pages.broadcast("settings_changed")      # every page shows the new setting
         return get_state()
 

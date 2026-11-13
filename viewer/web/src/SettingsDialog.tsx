@@ -336,7 +336,7 @@ export function SettingsDialog({
               <Setting id="about.format" name="File format">
                 <span>{state.lbd_version}</span>
               </Setting>
-              <UpdateSettings />
+              <UpdateSettings checkUpdates={state.check_updates} onSettings={onSettings} />
             </SettingsGroup>
           )}
         </div>

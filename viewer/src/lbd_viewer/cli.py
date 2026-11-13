@@ -452,6 +452,11 @@ def _start_update_check(state: AppState) -> None:
     that start a real viewer, so they never ask GitHub)."""
     if os.environ.get("LBD_NO_UPDATE_CHECK") == "1":
         return
+    try:
+        if state.config.settings().get("check_updates") is not True:   # off, or not answered yet (18.8)
+            return
+    except ConfigError:
+        return                                   # unreadable settings: the viewer's page says so
     state.updates.automatic = True
     try:
         state.updates.start()

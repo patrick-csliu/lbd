@@ -203,13 +203,33 @@ install Python: uv downloads the version the viewer is tested with.
 | Uninstall | `uv tool uninstall lbd-viewer`. Your presets and settings in `~/Library/Application Support/lbd` are kept; delete that folder to remove them too. |
 
 
+## The first start
+
+The first time LBD Viewer starts, it asks a few questions, only those whose answer matters for your
+data. It asks until they are answered (closing the page asks again next time); each can be changed
+later in Settings.
+
+1. **Your data folders**: the Library lists the data files in them. More can be added later.
+2. **Where each folder is kept**: on this computer only; synced with other computers by a sync tool
+   (Synology Drive, OneDrive, Dropbox, …); or in the cloud with files kept online only. For a
+   folder kept online only, LBD doesn't read each file's details (that would download every
+   file); the Library lists names, sizes and dates (Settings → Library → Read each file's details).
+3. **For a synced folder: how LBD edits data files** (labels, saved views, ids): *in place* (fast,
+   small, but a write cut half-way can damage the file) or *copy and swap* (a complete copy each
+   time, safe against a power cut, but a sync tool sends the whole file). Settings → Library → Edit
+   data files.
+4. **Check online for new versions?** (below). Settings → About.
+
+After an upgrade from an earlier version, with folders already set, only the last question is asked.
+
 ## Updates
 
-LBD Viewer tells you when a new version is out; it never downloads or installs anything by
-itself.
+LBD Viewer tells you when a new version is out, if you allow it (asked at the first start; Settings
+→ About → **Check for new versions online**); it never downloads or installs anything by itself.
 
-- **When it checks:** at most once a day, when the viewer starts (a viewer left open overnight
-  doesn't check again). It asks GitHub, in the background, for the latest published release
+- **When it checks:** at most once a day, when the viewer starts, while **Check for new versions
+  online** is on (a viewer left open overnight doesn't check again). **Check now** in Settings →
+  About asks at once, also when it is off. It asks GitHub, in the background, for the latest published release
   (`api.github.com/repos/patrick-csliu/lbd/releases/latest`), waiting at most 5 seconds.
 - **What it sends:** only that request, with the program's name and version
   (`User-Agent: LBD-Viewer/<version>`); nothing about your computer, you or your files. It uses

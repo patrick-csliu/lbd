@@ -81,20 +81,12 @@ interface Props {
   onOpenInNewBrowserTab: (path: string) => void;
   onRenamed: (oldPath: string, newPath: string) => void;
   onDeleted: (path: string) => void;
-  onOpenSettings: () => void;
 }
 
 const ROW_H = 28; // px: every row has this height (the list is windowed)
 const CARD_W = 220, CARD_BASE = 188, CARD_LINE = 18; // px: a picture of the picture view with its name (at least this wide), and each line under it
 const NEAR = 5; // rows above and below the selection whose previews are drawn ahead
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-export const NOTICE =
-  "LBD opens each data file's header (not its data) to list dates, sweep sizes and values, and to search inside files. " +
-  "In a cloud folder whose files are kept only online, that downloads every file.";
-export const NOTICE_MORE =
-  "This happens with Synology Drive on-demand sync, OneDrive Files On-Demand, Dropbox online-only and the like. " +
-  "Switch it off in ⚙ Settings → Library to list such folders by name only.";
-
 // Whether this browser tab shows the Library's filters in a wide window.
 const FILTERS_KEY = "lbd-library-filters-shown";
 const HELP_COPIES = docsUrl("viewer/library.html", "copies-and-the-same-measurement");
@@ -131,7 +123,7 @@ function madeFromSearched(r: LibraryRow, q: string): boolean {
 }
 
 export default function LibraryPage(props: Props) {
-  const { state, query, onQuery, selected, onSelect, onRootsChanged, onLibrarySettings, onOpenIn, onOpenInNewBrowserTab, onRenamed, onDeleted, onOpenSettings } = props;
+  const { state, query, onQuery, selected, onSelect, onRootsChanged, onLibrarySettings, onOpenIn, onOpenInNewBrowserTab, onRenamed, onDeleted } = props;
   const toast = useToast();
   const settings: LibrarySettings = state.library;
   // the filters on the left: a column of their own in a wide window (it can be hidden, per
@@ -696,31 +688,6 @@ export default function LibraryPage(props: Props) {
       </aside>
 
       <section className="library-middle" aria-label="Files">
-        {settings.read_headers && !settings.notice_seen && (
-          <div className="library-notice" role="note">
-            <div className="notice-text">
-              {NOTICE}
-              <details className="notice-more">
-                <summary>More…</summary>
-                {NOTICE_MORE}
-              </details>
-            </div>
-            <div className="row-controls">
-              <button
-                className="primary"
-                onClick={() =>
-                  api
-                    .setLibrary({ notice_seen: true })
-                    .then(onLibrarySettings)
-                    .catch((e) => toast((e as Error).message, "error"))
-                }
-              >
-                OK
-              </button>
-              <button onClick={onOpenSettings}>Settings</button>
-            </div>
-          </div>
-        )}
         <div className="library-search-row">
           {!filtersShown && <SidebarToggle open={false} onToggle={toggleFilters} what="folders, dates, labels" count={filterCount} />}
           <input

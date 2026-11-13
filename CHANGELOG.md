@@ -188,6 +188,14 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
   sliders come back; operations and equations, zoom, sync and cursor options start afresh
   (before, everything came back, cursors too). Cursor positions always start afresh; a kept zoom
   is not used once the file changed. **Forget this view** is now **Reset all**.
+- **The first start asks what matters for your data**: your folders; for each, whether it is on this
+  computer only, synced with other computers, or in the cloud with files kept online only (which
+  turns off reading each file's details); for a synced folder, how data files are edited (in place
+  or copy and swap, both explained); and whether to check online for new versions. It asks until
+  answered. After an upgrade only the last question is asked. It replaces the Library's notice about
+  cloud folders.
+- **The check for new versions can be turned off** (Settings → About → Check for new versions
+  online), and it runs only when allowed: asked at the first start, not before.
 - **Settings that change a lot ask first** and say what will happen: how data files are edited, reading
   each file's details, previews of every file, less room for summaries than they take, and emptying
   the picture cache or the summaries. A reset names those it would switch; a risky memory limit is
