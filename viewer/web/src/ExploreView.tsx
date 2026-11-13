@@ -488,8 +488,11 @@ export default function ExploreView({
       else ctx.fillRect(Math.min(ax, bx), Math.min(ay, by), Math.abs(bx - ax), Math.abs(by - ay));
     }
     // every mark twice: a wider edge first, then its colour, so a cursor shows on any background
-    // (a blue cursor on a blue map); the edge is solid under a dashed line
-    const edge = document.documentElement.dataset.theme === "dark" && kindRef.current === "curve" ? "rgba(24,24,24,0.85)" : "rgba(255,255,255,0.85)";
+    // (a blue cursor on a blue map); the edge is solid under a dashed line. On a picture the dark
+    // theme turns dark (curves, scatter, histogram, bars: `darkInverted`) the edge is dark too: a
+    // white one hid the cursor's colour (18.3)
+    const darkPicture = document.documentElement.dataset.theme === "dark" && kindOf(kindRef.current).darkInverted;
+    const edge = darkPicture ? "rgba(24,24,24,0.85)" : "rgba(255,255,255,0.85)";
     const edged = (color: string, width: number, path: () => void, dash: number[] = []) => {
       ctx.beginPath();
       path();

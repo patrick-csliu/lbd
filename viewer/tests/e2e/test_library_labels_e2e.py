@@ -415,3 +415,21 @@ def test_a_change_that_waits_its_turn_says_so_and_a_refusal_says_it_was_not_made
     detail(page).get_by_role("button", name=re.compile("Starred")).click()
     expect(page.locator(".toast.error")).to_contain_text("were not changed: another LBD program")
     expect(rows(page).first).to_contain_text("★")
+
+
+def test_project_users_and_tags_line_up_with_starred_only(viewer, library_files, new_page):
+    """18.1: their fold arrows sit in the column of Starred only's checkbox, their icons in its
+    star's, so they read as its equals, not as items inside it."""
+    page = new_page("Library")
+    shows(page, every_file(viewer), 20_000)
+    places = page.evaluate("""() => {
+        const left = e => Math.round(e.getBoundingClientRect().left);
+        const box = [...document.querySelectorAll('input[type=checkbox]')].find(e => e.closest('label')?.textContent.includes('Starred only'));
+        const text = [...box.closest('label').childNodes].find(n => n.nodeType === 3);
+        const r = document.createRange(); r.setStart(text, 0); r.setEnd(text, 1);
+        return {box: left(box), star: Math.round(r.getBoundingClientRect().left),
+                titles: [...document.querySelectorAll('.label-tree-title')].map(t => [left(t.querySelector('.twisty')), left(t.querySelector('svg'))])};
+    }""")
+    assert len(places["titles"]) == 3
+    for twisty, icon in places["titles"]:
+        assert abs(twisty - places["box"]) <= 1 and abs(icon - places["star"]) <= 2

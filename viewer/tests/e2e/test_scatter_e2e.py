@@ -214,3 +214,25 @@ def test_scatter_offers_its_three_operations(viewer, new_page):
     expect(items).to_have_text(["Rotation", "Auto-rotate each trace", "Subtract the mean"])
     frames(page, lambda: items.filter(has_text="Rotation").first.click())
     expect(view.locator(".operations li")).to_have_count(1)
+
+
+def test_the_cursor_shows_in_its_colour_on_a_dark_picture(viewer, new_page):
+    """18.3: in the dark theme a scatter plot's picture is dark; the cursor's edge was white and
+    wider than its red line, so the cursor looked white. The edge is dark there now."""
+    shots(viewer)
+    page = new_page("Explore")
+    page.emulate_media(color_scheme="dark")
+    expect(page.locator("html")).to_have_attribute("data-theme", "dark")
+    view, meta = open_scatter(page)
+    overlay = view.locator("canvas.explore-overlay").first
+    left, top, width, height = (v / meta["dpr"] for v in meta["plot"])
+    overlay.click(position={"x": left + width * 0.3, "y": top + height * 0.4})
+    expect(view.locator(".explore-readout .explore-pick").first).to_be_visible()
+    page.wait_for_timeout(300)
+    light = overlay.evaluate("""c => {
+        const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+        let n = 0;
+        for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 128 && d[i] > 200 && d[i + 1] > 200 && d[i + 2] > 200) n++;
+        return n;
+    }""")
+    assert light < 100, f"{light} white pixels on the cursor layer"         # (before the fix: 454; the badge's number: about 10)

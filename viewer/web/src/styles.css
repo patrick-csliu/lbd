@@ -756,8 +756,10 @@ details.group fieldset > .group-fields { margin-top: -4px; }
 .label-tree-head { display: flex; align-items: center; justify-content: space-between; padding: 0 12px 0 0; position: sticky; top: -8px; z-index: 2;
   background: var(--panel); }
 .label-tree-head h3 { margin: 0; font-size: 13px; font-weight: 600; flex: 1; min-width: 0; }
-.label-tree-head .label-tree-title { display: flex; align-items: center; gap: 5px; width: 100%; padding: 6px 4px 6px 8px; color: var(--text); font-weight: 600; text-align: left; }
-.label-tree-title .twisty { width: 14px; color: var(--muted); }
+/* the fold arrow in the column of "Starred only"'s checkbox, the icon in its star's: Project, Users
+   and Tags line up with it, as equals, not as its children (18.1) */
+.label-tree-head .label-tree-title { display: flex; align-items: center; gap: 4px; width: 100%; padding: 6px 4px 6px 4px; color: var(--text); font-weight: 600; text-align: left; }
+.label-tree-title .twisty { width: 13px; padding: 0; margin-right: 5px; color: var(--muted); }
 .label-kind-icon { color: var(--muted); flex: none; }
 .label-tree-count { color: var(--muted); font-weight: 400; }
 .label-tree-head .label-new { opacity: 0.6; }

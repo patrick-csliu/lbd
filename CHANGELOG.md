@@ -188,6 +188,10 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
   sliders come back; operations and equations, zoom, sync and cursor options start afresh
   (before, everything came back, cursors too). Cursor positions always start afresh; a kept zoom
   is not used once the file changed. **Forget this view** is now **Reset all**.
+- **A cursor shows in its colour on a dark Scatter, Histogram or Bars picture** (dark theme). Its
+  edge was white and wider than its red line, so the cursor looked white.
+- **Project, Users and Tags line up with "Starred only"** in the Library's Labels, instead of
+  looking like items inside it.
 - **A label change no longer makes others wait on a busy computer.** The first change in a
   program loaded the plotting code while it held the folder's labels lock; on a busy computer that
   took seconds, and other programs changing the same folder's labels could give up after 15 s.
