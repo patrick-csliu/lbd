@@ -61,6 +61,7 @@ export interface ExploreSettings {
   line_traces: number; // a cursor line marks every trace up to this many
   new_panels: number; // panels a file opened for the first time gets: 1 (the first value) … 6 (16.45)
   keep: KeepParts; // the parts of a file's view brought back when it is opened again (16.44)
+  looks: Record<string, Record<string, boolean>>; // per plot type: look options a new plot starts with on (18.2)
 }
 
 export interface MemorySettings {

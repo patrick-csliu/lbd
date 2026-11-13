@@ -648,8 +648,9 @@ drawn against the point number, with a note.
 ## Grid and Equal axes on curves
 
 **Grid** (Display, Curves and Scatter) draws grid lines at the ticks. It starts as the style says
-(`figure.axes.grid`); ticking or unticking it here overrides the style for this plot, and **Open in
-Figure** keeps it. The lines' colour and width stay the style's. **Equal axes** works on curves as on
+(`figure.axes.grid`), or on when **Settings → Explore → New plots start with** says so for that plot
+type (the same for **Show points** on Curves); ticking or unticking it here changes this plot, and
+**Open in Figure** keeps it. The lines' colour and width stay the style's. **Equal axes** works on curves as on
 a scatter plot (see [Scatter](#scatter)).
 
 ## Large data

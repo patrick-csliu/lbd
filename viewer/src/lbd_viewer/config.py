@@ -72,7 +72,12 @@ MEASUREMENTS_DEFAULTS: Dict[str, Any] = {"progress": True, "time": True, "percen
 KEEP_DEFAULTS: Dict[str, bool] = {"panels": True, "plot": True, "traces": True, "colours": True, "limits": True,
                                   "sliders": True, "operations": False, "zoom": False, "sync": False,
                                   "cursor_options": False}
-EXPLORE_DEFAULTS: Dict[str, Any] = {"line_traces": 20, "new_panels": 1, "keep": dict(KEEP_DEFAULTS)}
+# `looks`: the look options a new Explore plot starts with on, per plot type that has them (18.2).
+# On: on. Off: as the style says (Grid) or off (Show points). Explore only: the Figure page keeps the
+# style's look. A plot type gets a line here when it gets such an option.
+LOOKS_DEFAULTS: Dict[str, Dict[str, bool]] = {"curve": {"grid": False, "points": False}, "scatter": {"grid": False}}
+EXPLORE_DEFAULTS: Dict[str, Any] = {"line_traces": 20, "new_panels": 1, "keep": dict(KEEP_DEFAULTS),
+                                    "looks": {k: dict(v) for k, v in LOOKS_DEFAULTS.items()}}
 MOST_PANELS = 6                                   # (ExploreTab.tsx MAX_PANELS)
 # The check for a new version (plan 16.25, updates.py), kept by the viewer, not set by the user:
 # when it last asked GitHub (local time, ISO), the newest release then and its page, and the
@@ -506,7 +511,17 @@ def _check_explore(e: Dict[str, Any]) -> Dict[str, Any]:
     keep = e.get("keep")
     if not isinstance(keep, dict) or set(keep) - set(KEEP_DEFAULTS) or not all(isinstance(v, bool) for v in keep.values()):
         raise ConfigError(f"Explore setting 'keep' must say true or false for some of {sorted(KEEP_DEFAULTS)}, not {keep!r}")
-    return {**{k: e[k] for k in EXPLORE_DEFAULTS if k != "keep"}, "keep": {**KEEP_DEFAULTS, **keep}}
+    looks = e.get("looks")
+    good = isinstance(looks, dict) and all(
+        kind in LOOKS_DEFAULTS and isinstance(opts, dict) and all(k in LOOKS_DEFAULTS[kind] and isinstance(v, bool)
+                                                                  for k, v in opts.items())
+        for kind, opts in looks.items())
+    if not good:
+        raise ConfigError(f"Explore setting 'looks' must say true or false for these options: {LOOKS_DEFAULTS}, "
+                          f"not {looks!r}")
+    looks = {kind: {**opts, **looks.get(kind, {})} for kind, opts in LOOKS_DEFAULTS.items()}
+    return {**{k: e[k] for k in EXPLORE_DEFAULTS if k not in ("keep", "looks")}, "keep": {**KEEP_DEFAULTS, **keep},
+            "looks": looks}
 
 
 def _check_updates(u: Dict[str, Any]) -> Dict[str, Any]:

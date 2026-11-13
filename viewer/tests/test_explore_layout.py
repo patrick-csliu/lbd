@@ -149,3 +149,23 @@ def test_equal_curves_widen_the_view_in_stored_units(tmp_path):
     per_y = box.height / ((meta["ylim"][1] - meta["ylim"][0]) / m.yf)
     assert per_x == pytest.approx(per_y, rel=1e-3) and m.xf != m.yf
     s.close()
+
+
+def test_new_plots_start_with_the_looks_the_settings_turn_on(values_files, data_dir):
+    """18.2: Settings → Explore → New plots start with: a look that is on there starts on; one that
+    is off is left to the plot (Grid: the style; Show points: off); a tick in Display wins."""
+    looks = {"curve": {"grid": True, "points": True}, "scatter": {"grid": False}}
+    style = lp.load_style()
+    s = ExploreSession(data_dir / "6 rabi.lbd", "v", {}, style, 400, 300, 1, looks=lambda: looks)
+    assert s.spec["options"]["grid"] is True and s.spec["options"]["points"] is True
+    assert any(line.get_visible() for line in s.ax.xaxis.get_gridlines())
+    s.set_spec({"options": {"grid": False}})                            # unticked in Display: off
+    assert s.spec["options"]["grid"] is False and not any(line.get_visible() for line in s.ax.xaxis.get_gridlines())
+    s.close()
+    plain = ExploreSession(data_dir / "11 single shot iq.lbd", "v", {"kind": "scatter", "values": ["IQ"], "complex": "iq"},
+                           style, 400, 300, 1, looks=lambda: looks)
+    assert "grid" not in (plain.spec.get("options") or {})              # off in the settings: the style's
+    plain.close()
+    previews = ExploreSession(data_dir / "6 rabi.lbd", "v", {}, style, 400, 300, 1)   # no settings (previews): nothing added
+    assert "grid" not in (previews.spec.get("options") or {})
+    previews.close()

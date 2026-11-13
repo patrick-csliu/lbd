@@ -7,6 +7,14 @@ import type { KeepParts } from "./keep";
 import { useToast } from "./toast";
 import { Setting, SettingsGroup } from "./settingsUi";
 
+/** The look options and the plot types that have them (config.LOOKS_DEFAULTS), as the settings name them. */
+const LOOK_NAMES: Record<string, string> = { grid: "Grid", points: "Show points" };
+const KIND_NAMES: Record<string, string> = { curve: "Curves", scatter: "Scatter" };
+const LOOK_HELP: Record<string, string> = {
+  grid: "On: new plots of this type start with grid lines. Off: as the style says.",
+  points: "On: new plots of this type start with a dot on the stored points. Off: without.",
+};
+
 /** The parts of a file's view that can be kept (keep.ts KeepParts), as the settings list them. */
 const KEEP_LIST: [keyof KeepParts, string, string][] = [
   ["panels", "Panels and layout", "How many panels, their order, side by side or stacked"],
@@ -67,6 +75,30 @@ export function ExploreSettings({ settings, onSettings }: { settings: Settings; 
           <option value={6}>All values (up to 6)</option>
         </select>
       </Setting>
+    </SettingsGroup>
+    <SettingsGroup title="New plots start with">
+      {Object.entries(settings.looks).flatMap(([kind, options]) =>
+        Object.entries(options).map(([option, on]) => {
+          const name = `${LOOK_NAMES[option] ?? option} on ${KIND_NAMES[kind] ?? kind}`;
+          return (
+            <Setting key={`${kind}.${option}`} id={`explore.looks.${kind}.${option}`} name={name} help={LOOK_HELP[option] ?? ""}>
+              <input
+                type="checkbox"
+                aria-label={name}
+                checked={on}
+                onChange={async (e) => {
+                  try {
+                    onSettings(await api.setExplore({ looks: { ...settings.looks, [kind]: { ...options, [option]: e.target.checked } } }));
+                  } catch (err) {
+                    toast((err as Error).message, "error");
+                  }
+                }}
+              />
+            </Setting>
+          );
+        }),
+      )}
+      <p className="muted small">In Explore only; a tick under Display still changes one plot.</p>
     </SettingsGroup>
     <SettingsGroup title="Kept when a file is opened again">
       {KEEP_LIST.map(([key, name, help]) => (

@@ -64,3 +64,23 @@ def test_look_options_are_under_display(values_files, viewer, new_page):
         if kind == "histogram":                                            # one log switch: Log vertical
             expect(ctl.get_by_label("Log", exact=True)).to_have_count(0)
             expect(display.get_by_text("Log vertical")).to_have_count(1)
+
+
+def test_settings_start_new_plots_with_a_grid(values_files, viewer, new_page):
+    """18.2: Settings → Explore → New plots start with → Grid on Curves: a new curve plot in Explore
+    starts with Grid ticked; unticked in Display, that plot has none."""
+    from pageui import open_settings
+
+    page = new_page("Explore")
+    dialog = open_settings(page, "Explore")
+    box = dialog.get_by_label("Grid on Curves")
+    expect(box).not_to_be_checked()
+    box.click()                                                        # (ticked once the viewer saved it)
+    expect(box).to_be_checked()
+    page.keyboard.press("Escape")
+    frames(page, lambda: row(page, "6 rabi.lbd").dblclick())
+    ctl = explore(page).get_by_role("complementary", name="Controls")
+    grid = ctl.get_by_role("checkbox", name="Grid")
+    expect(grid).to_be_checked()
+    frames(page, lambda: grid.click())
+    expect(grid).not_to_be_checked()

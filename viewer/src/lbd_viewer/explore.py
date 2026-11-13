@@ -30,7 +30,7 @@ import threading
 import time
 import warnings
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import matplotlib
 import matplotlib.colors as mcolors
@@ -181,7 +181,7 @@ class ExploreSession:
 
     def __init__(self, path: Path, version: str, spec: Dict[str, Any], style: Style,
                  width: int, height: int, dpr: float, saved_view: bool = True, summarise: bool = True,
-                 bare: bool = False):
+                 bare: bool = False, looks: Optional[Callable[[], Dict[str, Dict[str, bool]]]] = None):
         """`saved_view` False: the file's saved figure view (/plot) is not used at all (the
         Library's automatic previews, plan 8c, depend on the data only). `summarise` False: a
         map bigger than memory is refused instead of summarised (previews, drawn in the
@@ -195,6 +195,7 @@ class ExploreSession:
         self.path, self.version, self.style = path, version, style
         self.saved_view = saved_view
         self.summarise = summarise
+        self.looks = looks                            # Settings → Explore: look options a plot starts with (18.2)
         self.bare = bare
         self._memory_said = False                     # the low-memory note: told once per session
         self._notes: List[str] = []
@@ -226,6 +227,7 @@ class ExploreSession:
         self.data = rnd.for_kind(self.flat_data, new["kind"])
         if new["kind"] not in KINDS:
             raise ExploreError(f"Explore can't show {rnd.kinds.KINDS[new['kind']].title} plots yet; use the Figure page")
+        new = self._start_looks(new)
         self.spec, self.base_kind = new, new["kind"]
         # A map with more cells (curves with more points) than the memory available holds is shown
         # from its summary, made once (and kept on disk) by reading the file part by part
@@ -300,6 +302,19 @@ class ExploreSession:
         what, each = ("map", "cell") if is_map else ("curves", "point")
         self._notes.append(f"This computer has little free memory ({available / memory.GB:.1f} GB free): this {what} "
                            f"is shown from a summary. Close other programs and open the file again to see every {each}.")
+
+    def _start_looks(self, spec: Dict[str, Any]) -> Dict[str, Any]:
+        """The look options the settings start this plot type with (18.2): one that is on there
+        and not chosen in this plot is on. One that is off there is left to the plot (Grid: the
+        style; Show points: off), as is one chosen here (a tick in Display)."""
+        if self.looks is None:
+            return spec
+        on = [k for k, v in (self.looks().get(spec["kind"]) or {}).items() if v]
+        options = dict(spec.get("options") or {})
+        missing = [k for k in on if options.get(k) is None]
+        if not missing:
+            return spec
+        return {**spec, "options": {**options, **{k: True for k in missing}}}
 
     @_locked
     def take_notes(self) -> List[str]:

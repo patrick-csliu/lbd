@@ -236,3 +236,27 @@ def test_the_cursor_shows_in_its_colour_on_a_dark_picture(viewer, new_page):
         return n;
     }""")
     assert light < 100, f"{light} white pixels on the cursor layer"         # (before the fix: 454; the badge's number: about 10)
+
+
+def test_the_strips_are_drawn_again_when_the_theme_changes(viewer, new_page):
+    """18.4 (checked, no fault): switched to the dark theme with a scatter plot and a cursor, the
+    histograms beside it are drawn again in the dark theme's ink."""
+    shots(viewer)
+    page = new_page("Explore")
+    page.emulate_media(color_scheme="light")
+    view, meta = open_scatter(page)
+    top = view.locator(".explore-cut-top canvas, canvas.explore-cut-top").first
+    expect(top).to_be_visible()
+    left, ptop, width, height = (v / meta["dpr"] for v in meta["plot"])
+    view.locator("canvas.explore-overlay").first.click(position={"x": left + width * 0.3, "y": ptop + height * 0.4})
+    expect(view.locator(".explore-readout .explore-pick").first).to_be_visible()
+    light_ink = """c => {
+        const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+        let n = 0;
+        for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 100 && d[i] > 150 && d[i + 1] > 150 && d[i + 2] > 150) n++;
+        return n / (c.width * c.height);
+    }"""
+    page.emulate_media(color_scheme="dark")
+    expect(page.locator("html")).to_have_attribute("data-theme", "dark")
+    page.wait_for_timeout(300)
+    assert top.evaluate(light_ink) > 0.03                                 # bars in the light ink, not only the frame

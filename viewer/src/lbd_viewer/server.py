@@ -1514,7 +1514,8 @@ def create_app(state: AppState) -> FastAPI:
             header = lbd.info(p)
             preset = cfg.preset_for(body.preset, header.style_name, notes)
             style = cfg.resolve(preset=preset, file_style=header.style)
-            s = ExploreSession(p, file_version(p), body.spec or {}, style, body.width, body.height, body.dpr)
+            s = ExploreSession(p, file_version(p), body.spec or {}, style, body.width, body.height, body.dpr,
+                               looks=lambda: cfg.settings()["explore"]["looks"])
         state.explore.add(s)
         return {"session": s.id, "spec": {**s.spec, "style_grid": s.style.figure.axes.grid.visible}, "kind": s.kind, "cells": getattr(s.model, "cells", None), "preset": preset,
                 "full": [list(s.full[0]), list(s.full[1])], "warnings": notes + warns + s.take_notes()}

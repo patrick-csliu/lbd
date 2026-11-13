@@ -188,6 +188,9 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
   sliders come back; operations and equations, zoom, sync and cursor options start afresh
   (before, everything came back, cursors too). Cursor positions always start afresh; a kept zoom
   is not used once the file changed. **Forget this view** is now **Reset all**.
+- **Settings → Explore → New plots start with**: Grid on Curves, Show points on Curves, Grid on
+  Scatter, each on its own. On: a new plot in Explore starts with it; off: as before (Grid as the
+  style says). A tick under Display still changes one plot; the Figure page is not affected.
 - **A cursor shows in its colour on a dark Scatter, Histogram or Bars picture** (dark theme). Its
   edge was white and wider than its red line, so the cursor looked white.
 - **Project, Users and Tags line up with "Starred only"** in the Library's Labels, instead of

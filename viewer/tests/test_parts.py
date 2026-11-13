@@ -29,7 +29,7 @@ def test_config_settings_roundtrip(tmp_path):
                                           "data_file_edits": "in_place"},
                               "memory": {"reserve_gb": None, "maximum_gb": None, "summary_cache_gb": 20.0},
                               "measurements": {"progress": True, "time": True, "percent": True, "points": True,
-                                               "axes": True, "notify": False}, "explore": {"line_traces": 20, "new_panels": 1, "keep": {
+                                               "axes": True, "notify": False}, "explore": {"line_traces": 20, "new_panels": 1, "looks": {"curve": {"grid": False, "points": False}, "scatter": {"grid": False}}, "keep": {
                                   "panels": True, "plot": True, "traces": True, "colours": True, "limits": True,
                                   "sliders": True, "operations": False, "zoom": False, "sync": False,
                                   "cursor_options": False}},
@@ -49,6 +49,12 @@ def test_config_settings_roundtrip(tmp_path):
         with pytest.raises(ConfigError, match="keep"):
             cfg.set_explore({"keep": bad})
     cfg.set_explore({"keep": {"zoom": False}})
+    # the looks new plots start with (18.2): per plot type, only the options it has
+    assert cfg.set_explore({"looks": {"curve": {"grid": True}}})["looks"] == {
+        "curve": {"grid": True, "points": False}, "scatter": {"grid": False}}
+    for bad in ({"bars": {"grid": True}}, {"scatter": {"points": True}}, {"curve": {"grid": "on"}}):
+        with pytest.raises(ConfigError, match="looks"):
+            cfg.set_explore({"looks": bad})
     # the Library's settings: checked, kept
     assert cfg.set_library({"card_main": "file", "card_fields": ["sweep", "tags"], "date_zone": "Europe/Paris"})["card_fields"] == ["sweep", "tags"]
     assert cfg.set_library({"card_main": "title", "card_fields": ["date"], "date_zone": "local"})["date_zone"] == "local"
