@@ -69,6 +69,12 @@ this section…** puts it back. Each setting has its name, a line about it, and 
 Esc, **×** or a click beside the dialog closes it. A link can open a section:
 `#settings/memory` at the end of the viewer's address.
 
+A setting takes effect at once, except one that changes a lot, which asks first and says what will
+happen: how data files are edited (in place or copy and swap), reading each file's details (how many
+files), previews of every file (how many are drawn), less room for summaries than they take now, and
+emptying the picture cache or the summaries (how much is deleted). **Reset this section…** names
+those it would switch. A risky memory limit is only warned about, under its field.
+
 | Section | Settings |
 |---|---|
 | **General** | **Theme**: *System* follows the light or dark mode of Windows, macOS or Linux, also when it changes while the viewer is open; *Light* and *Dark* stay as chosen. Figures always stay on white, because they are print figures; the Help pages have their own light/dark switch. **Files opened from Explorer / Finder** open *in this viewer (a tab)*, the default, or *in a new browser tab*, and data files go to *Explore* (the default) or *Figure*. |

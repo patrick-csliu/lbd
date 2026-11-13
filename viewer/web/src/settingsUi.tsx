@@ -26,8 +26,9 @@ export function SettingsGroup({ title, children }: { title: string; children: Re
   );
 }
 
-/** An on/off switch (a checkbox, so it is found by its label and ticked like one). */
-export function Switch({ label, checked, onChange, disabled = false, title }: { label: string; checked: boolean; onChange: (on: boolean) => void; disabled?: boolean; title?: string }) {
+/** An on/off switch (a checkbox, so it is found by its label and ticked like one). `waits`: it
+ * changes only when `checked` does (a setting that asks first, 18.7); otherwise at once. */
+export function Switch({ label, checked, onChange, disabled = false, title, waits = false }: { label: string; checked: boolean; onChange: (on: boolean) => void; disabled?: boolean; title?: string; waits?: boolean }) {
   // shown at once; the viewer's answer (or a refusal, with the old value) follows
   const [on, setOn] = useState(checked);
   useEffect(() => setOn(checked), [checked]);
@@ -40,7 +41,7 @@ export function Switch({ label, checked, onChange, disabled = false, title }: { 
         checked={on}
         disabled={disabled}
         onChange={(e) => {
-          setOn(e.target.checked);
+          if (!waits) setOn(e.target.checked);
           onChange(e.target.checked);
         }}
       />

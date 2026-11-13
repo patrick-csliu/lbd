@@ -1102,3 +1102,4 @@ button.ib:disabled { opacity: 0.4; cursor: default; }
 .update-command { display: flex; gap: 6px; align-items: center; margin: 0 0 6px; }
 .update-command code { flex: 1; min-width: 0; overflow-wrap: anywhere; padding: 4px 6px; border-radius: 4px; background: var(--panel-2); font-size: 12px; }
 .update-reminder { max-width: 30em; }
+.setting-control .settings-note { display: block; max-width: 34ch; }

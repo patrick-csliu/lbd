@@ -3,6 +3,7 @@
 // section with a setting not at its default, and "Reset this section…" puts it back.
 // The server keeps the settings (config.py; SETTINGS_SECTIONS lists each section's settings).
 
+import { AskFirst, EDIT_TEXTS, useAskFirst } from "./askFirst";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, AppState, DataFileEdits, OpenDataIn, OpenFilesIn, Theme } from "./api";
 import { ConfirmDialog, ConfirmRequest } from "./menu";
@@ -109,6 +110,15 @@ function changedSections(state: AppState): Set<string> {
   return out;
 }
 
+/** The settings a reset may switch that change a lot (18.7), and how the reset's question names the
+ * value it goes back to. */
+const BIG_SETTINGS: [string, (to: unknown) => string][] = [
+  ["library.read_headers", (to) => (to ? "Read each file's details: on (every file is read; in cloud storage, downloaded)" : "Read each file's details: off")],
+  ["library.previews", (to) => (to === "all" ? "Previews of every file, drawn in the background" : `Previews: ${String(to)}`)],
+  ["library.data_file_edits", (to) => `Edit data files: ${EDIT_TEXTS[to as DataFileEdits]?.name.toLowerCase() ?? String(to)}`],
+  ["memory.summary_cache_gb", (to) => `Summaries kept on disk, up to ${String(to)} GB (fewer may be deleted)`],
+];
+
 export function SettingsDialog({
   state,
   section,
@@ -172,16 +182,47 @@ export function SettingsDialog({
   );
   const title = SECTIONS.find((s) => s.id === section)!.title;
 
-  const reset = () =>
+  // a reset that would switch a setting that asks first says so (18.7)
+  const reset = () => {
+    const big = BIG_SETTINGS.filter(([key]) => (state.defaults?.[section] ?? {})[key] !== undefined && JSON.stringify(valueAt(state, key)) !== JSON.stringify(state.defaults?.[section]?.[key]));
     setConfirm({
       title: `Reset the ${title} settings?`,
       text: "They go back to how LBD starts. Your folders, presets and the Library's columns aren't changed.",
+      body: big.length ? (
+        <div>
+          <p className="small">These change a lot:</p>
+          <ul className="small">
+            {big.map(([key, what]) => (
+              <li key={key}>{what(state.defaults![section][key])}</li>
+            ))}
+          </ul>
+        </div>
+      ) : undefined,
       action: "Reset",
       onConfirm: async () => {
         onSettings(await api.resetSettings(section));
         toast(`The ${title} settings are back to their defaults.`);
       },
     });
+  };
+  // Read each file's details, turned on: every file in the open folders is read (18.7)
+  const askReadHeaders = (on: boolean) => {
+    if (!on) return setReadHeaders(false);
+    api
+      .libraryFacets(null, "")
+      .then((f) => f.total)
+      .catch(() => null)
+      .then((total) =>
+        setConfirm({
+          title: "Read each file's details?",
+          text:
+            `LBD reads the details of ${total === null ? "every file" : `each of the ${total.toLocaleString()} files`} in your open folders, ` +
+            "to list and search them. A file a cloud service keeps only online is downloaded whole to be read.",
+          action: "Read them",
+          onConfirm: () => setReadHeaders(true),
+        }),
+      );
+  };
 
   return (
     <dialog
@@ -243,6 +284,7 @@ export function SettingsDialog({
           </button>
           )}
         </nav>
+        <AskFirst.Provider value={setConfirm}>
         <div className="settings-main" ref={body} role="tabpanel" aria-label={title}>
           <h3>{title}</h3>
           {section === "general" && (
@@ -268,7 +310,7 @@ export function SettingsDialog({
                   name="Read each file's details"
                   help="Title, date, sweep size, values and metadata, to list and search them. Off: names, sizes and file dates only. Switch it off for cloud folders whose files are kept only online: reading a file there downloads all of it."
                 >
-                  <Switch label="Read each data file's details" checked={state.library.read_headers} onChange={setReadHeaders} />
+                  <Switch label="Read each data file's details" checked={state.library.read_headers} onChange={askReadHeaders} waits />
                 </Setting>
               </SettingsGroup>
               <SettingsGroup title="Previews">
@@ -298,6 +340,7 @@ export function SettingsDialog({
             </SettingsGroup>
           )}
         </div>
+        </AskFirst.Provider>
       </div>
       {confirm && <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />}
     </dialog>
@@ -307,12 +350,23 @@ export function SettingsDialog({
 /** How LBD changes a finished data file: its id, a saved view, its labels (plan 16.19). */
 function DataFileEditsSetting({ value, onSettings }: { value: DataFileEdits; onSettings: (s: AppState) => void }) {
   const toast = useToast();
-  const choose = async (data_file_edits: DataFileEdits) => {
-    try {
-      onSettings(await api.setLibrary({ data_file_edits }));
-    } catch (e) {
-      toast((e as Error).message, "error");
-    }
+  const askFirst = useAskFirst();
+  // it changes how every data file is written from now on: asked first (18.7)
+  const choose = (data_file_edits: DataFileEdits) => {
+    if (data_file_edits === value) return;
+    const { name, text } = EDIT_TEXTS[data_file_edits];
+    askFirst({
+      title: `Edit data files: ${name.toLowerCase()}?`,
+      text: `From now on, labels, saved views and ids are written so. ${text}`,
+      action: `Use ${name.toLowerCase()}`,
+      onConfirm: async () => {
+        try {
+          onSettings(await api.setLibrary({ data_file_edits }));
+        } catch (e) {
+          toast((e as Error).message, "error");
+        }
+      },
+    });
   };
   return (
     <Setting

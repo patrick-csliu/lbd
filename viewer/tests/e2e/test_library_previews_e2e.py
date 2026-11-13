@@ -105,11 +105,14 @@ def test_with_previews_off_a_click_draws_one_and_every_file_needs_headers(viewer
     # the setting: "Every file" can't be chosen while the files' details aren't read
     d = open_settings(page, "Library")
     every = d.get_by_label("Draw previews of").locator("option[value=all]")
-    d.get_by_label("Read each data file's details").uncheck()
+    read = d.get_by_label("Read each data file's details")
+    read.click()                                                       # off: at once
     expect(every).to_be_disabled()
-    d.get_by_label("Read each data file's details").check()
+    read.click()                                                       # on: asked first (18.7)
+    page.locator("dialog.confirm-dialog").get_by_role("button", name="Read them").click()
     expect(every).to_be_enabled()
     d.get_by_label("Draw previews of").select_option("all")
+    page.locator("dialog.confirm-dialog").get_by_role("button", name="Draw them").click()
     expect(d.locator("[data-setting='library.cache']")).to_contain_text(re.compile(r"\d+ pictures? ·"))
 
 

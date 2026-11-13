@@ -1,4 +1,5 @@
 import type React from "react";
+import { useAskFirst } from "./askFirst";
 import { CSSProperties, Dispatch, FormEvent, KeyboardEvent, MouseEvent, ReactNode, SetStateAction, useCallback, useEffect, useRef, useState } from "react";
 import {
   api,
@@ -1809,7 +1810,8 @@ export function PreviewSettings({ settings, onSettings }: { settings: LibrarySet
   useEffect(() => {
     measure();
   }, [measure]);
-  const choose = async (chosen: PreviewMode) => {
+  const askFirst = useAskFirst();
+  const apply = async (chosen: PreviewMode) => {
     setMode(chosen);
     try {
       onSettings(await api.setLibrary({ previews: chosen }));
@@ -1818,15 +1820,41 @@ export function PreviewSettings({ settings, onSettings }: { settings: LibrarySet
       toast((e as Error).message, "error");
     }
   };
-  const empty = async () => {
-    try {
-      const { freed } = await api.libraryPreviewClear();
-      toast(`Emptied the picture cache (${formatBytes(freed)}); previews are drawn again as needed.`);
-      measure();
-    } catch (e) {
-      toast((e as Error).message, "error");
-    }
+  // every file: drawn in the background, one after another: asked first, with how many (18.7)
+  const choose = (chosen: PreviewMode) => {
+    if (chosen !== "all" || settings.previews === "all") return void apply(chosen);
+    api
+      .libraryFacets(null, "")
+      .then((f) => f.total)
+      .catch(() => null)
+      .then((total) =>
+        askFirst({
+          title: "Draw previews of every file?",
+          text:
+            `LBD draws a picture of ${total === null ? "every file" : `each of the ${total.toLocaleString()} files`} in your open folders, ` +
+            "one after another in the background, using one processor core while it draws. A large file takes a few seconds.",
+          action: "Draw them",
+          onConfirm: () => apply(chosen),
+        }),
+      );
   };
+  // emptying deletes the pictures kept: asked first (18.7)
+  const empty = () =>
+    askFirst({
+      title: "Empty the picture cache?",
+      text: `${cache ? `${cache.count.toLocaleString()} picture${cache.count === 1 ? "" : "s"} (${formatBytes(cache.bytes)}) are deleted` : "The pictures kept are deleted"}; previews are drawn again as needed. Previews you chose in Explore are kept.`,
+      action: "Empty",
+      danger: true,
+      onConfirm: async () => {
+        try {
+          const { freed } = await api.libraryPreviewClear();
+          toast(`Emptied the picture cache (${formatBytes(freed)}); previews are drawn again as needed.`);
+          measure();
+        } catch (e) {
+          toast((e as Error).message, "error");
+        }
+      },
+    });
   const choices: [PreviewMode, string][] = [
     ["all", "Every file (in the background)"],
     ["nearby", "The selected file and rows near it"],

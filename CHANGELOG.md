@@ -188,6 +188,10 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
   sliders come back; operations and equations, zoom, sync and cursor options start afresh
   (before, everything came back, cursors too). Cursor positions always start afresh; a kept zoom
   is not used once the file changed. **Forget this view** is now **Reset all**.
+- **Settings that change a lot ask first** and say what will happen: how data files are edited, reading
+  each file's details, previews of every file, less room for summaries than they take, and emptying
+  the picture cache or the summaries. A reset names those it would switch; a risky memory limit is
+  warned about under its field.
 - **Settings → Explore → Reset this section** puts the Explore settings back; it did nothing.
 - **Settings → Explore → New plots start with**: Grid on Curves, Show points on Curves, Grid on
   Scatter, each on its own. On: a new plot in Explore starts with it; off: as before (Grid as the
