@@ -761,3 +761,13 @@ def test_mac_app_setting_browser_tab(mac_app, tmp_path):
     app.open_documents(str(f))
     app.tick(0.0)
     assert len(opened) == 1 and "open=" in opened[0]
+
+
+def test_reset_puts_the_explore_section_back(cfg):
+    """Settings → Explore → Reset this section…: every Explore setting back to its default (it
+    did nothing: reset_section had no explore case)."""
+    from lbd_viewer.config import EXPLORE_DEFAULTS
+
+    cfg.set_explore({"new_panels": 4, "line_traces": 3, "keep": {"zoom": True}, "looks": {"curve": {"grid": True}}})
+    cfg.reset_section("explore")
+    assert cfg.settings()["explore"] == EXPLORE_DEFAULTS

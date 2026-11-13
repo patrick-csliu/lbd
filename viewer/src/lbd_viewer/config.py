@@ -380,6 +380,8 @@ class Config:
             self.set_memory(groups["memory"])
         if "measurements" in groups:
             self.set_measurements(groups["measurements"])
+        if "explore" in groups:
+            self.set_explore(groups["explore"])
 
     def set_theme(self, theme: str) -> None:
         """The viewer's colours: "system" (follow the operating system), "light" or "dark"."""
