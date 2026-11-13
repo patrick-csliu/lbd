@@ -718,6 +718,9 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
 
 **For developers**
 
+- `scripts/make_mock_data.py --healthy`: mock data with nothing broken or in conflict (no damaged
+  file, copies, conflicts, files without an id, missing file or stopped measurement), to show the
+  tool or play around with it; `mock_live.py --no-stopped`.
 - The installer builds without warnings: `uv` runs quietly in the build scripts (PowerShell showed
   its progress as errors), esbuild's install step is approved in `package.json`, Vite's
   chunk-size hint is raised for this local page, Material's MkDocs 2 notice is off

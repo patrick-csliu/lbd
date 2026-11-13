@@ -124,6 +124,8 @@ if __name__ == "__main__":
     ap.add_argument("--as-computer", default="OTHER-PC", help="the computer the copies' heartbeat names")
     ap.add_argument("--variable", action="store_true",
                     help="write a variable sweep (frequencies chosen per power) instead of the power sweep")
+    ap.add_argument("--no-stopped", action="store_true",
+                    help="without the measurement that stopped before finishing")
     args = ap.parse_args()
     args.folder.mkdir(parents=True, exist_ok=True)
     if args.variable:
@@ -131,5 +133,6 @@ if __name__ == "__main__":
             ap.error("--copy-to goes with the power sweep: leave out --variable or --copy-to")
         print("finished", measure_variable(args.folder, args.seconds))
         raise SystemExit(0)
-    print("left", stopped(args.folder))
+    if not args.no_stopped:
+        print("left", stopped(args.folder))
     print("finished", measure(args.folder, args.seconds, args.copy_to, args.as_computer))

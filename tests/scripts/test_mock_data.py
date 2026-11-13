@@ -84,3 +84,36 @@ def test_a_variable_sweep_written_live(tmp_path):
     d = lbd.load(path)
     assert d.lbd_version == "2.0" and list(d.groups) == ["scan"]
     assert d.values["Q"].data.shape == (2,) and len(d.axes["freq"].data) == 46 + 40
+
+
+def test_healthy_mock_data_has_nothing_broken_or_in_conflict(tmp_path):
+    """18.5: --healthy, to play around with: every file reads and has an id; no copies, conflict,
+    missing file or sync conflict copy; the labels are still there."""
+    pytest.importorskip("lbd_viewer")
+    make = load("make_mock_data")
+    made = make.make(tmp_path / "mock", files=30, small=True, healthy=True)
+    root = tmp_path / "mock"
+    assert made["special"] == {} and made["healthy"]
+    files = sorted(root.rglob("*.lbd"))
+    assert len(files) >= 25
+    for p in files:
+        assert lbd.info(p).id, p                                      # reads, and has an id
+    assert not list(root.rglob("*Conflict*")) and not (root / "Lab library" / "Shared" / "Backup").exists()
+    sides = list(root.rglob(".lbd-library.json"))
+    entries = [(side.parent, e) for side in sides for e in json.loads(side.read_text("utf-8"))["files"]]
+    assert any(e["tags"] for _, e in entries)                         # labelled
+    assert all((where / e["name"]).exists() for where, e in entries)  # no label without its file
+    assert "healthy" in "\n".join(make.report(root, made))
+    # the same folder made without --healthy has the problem cases
+    plain = make.make(tmp_path / "plain", files=30, small=True)
+    assert set(plain["special"]) >= {"copy", "conflict", "no_id", "missing"}
+    assert (tmp_path / "plain" / "Lab library" / "Lab data" / "2026" / "03" / "14" / "broken.lbd").exists()
+
+
+def test_a_live_measurement_without_the_stopped_one(tmp_path):
+    """18.5: mock_live.py --no-stopped (what --healthy --live runs) leaves no stopped measurement."""
+    import subprocess
+
+    subprocess.run([sys.executable, str(REPO / "viewer" / "tests" / "mock_live.py"), str(tmp_path), "--seconds", "0",
+                    "--no-stopped"], check=True, capture_output=True, timeout=120)
+    assert not list(tmp_path.glob("stopped*")) and (tmp_path / "live sweep.lbd").exists()

@@ -6,6 +6,7 @@ panels, large files, the examples, and (optionally) a measurement being written.
     uv run python scripts/make_mock_data.py FOLDER --small --no-labels   # quick: no large files
     uv run python scripts/make_mock_data.py FOLDER --many-labels  # hundreds of users and tags
     uv run python scripts/make_mock_data.py FOLDER --live          # also a file being written (runs on)
+    uv run python scripts/make_mock_data.py FOLDER --healthy       # only healthy files: to play around with
 
 FOLDER gets:
 
@@ -23,6 +24,12 @@ FOLDER gets:
 - `Examples/`: the repository's examples (examples/data).
 - `Live/` (--live): a measurement being written slowly (viewer/tests/mock_live.py, in the
   background; it prints how to stop it) and one that stopped before finishing.
+
+With --healthy, nothing is broken or in conflict, to show the tool or play around with it: no damaged
+file, no copies or copies in conflict, no files without an id, no missing file, no sync conflict copy
+of a labels file, and (with --live) no measurement that stopped before finishing. The examples are
+written again in today's format (the repository's copies have no id). The labels, the panel files
+and (without --small) the large files stay.
 
 Everything is made with fixed random seeds: the same files every time. FOLDER must be empty or
 not exist yet. Open it in the viewer with scripts/dev_viewer.py FOLDER (see docs/developers/
@@ -43,9 +50,11 @@ sys.path.insert(0, str(REPO / "viewer" / "tests"))   # the mock modules, which t
 
 
 def make(folder: Path, files: int = 300, with_labels: bool = True, small: bool = False,
-         live: bool = False, live_seconds: int = 600, many_labels: bool = False) -> Dict[str, object]:
+         live: bool = False, live_seconds: int = 600, many_labels: bool = False,
+         healthy: bool = False) -> Dict[str, object]:
     """Write the mock data into `folder` (empty or new). Returns what was made: the open folders
-    to add to the viewer, counts, and the live writer's process (or None)."""
+    to add to the viewer, counts, and the live writer's process (or None). `healthy`: none of the
+    broken or problem cases (18.5)."""
     import mock_library
     import mock_values
 
@@ -54,22 +63,40 @@ def make(folder: Path, files: int = 300, with_labels: bool = True, small: bool =
         raise SystemExit(f"{folder} isn't empty: give an empty or new folder (the mock data is written into it)")
     folder.mkdir(parents=True, exist_ok=True)
     library = folder / "Lab library"
-    written = mock_library.write_library(library, files)
-    special = mock_library.add_labels(library, keep_in=folder, many=many_labels) if with_labels else {}   # FOLDER is the open folder
+    written = mock_library.write_library(library, files, healthy=healthy)
+    special = (mock_library.add_labels(library, keep_in=folder, many=many_labels, healthy=healthy)
+               if with_labels else {})   # FOLDER is the open folder
     panels = mock_values.write_all(folder / "Panels", small=small)
     large: List[Path] = []
     if not small:                                   # --small leaves them out, so the tests stay quick
         import mock_large
         large = mock_large.write_all(folder / "Large")
     shutil.copytree(REPO / "examples" / "data", folder / "Examples")
+    if healthy:
+        # the repository's example files are from format 1.0 (no id): written again over the copy,
+        # which keeps any view saved in them
+        _write_examples(folder / "Examples")
     writer: Optional[subprocess.Popen] = None
     if live:
         (folder / "Live").mkdir()
         writer = subprocess.Popen([sys.executable, str(REPO / "viewer" / "tests" / "mock_live.py"), str(folder / "Live"),
-                                   "--seconds", str(live_seconds)],
+                                   "--seconds", str(live_seconds), *(["--no-stopped"] if healthy else [])],
                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return {"roots": [str(folder)], "library": {k: len(v) for k, v in written.items()}, "special": special,
-            "panels": len(panels), "large": len(large), "writer": writer}
+            "panels": len(panels), "large": len(large), "writer": writer, "healthy": healthy}
+
+
+def _write_examples(out: Path) -> None:
+    """examples/make_examples.py into `out`, quietly."""
+    import contextlib
+    import importlib.util
+    import io
+
+    spec = importlib.util.spec_from_file_location("make_examples", REPO / "examples" / "make_examples.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)                                # type: ignore[union-attr]
+    with contextlib.redirect_stdout(io.StringIO()):
+        module.main(out)
 
 
 def report(folder: Path, made: Dict[str, object]) -> List[str]:
@@ -78,7 +105,10 @@ def report(folder: Path, made: Dict[str, object]) -> List[str]:
         lines.append(f"  Lab library/{where}: {n} files")
     if made["special"]:
         lines.append("  with labels, copies, a conflict, files without an id and a missing file")
-    lines.append(f"  Panels: {made['panels']} files; Examples: the repository's examples")
+    elif made.get("healthy"):
+        lines.append("  healthy: nothing broken or in conflict")
+    examples = "the repository's examples, written in today's format" if made.get("healthy") else "the repository's examples"
+    lines.append(f"  Panels: {made['panels']} files; Examples: {examples}")
     if made["large"]:
         lines.append(f"  Large: {made['large']} large files (the engine tests)")
     if made["writer"] is not None:
@@ -99,8 +129,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--small", action="store_true", help="the panel files with few points, and no large files (quick)")
     ap.add_argument("--live", action="store_true", help="also a measurement being written, in the background")
     ap.add_argument("--live-seconds", type=int, default=600, help="how long the live measurement runs (default 600)")
+    ap.add_argument("--healthy", action="store_true",
+                    help="only healthy files, to play around with: no damaged file, copies, conflicts, files "
+                         "without an id, missing file or stopped measurement")
     a = ap.parse_args(argv)
-    made = make(a.folder, a.files, not a.no_labels, a.small, a.live, a.live_seconds, a.many_labels)
+    made = make(a.folder, a.files, not a.no_labels, a.small, a.live, a.live_seconds, a.many_labels, a.healthy)
     print("\n".join(report(a.folder, made)))
     return 0
 

@@ -22,7 +22,18 @@ test viewer on it at once with [`scripts/dev_viewer.py`](index.md#quick-start-fo
 | `Live/` (with `--live`) | a measurement being written slowly (it runs on in the background; the script prints its process), and one that stopped before finishing | `viewer/tests/mock_live.py` |
 
 Options: `--files N` (the Library's size), `--no-labels`, `--many-labels` (long lists, below),
-`--small` (the panel files with few points, and no `Large/`: quick), `--live` and `--live-seconds S`.
+`--small` (the panel files with few points, and no `Large/`: quick), `--live` and `--live-seconds S`,
+and `--healthy` (below).
+
+**Healthy data to play around with.** The mock data is made for testing, so it holds files and labels
+that are broken or in conflict on purpose (listed below). `--healthy` leaves all of them out: no damaged
+file, no copies or copies in conflict, no files without an id, no missing file, no sync conflict copy of
+a labels file, and with `--live` no measurement that stopped before finishing. The examples are written
+again in today's format. The labels, the panel files and (without `--small`) the large files stay:
+
+```bash
+uv run python scripts/make_mock_data.py FOLDER --healthy --small
+```
 
 ## The Library and its labels
 

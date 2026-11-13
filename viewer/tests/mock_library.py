@@ -86,9 +86,11 @@ def _dataset(kind: str, k: int, rng: np.random.Generator, created: datetime) -> 
 KINDS = ["resonator", "rabi", "spectroscopy", "t1", "fridge"]
 
 
-def write_library(folder: Path, n: int = 300) -> Dict[str, List[Path]]:
+def write_library(folder: Path, n: int = 300, healthy: bool = False) -> Dict[str, List[Path]]:
     """Write the mock library into `folder`: {"Lab data": [...], "Shared": [...]} (the paths
-    written, per open folder). The special files are in SPECIAL."""
+    written, per open folder). The special files are in SPECIAL. `healthy`: without the damaged
+    file (the others are odd, not wrong: an untitled file, single numbers only, a measurement just
+    before midnight, the same name in two folders)."""
     folder = Path(folder)
     rng = np.random.default_rng(8)
     start = datetime(2024, 10, 1, 9, 0, tzinfo=timezone.utc)         # two years up to about 2026-10
@@ -126,6 +128,8 @@ def write_library(folder: Path, n: int = 300) -> Dict[str, List[Path]]:
         path.parent.mkdir(parents=True, exist_ok=True)
         d.save(path)
         out[SPECIAL[name].split("/")[0]].append(path)
+    if healthy:
+        return out
     broken = folder / SPECIAL["broken"]
     broken.write_bytes((folder / SPECIAL["midnight"]).read_bytes()[:300])   # cut short: damaged
     out["Lab data"].append(broken)
@@ -182,7 +186,8 @@ def random_labels(rng: random.Random, vocabulary: Optional[Dict[str, List[str]]]
             "comment": rng.choice(LABEL_COMMENTS)}
 
 
-def add_labels(folder: Path, keep_in: Optional[Path] = None, many: bool = False) -> Dict[str, Path]:
+def add_labels(folder: Path, keep_in: Optional[Path] = None, many: bool = False,
+               healthy: bool = False) -> Dict[str, Path]:
     """Organise a mock library written by write_library (plan 8b): labels in the folders' label
     files (stars, projects nested 1-3 levels, users in groups, flat and nested tags, comments of
     one or several lines; LABEL_*), labels kept without a file (KEPT), an identical copy, a copy changed
@@ -190,7 +195,8 @@ def add_labels(folder: Path, keep_in: Optional[Path] = None, many: bool = False)
     labels whose file is gone (missing). The labels kept without a file go into `keep_in`, an open
     folder of the viewer (default: `folder/Lab data`, as the tests open it). Returns the special
     files by name. `many`: a large vocabulary (many_labels), every label of it kept, so the lists
-    are long."""
+    are long. `healthy`: the labels only, none of the problem cases (no copies, conflict, files
+    without an id, missing file or sync conflict copy)."""
     import shutil
 
     import h5py
@@ -225,6 +231,8 @@ def add_labels(folder: Path, keep_in: Optional[Path] = None, many: bool = False)
                     labels.keep(doc, kind, label)
         labels.update(keep_in, keep)
     special: Dict[str, Path] = {}
+    if healthy:
+        return special
     backup = folder / "Shared" / "Backup"
     backup.mkdir(parents=True, exist_ok=True)
     original = files[0]
