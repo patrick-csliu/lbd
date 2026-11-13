@@ -77,7 +77,7 @@ viewer/                     LBD Viewer
     src/api.ts                  typed client for the HTTP API
     src/help.tsx                Help links into /docs/
 tests/crosslang/            fixture definition + run_all.py (N x N matrix over the discovered languages)
-examples/                   sample .lbd files and make_examples.py
+examples/                   make_examples.py: sample .lbd files, written into examples/data (not in git)
   python/                   the scripts of the docs' Examples section (scripts/make_gallery.py)
 docs/examples/              generated Examples pages, figures (img/) and printed output (output/)
 packaging/                  PyInstaller spec, frozen entry point, SDK staging, icons, installers
@@ -179,8 +179,10 @@ uv run mkdocs build --strict     # into site/; lbd-view --dev serves it at /docs
 ## Working on the viewer
 
 1. Start the backend in development mode: port 8765, session code `dev`, never stops by itself.
-   It serves the last built UI at http://127.0.0.1:8765/?token=dev.
+   It serves the last built UI at http://127.0.0.1:8765/?token=dev. The example files aren't kept
+   in the repository: `make_examples.py` writes them into `examples/data` first (once).
    ```bash
+   uv run python examples/make_examples.py
    uv run lbd-view --dev examples/data
    ```
 2. For live UI editing, also run the Vite dev server. It forwards `/api` and `/docs` to the

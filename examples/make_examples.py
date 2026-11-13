@@ -2,6 +2,10 @@
 
     uv run python examples/make_examples.py [OUTDIR]
 
+The files are not kept in the repository: this script makes them wherever they are needed (the
+developer quick start, the language modules' tests, the smoke test of a built app, the mock data).
+Scripts and tests call `ensure_examples(folder)`, which makes them only when the folder is missing.
+
 When a file already exists and has a saved view (e.g. one saved in LBD Viewer), that view is
 kept: the script rewrites the data but never throws away a view someone chose.
 """
@@ -10,15 +14,31 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-import numpy as np
-
-import lbd
+# numpy and lbd are imported inside the functions that write: a script without them (the release
+# smoke tests run with a bare Python) can still call ensure_examples on a folder made earlier.
 
 DEFAULT_OUT = Path(__file__).resolve().parent / "data"
 
 
+def ensure_examples(folder: Optional[Path] = None) -> Path:
+    """The examples in `folder` (default examples/data): written by main() when the folder is
+    missing, left as they are when it exists. Returns the folder."""
+    folder = Path(folder) if folder is not None else DEFAULT_OUT
+    if folder.is_dir():
+        return folder
+    try:
+        import lbd  # noqa: F401
+        import numpy  # noqa: F401
+    except ImportError as e:
+        raise SystemExit(f"The example files are missing ({folder}) and this Python can't make them "
+                         f"({e}). Make them first: uv run python examples/make_examples.py") from None
+    return main(folder)
+
+
 def _save(d: "lbd.Dataset", path: Path, **kwargs) -> None:
     """Save `d`, keeping the saved view of an existing file at `path`."""
+    import lbd
+
     if path.exists():
         old = lbd.info(path)
         if old.plot is not None or old.style is not None or old.style_name is not None:
@@ -28,6 +48,10 @@ def _save(d: "lbd.Dataset", path: Path, **kwargs) -> None:
 
 
 def main(out: Optional[Path] = None) -> Path:
+    import numpy as np
+
+    import lbd
+
     out = Path(out) if out is not None else DEFAULT_OUT
     (out / "2026" / "resonator").mkdir(parents=True, exist_ok=True)
 

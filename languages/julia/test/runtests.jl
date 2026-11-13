@@ -525,7 +525,7 @@ end
             t = LBD.load(joinpath(ex, "temperature_map.lbd"))
             @test size(t["temperature"].data) == (81, 121)
         else
-            @warn "examples/data not found; run examples/python/make_examples.py"
+            @warn "examples/data not found; make it with: uv run python examples/make_examples.py"
         end
     end
 end

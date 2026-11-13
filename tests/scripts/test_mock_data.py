@@ -30,6 +30,9 @@ def test_a_folder_of_mock_data_with_every_kind_of_label(tmp_path):
     root = tmp_path / "mock"
     assert {p.name for p in root.iterdir()} == {"Lab library", "Panels", "Examples", ".lbd-library.json"}
     assert sum(made["library"].values()) >= 25 and made["panels"] >= 5 and made["writer"] is None
+    # the examples are written by examples/make_examples.py (18.6), in today's format: with an id
+    assert lbd.info(root / "Examples" / "rabi.lbd").id
+    assert (root / "Examples" / "2026" / "resonator" / "power_sweep.lbd").is_file()
     entries = [e for side in root.rglob(".lbd-library.json") for e in json.loads(side.read_text("utf-8"))["files"]]
     assert any(e["star"] for e in entries)
     assert any(e["project"] and e["project"].count("/") >= 1 for e in entries)              # nested projects

@@ -721,6 +721,11 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
 - `scripts/make_mock_data.py --healthy`: mock data with nothing broken or in conflict (no damaged
   file, copies, conflicts, files without an id, missing file or stopped measurement), to show the
   tool or play around with it; `mock_live.py --no-stopped`.
+- The example files (`examples/data`, written by LBD 0.1.0) are no longer in the repository:
+  `examples/make_examples.py` writes them in today's format where they are needed (run it before
+  `lbd-view --dev examples/data`). The mock data, the screenshots, the smoke test, the release
+  workflow, `test_all.py` (for the language modules' tests) and the `example_files` test fixture
+  make them; `ensure_examples(folder)` writes a missing folder.
 - The installer builds without warnings: `uv` runs quietly in the build scripts (PowerShell showed
   its progress as errors), esbuild's install step is approved in `package.json`, Vite's
   chunk-size hint is raised for this local page, Material's MkDocs 2 notice is off

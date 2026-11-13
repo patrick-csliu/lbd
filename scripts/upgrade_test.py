@@ -33,6 +33,9 @@ import urllib.request
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
+sys.path.append(str(REPO / "examples"))
+from make_examples import ensure_examples  # noqa: E402
+
 WINDOWS = sys.platform == "win32"
 HOME = Path.home()
 
@@ -119,7 +122,7 @@ def main(argv=None) -> int:
     step("make settings, labels and a Library")
     data = HOME / "lbd-upgrade-test-data"
     data.mkdir(exist_ok=True)
-    shutil.copy(REPO / "examples" / "data" / "rabi.lbd", data / "rabi.lbd")
+    shutil.copy(ensure_examples() / "rabi.lbd", data / "rabi.lbd")   # examples/data, made first in release.yml
     labels = data / ".lbd-library.json"
     labels.write_text(json.dumps({"files": {"rabi.lbd": {"tags": ["upgrade-test"]}}}), encoding="utf-8")
     SETTINGS.mkdir(parents=True, exist_ok=True)

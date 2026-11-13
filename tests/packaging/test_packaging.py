@@ -159,6 +159,19 @@ def test_make_examples_keeps_a_saved_view(load_module, tmp_path, capsys):
     assert "kept the saved view of temperature_map.lbd" in capsys.readouterr().out
 
 
+def test_ensure_examples_writes_a_missing_folder_only(load_module, tmp_path, monkeypatch):
+    """18.6: ensure_examples writes the files when the folder is missing and leaves a folder that
+    exists alone; when this Python can't write them, it says how to make them."""
+    mk = load_module("examples/make_examples.py")
+    out = mk.ensure_examples(tmp_path / "ex")
+    assert out == tmp_path / "ex" and lbd.info(out / "rabi.lbd").id
+    (out / "rabi.lbd").unlink()
+    assert mk.ensure_examples(out) == out and not (out / "rabi.lbd").exists()   # not written again
+    monkeypatch.setitem(sys.modules, "lbd", None)                               # as in a bare Python
+    with pytest.raises(SystemExit, match="examples/make_examples.py"):
+        mk.ensure_examples(tmp_path / "missing")
+
+
 def test_python_version():
     assert sys.version_info >= (3, 9)
 

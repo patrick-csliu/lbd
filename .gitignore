@@ -54,3 +54,6 @@ CLAUDE.md
 
 # Explore benchmark results, per computer (scripts/benchmark_explore.py)
 .benchmarks/
+
+# The example files, made by examples/make_examples.py where they are needed (not kept in git)
+examples/data/

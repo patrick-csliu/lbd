@@ -13,15 +13,12 @@ import time
 import urllib.request
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import get_context
-from pathlib import Path
 
 import psutil
 import pytest
 
 from lbd_viewer.pages import Pages
 from lbd_viewer.previews import _worker_init
-
-EXAMPLES = Path(__file__).resolve().parents[2] / "examples" / "data"
 
 
 def wait_for(cond, timeout: float, step: float = 0.1) -> bool:
@@ -91,10 +88,10 @@ def _api(port: int, token: str, method: str, path: str, body=None, timeout: floa
         return r.read()
 
 
-def test_ctrl_c_stops_the_viewer_quickly_and_quietly(tmp_path):
+def test_ctrl_c_stops_the_viewer_quickly_and_quietly(tmp_path, example_files):
     data = tmp_path / "data"
     data.mkdir()
-    shutil.copy(EXAMPLES / "temperature_map.lbd", data / "map.lbd")
+    shutil.copy(example_files / "temperature_map.lbd", data / "map.lbd")
     env = {**os.environ, "LBD_CONFIG_DIR": str(tmp_path / "config"), "LBD_RUNTIME_DIR": str(tmp_path / "run"),
            "PYTHONUNBUFFERED": "1"}
     windows = sys.platform == "win32"

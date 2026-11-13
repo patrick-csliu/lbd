@@ -308,7 +308,10 @@ def test_test_all_summary(load_module, monkeypatch, capsys):
     for lang in langs:
         monkeypatch.setattr(type(lang), "run", lambda self, cmd, **kw: R(0))
     monkeypatch.setattr(type(langs[0]), "missing_tool", lambda self, section: None)
+    made = []                                             # never into the repository from a test
+    monkeypatch.setattr(ta, "make_example_files", lambda: made.append(1))
     assert ta.main(["--fast"]) == 0
+    assert made == [1]                    # the language tests read examples/data: made once, first
     out = capsys.readouterr().out
     assert "skipped" in out and "PASSED, but" in out      # web type check skipped without npm
     monkeypatch.setattr(ta, "run", lambda cmd, cwd, env=None: R(1))
@@ -330,6 +333,7 @@ def test_test_all_annotates_failures_on_github(load_module, monkeypatch, capsys)
     for lang in langs:
         monkeypatch.setattr(type(lang), "run", lambda self, cmd, **kw: R())
     monkeypatch.setattr(type(langs[0]), "missing_tool", lambda self, section: None)
+    monkeypatch.setattr(ta, "make_example_files", lambda: None)
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     assert ta.main(["--fast", "--workers", "1"]) == 1
     errors = [l for l in capsys.readouterr().out.splitlines() if l.startswith("::error")]
@@ -464,6 +468,8 @@ def test_test_all_runs_what_a_change_affects(load_module):
     assert picked("planning/plans/x.md", "CLAUDE.md") == []
     assert picked("something/new.txt") == sorted(every)                  # not known: everything
     assert picked("viewer/src/lbd_viewer/server.py", "spec/LBD-v1.md") == ["docs", "e2e", "viewer"]
+    # the language tests read the files make_examples.py writes
+    assert picked("examples/make_examples.py") == ["julia", "matlab", "python", "tools", "viewer"]
 
 
 def test_test_all_only_and_side_by_side(load_module, monkeypatch, capsys):
