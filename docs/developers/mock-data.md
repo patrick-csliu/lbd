@@ -18,7 +18,7 @@ test viewer on it at once with [`scripts/dev_viewer.py`](index.md#quick-start-fo
 | `Lab library/` | about 300 measurements (`--files N` for more or fewer): `Lab data/` sorted by date (`YYYY/MM/DD/`) and `Shared/` sorted by project | `viewer/tests/mock_library.py` |
 | `Panels/` | files for Explore's panels: several values on one axis, 3-D maps with a slider, values over different axes, many values, I/Q readout, data points with a shape, variable sweeps (format 2.0), uneven grids | `viewer/tests/mock_values.py` |
 | `Large/` (not with `--small`) | the four engine tests, about 214 MB: a curve of 1 000 000 points, 1000 traces × 10 000 points, a 4001 × 4001 map, and a small map with uneven x ([below](#large-files-and-uneven-grids)) | `viewer/tests/mock_large.py` |
-| `Examples/` | the repository's examples (`examples/data`) | `examples/make_examples.py` |
+| `Examples/` | the example files: a Rabi curve, a temperature map, a resonator power sweep, an I/Q readout, a style file and a figure | `examples/make_examples.py` |
 | `Live/` (with `--live`) | a measurement being written slowly (it runs on in the background; the script prints its process), and one that stopped before finishing | `viewer/tests/mock_live.py` |
 
 Options: `--files N` (the Library's size), `--no-labels`, `--many-labels` (long lists, below),
@@ -28,8 +28,8 @@ and `--healthy` (below).
 **Healthy data to play around with.** The mock data is made for testing, so it holds files and labels
 that are broken or in conflict on purpose (listed below). `--healthy` leaves all of them out: no damaged
 file, no copies or copies in conflict, no files without an id, no missing file, no sync conflict copy of
-a labels file, and with `--live` no measurement that stopped before finishing. The examples are written
-again in today's format. The labels, the panel files and (without `--small`) the large files stay:
+a labels file, and with `--live` no measurement that stopped before finishing. The labels, the examples,
+the panel files and (without `--small`) the large files stay:
 
 ```bash
 uv run python scripts/make_mock_data.py FOLDER --healthy --small

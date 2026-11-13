@@ -305,7 +305,7 @@ end
 
 function testReadsPythonExamples(tc)
 ex = tc.TestData.examples;
-tc.assumeTrue(isfolder(ex), "examples/data not found; run examples/python/make_examples.py");
+tc.assumeTrue(isfolder(ex), "examples/data not found; make it with: uv run python examples/make_examples.py");
 r = lbd.load(fullfile(ex, "2026", "resonator", "power_sweep.lbd"));
 tc.verifyEqual(r.Values.S21.Axes, ["power" "freq"]);
 tc.verifySize(r.Values.S21.Data, [numel(r.Axes.power.Data) numel(r.Axes.freq.Data)]);

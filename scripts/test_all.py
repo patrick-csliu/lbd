@@ -169,6 +169,8 @@ def affected(paths: List[str], every: Set[str], languages: List[str]) -> Dict[st
                 if parts[1] == "python":
                     add({"viewer", "e2e", "tools", "docs"}, p)
             continue
+        if p == "examples/make_examples.py":
+            add(set(languages), p)            # every language's tests read the files it writes
         for prefix, suites in AFFECTS:
             if p == prefix or p.startswith(prefix):
                 add(suites, p)
@@ -176,6 +178,15 @@ def affected(paths: List[str], every: Set[str], languages: List[str]) -> Dict[st
         else:
             add(every, p)                     # not known: everything
     return {s: why[s] for s in why if s in every}
+
+
+def make_example_files() -> None:
+    """The language modules' tests read files written by Python from examples/data, which isn't
+    kept in the repository: examples/make_examples.py writes it when it is missing."""
+    sys.path.append(str(REPO / "examples"))
+    from make_examples import ensure_examples
+
+    ensure_examples(REPO / "examples" / "data")
 
 
 def main(argv=None) -> int:
@@ -208,7 +219,9 @@ def main(argv=None) -> int:
     suites = []   # (name, title, fn), in the order the summary shows them
     e2e_env = {**os.environ, "LBD_SHARD": f"{shard[0]}/{shard[1]}"} if shard else None
 
-    for lang in discover():
+    langs = discover()
+    language_ids = {lang.id for lang in langs}
+    for lang in langs:
         test = lang.section("test")
 
         def lang_test(lang=lang, test=test):
@@ -291,6 +304,8 @@ def main(argv=None) -> int:
               + (", ".join(f"{n} ({sorted(why[n])[0]}{' …' if len(why[n]) > 1 else ''})" for n in sorted(why))
                  or "nothing"), flush=True)
     run_now = [(n, t, fn) for n, t, fn in suites if chosen is None or n in chosen]
+    if any(n in language_ids for n, _, _ in run_now):
+        make_example_files()                  # once, before the suites run side by side
 
     results: Dict[str, tuple] = {}   # title → (status, seconds, output)
 

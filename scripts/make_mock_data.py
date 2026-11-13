@@ -21,15 +21,14 @@ FOLDER gets:
 - `Large/` (not with --small): the four engine tests (viewer/tests/mock_large.py), about 214 MB:
   a curve of 1 000 000 points, 1000 traces x 10 000 points, a 4001 x 4001 map, and a small map
   with uneven x.
-- `Examples/`: the repository's examples (examples/data).
+- `Examples/`: the example files, written by examples/make_examples.py.
 - `Live/` (--live): a measurement being written slowly (viewer/tests/mock_live.py, in the
   background; it prints how to stop it) and one that stopped before finishing.
 
 With --healthy, nothing is broken or in conflict, to show the tool or play around with it: no damaged
 file, no copies or copies in conflict, no files without an id, no missing file, no sync conflict copy
-of a labels file, and (with --live) no measurement that stopped before finishing. The examples are
-written again in today's format (the repository's copies have no id). The labels, the panel files
-and (without --small) the large files stay.
+of a labels file, and (with --live) no measurement that stopped before finishing. The labels, the
+examples, the panel files and (without --small) the large files stay.
 
 Everything is made with fixed random seeds: the same files every time. FOLDER must be empty or
 not exist yet. Open it in the viewer with scripts/dev_viewer.py FOLDER (see docs/developers/
@@ -39,7 +38,6 @@ mock-data.md).
 from __future__ import annotations
 
 import argparse
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -71,11 +69,7 @@ def make(folder: Path, files: int = 300, with_labels: bool = True, small: bool =
     if not small:                                   # --small leaves them out, so the tests stay quick
         import mock_large
         large = mock_large.write_all(folder / "Large")
-    shutil.copytree(REPO / "examples" / "data", folder / "Examples")
-    if healthy:
-        # the repository's example files are from format 1.0 (no id): written again over the copy,
-        # which keeps any view saved in them
-        _write_examples(folder / "Examples")
+    _write_examples(folder / "Examples")
     writer: Optional[subprocess.Popen] = None
     if live:
         (folder / "Live").mkdir()
@@ -107,8 +101,7 @@ def report(folder: Path, made: Dict[str, object]) -> List[str]:
         lines.append("  with labels, copies, a conflict, files without an id and a missing file")
     elif made.get("healthy"):
         lines.append("  healthy: nothing broken or in conflict")
-    examples = "the repository's examples, written in today's format" if made.get("healthy") else "the repository's examples"
-    lines.append(f"  Panels: {made['panels']} files; Examples: {examples}")
+    lines.append(f"  Panels: {made['panels']} files; Examples: the example files (examples/make_examples.py)")
     if made["large"]:
         lines.append(f"  Large: {made['large']} large files (the engine tests)")
     if made["writer"] is not None:

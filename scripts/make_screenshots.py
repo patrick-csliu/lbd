@@ -44,6 +44,9 @@ from lbd_viewer import server  # noqa: E402
 from lbd_viewer.config import Config  # noqa: E402
 from lbd_viewer.server import AppState, create_app  # noqa: E402
 
+sys.path.append(str(REPO / "examples"))
+from make_examples import ensure_examples  # noqa: E402
+
 VIEWER_IMG = REPO / "docs" / "viewer" / "img"
 QUICKSTART_IMG = REPO / "docs" / "getting-started" / "img"
 TOKEN = "screenshots"
@@ -115,7 +118,7 @@ def make_files(folder: Path) -> None:
     d.meta["T_mK"] = 12
     d.save(folder / "sweep.lbd")
 
-    shutil.copytree(REPO / "examples" / "data", folder / "examples")
+    ensure_examples(folder / "examples")             # examples/make_examples.py
 
     # values on two different axes, and a single number
     delay = np.logspace(-7, -3.5, 60)

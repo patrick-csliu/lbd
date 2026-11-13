@@ -164,6 +164,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+
+      # The MATLAB tests read files written by Python from examples/data (not kept in the
+      # repository; scripts/test_all.py makes them the same way in the other jobs).
+      - name: Make the example files
+        run: uv run --no-project --with "./languages/python[plot]" python examples/make_examples.py
 
       - uses: matlab-actions/setup-matlab@v3
 

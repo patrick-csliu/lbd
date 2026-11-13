@@ -5,7 +5,6 @@ Found on a lab computer with 0.55 GB of 15 GB free: the old reserve (2 GB) left 
 11 × 201 points were "too big" and refused ("small enough to show without a summary")."""
 
 import warnings
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -18,8 +17,6 @@ from lbd_viewer.memory import GB, Memory, PartCache
 
 from mock_values import write_all
 
-EXAMPLES = Path(__file__).resolve().parents[2] / "examples" / "data"
-
 
 def no_free_memory(monkeypatch, tmp_path, always_whole=memory.ALWAYS_WHOLE, total=16 * GB):
     """The operating system reports nothing available; summaries kept in `tmp_path`."""
@@ -29,8 +26,8 @@ def no_free_memory(monkeypatch, tmp_path, always_whole=memory.ALWAYS_WHOLE, tota
     return m
 
 
-def files(tmp_path):
-    return write_all(tmp_path / "mock") + sorted(EXAMPLES.rglob("*.lbd"))
+def files(tmp_path, examples):
+    return write_all(tmp_path / "mock") + sorted(examples.rglob("*.lbd"))
 
 
 def open_quietly(path, spec=None, **kw):
@@ -39,8 +36,8 @@ def open_quietly(path, spec=None, **kw):
         return ExploreSession(path, "v", spec or {}, Style(), 400, 300, 1, **kw)
 
 
-def test_every_file_opens_and_previews_with_no_free_memory(monkeypatch, tmp_path):
-    paths = files(tmp_path)
+def test_every_file_opens_and_previews_with_no_free_memory(monkeypatch, tmp_path, example_files):
+    paths = files(tmp_path, example_files)
     no_free_memory(monkeypatch, tmp_path)
     for p in paths:
         s = open_quietly(p)
@@ -52,9 +49,9 @@ def test_every_file_opens_and_previews_with_no_free_memory(monkeypatch, tmp_path
         open_quietly(p, saved_view=False, summarise=False, bare=True)     # the Library's preview
 
 
-def test_several_values_as_curves_open_with_no_free_memory(monkeypatch, tmp_path):
+def test_several_values_as_curves_open_with_no_free_memory(monkeypatch, tmp_path, example_files):
     no_free_memory(monkeypatch, tmp_path)               # rabi: two values in one curve plot
-    s = open_quietly(EXAMPLES / "rabi.lbd")
+    s = open_quietly(example_files / "rabi.lbd")
     assert len(s.spec["values"]) == 2 and not s.summarised
 
 

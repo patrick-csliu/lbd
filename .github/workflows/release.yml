@@ -115,6 +115,9 @@ jobs:
         with:
           name: mltbx
           path: mltbx
+      # examples/data, which the smoke and upgrade tests open (not kept in the repository)
+      - name: Make the example files
+        run: uv run --no-project --with "./languages/python[plot]" python examples/make_examples.py
 
       - name: Inno Setup (if the runner lacks it)
         run: |
@@ -203,6 +206,9 @@ jobs:
         with:
           name: mltbx
           path: mltbx
+      # examples/data, which the smoke and upgrade tests open (not kept in the repository)
+      - name: Make the example files
+        run: uv run --no-project --with "./languages/python[plot]" python examples/make_examples.py
 
       - name: Install Arial (the default style's font, for the smoke test)
         run: |
@@ -281,6 +287,9 @@ jobs:
         with:
           name: wheels
           path: wheels
+      # examples/data, which the smoke test opens (not kept in the repository)
+      - name: Make the example files
+        run: uv run --no-project --with "./languages/python[plot]" python examples/make_examples.py
       # Exactly the commands of docs/getting-started/install.md ("LBD Viewer on macOS").
       - name: Install with uv, as a Mac user would
         working-directory: wheels
@@ -321,6 +330,9 @@ jobs:
         with:
           name: mltbx
           path: mltbx
+      # examples/data, which the smoke test and the Finder check open (not kept in the repository)
+      - name: Make the example files
+        run: uv run --no-project --with "./languages/python[plot]" python examples/make_examples.py
 
       - name: Build (app, ad-hoc signature, minimum macOS, disk image)
         run: LBD_PREBUILT="matlab=$GITHUB_WORKSPACE/mltbx" sh scripts/build_macos.sh "$RUNNER_TEMP/build"

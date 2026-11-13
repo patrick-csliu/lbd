@@ -227,6 +227,7 @@ export UV_PROJECT_ENVIRONMENT=~/.venvs/lbd-dev
 uv sync --all-packages --group docs            # the lbd module, the viewer, dev and docs tools
 (cd viewer/web && npm ci && npm run build)     # the viewer's user interface
 uv run python scripts/test_all.py              # every test suite, every language
+uv run python examples/make_examples.py        # a few example files, into examples/data
 uv run lbd-view --dev examples/data            # http://127.0.0.1:8765/?token=dev
 ```
 

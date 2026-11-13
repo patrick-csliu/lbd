@@ -4,6 +4,7 @@
   LBD_RUNTIME_DIR point to fresh temporary folders.
 - matplotlib draws off-screen and every figure is closed after each test.
 - `load_module` imports a script (scripts/, packaging/, examples/) by path, for testing it.
+- `example_files` is a folder with the example files, made once per session.
 """
 
 import importlib.util
@@ -44,6 +45,14 @@ def _load(rel: str):
 def load_module():
     """load_module("scripts/languages.py") -> the module, imported once under its own name."""
     return _load
+
+
+@pytest.fixture(scope="session")
+def example_files(tmp_path_factory):
+    """The example files (examples/make_examples.py: rabi.lbd, temperature_map.lbd, …), written once
+    per test session into a temporary folder: they aren't kept in the repository. Read them, or
+    copy them before changing one."""
+    return _load("examples/make_examples.py").ensure_examples(tmp_path_factory.mktemp("lbd-examples") / "examples")
 
 
 def pytest_configure(config):
