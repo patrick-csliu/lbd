@@ -191,9 +191,13 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
 - **The first start asks what matters for your data**: your folders; for each, whether it is on this
   computer only, synced with other computers, or in the cloud with files kept online only (which
   turns off reading each file's details); for a synced folder, how data files are edited (in place
-  or copy and swap, both explained); and whether to check online for new versions. It asks until
+  or copy and swap, both explained); which previews the Library draws (every file reads every
+  file); and whether to check online for new versions. It asks until
   answered. After an upgrade only the last question is asked. It replaces the Library's notice about
-  cloud folders.
+  cloud folders. Each question starts with its first answer chosen; a folder added by mistake can be
+  removed; nothing is saved, and no folder is read, until **Start**.
+- **A question asked while the last one's change was still being made** (two settings changed
+  quickly) could keep its button greyed out, or close by itself; it now starts afresh.
 - **The check for new versions can be turned off** (Settings → About → Check for new versions
   online), and it runs only when allowed: asked at the first start, not before.
 - **Settings that change a lot ask first** and say what will happen: how data files are edited, reading

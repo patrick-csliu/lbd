@@ -206,8 +206,9 @@ install Python: uv downloads the version the viewer is tested with.
 ## The first start
 
 The first time LBD Viewer starts, it asks a few questions, only those whose answer matters for your
-data. It asks until they are answered (closing the page asks again next time); each can be changed
-later in Settings.
+data. Each question starts with its first answer chosen, and a folder added by mistake can be removed
+(**×**). Nothing is saved, and no folder is read, until **Start**. It asks until the questions are
+answered (closing the page asks again next time); each can be changed later in Settings.
 
 1. **Your data folders**: the Library lists the data files in them. More can be added later.
 2. **Where each folder is kept**: on this computer only; synced with other computers by a sync tool
@@ -218,7 +219,11 @@ later in Settings.
    small, but a write cut half-way can damage the file) or *copy and swap* (a complete copy each
    time, safe against a power cut, but a sync tool sends the whole file). Settings → Library → Edit
    data files.
-4. **Check online for new versions?** (below). Settings → About.
+4. **Which previews the Library draws**: of every file (they show at once, but every file is read
+   for them, in the background), of the selected file and the rows near it, or only when you click
+   **Show preview** (Settings → Library → Draw previews of). Every file can't be chosen while a
+   folder is kept online only.
+5. **Check online for new versions?** (below). Settings → About.
 
 After an upgrade from an earlier version, with folders already set, only the last question is asked.
 
