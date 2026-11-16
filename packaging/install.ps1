@@ -71,7 +71,12 @@ function Install-LBDViewer {
         catch { Fail "couldn't download $($entry.Name) ($($_.Exception.Message)). Check the internet connection (or proxy), then try again." }
 
         Say "Checking its SHA-256 checksum"
-        $hash = (Get-FileHash -LiteralPath $setup -Algorithm SHA256).Hash.ToLower()
+        # .NET directly, not Get-FileHash: that cmdlet can be missing (e.g. Windows PowerShell started
+        # from PowerShell 7, whose module path hides it)
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        $stream = [System.IO.File]::OpenRead($setup)
+        try { $hash = ([System.BitConverter]::ToString($sha.ComputeHash($stream)) -replace '-', '').ToLower() }
+        finally { $stream.Dispose(); $sha.Dispose() }
         if ($hash -ne $entry.Hash) {
             Fail "the checksum of $($entry.Name) doesn't match SHA256SUMS (expected $($entry.Hash), got $hash). The download is damaged or not the published file; it was deleted. Try again later."
         }
