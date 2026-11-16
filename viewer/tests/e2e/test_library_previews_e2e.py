@@ -150,9 +150,15 @@ def test_a_preview_chosen_in_explore_stays_until_reset(viewer, new_page):
 def shown_picture(page: Page) -> bytes:
     """The bytes of the picture the preview box shows."""
     img = preview(page).locator("img")
-    expect(img).to_be_visible(timeout=30_000)
-    data = img.evaluate("async (i) => Array.from(new Uint8Array(await (await fetch(i.src)).arrayBuffer()))")
-    return bytes(data)
+    for attempt in range(5):
+        expect(img).to_be_visible(timeout=30_000)
+        try:   # the picture can be replaced while it is fetched (a new one drawn): then the next src
+            data = img.evaluate("async (i) => Array.from(new Uint8Array(await (await fetch(i.src)).arrayBuffer()))")
+            return bytes(data)
+        except Exception:
+            if attempt == 4:
+                raise
+            page.wait_for_timeout(300)
 
 
 def test_update_preview_draws_a_changed_file_again_and_asks_for_a_chosen_picture(viewer, new_page):
