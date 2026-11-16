@@ -196,6 +196,10 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
   answered. After an upgrade only the last question is asked. It replaces the Library's notice about
   cloud folders. Each question starts with its first answer chosen; a folder added by mistake can be
   removed; nothing is saved, and no folder is read, until **Start**.
+- **Dates and times are written one way everywhere** (2026-03-14 23:30), also when the browser is
+  set to another language: the Library's "Drawn on", a measurement's status line, "Updated" after a
+  change on disk and Settings → About were written in the browser's language (e.g. "2026年11月13日
+  下午5:46" in English text).
 - **A question asked while the last one's change was still being made** (two settings changed
   quickly) could keep its button greyed out, or close by itself; it now starts afresh.
 - **The check for new versions can be turned off** (Settings → About → Check for new versions

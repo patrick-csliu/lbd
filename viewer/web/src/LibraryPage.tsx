@@ -1625,9 +1625,7 @@ function usePreview(path: string, version: string, now: boolean, nonce = 0): { p
   return { preview: mine?.preview ?? null, url: mine?.url ?? null, error };
 }
 
-function dateTime(seconds: number): string {
-  return new Date(seconds * 1000).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
-}
+const dateTime = localTime; // as every date in the Library
 
 /** The selected file's preview, with what it shows and, for a chosen one, Reset. A file being
  *  measured shows "Live" instead (`stopped`: its measurement ended without finishing it). */

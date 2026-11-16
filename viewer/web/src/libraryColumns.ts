@@ -131,10 +131,19 @@ export function createdTip(r: LibraryRow): string {
   return r.date_from_file || !r.created ? `${zonedText(ms)} (${dateZoneName()}); the file's modified time` : `${zonedText(ms)} (${dateZoneName()}); in the file: ${writtenText(r, true)}`;
 }
 
+/** "2026-03-14 23:30" in this computer's time zone. Dates and times are always written so, never
+ * in the browser's language (a Chinese browser wrote "2026年3月14日 下午11:30" into English text). */
 export function localTime(seconds: number): string {
   const d = new Date(seconds * 1000);
   const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${clockTime(seconds)}`;
+}
+
+/** "23:30" (or "23:30:05" with `withSeconds`) in this computer's time zone, as localTime writes it. */
+export function clockTime(seconds: number, withSeconds = false): string {
+  const d = new Date(seconds * 1000);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}${withSeconds ? `:${p(d.getSeconds())}` : ""}`;
 }
 
 export function cellText(r: LibraryRow, c: LibraryColumn): string {
