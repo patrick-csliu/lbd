@@ -15,7 +15,9 @@ FOLDERS = {"VIEWER_IMG": REPO / "docs" / "viewer" / "img", "QUICKSTART_IMG": REP
 
 def shots():
     """The images the script makes: their paths."""
-    found = re.findall(r'save\(page, (VIEWER_IMG|QUICKSTART_IMG) / "([^"]+)"', SCRIPT.read_text(encoding="utf-8"))
+    text = SCRIPT.read_text(encoding="utf-8")
+    found = re.findall(r'save\(page, (VIEWER_IMG|QUICKSTART_IMG) / "([^"]+)"', text)
+    found += [("VIEWER_IMG", name) for name in re.findall(r'clean\(page, "([^"]+)"\)', text)]   # without numbers
     return {FOLDERS[folder] / name for folder, name in found}
 
 

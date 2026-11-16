@@ -5,15 +5,14 @@
 Runs in release.yml's Windows job (setup .exe files) and Linux job (tarballs), on a fresh runner:
 it installs into the real user folders, so never run it on your own computer.
 
-1. installs the old version (e.g. v1.2.0 from its release) and starts it;
+1. installs the old version (the latest published release, e.g. v1.1.0) and starts it;
 2. makes settings (a folder, the dark theme), labels (a Library label file next to a data file)
    and a Library database (as a later version would have left them);
 3. installs the new version over it: the running old viewer must be stopped by the installer;
 4. checks that the settings, labels and Library survive, the new viewer reads the settings, the
    old program folder's files are gone, and `lbd-view --stop` stops the new viewer gently;
 5. installs an older version again: it must be refused, leaving the new one installed.
-   The refusal is in the installer being run, so v1.2.0's own installer (from before 1.3.0) can't
-   refuse: --older is the new installer made with an older version number (release.yml builds it).
+   The refusal is in the installer being run, so an old release's own installer can't refuse: --older is the new installer made with an older version number (release.yml builds it).
 Prints one line per step and exits 1 at the first failure.
 """
 

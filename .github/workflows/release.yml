@@ -162,16 +162,17 @@ jobs:
           if ($left) { throw "the uninstaller left behind: $($left -join ', ')" }
           "installed, smoke-tested and uninstalled; settings kept, nothing else left behind"
 
-      # Plan 16.26: v1.2.0 from its release, settings, labels and a Library, the new version over
+      # Plan 16.26: the latest published release (1.1.0 before 2.0; there was no 1.2.0), settings,
+      # labels and a Library, the new version over
       # it (all kept, the old program files gone), then an older version refused. The refusal is
       # in the installer being run, so the "older" one is this build's installer with a lower number.
-      - name: Upgrade from v1.2.0, and refuse an older version
+      - name: Upgrade from the latest release, and refuse an older version
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $old = "$env:RUNNER_TEMP\old"
-          gh release download v1.2.0 --repo $env:GITHUB_REPOSITORY --pattern "*-windows-x64-setup.exe" --dir $old
-          if ($LASTEXITCODE -ne 0) { throw "couldn't download v1.2.0's installer" }
+          gh release download --repo $env:GITHUB_REPOSITORY --pattern "*-windows-x64-setup.exe" --dir $old   # no tag: the latest
+          if ($LASTEXITCODE -ne 0) { throw "couldn't download the latest release's installer" }
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { $iscc = (Get-Command ISCC.exe).Source }
           & $iscc /Q /DAppVersion=0.0.1 "/DDistDir=$env:RUNNER_TEMP\build\dist\LBDViewer" "/O$env:RUNNER_TEMP\older" packaging\windows\LBDViewer.iss
@@ -228,12 +229,12 @@ jobs:
           uv run --no-project python scripts/smoke_test_app.py --release --exe "$RUNNER_TEMP/unpacked/$name/LBDViewer/lbd-view"
 
       # Plan 16.26, as in the Windows job; the "older" package is this one with a lower VERSION.
-      - name: Upgrade from v1.2.0, and refuse an older version
+      - name: Upgrade from the latest release, and refuse an older version
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           name="lbd-viewer-$VERSION-linux-$(uname -m)"
-          gh release download v1.2.0 --repo "$GITHUB_REPOSITORY" --pattern "*-linux-$(uname -m).tar.gz" --dir "$RUNNER_TEMP/old"
+          gh release download --repo "$GITHUB_REPOSITORY" --pattern "*-linux-$(uname -m).tar.gz" --dir "$RUNNER_TEMP/old"   # no tag: the latest
           mkdir -p "$RUNNER_TEMP/older"
           cp -a "$RUNNER_TEMP/unpacked/$name" "$RUNNER_TEMP/older/lbd-viewer-0.0.1"
           echo 0.0.1 > "$RUNNER_TEMP/older/lbd-viewer-0.0.1/LBDViewer/VERSION"

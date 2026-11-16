@@ -18,10 +18,8 @@ files, also while they are being measured. LBD Viewer shows them on three pages:
 - **Figure**: figures that look the same for every dataset, every program and every year: the same
   size, fonts, line widths, colours and colour scales.
 
-![A data file plus a style makes a figure; the same style with any data file makes figures that match](assets/concept.svg)
+![Your programs write .lbd files; the Library manages them, Explore looks into them, Figure makes the figures](assets/three-parts.svg)
 
-The idea behind the figures: a **data file** holds what you measured, a **style** holds how
-figures look, and LBD puts them together when it draws. Keep one style, and every figure matches.
 [How LBD works :octicons-arrow-right-24:](getting-started/how-it-works.md)
 
 <div class="grid cards" markdown>
