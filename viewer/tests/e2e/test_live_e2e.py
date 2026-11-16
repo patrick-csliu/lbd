@@ -36,7 +36,10 @@ def test_the_status_line_then_the_finished_file(viewer, new_page):
         page = new_page("Explore")
         frames(page, lambda: row(page, "live.lbd.writing").dblclick())
         expect(status(page)).to_contain_text("Measuring")
-        expect(status(page)).to_contain_text("15 of 50 points")
+        # the pace decides the rounding (live.progress_parts): "30.0 %" and 15 points while slow,
+        # "30 %" and 10 points on a fast computer
+        expect(status(page).locator(".measuring-part").filter(has_text="%").first).to_have_text(re.compile(r"30(\.0)? %"))
+        expect(status(page)).to_contain_text(re.compile(r"\b(15|10) of 50 points"))
         points = status(page).locator(".measuring-part").filter(has_text="points")
         width = points.bounding_box()["width"]
         expect(page.get_by_role("tab", name=re.compile(r"being measured\s*Live sweep"))).to_be_visible()   # the file's title
