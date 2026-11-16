@@ -310,7 +310,7 @@ when complete.
   finished:
 
   ```json
-  {"lbd_live": 1, "computer": "LAB-PC", "process": 4120, "program": "python lbd 1.3.0",
+  {"lbd_live": 1, "computer": "LAB-PC", "process": 4120, "program": "python lbd 2.0.0",
    "started": "2026-11-03T10:00:05+08:00", "updated": "2026-11-03T10:12:35+08:00",
    "beat_every": 30, "longest_gap": 31.2,
    "values": {"S21": {"points": 47069, "total": 180090, "per_write": 2001, "rate": 64.1,
@@ -331,7 +331,7 @@ when complete.
 
 ```
 /                         lbd_format="LBD" lbd_version="1.2" title="Resonator power sweep"
-                          description="" created="2026-10-13T16:09:00+08:00" writer="python lbd 1.3.0"
+                          description="" created="2026-10-13T16:09:00+08:00" writer="python lbd 2.0.0"
                           id="0199dc2a-4b7e-7f30-8a41-5c6d7e8f9a0b"
 /axes/power   float64[11]       unit="dBm" label="Power"
 /axes/freq    float64[401]      unit="Hz"  label="Frequency"

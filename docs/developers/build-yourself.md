@@ -31,7 +31,7 @@ are on the [release page](https://github.com/patrick-csliu/lbd/releases)).
 With Git:
 
 ```bash
-git clone --branch v1.3.0 https://github.com/patrick-csliu/lbd.git
+git clone --branch v2.0.0 https://github.com/patrick-csliu/lbd.git
 cd lbd
 ```
 

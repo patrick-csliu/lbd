@@ -4,7 +4,7 @@ All components (the viewer and every language module) share one version number.
 The file format has its own version (`lbd_version`, currently 2.1; a file is written with the
 lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with an axis group).
 
-## 1.3.0 (in development)
+## 2.0.0 (in development)
 
 **Changes to how things behave** (read these when upgrading)
 
@@ -78,7 +78,7 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
   inner points depend on the outer ones (frequencies chosen per power, a different number of
   points per row, adaptive points) is stored as an axis group: only the measured points, level
   by level. Writers write 2.0 only for a file with an axis group; **every other file is still
-  written as 1.2**, so older LBD keeps reading it. **LBD older than 1.3 can't open 2.0 files**
+  written as 1.2**, so older LBD keeps reading it. **LBD older than 2.0 can't open file format 2.0 files**
   ("please update"). `lbd.version()` gives `"2.0"`, the newest format read and written. See
   *Concepts → Variable sweeps* and *Grid or group?*.
 

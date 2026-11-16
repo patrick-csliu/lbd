@@ -84,7 +84,7 @@ measurement may stop early (the points not measured stay `NaN`) or a few points 
 | Reading | `data[i, j]` is A index i, B index j: plain array indexing | `data[k]` is the k-th point: by axis needs `rows`, `coords` or `to_dense` |
 | A rectangle for plots and arrays | it already is one | `to_dense`: a copy, gaps `NaN`; can be large |
 | Writing | an index per axis | coordinates (looked up) or `parent=`; float coordinates that differ only by rounding make two points (with a warning) |
-| File format | 1.2: read by every LBD since 1.2 | **2.0: LBD older than 1.3 can't open it** |
+| File format | 1.2: read by every LBD since 1.2 | **file format 2.0: LBD older than 2.0 can't open it** |
 | Other HDF5 tools (h5py, HDFView, `h5read`) | the arrays are the data, as they look | flat arrays plus `._parent` indices: readable, but you follow the parents yourself |
 | LBD Viewer | every plot, Explore, cursors | maps and curves on the real coordinates (two levels); deeper groups against the point number |
 | Speed | direct | `write` looks coordinates up (in memory, fast); `to_dense` and `coords` copy |

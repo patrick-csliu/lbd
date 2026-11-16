@@ -429,7 +429,7 @@ def stop_running(wait: float = 10.0) -> int:
         except ValueError:
             detail = e.reason
         if e.code == 404:
-            detail = "it is a version without this way to stop (older than 1.3.0)"
+            detail = "it is a version without this way to stop (older than 2.0.0)"
         print(f"lbd-view: the running viewer (process {pid}) refused to stop: {detail}", file=sys.stderr)
         return 1
     except (OSError, ValueError) as e:

@@ -300,7 +300,7 @@ d.labels = {"project": "Chip 3/Cooldown 7", "tags": ["calibration"]}   # or all 
 
 Each label is checked when it is set (text, no empty part), so a mistake shows before the
 measurement starts. `d.labels.written` says when they were last set. A file with labels is
-format 1.3; LBD older than 1.3.0 reads it and ignores the labels.
+format 1.3; LBD older than 2.0 reads it and ignores the labels.
 
 The labels of an existing file change without rewriting its data:
 

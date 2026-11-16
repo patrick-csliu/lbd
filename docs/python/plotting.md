@@ -289,7 +289,7 @@ print(cols["freq"][:3], cols["S21"][:3])
 | `to_csv(layout=)` | `"rows"` or `"matrix"`; `rows_are="x"` turns the matrix the other way |
 
 Numbers are always in the units stored in the file (Hz, not GHz: nothing rounded); the header
-names each column's unit. (`units=` was removed in 1.3.)
+names each column's unit. (`units=` was removed in LBD 2.0.)
 
 The file starts with comment lines (`#`): the column names, where the numbers come from (file,
 the file's `id` and the `parent_id` it was made from, complex mode, fixed parameters), and each

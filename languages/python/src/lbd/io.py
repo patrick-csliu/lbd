@@ -28,7 +28,7 @@ import numpy as np
 from . import _labels
 from ._labels import Labels
 
-__version__ = "1.3.0.dev0"
+__version__ = "2.0.0.dev0"
 FORMAT_VERSION = "2.1"         # the newest format this module reads and writes
 _GRID_VERSION = "1.2"          # what a file without an axis group is written as (spec §6)
 _GROUP_VERSION = "2.0"         # a file with an axis group
@@ -387,7 +387,7 @@ class Dataset:
         zone. Not given: `save` fills in the time of the first save. A loaded file keeps its
         `created`, and saving it again keeps it; only a new value changes it.
     writer : str or None
-        The program that wrote the file, e.g. `"python lbd 1.3.0"`. Set by `save`.
+        The program that wrote the file, e.g. `"python lbd 2.0.0"`. Set by `save`.
     id : str or None
         The measurement's identity, a UUID (version 7) written into the file at its first save,
         e.g. `"0192d4e2-7b3a-7c1e-9f2a-1c2b3d4e5f60"`. Read-only. Saving again to the same file
@@ -557,7 +557,7 @@ class Dataset:
 
         Add its axes next, outer to inner, with `add_axis(name, group=...)`; their points come
         with [`write`][lbd.Dataset.write] (only measured points are stored). A file with a
-        group is format 2.0, which LBD older than 1.3 can't read; use fixed axes when every
+        group is format 2.0, which LBD older than 2.0 can't read; use fixed axes when every
         combination of the axes is planned.
 
         Raises

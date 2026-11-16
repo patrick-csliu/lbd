@@ -98,7 +98,7 @@ export function useFileActions(ctx: FileActionsContext) {
     setConfirm({
       title: rows.length === 1 ? "Give this file an identity?" : `Give ${rows.length} files an identity?`,
       text:
-        "Files written before LBD 1.3 (or by other programs) have no hidden identity, so LBD follows them by name and date. " +
+        "Files written before LBD 2.0 (or by other programs) have no hidden identity, so LBD follows them by name and date. " +
         "This writes one into each file's header (its data is not changed), so their labels follow them anywhere.",
       action: "Give them an identity",
       onConfirm: () => run(api.libraryGiveIds(rows.map((x) => x.path))),
