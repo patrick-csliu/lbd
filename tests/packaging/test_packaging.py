@@ -519,10 +519,15 @@ def test_web_install_sh_installs_with_the_options(tmp_path):
 
 
 def test_install_macos_sh_checks_the_checksum(tmp_path):
-    _posix_shell()
+    import subprocess
+
+    sh = _posix_shell()
     arch = {"x86_64": "x86_64", "arm64": "arm64"}.get(_arch())
     if not arch:
         pytest.skip("the macOS script knows only arm64 and x86_64")
+    # the script uses macOS's shasum; Git's sh on Windows may have none (GitHub's runners don't)
+    if subprocess.run([sh, "-c", "command -v shasum"], capture_output=True).returncode != 0:
+        pytest.skip("no shasum here (macOS has it)")
     name = f"LBD-Viewer-1.3.0-macos-{arch}.dmg"
     release = fake_release(tmp_path / "release", {name: b"a disk image"})
     r, _ = _web_install(tmp_path, "install-macos.sh", release)
@@ -545,10 +550,14 @@ def test_install_ps1_checks_the_checksum(tmp_path):
     tmp.mkdir()
     env = {**os.environ, "LBD_RELEASE_BASE": str(release), "LBD_INSTALL_CHECK_ONLY": "1", "TEMP": str(tmp),
            "TMP": str(tmp), "TMPDIR": str(tmp)}
+    # Started from PowerShell 7 (GitHub's runners), its module path hides Windows PowerShell's own
+    # modules (Get-FileHash "is not recognized"): the script runs as a user's own PowerShell would.
+    env.pop("PSModulePath", None)
 
     def run():
+        # its output is UTF-8 (not the console's code page, e.g. cp950 on a Chinese Windows)
         return subprocess.run([ps, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(script)],
-                              env=env, capture_output=True, text=True)
+                              env=env, capture_output=True, text=True, encoding="utf-8", errors="replace")
 
     r = run()
     assert r.returncode == 0 and "not installing" in r.stdout, r.stdout + r.stderr

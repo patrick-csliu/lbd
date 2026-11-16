@@ -30,6 +30,8 @@ def test_the_status_line_then_the_finished_file(viewer, new_page):
     for i in range(3):
         w.write(power=i, S21=np.full(5, float(i)))
     w.flush()
+    # the heartbeat with these 15 points now (by itself: up to 5 s later, too slow for a busy runner)
+    w._beat_now(force=True)
     try:
         page = new_page("Explore")
         frames(page, lambda: row(page, "live.lbd.writing").dblclick())
