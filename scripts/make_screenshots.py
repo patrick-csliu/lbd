@@ -218,6 +218,12 @@ def mark(page: Page, marks: List[Mark]) -> None:
     page.evaluate(MARK_JS, [list(m) for m in marks])
 
 
+def clean(page: Page, name: str) -> None:
+    """The same view without numbers, for the README and *How LBD works* (one per page)."""
+    mark(page, [])
+    save(page, VIEWER_IMG / name)
+
+
 def save(page: Page, path: Path, clip: Dict[str, float] = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     page.screenshot(path=str(path), clip=clip)
@@ -255,6 +261,7 @@ def shot(fn: Callable) -> Callable:
 def overview(page: Page, url: str, ctx) -> None:
     fresh(page, url)
     open_file(page, "sweep.lbd")
+    clean(page, "page-figure.png")
     mark(page, [
         (1, ".pages", 0, "b"),
         (2, ".page-badge", 0, "b"),
@@ -283,6 +290,7 @@ def explore(page: Page, url: str, ctx) -> None:
     page.locator("main:not([hidden]) .explore-pick").wait_for()
     page.keyboard.press("c")                    # without the cuts (shown in reading.png): all fits
     page.wait_for_timeout(1500)
+    clean(page, "page-explore.png")
     mark(page, [                                # the numbers of the list in explore.md
         (1, ".pages", 0, "b"),
         (2, "main:not([hidden]) .tabs .tab", 0, "b"),
@@ -493,6 +501,7 @@ def library(page: Page, url: str, ctx) -> None:
     page.locator(".library-detail .library-preview img").wait_for(timeout=60_000)   # drawn by the server
     page.mouse.move(5, 400)
     page.wait_for_timeout(800)
+    clean(page, "page-library.png")
     mark(page, [                                # the numbers of the list in library.md
         (1, ".library-tree[aria-label='Folders']", 0, "r"),
         (2, ".library-tree[aria-label='Dates']", 0, "r"),

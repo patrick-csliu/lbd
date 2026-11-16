@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 290" width="960" height="290" font-family="Segoe UI, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
+<title id="t">LBD: your programs write .lbd files; the Library manages them, Explore looks into them, Figure makes the figures</title>
+<desc id="d">Programs in any language write .lbd files, also while measuring. LBD Viewer has three parts: the Library finds and labels every file, Explore looks into a file interactively, and Figure makes figures in one shared style.</desc>
+<rect width="960" height="290" rx="16" fill="#ffffff"/>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#5d6673"/></marker></defs>
+<rect x="24" y="24" width="196" height="196" rx="12" fill="#f4f5f7" stroke="#5d6673" stroke-width="2"/>
+<text x="40" y="56" font-size="19" font-weight="700" fill="#1c2026">Your programs</text>
+<text x="40" y="76" font-size="12.5" fill="#5d6673">any programming language</text>
+<text x="40" y="112" font-size="13.5" fill="#1c2026">measurement scripts</text>
+<text x="40" y="133" font-size="13.5" fill="#1c2026">notebooks, simulations</text>
+<text x="40" y="154" font-size="13.5" fill="#1c2026">save <tspan font-weight="600">.lbd</tspan> files,</text>
+<text x="40" y="175" font-size="13.5" fill="#1c2026">also while measuring</text>
+<path d="M226 122 h22" stroke="#5d6673" stroke-width="3" fill="none" marker-end="url(#a)"/>
+<rect x="256" y="24" width="214" height="196" rx="12" fill="#eef5fb" stroke="#0072b2" stroke-width="2"/>
+<text x="272" y="56" font-size="19" font-weight="700" fill="#1c2026">1 Library</text>
+<text x="272" y="76" font-size="12.5" fill="#5d6673">manage your data</text>
+<text x="272" y="112" font-size="13.5" fill="#1c2026">every file in one list</text>
+<text x="272" y="133" font-size="13.5" fill="#1c2026">search, filter by date</text>
+<text x="272" y="154" font-size="13.5" fill="#1c2026">star, project, users, tags</text>
+<text x="272" y="175" font-size="13.5" fill="#1c2026">previews, live measurements</text>
+<path d="M476 122 h22" stroke="#5d6673" stroke-width="3" fill="none" marker-end="url(#a)"/>
+<rect x="506" y="24" width="214" height="196" rx="12" fill="#eef8f4" stroke="#009e73" stroke-width="2"/>
+<text x="522" y="56" font-size="19" font-weight="700" fill="#1c2026">2 Explore</text>
+<text x="522" y="76" font-size="12.5" fill="#5d6673">look into a file</text>
+<text x="522" y="112" font-size="13.5" fill="#1c2026">curves, maps, scatter, …</text>
+<text x="522" y="133" font-size="13.5" fill="#1c2026">cursors, cuts, peaks</text>
+<text x="522" y="154" font-size="13.5" fill="#1c2026">operations, equations</text>
+<text x="522" y="175" font-size="13.5" fill="#1c2026">several panels side by side</text>
+<path d="M726 122 h22" stroke="#5d6673" stroke-width="3" fill="none" marker-end="url(#a)"/>
+<rect x="756" y="24" width="180" height="196" rx="12" fill="#fdf5e8" stroke="#e69f00" stroke-width="2"/>
+<text x="772" y="56" font-size="19" font-weight="700" fill="#1c2026">3 Figure</text>
+<text x="772" y="76" font-size="12.5" fill="#5d6673">show it</text>
+<text x="772" y="112" font-size="13.5" fill="#1c2026">one shared style</text>
+<text x="772" y="133" font-size="13.5" fill="#1c2026">the same in Python</text>
+<text x="772" y="154" font-size="13.5" fill="#1c2026">PDF, SVG, PNG</text>
+<text x="772" y="175" font-size="13.5" fill="#1c2026">at the real size</text>
+<text x="480" y="256" font-size="16" font-weight="600" fill="#1c2026" text-anchor="middle">One file format from every program; one viewer to find, explore and show it.</text>
+<text x="480" y="276" font-size="13.5" fill="#5d6673" text-anchor="middle">LBD Viewer runs on your computer and shows its three parts in the browser.</text>
+</svg>

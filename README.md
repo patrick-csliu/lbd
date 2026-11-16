@@ -8,20 +8,9 @@
 the Library, explore it, and make figures that always match.**
 
 Lab data comes from many programs, written in many programming languages: measurement
-scripts, notebooks, simulations, instrument software. LBD gives all of it one home:
-
-- Every program saves its data as an **`.lbd` file** (plain HDF5 inside), using the small LBD
-  module for its programming language, also while it is still measuring. The same file reads
-  back identically in every [supported language](#2-install-the-module-for-your-language).
-- **LBD Viewer** runs on your computer and shows your data in the browser, on three pages:
-  - **Library**: every data file under your folders in one list. Search, filter by date, project,
-    user and tag, star and comment, see a preview of each file, and see measurements as they are
-    being written.
-  - **Explore**: look into a file. Curves, maps, scatter plots, histograms and more; cursors that
-    read the stored values, cuts through maps, peaks, operations and equations, several panels side
-    by side, and a file that grows while it is measured.
-  - **Figure**: the figure for your paper. One style system, so a figure looks the same whichever
-    program made the data, and what you see is exactly what exports to PDF.
+scripts, notebooks, simulations, instrument software. Over months it piles up in folders, on
+several computers, each file in its own shape. Finding last week's measurement, looking into it,
+and making a figure that matches last year's all take work. LBD gives all of it one home.
 
 Coming from Labber? The Library and Explore do what its Log Browser and Log Viewer did.
 
@@ -29,51 +18,56 @@ Coming from Labber? The Library and Explore do what its Log Browser and Log View
 [quick start](https://patrick-csliu.github.io/lbd/getting-started/quickstart.html), examples
 with their figures, and every feature of the viewer.
 
-![The Library: every data file under your folders, with filters, labels and a preview](docs/viewer/img/library.png)
-
-![Explore: a map with a cursor reading the stored values](docs/viewer/img/explore.png)
-
 ## How it works
+
+![Your programs write .lbd files; the Library manages them, Explore looks into them, Figure makes the figures](docs/assets/three-parts.svg)
+
+Your programs save their data as **`.lbd` files** (plain HDF5 inside), with the small LBD module
+for their programming language, also while they are still measuring. The same file reads back
+identically in every [supported language](#2-install-the-module-for-your-language).
+
+**LBD Viewer** runs on your computer and shows your data in the browser. It has three parts:
+
+### 1. Library: manage your data
+
+Every data file under your folders, in one list. Search names, values and metadata; filter by
+folder, date, project, users and tags; star and comment. Each file shows a preview; a measurement
+still being written shows how far it is. Labels are kept with the folder and written into the
+file itself, so they travel with it, also to other computers. Copies of one measurement, copies
+that differ and files that went missing are shown as such. [More](docs/viewer/library.md)
+
+![The Library: every data file under your folders, with filters, labels and a preview](docs/viewer/img/page-library.png)
+
+### 2. Explore: look into your data
+
+Open a file and look into it interactively: curves, maps, scatter (also the complex I/Q plane),
+histograms, matrices and bars. Cursors snap to the stored values; take cuts through a map, find
+the maximum, minimum or a peak; apply operations (mean, normalize, d/dx, FFT, smoothing,
+background, rotation, …) and equations; put several panels side by side, following each other's
+zoom and cursors. A file being measured grows on screen. [More](docs/viewer/explore.md)
+
+![Explore: a map with a cursor reading the stored values](docs/viewer/img/page-explore.png)
+
+### 3. Figure: figures that always match
+
+For a paper or a talk, LBD keeps **what you measured** and **how figures look** apart, and puts
+them together only when it draws:
 
 ![A data file plus a style makes a figure; the same style with any data file makes figures that match](docs/assets/concept.svg)
 
-LBD keeps **what you measured** and **how figures look** apart, and puts them together only
-when it draws. This is the idea behind the Figure page and `lbd.plot`:
-
 - **Data file (`.lbd`):** the axes you swept, the values you measured, units, labels and
-  metadata. Optionally a saved *view*: what to plot by default. Written by your own programs, in
-  any supported language.
+  metadata. Optionally a saved *view*: what to plot by default.
 - **Style:** size, fonts, line widths, ticks, colours, colour maps, and fixed scales per
   quantity. A named *preset* on your computer, or a `.lbd.json` style file to share.
-- **Figure:** LBD Viewer and Python's `lbd.plot` draw the data file with the style, with the
+- **Figure:** the Figure page and Python's `lbd.plot` draw the data file with the style, with the
   same code, on screen and in PDF, SVG or PNG at the real size.
 
 Keep one style, and every figure matches: across datasets, programs and years. Change the style
-once, and every figure follows; the data is never touched. More in
-[How LBD works](docs/getting-started/how-it-works.md).
+once, and every figure follows; the data is never touched. [More](docs/getting-started/how-it-works.md)
 
-## Features
+## More features
 
-- **Library** (find your data):
-  - every data file under your folders as one list or as pictures, with a preview of each;
-  - search names, descriptions, values, units and metadata; filter by folder, date, project,
-    users, tags and star;
-  - labels (star, project, users, tags, comment), kept in the folder and written into the data
-    file too, so they travel with it;
-  - new files appear by themselves; copies of one measurement, copies that differ, and files that
-    went missing are shown as such;
-  - a measurement being written shows its progress, and one that stopped can be recovered.
-- **Explore** (look into a file):
-  - plot types: curves, maps, scatter (also the complex I/Q plane), matrix, bars, 3D bars and
-    histogram; complex data as magnitude, dB, phase, real or imaginary;
-  - sliders (or typed values) for the other axes; maps of sweeps whose points differ per step;
-  - cursors that snap to the stored data, with max, min and peak; cuts through maps, saved as CSV
-    or as a new `.lbd` file;
-  - operations (mean, normalize, d/dx, FFT, smoothing, background, rotation and more) and
-    equations on x, y and z, with units;
-  - several panels side by side, following each other's zoom and cursors;
-  - a file being measured grows on screen.
-- **Figure and styles** (make the figure):
+- **Styles and figures:**
   - styles shaped like matplotlib (Figure → Axes → frame, axis, ticks, legend, …): presets shared
     with Python, style files (`*.lbd.json`) to keep with a paper, `.mplstyle` export;
   - fixed colour scales per quantity, for fair comparisons;
