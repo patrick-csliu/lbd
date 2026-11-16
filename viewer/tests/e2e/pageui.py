@@ -26,6 +26,8 @@ def tab_names(page: Page) -> list:
 
 
 def open_file(page: Page, name: str):
+    """Open a file as a figure: in the Figure workspace, double-click its row."""
+    page.get_by_role("tab", name="Figure", exact=True).click()
     row(page, name).dblclick()
     expect(tab(page, name)).to_be_visible()
 
@@ -56,3 +58,12 @@ def deliver(viewer, *names) -> dict:
                    json={"files": [viewer.path(n) for n in names], "dirs": []}, timeout=15)
     r.raise_for_status()
     return r.json()
+
+
+def open_settings(page: Page, section: str):
+    """⚙ (top right) → the Settings dialog, on `section` (General, Library, Files sidebar, Memory,
+    Measurements). Returns the dialog."""
+    page.locator("button[aria-label=Settings]").click()                # ⚙ (not the Library notice's Settings)
+    dialog = page.get_by_role("dialog", name="Settings")
+    dialog.get_by_role("tab", name=re.compile(rf"^{re.escape(section)}")).click()
+    return dialog

@@ -4,6 +4,18 @@ using Test
 function check(path)
     d = LBD.load(path)
     @test d.title == "Fixture – ünïcode"
+    @test d.created == "2025-03-01T23:30:00+08:00"
+    again = joinpath(mktempdir(), "again.lbd")              # loaded and saved again: created kept
+    LBD.save(again, LBD.load(path))
+    @test LBD.load(again).created == "2025-03-01T23:30:00+08:00"
+    # the id: a UUID version 7; saved to another file: a new one, made from this one
+    @test d.id !== nothing && occursin(r"^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", d.id)
+    @test LBD.load(again).id != d.id && LBD.load(again).parent_id == d.id
+    # a copy made by the file system, loaded and saved at its own place: the same id
+    copied = joinpath(mktempdir(), "copied.lbd")
+    cp(path, copied)
+    LBD.save(copied, LBD.load(copied))
+    @test LBD.load(copied).id == d.id
     @test d["x"].data == collect(0.0:9.0)
     @test (d["x"].unit, d["a"].unit, d["b"].unit, d["c"].unit) == ("s", "V", "A", "Hz")
     @test d["y"].data == collect(0.0:9.0) .^ 2
@@ -17,6 +29,13 @@ function check(path)
     @test d["Z"].data == [ComplexF64(i + 1, j + 1) for i in 0:2, j in 0:3]
     @test d["T"].data == [100.0 * i + 10j + k for i in 0:2, j in 0:3, k in 0:1]
     @test isempty(d["q"].axes) && d["q"].data == 42.5
+    @test d["state"].elements == ["ground", "état 1", "量子"]
+    @test d["state"].data == [0, 1, 2]
+    @test d["S"].data == [0.5, 1.5, 2.5]
+    @test d["C"].axes == ["a"] && LBD.point_shape(d["C"]) == (2, 2)
+    @test d["C"].elements == Any[["I", "Q"], nothing]
+    @test !haskey(d.axes, "C_dim1") && d["a"].role === nothing
+    @test d["C"].data == [100.0 * i + 10r + c for i in 0:2, r in 0:1, c in 0:1]
     m = d.meta
     @test m["sample"] == "chip – é"
     @test m["T_mK"] == 12
@@ -29,6 +48,86 @@ function check(path)
     @test d.matplotlib isa String && !isempty(d.matplotlib)
 end
 
+function check_live(path)
+    @test !isfile(path * ".writing")
+    d = LBD.load(path)
+    @test d.title == "Live – ü"
+    s = d["S21"].data
+    @test eltype(s) == ComplexF64 && size(s) == (3, 3)
+    @test s[1:2, :] == [ComplexF64(i, j) for i in 1:2, j in 1:3]
+    @test all(isnan, s[3, :])
+    @test d["time"].data == [0, 1, 2, 3]
+    @test d["T"].data == [0, 10, 20, 30]
+    @test d["T"].measured === nothing && d["S21"].measured === nothing
+    @test eltype(d["n"].data) == Int32
+    @test d["n"].data == [0 3 0; 7 0 0]
+    @test d["n"].measured == [false true false; true false false]
+    @test d["state"].elements == ["ground", "excited"]
+    @test d.lbd_version == "1.3" && d.labels.tags == ["live"] && d.labels.star
+end
+
+function check_groups(path)
+    d = LBD.load(path)
+    @test d.lbd_version == "2.1"
+    @test d.labels.tags == ["groups"]
+    @test d.groups["AB"].order == ["A", "B"] && d.groups["PQR"].order == ["P", "Q", "R"]
+    @test d["A"].data == [1, 2, 3] && d["B"].data == [10, 10, 20, 15, 25, 35]
+    @test d["B"].parent == [1, 2, 2, 3, 3, 3]                             # from 1 in Julia
+    @test d["A"].unit == "V" && d["B"].group == "AB" && d["C"].group === nothing
+    @test d["f"].dims == Tuple[("A", "B")] && d["h"].dims == Tuple[("A", "B"), ("C",)]
+    @test d["f"].data == [110, 210, 220, 315, 325, 335]
+    @test d["q"].data == [1.5, 3.0, 4.5]
+    @test size(d["h"].data) == (6, 3) && d["h"].data[6, :] == [3, 35, 38]
+    @test d["cov"].point_shape == (2, 2) && d["cov"].data[5, :, :] == [3 25; 25 -3]
+    @test eltype(d["n"].data) == Int16 && d["n"].data == [1, 0, 0, 0, 2, 0]
+    @test d["n"].measured == [true, false, false, false, true, false]
+    @test d["Q"].data == [0, 0, 1, 0, 1, 2] && d["R"].parent == [3, 5, 6, 6]
+    @test d["u"].data == [10, 20, 21, 30, 31, 32] && d["w"].data == [210, 310, 320, 321]
+    m = to_dense(d, "f")
+    @test m["B"].data == [10, 15, 20, 25, 35] && isnan(m["f"].data[1, 2]) && m["f"].data[3, 4] == 325
+end
+
+# lbd.open reads the same parts as LBD.load (plan 6d).
+function check_open(path)
+    whole = LBD.load(path)
+    LBD.open(path) do d
+        for (name, v) in whole.values
+            o = d[name].data
+            @test size(o) == size(v.data)
+            @test isequal(collect(o), v.data isa AbstractArray ? v.data : fill(v.data))
+            if ndims(o) >= 2
+                @test isequal(o[end, ntuple(_ -> Colon(), ndims(o) - 1)...], selectdim(v.data, 1, size(v.data, 1)))
+            end
+        end
+        isempty(d.groups) || @test isequal(to_dense(d, "f")["f"].data, to_dense(whole, "f")["f"].data)
+    end
+end
+
+function check_rplus(path)
+    d = LBD.load(path)
+    @test d["y"].data == [0, 0, 7, 0, 0]
+    @test d.meta["edited"] == 1 && d.title == "R plus"
+    @test d.labels.tags == ["kept"]
+end
+
+function check_notsaved(path)
+    d = LBD.load(path)
+    @test d["y"].data == [1.0, 2.0]
+    @test collect(keys(d.meta)) == ["ok"] && d.meta["ok"] == 1
+end
+
+function check_labels(path)
+    d = LBD.load(path)
+    l = d.labels
+    @test d.lbd_version == "1.3"
+    @test l.star && l.project == "Chip – é/Run 1" && l.comment == "ü – note"
+    @test l.users == ["Ana", "Bo"] && l.tags == ["checked"]
+    @test occursin(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$", something(l.written, ""))
+    copy = LBD.save(joinpath(mktempdir(), "copy.lbd"), d)     # saved to another file: the same labels and time
+    c = LBD.labels(copy)
+    @test c == l && c.written == l.written
+end
+
 root = ARGS[1]
 failed = false
 for lang in sort(readdir(root))
@@ -36,5 +135,34 @@ for lang in sort(readdir(root))
     isfile(p) || continue
     ts = @testset "julia reads $lang" begin
         check(p)
+    end
+    p = joinpath(root, lang, "live.lbd")
+    isfile(p) || continue
+    @testset "julia reads $lang live.lbd" begin
+        check_live(p)
+    end
+    p = joinpath(root, lang, "groups.lbd")
+    isfile(p) || continue
+    @testset "julia reads $lang groups.lbd" begin
+        check_groups(p)
+    end
+    @testset "julia opens $lang fixture.lbd, groups.lbd" begin
+        check_open(joinpath(root, lang, "fixture.lbd"))
+        check_open(p)
+    end
+    p = joinpath(root, lang, "rplus.lbd")
+    isfile(p) || continue
+    @testset "julia reads $lang rplus.lbd" begin
+        check_rplus(p)
+    end
+    p = joinpath(root, lang, "labels.lbd")
+    isfile(p) || continue
+    @testset "julia reads $lang labels.lbd" begin
+        check_labels(p)
+    end
+    p = joinpath(root, lang, "notsaved.lbd")
+    isfile(p) || continue
+    @testset "julia reads $lang notsaved.lbd" begin
+        check_notsaved(p)
     end
 end

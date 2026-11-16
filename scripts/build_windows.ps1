@@ -21,17 +21,18 @@ $ErrorActionPreference = "Stop"
 $Repo = Split-Path -Parent $PSScriptRoot
 Set-Location $Repo
 $env:UV_PROJECT_ENVIRONMENT = Join-Path $OutDir "venv"
+$env:NO_MKDOCS_2_WARNING = "1"   # Material's notice about MkDocs 2; pyproject keeps mkdocs below 2
 
 function Step([string]$Name) { Write-Host "==> $Name" -ForegroundColor Cyan }
 function Check([string]$What) { if ($LASTEXITCODE -ne 0) { throw "$What failed (exit code $LASTEXITCODE)" } }
 
 Step "Checking versions"
-$Version = (& uv run python scripts/check_versions.py).Trim()
+$Version = (& uv run --quiet python scripts/check_versions.py).Trim()
 Check "version check"
 Write-Host "    version $Version"
 
 Step "Python build environment ($env:UV_PROJECT_ENVIRONMENT)"
-& uv sync --all-packages --group docs
+& uv sync --all-packages --group docs --quiet   # (its progress goes to stderr: PowerShell shows that as an error)
 Check "uv sync"
 
 Step "Web UI"
@@ -44,18 +45,18 @@ try {
 } finally { Pop-Location }
 
 Step "Icons"
-& uv run python packaging/make_icons.py
+& uv run --quiet python packaging/make_icons.py
 Check "icons"
 
 Step "PyInstaller"
 $Dist = Join-Path $OutDir "dist"
-& uv run pyinstaller packaging/lbd-view.spec --noconfirm --log-level WARN `
+& uv run --quiet pyinstaller packaging/lbd-view.spec --noconfirm --log-level WARN `
     --distpath $Dist --workpath (Join-Path $OutDir "work")
 Check "pyinstaller"
 $App = Join-Path $Dist "LBDViewer"
 
 Step "Language modules (sdk)"
-$StageArgs = @("run", "python", "packaging/stage_sdk.py", "--dest", (Join-Path $App "sdk"))
+$StageArgs = @("run", "--quiet", "python", "packaging/stage_sdk.py", "--dest", (Join-Path $App "sdk"))
 if ($Skip.Count -gt 0) { $StageArgs += "--skip"; $StageArgs += $Skip }
 if ($Prebuilt.Count -gt 0) { $StageArgs += "--prebuilt"; $StageArgs += $Prebuilt }
 & uv @StageArgs
@@ -63,7 +64,7 @@ Check "stage_sdk"
 
 Step "Documentation (Help)"
 $Site = Join-Path $OutDir "site"
-& uv run mkdocs build --strict --quiet --site-dir $Site
+& uv run --quiet mkdocs build --strict --quiet --site-dir $Site
 Check "mkdocs build"
 $Docs = Join-Path $App "docs"
 if (Test-Path $Docs) { Remove-Item -Recurse -Force $Docs }

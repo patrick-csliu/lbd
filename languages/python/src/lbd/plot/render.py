@@ -17,7 +17,9 @@ import math
 import numbers
 import re
 import threading
-from typing import Any, Callable, Dict, List, Optional, Tuple
+import warnings
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import matplotlib
 import matplotlib.colors as mcolors
@@ -27,26 +29,26 @@ from matplotlib.figure import Figure
 
 import lbd
 from lbd.io import PLOT_SPEC_KEYS, _warn
+from lbd.io import _flat_view as flat   # drawing sees one axis per dimension (a data point's too)
 
+from . import kinds
 from .style import QuantityStyle, Style
 from .units import AUTO_UNITS, UnitWarning, axis_label, mathsafe, prefix_scale
 
-KINDS = ("auto", "curve", "heatmap", "scatter")
-COMPLEX_MODES = ("abs", "db", "phase", "phase_deg", "real", "imag", "iq")
+COMPLEX_MODES = ("abs", "db", "phase", "phase_deg", "phase_unwrap", "phase_deg_unwrap", "real", "imag", "iq")
 SCALES = ("linear", "log")
 FORMATS = {"svg": "image/svg+xml", "pdf": "application/pdf", "png": "image/png", "jpg": "image/jpeg"}
 DISPLAY_RASTER_DPI = 200  # raster layers (heat-map pixels, dense scatter) in the on-screen SVG
 SCATTER_RASTER_ABOVE = 5000  # rasterize scatter plots with more points than this (vector files stay small)
 SPEC_KEYS = PLOT_SPEC_KEYS
-# Settings used by each plot type (kind, values, complex and title apply to all).
-_APPLIES = {
-    "curve": {"x", "series", "index", "x_scale", "y_scale", "x_label", "y_label", "annotations"},
-    "heatmap": {"x", "y", "index", "x_scale", "y_scale", "x_label", "y_label", "z_label", "annotations"},
-    "scatter": {"x", "color", "index", "x_scale", "y_scale", "x_label", "y_label", "z_label", "annotations"},
-}
 # Saved-view settings that mean the same for every plot type: kept when another type is chosen
 # (resolve_spec). Axes, series, colours, slices, axis labels and annotations belong to the plot
 # they were made for.
+# Keys of a resolved spec that are answers (what the drawing found), not settings: they are left
+# out when a spec comes back. `levels`: a variable sweep's levels drawn as a map; `real_axes`: the
+# axes and values of a variable sweep's curves (16.41), see `for_kind`; `style_grid`: whether the
+# style draws a grid (LBD Viewer: where the Grid tick starts, 16.32).
+ANSWER_KEYS = frozenset({"levels", "real_axes", "style_grid"})
 KIND_FREE_KEYS = frozenset({"values", "complex", "x_scale", "y_scale", "title"})
 
 # rcParams are global in matplotlib, so renders are serialized.
@@ -69,6 +71,16 @@ class RenderWarning(lbd.LBDWarning):
 # ---- spec resolution ----------------------------------------------------------
 
 
+def for_kind(d: "lbd.Dataset", kind: str) -> "lbd.Dataset":
+    """The view of `d` that plot kind `kind` draws: curves see a variable sweep of two levels on
+    its real axes (`lbd.groups.curve_view`, 16.41); every other kind sees the flat view."""
+    if kind == "curve":
+        from lbd.groups import curve_view
+
+        return curve_view(d)
+    return flat(d)
+
+
 def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: bool = True) -> Dict[str, Any]:
     """Fill in defaults and check a plot spec against a dataset. `d` may be header-only.
 
@@ -87,10 +99,12 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
     as dimensions for the automatic kind or a heat map, and are not chosen as the horizontal
     axis, vertical axis or series unless asked for.
     """
+    d = flat(d)
     if spec is None:
         spec = {}
     if not isinstance(spec, dict):
         raise RenderError(f"plot settings must be a dict, not {type(spec).__name__}")
+    spec = {k: v for k, v in spec.items() if k not in ANSWER_KEYS}     # answers of ours, sent back
     unknown = sorted(str(k) for k in spec if k not in SPEC_KEYS)
     if unknown:
         raise RenderError(f"unknown plot setting(s) {unknown}; allowed: {sorted(SPEC_KEYS)}")
@@ -126,6 +140,12 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
             return default
 
     # values
+    asked_kind = kinds.KINDS.get(spec.get("kind") or file_spec.get("kind"))
+
+    def shows_it(name: str) -> bool:
+        """Single numbers aren't plotted, except by a plot type that takes them (Bars)."""
+        return len(d.values[name].shape) > 0 or (asked_kind is not None and asked_kind.fits(d, name) is None)
+
     def check_values(v: Any) -> List[str]:
         items = [v] if isinstance(v, str) else v
         if not isinstance(items, (list, tuple)) or not all(isinstance(x, str) for x in items) or not items:
@@ -133,14 +153,14 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
         missing = [x for x in items if x not in d.values]
         if missing:
             raise RenderError(f"no value named {', '.join(map(repr, missing))}; this file has {names}")
-        single = [x for x in items if len(d.values[x].shape) == 0]
+        single = [x for x in items if not shows_it(x)]
         if single:
             raise RenderError(f"{_single_number(d.values[single[0]])} is a single number; it can't be plotted "
                               f"(plot one of {plottable})")
         return list(items)
 
     # Single numbers (values without axes) aren't plotted; the viewer lists them with the values.
-    plottable = [n for n in names if len(d.values[n].shape) > 0]
+    plottable = [n for n in names if shows_it(n)]
     if not plottable:
         numbers_ = ", ".join(_single_number(v) for v in d.values.values())
         raise RenderError(f"this file has only single numbers ({numbers_}); there is nothing to plot")
@@ -148,17 +168,15 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
 
     def fits(name: str, k: str) -> bool:
         """Whether this value can be drawn as plot kind k."""
-        v = d.values[name]
-        if k == "heatmap":
-            return len(_swept(v)) >= 2
-        return k == "auto" or len(v.shape) > 0
+        kind = kinds.KINDS.get(k)          # (an unknown kind is refused below, with its message)
+        return k == "auto" or (kind.fits(d, name) is None if kind else len(d.values[name].shape) > 0)
 
     if other_kind and not explicit("values") and not fits(values[0], spec["kind"]):
         # the saved values were for another kind of plot: the first value this kind can show
-        values = [next((n for n in names if fits(n, spec["kind"])), default_value)]
+        values = [next((n for n in names if fits(n, spec["kind"])), values[0])]
     first = d.values[values[0]]
-    nd = len(first.shape)
-    swept = _swept(first)                  # its axes with more than one point
+    # its sweep axes: not the axes of one data point (format 1.2), which become curves, not maps
+    sweep = [a for a in _swept(first) if not _is_point(d, a)]
 
     # kind
     def check_kind(k: Any) -> str:
@@ -167,19 +185,22 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
         if k not in KINDS:
             raise RenderError(f"unknown plot kind {k!r}; use one of {KINDS}")
         if k == "auto":
-            return "heatmap" if len(swept) >= 2 else "curve"
-        if k == "heatmap" and nd < 2:
-            raise RenderError(f"'{first.name}' is {nd}-D; a heat map needs 2 dimensions")
-        if k == "heatmap" and len(swept) < 2:
-            fixed = [a for a in first.axes if a not in swept]
-            raise RenderError(f"a heat map needs 2 axes with more than one point; '{first.name}' has "
-                              f"{len(swept)} ({fixed} {'is' if len(fixed) == 1 else 'are'} a single point)")
+            return "heatmap" if len(sweep) >= 2 or _on_levels(d, first.name) else "curve"
+        why = kinds.KINDS[k].fits(d, first.name)
+        if why:
+            raise RenderError(why)
         return k
 
     kind = pick("kind", check_kind, check_kind("auto"))
+    if kind == "curve":
+        # curves draw a variable sweep on its real axes (16.41): the curve view of the dataset
+        d = for_kind(d, kind)
+        first = d.values[first.name]
 
     # complex
     def check_complex(m: Any) -> str:
+        if m in ("re_im", "abs_phase") and m in kinds.KINDS[kind].applies:
+            return m                                 # modes of a plot type's own: read_grid, read_bars, bars3d
         if m not in COMPLEX_MODES:
             raise RenderError(f"unknown complex mode {m!r}; use one of {COMPLEX_MODES}")
         if m == "iq" and kind != "scatter":
@@ -225,42 +246,116 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
 
     index_in = {**pick_dict(file_spec, "index", check_index, d), **(check_index(spec["index"]) if explicit("index") else {})}
 
+    def check_all(v: Any) -> List[str]:
+        if not isinstance(v, (list, tuple)) or not all(isinstance(a, str) for a in v):
+            raise RenderError(f"all must be a list of axis names, not {v!r}")
+        wrong = [a for a in v if a not in first.axes]
+        if wrong:
+            raise RenderError(f"all: '{first.name}' has no axis {', '.join(map(repr, wrong))}; its axes: {list(first.axes)}")
+        return list(v)
+
+    def check_options(v: Any) -> Dict[str, Any]:
+        if not isinstance(v, dict):
+            raise RenderError(f"options must be a dict of a plot type's own choices, not {type(v).__name__}")
+        return dict(v)
+
+    whole = pick("all", check_all, [])
+    if whole:
+        out["all"] = whole
+    options = pick("options", check_options, {})
+    if options:
+        out["options"] = options
+
     if warn_unused:
-        unused = sorted(k for k in spec if explicit(k) and k not in {"kind", "values", "complex", "title"}
-                        and k not in _APPLIES[kind])
+        unused = sorted(k for k in spec if explicit(k) and k not in {"kind", "values", "complex", "title", "all", "options"}
+                        and k not in kinds.KINDS[kind].applies)
         if unused:
             _warn(f"{unused} {'is' if len(unused) == 1 else 'are'} not used by a {kind} plot; ignored", RenderWarning)
 
-    if kind == "scatter":
-        return _resolve_scatter(d, out, values, pick, spec, index_in, warn_unused)
+    return kinds.KINDS[kind].resolve(d, out, values, pick, spec, index_in, warn_unused, file_spec)
+
+
+def _resolve_curve_or_map(d, out, values, pick, spec, index_in, warn_unused, file_spec) -> Dict[str, Any]:
+    """The rest of `resolve_spec` for curves and maps: axes, series and slices."""
+    kind = out["kind"]
+    if kind == "heatmap" and _on_levels(d, values[0]):
+        from . import groupmap
+
+        return groupmap.resolve(d, out, values, pick, spec, index_in, warn_unused, file_spec)
+    first = d.values[values[0]]
+    swept = _swept(first)                  # its axes with more than one point
+    sweep = [a for a in swept if not _is_point(d, a)]
+
+    def explicit(key: str) -> bool:
+        return spec.get(key) not in (None, "")
 
     axes = list(first.axes)
+    # Curves may also take a value as x, as scatter plots do: one with the same axes as the
+    # plotted value, e.g. a frequency that differs from trace to trace. The points then run along
+    # the value's last swept axis (`along`); a series, if any, is another axis.
+    x_values = ([n for n, v in d.values.items() if n not in values and v.axes == axes and len(v.shape) > 0]
+                if kind == "curve" else [])
 
     def check_x(v: Any) -> str:
+        if kind == "curve" and isinstance(v, str) and v in d.values:
+            if v not in x_values:
+                raise RenderError(f"'{v}' can't be the horizontal axis of '{first.name}': a value used as x needs "
+                                  f"the same axes {axes}; values that have them: {x_values or 'none'}")
+            if d.values[v].dtype.startswith("complex"):
+                raise RenderError(f"'{v}' is complex; the horizontal axis needs real numbers (plot its magnitude "
+                                  "or phase as a value of its own)")
+            return v
         return _pick(v, axes, role="horizontal axis")
 
-    x = pick("x", check_x, (swept or axes)[-1])
+    # a variable sweep's curves start on the inner level's real coordinates (16.41)
+    in_step = getattr(d, "_in_step", {})
+    inner = next((in_step[a] for a in reversed(axes) if a in in_step), None)
+    x = pick("x", check_x, inner if inner in x_values else (sweep or swept or axes)[-1])
     out["x"] = x
-    keep = [x]
+    along = x
+    if x in d.values:
+        along = (sweep or swept or axes)[-1]
+        out["along"] = along
+    keep = [along]
     if kind == "heatmap":
         if len(values) > 1 and warn_unused:
             _warn(f"a heat map shows one value; {values[1:]} ignored", RenderWarning)
         out["values"] = values[:1]
         rest = [a for a in axes if a != x]
-        y = pick("y", lambda v: _pick(v, rest, role="vertical axis"), ([a for a in rest if a in swept] or rest)[-1])
+        y_default = ([a for a in rest if a in swept] or rest)[-1]
+        if explicit("x") and not explicit("y") and file_spec.get("y") == x:
+            # x chosen now is the saved vertical axis: they swap
+            y = file_spec.get("x") if file_spec.get("x") in rest else y_default
+        else:
+            y = pick("y", lambda v: _pick(v, rest, role="vertical axis"), y_default)
         out["y"] = y
         keep.append(y)
     else:
         for name in values[1:]:
-            if x not in d.values[name].axes:
+            if x in d.values and d.values[name].axes != axes:
+                steps = [a for a in axes if a in in_step and a not in d.values[name].axes]
+                if steps and set(d.values[name].axes) <= set(axes):
+                    outer = [a for a in d.values[name].axes if a in axes]
+                    raise RenderError(f"'{name}' has one number per step of {', '.join(_label(d, a) for a in outer)}, "
+                                      f"not one per point of {_label(d, x)}, so it can't be drawn against it together "
+                                      f"with '{values[0]}'; with {_label(d, outer[-1]) if outer else 'that axis'} "
+                                      "horizontal they can")
+                raise RenderError(f"'{name}' doesn't have the axes {axes}, so it can't be plotted against '{x}' "
+                                  f"together with '{values[0]}'")
+            if x not in d.values and x not in d.values[name].axes:
                 raise RenderError(f"'{name}' has no axis '{x}', so it can't share the x axis with '{values[0]}'")
-        others = [a for a in axes if a != x]
+        others = [a for a in axes if a != along]
         if len(values) == 1 and others:
             series = spec.get("series") if explicit("series") else file_spec.get("series")
             if series != "none":
                 # by default one curve per swept axis; a single-point axis is a fixed parameter
                 default = next((a for a in others if a in swept), None)
-                series = pick("series", lambda v: _pick(v, others, role="series"), default)
+                saved_x = file_spec.get("x")
+                if explicit("x") and not explicit("series") and file_spec.get("series") == x:
+                    # x chosen now is the saved series: they swap (the saved x becomes the series)
+                    series = saved_x if saved_x in others else default
+                else:
+                    series = pick("series", lambda v: _pick(v, others, role="series"), default)
                 if series is not None:
                     out["series"] = series
                     keep.append(series)
@@ -276,8 +371,40 @@ def resolve_spec(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], warn_unused: 
         unused_idx = [a for a in spec["index"] if a in keep or a not in all_axes]
         if unused_idx:
             _warn(f"index for {unused_idx} is ignored: those axes are drawn, not sliced", RenderWarning)
-    out["index"], out["slices"] = _slices(d, [a for a in all_axes if a not in keep], index_in, spec)
+    whole = out.get("all", [])                    # all their points go in: no slider
+    out["index"], out["slices"] = _slices(d, [a for a in all_axes if a not in keep and a not in whole], index_in, spec)
+    variable = [a for a in all_axes if getattr(d.axes[a], "group", None) is not None]
+    if getattr(d, "_curve_view", False):
+        out["real_axes"] = real_axes(d, out["values"])
+    if kind == "curve":
+        from .matrix import checked_options
+
+        checked_options(d, out, spec, CURVE_OPTIONS)
+    if variable:
+        _warn(f"{_where(d)}{', '.join(variable)} {'is' if len(variable) == 1 else 'are'} part of a variable sweep "
+              "(its values differ from point to point) of more than two levels: drawn against the point number",
+              RenderWarning)
     return out
+
+
+def _label(d, name: str) -> str:
+    """An axis's or value's label, for messages."""
+    a = d.axes.get(name) or d.values.get(name)
+    return (a.label or name) if a is not None else name
+
+
+def real_axes(d, values: List[str]) -> Dict[str, Any]:
+    """What the controls need of a variable sweep's curves (16.41), as the answer `real_axes`:
+    every axis of the curve view (name, label, unit, length; `in_step` for the position inside a
+    step), every value's axes there (a step's real coordinates are values too), and the
+    coordinates the first drawn value can be drawn against."""
+    in_step = getattr(d, "_in_step", {})
+    return {
+        "axes": [{"name": n, "label": a.label or n, "unit": a.unit, "length": len(a.data), "in_step": n in in_step}
+                 for n, a in d.axes.items()],
+        "values": {n: list(v.axes) for n, v in d.values.items()},
+        "coordinates": [in_step[a] for a in d.values[values[0]].axes if a in in_step],
+    }
 
 
 # ---- annotations ------------------------------------------------------------------
@@ -385,11 +512,26 @@ def _annotate(ax, d, spec, auto_axes: List[Tuple[str, str]]) -> None:
             raise RenderError(f"annotations[{i}] ({name}): {type(e).__name__}: {e}{versions}") from e
 
 
+LEGEND_DOT_PT = 6.0        # a legend's dots are at least this wide, whatever the plotted points' size (16.11)
+
+
+def readable_dots(legend: Any) -> None:
+    """A legend's markers at least LEGEND_DOT_PT wide, so that their colour can be seen: they copy
+    the plotted points, which may be tiny (a scatter of many points). Bigger ones stay."""
+    if legend is None:
+        return
+    for h in legend.legend_handles:
+        if hasattr(h, "get_sizes") and len(h.get_sizes()):        # a scatter's points (area in pt²)
+            h.set_sizes(np.maximum(h.get_sizes(), LEGEND_DOT_PT ** 2))
+        elif hasattr(h, "get_marker") and h.get_marker() not in (None, "None", "", " "):
+            h.set_markersize(max(h.get_markersize(), LEGEND_DOT_PT))
+
+
 def _legend(ax, a) -> None:
     """The legend, when there is more than one labelled entry (curves, and annotations with a label)."""
     handles, _ = ax.get_legend_handles_labels()
     if a.legend.visible and 1 < len(handles) <= a.legend.max_entries:
-        ax.legend()
+        readable_dots(ax.legend())
 
 
 def pick_dict(file_spec: Dict[str, Any], key: str, check: Callable[[Any], Any], d) -> Dict[str, Any]:
@@ -403,67 +545,6 @@ def pick_dict(file_spec: Dict[str, Any], key: str, check: Callable[[Any], Any], 
         return {k: v for k, v in raw.items() if k in d.axes} if isinstance(raw, dict) else {}
 
 
-def _resolve_scatter(d, out, values, pick, spec, index_in, warn_unused) -> Dict[str, Any]:
-    first = d.values[values[0]]
-    axes = list(first.axes)
-    same_shape = [n for n, v in d.values.items() if v.axes == axes]   # values usable point by point
-    if out["complex"] == "iq":
-        if not first.dtype.startswith("complex"):
-            raise RenderError(f"'{first.name}' is not complex; the I/Q plane needs complex data")
-        if warn_unused:
-            ignored = [k for k in ("x",) if spec.get(k) not in (None, "")]
-            if len(values) > 1:
-                ignored.append(f"values {values[1:]}")
-            if ignored:
-                _warn(f"the I/Q plane plots one complex value against itself; {', '.join(ignored)} ignored",
-                      RenderWarning)
-        out["values"] = values[:1]
-    else:
-        def check_x(x: Any) -> str:
-            if x not in axes and x not in same_shape:
-                raise RenderError(f"'{x}' can't be the horizontal axis: use one of the axes {axes} "
-                                  f"or a value with the same axes ({[n for n in same_shape if n not in values]})")
-            return x
-
-        x = pick("x", check_x, (_swept(first) or axes)[-1])
-        out["x"] = x
-        for name in values[1:]:
-            v = d.values[name]
-            ok = (x in v.axes) if x in axes else (v.axes == axes)
-            if not ok:
-                raise RenderError(f"'{name}' can't be plotted against '{x}' together with '{values[0]}'")
-
-    def check_color(c: Any) -> Optional[str]:
-        if c == "none":
-            return None
-        if c not in axes and c not in same_shape:
-            raise RenderError(f"'{c}' can't colour the points: use one of the axes {axes} "
-                              f"or a value with the same axes {same_shape}")
-        return c
-
-    color = pick("color", check_color, None)
-    if color:
-        for name in out["values"][1:]:
-            if d.values[name].axes != axes:
-                raise RenderError(f"colouring by '{color}' needs every value to have the axes {axes}; "
-                                  f"'{name}' has {d.values[name].axes}")
-        out["color"] = color
-    elif warn_unused and spec.get("z_label") not in (None, ""):
-        _warn("z_label is the colour bar label; it is ignored without color=", RenderWarning)
-    # Scatter plots use every point; only axes fixed explicitly in `index` are sliced.
-    fixed = [a for a in axes if a in index_in]
-    for role, name in (("horizontal axis", out.get("x")), ("colour", color)):
-        if name in fixed:
-            raise RenderError(f"index fixes '{name}', which is the {role} of this scatter plot; remove it "
-                              "from index or choose another axis")
-    if warn_unused and spec.get("index"):
-        unused_idx = [a for a in spec["index"] if a not in axes]
-        if unused_idx:
-            _warn(f"index for {unused_idx} is ignored: '{first.name}' has no such axes", RenderWarning)
-    out["index"], out["slices"] = _slices(d, fixed, index_in, spec)
-    return out
-
-
 def _single_number(v) -> str:
     """A single number (0-D value) for messages: "'T1' (21 µs)", or "'T1'" if it wasn't read."""
     if v.data is None:
@@ -475,9 +556,50 @@ def _single_number(v) -> str:
     return f"{v.name!r} ({float(x) * factor:.6g} {unit})".replace(" )", ")")
 
 
+def _on_levels(d, name: str) -> bool:
+    """A value on two levels or more of an axis group: it has its own way to be a map (groupmap.py)."""
+    from . import groupmap
+
+    return groupmap.levels(d, name) is not None
+
+
 def _swept(value) -> List[str]:
     """The value's axes with more than one point; the others are fixed parameters."""
     return [a for a, n in zip(value.axes, value.shape) if n > 1]
+
+
+def _is_point(d, axis: str) -> bool:
+    """An axis of one data point (format 1.2: role "point"), not a sweep."""
+    return getattr(d.axes[axis], "role", None) == "point"
+
+
+def position_text(axis, i: int) -> Optional[str]:
+    """The text of position i of an axis with elements (format 1.2), or None."""
+    elements = getattr(axis, "elements", None)
+    return elements[i] if elements is not None and 0 <= i < len(elements) else None
+
+
+def _element_axis(axis, ticks: Optional[Tuple[np.ndarray, List[str]]]) -> None:
+    """An axis with elements: its texts at their positions, no minor ticks between them."""
+    if ticks is None:
+        return
+    from matplotlib.ticker import NullLocator
+
+    axis.set_ticks(*ticks)
+    axis.set_minor_locator(NullLocator())
+
+
+MAX_ELEMENT_TICKS = 15     # an axis with elements shows at most this many of them (every k-th)
+
+
+def _element_ticks(axis, f: float) -> Optional[Tuple[np.ndarray, List[str]]]:
+    """Tick positions (in plot units) and texts for an axis with elements, or None."""
+    elements = getattr(axis, "elements", None)
+    if elements is None:
+        return None
+    step = max(1, math.ceil(len(elements) / MAX_ELEMENT_TICKS))
+    pos = np.asarray(axis.data, dtype=float)[::step] * f
+    return pos, [mathsafe(e) for e in elements[::step]]
 
 
 def _slices(d, axes: List[str], index_in: Dict[str, Any], spec: Dict[str, Any]):
@@ -494,8 +616,10 @@ def _slices(d, axes: List[str], index_in: Dict[str, Any], spec: Dict[str, Any]):
             _warn(f"{_where(d)}saved view: {e}; using the first point", RenderWarning)
             i = 0
         ax = d.axes[a]
-        slices.append({"axis": a, "index": i, "length": n, "label": ax.label, "unit": ax.unit,
-                       "value": _num(ax.data[i])})
+        item = {"axis": a, "index": i, "length": n, "label": ax.label, "unit": ax.unit, "value": _num(ax.data[i])}
+        if getattr(ax, "elements", None) is not None:          # an axis with elements (format 1.2)
+            item.update(text=position_text(ax, i), elements=ax.elements)
+        slices.append(item)
     return {s["axis"]: s["index"] for s in slices}, slices
 
 
@@ -526,8 +650,13 @@ def _num(x: Any) -> Any:
     return x if not isinstance(x, float) or math.isfinite(x) else None
 
 
-def _legend_label(axis, value: Any) -> str:
-    """'Power = −60 dBm': one point of an axis in a legend (with a real minus, like the tick labels)."""
+def _legend_label(axis, value: Any, i: Optional[int] = None) -> str:
+    """'Power = −60 dBm': one point of an axis in a legend (with a real minus, like the tick labels).
+    Position i of an axis with elements: 'Prepared state = excited'; of a data point's axis, the
+    element alone ('x')."""
+    text = None if i is None else position_text(axis, i)
+    if text is not None:
+        return mathsafe(text) if getattr(axis, "role", None) == "point" else f"{mathsafe(axis.label)} = {mathsafe(text)}"
     number = _fmt(value).replace("-", "−")
     return f"{mathsafe(axis.label)} = {number} {axis.unit}".strip()
 
@@ -544,31 +673,52 @@ def _fmt(x: Any) -> str:
 def _take(v: "lbd.Value", keep: List[str], index: Dict[str, int]) -> np.ndarray:
     """Slice a value down to the axes in `keep`, in that order."""
     idx = tuple(slice(None) if a in keep else index.get(a, 0) for a in v.axes)
-    arr = np.asarray(v.data)[idx] if v.axes else np.asarray(v.data)
+    arr = np.asarray(v._read(idx if v.axes else ()))       # a value opened with lbd.open: only this part
     remaining = [a for a in v.axes if a in keep]
     order = [remaining.index(a) for a in keep if a in remaining]
     return np.transpose(arr, order) if len(order) > 1 else arr
 
 
-def _points(d, v: "lbd.Value", index: Dict[str, int]) -> Tuple[np.ndarray, List[str]]:
-    """All points of a value (only axes in `index` are fixed), and the axes left."""
-    idx = tuple(index[a] if a in index else slice(None) for a in v.axes)
-    arr = np.asarray(v.data)[idx] if v.axes else np.asarray(v.data)
-    return arr, [a for a in v.axes if a not in index]
+def _unwrap(phase: np.ndarray, axis: int) -> np.ndarray:
+    """np.unwrap along `axis`, skipping missing points (np.unwrap would make everything after a
+    NaN missing too)."""
+    p = np.moveaxis(np.array(phase, dtype=float), axis, -1)
+    flat = p.reshape(-1, p.shape[-1]) if p.ndim else p.reshape(1, 1)
+    for row in flat:
+        ok = np.isfinite(row)
+        if ok.sum() > 1:
+            row[ok] = np.unwrap(row[ok])
+    return np.moveaxis(flat.reshape(p.shape), -1, axis)
 
 
-def _coords(d, axis: str, axes_left: List[str], shape: Tuple[int, ...]) -> np.ndarray:
-    """Coordinates of `axis` broadcast to the shape of the points."""
-    data = np.asarray(d.axes[axis].data, dtype=float)
-    view = [1] * len(axes_left)
-    view[axes_left.index(axis)] = len(data)
-    return np.broadcast_to(data.reshape(view), shape)
+def whole_numbers(v: "lbd.Value", mode: str) -> Optional[np.ndarray]:
+    """A value's numbers as shown in a complex mode, over all of it (every slider position), flat;
+    None when its data isn't held whole (read by part: reading it all would cost too much). Used
+    to choose one unit prefix and one range for every slider position (16.49)."""
+    if not isinstance(v.data, np.ndarray):
+        return None
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        numbers = apply_complex(v.data, v.label, v.unit, mode)[0]
+    return np.ravel(numbers)
 
 
-def apply_complex(arr: np.ndarray, label: str, unit: str, mode: str) -> Tuple[np.ndarray, str, str]:
+def whole_range(arrays: Sequence[Optional[np.ndarray]]) -> Optional[Tuple[float, float]]:
+    """The lowest and highest finite number of these arrays; None if any is missing or none is finite."""
+    if any(a is None for a in arrays):
+        return None
+    parts = [a[np.isfinite(a)] for a in arrays if a is not None and a.size]
+    parts = [p for p in parts if p.size]
+    if not parts:
+        return None
+    return float(min(p.min() for p in parts)), float(max(p.max() for p in parts))
+
+
+def apply_complex(arr: np.ndarray, label: str, unit: str, mode: str, axis: int = 0) -> Tuple[np.ndarray, str, str]:
     """Turn data into what is plotted for a complex mode: (numbers, label, unit).
 
-    Real data is returned unchanged for every mode (see resolve_spec, which warns).
+    Real data is returned unchanged for every mode (see resolve_spec, which warns). The unwrapped
+    phases remove the 2π jumps along `axis`, the direction of the plot's x (the traces).
     """
     if mode not in COMPLEX_MODES:
         raise RenderError(f"unknown complex mode {mode!r}; use one of {COMPLEX_MODES}")
@@ -586,6 +736,10 @@ def apply_complex(arr: np.ndarray, label: str, unit: str, mode: str) -> Tuple[np
         return np.angle(arr), f"arg {label}", "rad"
     if mode == "phase_deg":
         return np.degrees(np.angle(arr)), f"arg {label}", "°"
+    if mode == "phase_unwrap":
+        return _unwrap(np.angle(arr), axis), f"arg {label}", "rad"
+    if mode == "phase_deg_unwrap":
+        return np.degrees(_unwrap(np.angle(arr), axis)), f"arg {label}", "°"
     if mode == "real":
         return arr.real, f"Re {label}", unit
     return arr.imag, f"Im {label}", unit
@@ -641,18 +795,16 @@ def build_figure(d: "lbd.Dataset", spec: Dict[str, Any], style: Style,
     `d` must have the data of the plotted values loaded (and of `x`/`color` if they are values).
     Returns (figure, axes).
     """
+    d = flat(d)
     if ax is None:
         fig = fig or new_figure(style)
-        ax = fig.add_subplot()
     else:
         fig = ax.figure
-    kind = spec["kind"]
-    if kind == "curve":
-        _draw_curves(fig, ax, d, spec, style)
-    elif kind == "scatter":
-        _draw_scatter(fig, ax, d, spec, style)
-    else:
-        _draw_heatmap(fig, ax, d, spec, style)
+    kind = kinds.KINDS[spec["kind"]]
+    model = kind.prepare(d, spec, style)
+    if ax is None:
+        ax = kind.make_axes(fig, model)
+    kind.draw(fig, ax, model, d, spec, style)
     if spec.get("title"):
         ax.set_title(mathsafe(spec["title"]))
     apply_axis_text(ax, style)
@@ -681,11 +833,16 @@ def apply_axis_text(ax, style: Style) -> None:
                        **common)
 
 
-def _colorbar(fig, mappable, ax, style: Style, label: str):
+def _colorbar(fig, mappable, ax, style: Style, label: str, beside: bool = False):
+    """`beside`: as tall as the axes box, for axes with equal cells (the layout doesn't know about those)."""
     cb_style = style.figure.axes.image.colorbar
     if not cb_style.visible:
         return
-    cb = fig.colorbar(mappable, ax=ax, fraction=cb_style.size_pct / 100, pad=cb_style.pad_pct / 100, label=label)
+    if beside:
+        cax = ax.inset_axes([1 + cb_style.pad_pct / 100, 0, cb_style.size_pct / 100, 1])
+        cb = fig.colorbar(mappable, cax=cax, label=label)
+    else:
+        cb = fig.colorbar(mappable, ax=ax, fraction=cb_style.size_pct / 100, pad=cb_style.pad_pct / 100, label=label)
     # Pin the colour bar's ticks like the plot's (see apply_axis_text).
     rc = style.to_rcparams()
     s = style.axis_style("y")
@@ -696,6 +853,7 @@ def _colorbar(fig, mappable, ax, style: Style, label: str):
     cb.ax.tick_params(which="minor", length=s.minor.length_pt, width=rc["ytick.minor.width"], **common)
     if s.label.size_pt:
         cb.ax.yaxis.label.set_size(s.label.size_pt)
+    return cb
 
 
 def _axis_quantity(style: Style, d, name: str) -> QuantityStyle:
@@ -703,84 +861,223 @@ def _axis_quantity(style: Style, d, name: str) -> QuantityStyle:
     return find_quantity(style, name, a.label, None)
 
 
-def _draw_curves(fig: Figure, ax, d, spec, style: Style) -> None:
+# Curves' own choices (`options`), checked as lbd.plot.matrix.checked_options does
+CURVE_OPTIONS = {
+    "points": (lambda v: isinstance(v, bool), "points must be true or false"),
+    "grid": (lambda v: isinstance(v, bool), "grid must be true or false"),
+    "equal": (lambda v: isinstance(v, bool), "equal must be true or false"),
+}
+
+
+@dataclass
+class CurveModel:
+    """A curve plot worked out from the full data (prepare_curves): what draw_curves draws.
+
+    Everything is in plot units (the axes' unit prefixes applied), so a reduced copy of the lines
+    (lbd.plot.reduce, for the Explore view) is drawn with the same labels, prefixes and scales.
+    """
+
+    xs: List[np.ndarray]                                # each line's x (one shared array when x is an axis)
+    lines: List[Tuple[np.ndarray, str]]                 # (y, legend label)
+    colors: Optional[np.ndarray]                        # per line (many series), or None: the colour cycle
+    xf: float                                           # plot units per stored unit
+    yf: float
+    x_label: str
+    y_label: str
+    x_scale: str
+    y_scale: str
+    ylim: Optional[Tuple[Optional[float], Optional[float]]]
+    series_bar: Optional[Tuple[ScalarMappable, str]]    # many series: a colour bar instead of a legend
+    auto_axes: List[Tuple[str, str]]
+    x_ticks: Optional[Tuple[np.ndarray, List[str]]] = None   # an axis with elements: its texts as ticks
+    whole: Optional[Tuple[float, float]] = None        # the values' range at every slider position (plot units)
+
+
+@dataclass
+class MapModel:
+    """A heat map worked out from the full data (prepare_map): what draw_map draws, in plot units."""
+
+    x: np.ndarray                                       # cell centres
+    y: np.ndarray
+    z: np.ndarray                                       # rows = y, columns = x
+    xf: float
+    yf: float
+    zf: float
+    norm: mcolors.Normalize
+    cmap: str
+    x_label: str
+    y_label: str
+    z_label: str
+    x_scale: str
+    y_scale: str
+    auto_axes: List[Tuple[str, str]]
+    x_ticks: Optional[Tuple[np.ndarray, List[str]]] = None   # an axis with elements: its texts as ticks
+    y_ticks: Optional[Tuple[np.ndarray, List[str]]] = None
+
+
+def prepare_curves(d, spec, style: Style, big: Optional[Any] = None, whole_span: bool = False,
+                   two_axes: bool = False) -> CurveModel:
+    """`big`: stands for the curves when they are too big to read whole (LBD Viewer's
+    summaries.BigCurves, one value): `big.trace(j)` for each line, `big.range()` their lowest and
+    highest number, `trace * factor` scaled; the model's lines are then read part by part.
+    `whole_span`: the vertical unit prefix is chosen from the values' numbers at every slider
+    position, not only the ones shown, so it stays the same while a slider moves (Explore,
+    16.49); the model's `whole` then holds their range (plot units). `two_axes`: a second unit
+    gets its own right-hand axis (Explore), so there is no note that the axis shows no unit."""
+    d = for_kind(d, "curve")
     a = style.figure.axes
     xs, ys = style.axis_style("x"), style.axis_style("y")
-    xa = d.axes[spec["x"]]
-    x_raw = np.asarray(xa.data, dtype=float)
+    # x is an axis (shared by every curve) or a value (its own x for each curve, see resolve_spec)
+    x_is_value = spec["x"] in d.values
+    along = spec.get("along", spec["x"])
+    keep = [along] + ([spec["series"]] if spec.get("series") else [])
+    xa = d.values[spec["x"]] if x_is_value else d.axes[spec["x"]]
+    x_raw = np.asarray(_take(xa, keep, spec["index"]) if x_is_value else xa.data, dtype=float)
     xq = _axis_quantity(style, d, spec["x"])
     xf, xunit = _unit_scale(x_raw, xa.unit, xq, xs.label.auto_prefix)
     auto_axes = [(spec["x"], xunit)] if _auto_prefix(xq, xa.unit, xs.label.auto_prefix) else []
+    x_shown = x_raw * xf
     lines: List[Tuple[np.ndarray, str]] = []
+    line_x: List[np.ndarray] = []
     labels, units = [], []
     quantity: Optional[QuantityStyle] = None
     series_colors = None
     series_mappable = None
     for name in spec["values"]:
         v = d.values[name]
-        keep = [spec["x"]] + ([spec["series"]] if spec.get("series") else [])
-        arr = _take(v, keep, spec["index"])
-        arr, label, unit = apply_complex(arr, v.label, v.unit, spec["complex"])
+        if big is None:
+            arr = _take(v, keep, spec["index"])
+            arr, label, unit = apply_complex(arr, v.label, v.unit, spec["complex"])
+        else:
+            _, label, unit = apply_complex(np.ones(1, dtype=v.dtype), v.label, v.unit, spec["complex"])
+            arr = None
         labels.append(label)
         units.append(unit)
         if quantity is None:  # the first value's fixed scale sets the vertical axis
             quantity = find_quantity(style, name, v.label, spec["complex"] if np.iscomplexobj(v.data) else None)
         if spec.get("series"):
             sa = d.axes[spec["series"]]
-            n = arr.shape[1]
+            n = arr.shape[1] if big is None else big.traces
             if n > len(a.colors):
                 cmap = matplotlib.colormaps[a.image.cmap]
                 series_colors = cmap(np.linspace(0, 1, n))
                 norm = mcolors.Normalize(float(np.min(sa.data)), float(np.max(sa.data)))
                 series_mappable = (ScalarMappable(norm=norm, cmap=cmap), sa)
             for j in range(n):
-                lines.append((arr[:, j], _legend_label(sa, sa.data[j])))
+                legend = (f"point {j} of each step" if spec["series"] in getattr(d, "_in_step", {})   # 16.41
+                          else _legend_label(sa, sa.data[j], j))
+                lines.append((arr[:, j] if big is None else big.trace(j), legend))
+                line_x.append(x_shown[:, j] if x_is_value else x_shown)
         else:
-            lines.append((arr, label))
+            lines.append((arr if big is None else big.trace(0), label))
+            line_x.append(x_shown)
     quantity = quantity or QuantityStyle()
 
-    yall = np.concatenate([np.ravel(y) for y, _ in lines]) if lines else np.array([])
-    if len(set(units)) > 1:
+    if big is not None:
+        yall = np.asarray(big.range(), dtype=float)
+    else:
+        yall = np.concatenate([np.ravel(y) for y, _ in lines]) if lines else np.array([])
+    if len(set(units)) > 1 and not (two_axes and len(set(units)) == 2):
         _warn(f"the curves have different units {sorted(set(units))}; the vertical axis shows no unit", RenderWarning)
     common_unit = units[0] if len(set(units)) == 1 else ""
-    yf, yunit = _unit_scale(yall, common_unit, quantity, ys.label.auto_prefix)
+    whole = None
+    if whole_span and big is None:
+        whole = whole_range([whole_numbers(d.values[n], spec["complex"]) for n in spec["values"]])
+    yf, yunit = _unit_scale(np.array(whole) if whole else yall, common_unit, quantity, ys.label.auto_prefix)
     if _auto_prefix(quantity, common_unit, ys.label.auto_prefix):
         auto_axes.append((spec["values"][0], yunit))
-    for j, (y, lab) in enumerate(lines):
-        kw = {"color": series_colors[j]} if series_colors is not None else {}
-        ax.plot(x_raw * xf, np.asarray(y) * yf, label=lab, **kw)
-
-    ax.set_xlabel(axis_label(spec.get("x_label") or xa.label, xunit, xs.label.unit_format))
     # Several values: the legend names them, so the axis gets a generic label.
     ylabel = spec.get("y_label") or (labels[0] if len(set(labels)) == 1 else "Value")
-    ax.set_ylabel(axis_label(ylabel, yunit, ys.label.unit_format))
     y_scale = "log" if quantity.scale == "log" else spec["y_scale"]
     if spec["x_scale"] == "log":
         _check_log(x_raw, f"the horizontal axis '{xa.name}'")
     if y_scale == "log":
         _check_log(yall.real if np.iscomplexobj(yall) else yall, "the vertical axis")
-    ax.set_xscale(spec["x_scale"])
-    ax.set_yscale(y_scale)
+    ylim = None
     if quantity.vmin is not None or quantity.vmax is not None:
-        ax.set_ylim(None if quantity.vmin is None else quantity.vmin * yf,
-                    None if quantity.vmax is None else quantity.vmax * yf)
-    ax.margins(x=0)
-    _annotate(ax, d, spec, auto_axes)
+        ylim = (None if quantity.vmin is None else quantity.vmin * yf,
+                None if quantity.vmax is None else quantity.vmax * yf)
+    series_bar = None
     if series_mappable is not None:
         sm, sa = series_mappable
-        _colorbar(fig, sm, ax, style, axis_label(sa.label, sa.unit, ys.label.unit_format))
+        series_bar = (sm, axis_label(sa.label, sa.unit, ys.label.unit_format))
+    return CurveModel(
+        xs=line_x, lines=[((np.asarray(y) if big is None else y) * yf, lab) for y, lab in lines], colors=series_colors,
+        xf=xf, yf=yf,
+        x_label=axis_label(spec.get("x_label") or xa.label, xunit, xs.label.unit_format),
+        y_label=axis_label(ylabel, yunit, ys.label.unit_format), x_scale=spec["x_scale"], y_scale=y_scale,
+        ylim=ylim, series_bar=series_bar, auto_axes=auto_axes,
+        x_ticks=None if x_is_value else _element_ticks(xa, xf),
+        whole=None if whole is None else (whole[0] * yf, whole[1] * yf))
+
+
+def look_options(ax, spec: Dict[str, Any], xf: float = 1.0, yf: float = 1.0) -> None:
+    """Grid and Equal axes (16.32), for curves and scatter plots: `options.grid` (True or False)
+    overrides the style's grid; `options.equal` gives one stored unit the same length on both
+    axes (also when the axes show other prefixes), on linear axes only. The viewer's Explore
+    widens its view itself instead (kinds.Interaction.frame)."""
+    options = spec.get("options") or {}
+    if options.get("grid") is not None:
+        if options["grid"]:
+            ax.grid(True, which=matplotlib.rcParams["axes.grid.which"])
+        else:
+            ax.grid(False, which="both")
+    if options.get("equal") and ax.get_xscale() == ax.get_yscale() == "linear":
+        ax.set_aspect(xf / yf, adjustable="datalim")
+
+
+def draw_curves(fig: Figure, ax, model: CurveModel, d, spec, style: Style,
+                data: Optional[List[Tuple[np.ndarray, np.ndarray]]] = None) -> List[Any]:
+    """Draw a CurveModel; `data` replaces each line's (x, y), e.g. by a reduced copy. Returns the lines."""
+    drawn = []
+    # Show points (16.39): matplotlib's small dot on every stored point
+    dots = {"marker": "."} if (spec.get("options") or {}).get("points") else {}
+    for j, (y, lab) in enumerate(model.lines):
+        kw = {"color": model.colors[j], **dots} if model.colors is not None else dict(dots)
+        x, y = (model.xs[j], y) if data is None else data[j]
+        drawn += ax.plot(x, y, label=lab, **kw)
+    ax.set_xlabel(model.x_label)
+    ax.set_ylabel(model.y_label)
+    ax.set_xscale(model.x_scale)
+    ax.set_yscale(model.y_scale)
+    if model.ylim is not None:
+        ax.set_ylim(*model.ylim)
+    _element_axis(ax.xaxis, model.x_ticks)
+    ax.margins(x=0)
+    look_options(ax, spec, model.xf, model.yf)
+    _annotate(ax, d, spec, model.auto_axes)
+    if model.series_bar is not None:
+        _colorbar(fig, model.series_bar[0], ax, style, model.series_bar[1])
     else:
-        _legend(ax, a)
+        _legend(ax, style.figure.axes)
+    return drawn
 
 
-def _draw_heatmap(fig: Figure, ax, d, spec, style: Style) -> None:
+def prepare_map(d, spec, style: Style, big: Optional[Any] = None,
+                zspan: Optional[Tuple[float, float]] = None) -> MapModel:
+    """`big`: stands for the map when it is too big to read whole (LBD Viewer's
+    summaries.BigMap): `big.range()` gives its lowest and highest drawn number, `big * factor`
+    the same map scaled; the model's `z` is then `big` scaled, read part by part. `zspan`: the
+    numbers the colour bar's unit prefix is chosen for, instead of this map's (LBD Viewer: the
+    range of every slider position, so the prefix stays while the slider moves). A value on an
+    axis group gives a groupmap.GroupMapModel."""
+    d = flat(d)
+    if _on_levels(d, spec["values"][0]):
+        from . import groupmap
+
+        return groupmap.prepare(d, spec, style, zspan)
     a = style.figure.axes
     xs, ys = style.axis_style("x"), style.axis_style("y")
     name = spec["values"][0]
     v = d.values[name]
     xa, ya = d.axes[spec["x"]], d.axes[spec["y"]]
-    z = _take(v, [spec["y"], spec["x"]], spec["index"])     # rows = y, columns = x
-    z, label, unit = apply_complex(z, v.label, v.unit, spec["complex"])
+    if big is None:
+        z = _take(v, [spec["y"], spec["x"]], spec["index"])     # rows = y, columns = x
+        z, label, unit = apply_complex(z, v.label, v.unit, spec["complex"], axis=1)      # x runs along rows
+        span = z
+    else:
+        _, label, unit = apply_complex(np.ones(1, dtype=v.dtype), v.label, v.unit, spec["complex"])
+        z, span = big, np.asarray(big.range(), dtype=float)
     q = find_quantity(style, name, v.label, spec["complex"] if np.iscomplexobj(v.data) else None)
     x_raw = np.asarray(xa.data, dtype=float)
     y_raw = np.asarray(ya.data, dtype=float)
@@ -791,151 +1088,46 @@ def _draw_heatmap(fig: Figure, ax, d, spec, style: Style) -> None:
                                                    (spec["y"], yq, ya.unit, ys.label.auto_prefix, yunit))
                  if _auto_prefix(q, unit, auto)]
     # With fixed limits, the colour bar keeps the value's own unit so the limits read as entered.
-    zf, zunit = _unit_scale(z, unit, q, ys.label.auto_prefix and q.vmin is None and q.vmax is None)
+    if zspan is not None:
+        span = np.asarray(zspan, dtype=float)
+    zf, zunit = _unit_scale(span, unit, q, ys.label.auto_prefix and q.vmin is None and q.vmax is None)
     if q.scale == "log":
-        _check_log(np.asarray(z, dtype=float), f"the colour scale of '{name}'")
+        _check_log(np.asarray(span, dtype=float), f"the colour scale of '{name}'")
     for scale, raw, axis in ((spec["x_scale"], x_raw, xa), (spec["y_scale"], y_raw, ya)):
         if scale == "log":
             _check_log(raw, f"axis '{axis.name}'")
-    mesh = ax.pcolormesh(x_raw * xf, y_raw * yf, z * zf, shading="nearest", norm=_norm(q, zf),
-                         cmap=q.cmap or a.image.cmap, rasterized=True)
-    ax.set_xlabel(axis_label(spec.get("x_label") or xa.label, xunit, xs.label.unit_format))
-    ax.set_ylabel(axis_label(spec.get("y_label") or ya.label, yunit, ys.label.unit_format))
-    ax.set_xscale(spec["x_scale"])
-    ax.set_yscale(spec["y_scale"])
-    _annotate(ax, d, spec, auto_axes)
-    _colorbar(fig, mesh, ax, style, axis_label(spec.get("z_label") or label, zunit, ys.label.unit_format))
+    return MapModel(
+        x=x_raw * xf, y=y_raw * yf, z=z * zf, xf=xf, yf=yf, zf=zf, norm=_norm(q, zf), cmap=q.cmap or a.image.cmap,
+        x_label=axis_label(spec.get("x_label") or xa.label, xunit, xs.label.unit_format),
+        y_label=axis_label(spec.get("y_label") or ya.label, yunit, ys.label.unit_format),
+        z_label=axis_label(spec.get("z_label") or label, zunit, ys.label.unit_format),
+        x_scale=spec["x_scale"], y_scale=spec["y_scale"], auto_axes=auto_axes,
+        x_ticks=_element_ticks(xa, xf), y_ticks=_element_ticks(ya, yf))
 
 
-def _draw_scatter(fig: Figure, ax, d, spec, style: Style) -> None:
-    a = style.figure.axes
-    sc = a.scatter
-    xs, ys = style.axis_style("x"), style.axis_style("y")
-    index = spec["index"]
-    mode = spec["complex"]
-    first = d.values[spec["values"][0]]
+def draw_map(fig: Figure, ax, model: MapModel, d, spec, style: Style, image: Optional[np.ndarray] = None):
+    """Draw a MapModel. `image` replaces the cells by a picture of exactly the plot area's pixels
+    (rows bottom to top, e.g. reduced by lbd.plot.reduce): it is placed on the axes box, whatever
+    the limits and scales, so no pixel is resampled. Returns the drawn mappable."""
+    from . import groupmap
 
-    # (x points, y points, legend label) for every series, plus axis labels and units
-    series: List[Tuple[np.ndarray, np.ndarray, str]] = []
-    if mode == "iq":
-        arr, shape_axes = _points(d, first, index)
-        arr = np.asarray(arr)
-        series.append((arr.real.ravel(), arr.imag.ravel(), first.label))
-        xlab, xunit, ylab, yunit = f"Re {first.label}", first.unit, f"Im {first.label}", first.unit
-        point_shape = arr.shape
-        xq = yq = find_quantity(style, first.name, first.label, "iq")
+    if isinstance(model, groupmap.GroupMapModel) and image is None:
+        return groupmap.draw(fig, ax, model, d, spec, style)
+    if image is None:
+        mappable = ax.pcolormesh(model.x, model.y, model.z, shading="nearest", norm=model.norm,
+                                 cmap=model.cmap, rasterized=True)
     else:
-        x = spec["x"]
-        xlab = xunit = ylab = yunit = ""
-        labels, units = [], []
-        point_shape, shape_axes = None, None
-        for name in spec["values"]:
-            v = d.values[name]
-            arr, left = _points(d, v, index)
-            yarr, lab, unit = apply_complex(np.asarray(arr), v.label, v.unit, mode)
-            if x in d.axes:
-                xarr = _coords(d, x, left, yarr.shape)
-                xlab, xunit = d.axes[x].label, d.axes[x].unit
-            else:
-                xv = d.values[x]
-                xraw, _ = _points(d, xv, index)
-                xarr, xlab, xunit = apply_complex(np.asarray(xraw), xv.label, xv.unit, mode)
-            if point_shape is None:
-                point_shape, shape_axes = yarr.shape, left
-            series.append((np.ravel(xarr), np.ravel(yarr), lab))
-            labels.append(lab)
-            units.append(unit)
-        ylab = labels[0] if len(set(labels)) == 1 else "Value"
-        if len(set(units)) > 1:
-            _warn(f"the values have different units {sorted(set(units))}; the vertical axis shows no unit",
-                  RenderWarning)
-        yunit = units[0] if len(set(units)) == 1 else ""
-        xq = _axis_quantity(style, d, x)
-        yq = find_quantity(style, first.name, first.label, mode if np.iscomplexobj(first.data) else None)
-
-    all_x = np.concatenate([s[0] for s in series])
-    all_y = np.concatenate([s[1] for s in series])
-    if mode == "iq":  # one scale for both axes keeps the I/Q plane undistorted
-        base = xunit
-        xf, xunit = _unit_scale(np.concatenate([all_x, all_y]), xunit, xq,
-                                xs.label.auto_prefix and ys.label.auto_prefix)
-        yf, yunit = xf, xunit
-        auto_axes = ([(first.name, xunit)] if _auto_prefix(xq, base, xs.label.auto_prefix and ys.label.auto_prefix)
-                     else [])
-    else:
-        xbase, ybase = xunit, yunit
-        xf, xunit = _unit_scale(all_x, xunit, xq, xs.label.auto_prefix)
-        yf, yunit = _unit_scale(all_y, yunit, yq, ys.label.auto_prefix)
-        auto_axes = [(n, u) for n, q, unit, auto, u in ((spec["x"], xq, xbase, xs.label.auto_prefix, xunit),
-                                                       (first.name, yq, ybase, ys.label.auto_prefix, yunit))
-                     if _auto_prefix(q, unit, auto)]
-
-    # colour by a third quantity
-    cvals = None
-    cnorm = None
-    cmap = None
-    clabel = ""
-    groups = None      # colour by a short axis: one cycle colour and legend entry per point of it
-    if spec.get("color"):
-        c = spec["color"]
-        cq = _axis_quantity(style, d, c)
-        fixed_scale = cq.vmin is not None or cq.vmax is not None or cq.cmap is not None
-        if c in d.axes and len(d.axes[c].data) <= len(a.colors) and not fixed_scale:
-            ca = d.axes[c]
-            where = np.ravel(_coords(d, c, shape_axes, point_shape))
-            groups = [(where == val, _legend_label(ca, val)) for val in ca.data]
-        else:
-            if c in d.axes:
-                cvals = _coords(d, c, shape_axes, point_shape)
-                cname, clab, cunit = c, d.axes[c].label, d.axes[c].unit
-                cmode = None
-            else:
-                cv = d.values[c]
-                craw, _ = _points(d, cv, index)
-                cmode = mode if mode != "iq" else "abs"
-                cvals, clab, cunit = apply_complex(np.asarray(craw), cv.label, cv.unit, cmode)
-                cname = c
-                cmode = cmode if np.iscomplexobj(cv.data) else None
-            q = find_quantity(style, cname, clab, cmode)
-            cf, cunit = _unit_scale(cvals, cunit, q, ys.label.auto_prefix and q.vmin is None and q.vmax is None)
-            cvals = np.ravel(cvals) * cf
-            cnorm = _norm(q, cf)
-            cmap = q.cmap or a.image.cmap
-            clabel = axis_label(spec.get("z_label") or clab, cunit, ys.label.unit_format)
-
-    kw = dict(s=sc.size_pt ** 2, alpha=sc.alpha, marker=sc.marker, edgecolors=sc.edgecolor,
-              linewidths=sc.edgewidth_pt)
-    mappable = None
-    for xpts, ypts, lab in series:
-        raster = xpts.size > SCATTER_RASTER_ABOVE
-        if groups is not None:
-            for k, (mask, glab) in enumerate(groups):
-                ax.scatter(xpts[mask] * xf, ypts[mask] * yf, color=a.colors[k], rasterized=raster,
-                           label=glab if len(series) == 1 else f"{lab}, {glab}", **kw)
-        elif cvals is not None:
-            mappable = ax.scatter(xpts * xf, ypts * yf, c=cvals, cmap=cmap, norm=cnorm, label=lab,
-                                  rasterized=raster, **kw)
-        else:
-            ax.scatter(xpts * xf, ypts * yf, label=lab, rasterized=raster, **kw)
-
-    ax.set_xlabel(axis_label(spec.get("x_label") or xlab, xunit, xs.label.unit_format))
-    ax.set_ylabel(axis_label(spec.get("y_label") or ylab, yunit, ys.label.unit_format))
-    y_scale = "log" if yq.scale == "log" and mode != "iq" else spec["y_scale"]
-    if spec["x_scale"] == "log":
-        _check_log(all_x, "the horizontal axis")
-    if y_scale == "log":
-        _check_log(all_y, "the vertical axis")
-    ax.set_xscale(spec["x_scale"])
-    ax.set_yscale(y_scale)
-    if mode != "iq" and (yq.vmin is not None or yq.vmax is not None):
-        ax.set_ylim(None if yq.vmin is None else yq.vmin * yf, None if yq.vmax is None else yq.vmax * yf)
-    if mode == "iq":
-        ax.set_aspect("equal", adjustable="datalim")
-    _annotate(ax, d, spec, auto_axes)
-    if mappable is not None:
-        _colorbar(fig, mappable, ax, style, clabel)
-    else:
-        _legend(ax, a)
+        mappable = ax.imshow(image, extent=(0, 1, 0, 1), transform=ax.transAxes, origin="lower",
+                             interpolation="nearest", aspect="auto", norm=model.norm, cmap=model.cmap)
+    ax.set_xlabel(model.x_label)
+    ax.set_ylabel(model.y_label)
+    ax.set_xscale(model.x_scale)
+    ax.set_yscale(model.y_scale)
+    _element_axis(ax.xaxis, model.x_ticks)
+    _element_axis(ax.yaxis, model.y_ticks)
+    _annotate(ax, d, spec, model.auto_axes)
+    _colorbar(fig, mappable, ax, style, model.z_label)
+    return mappable
 
 
 # ---- output ---------------------------------------------------------------------
@@ -972,6 +1164,7 @@ def render_dataset(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], style: Styl
                    display: bool = False, creator: Optional[str] = None,
                    warn_unused: bool = True) -> Tuple[bytes, Dict[str, Any]]:
     """Render an in-memory (fully loaded) dataset. Returns (image bytes, resolved spec)."""
+    d = flat(d)
     fmt = check_format(fmt)
     resolved = resolve_spec(d, spec, warn_unused=warn_unused)
     meta = metadata(fmt, d, creator)
@@ -989,8 +1182,9 @@ def render_dataset(d: "lbd.Dataset", spec: Optional[Dict[str, Any]], style: Styl
 
 def render_file(path, spec: Optional[Dict[str, Any]], style: Style, fmt: str = "svg",
                 display: bool = True, creator: Optional[str] = None,
-                warn_unused: bool = True) -> Tuple[bytes, Dict[str, Any]]:
-    """Render a file, reading only the values the plot needs."""
+                warn_unused: bool = True, load: Optional[Any] = None) -> Tuple[bytes, Dict[str, Any]]:
+    """Render a file, reading only the values the plot needs (with `load(path, names)`, by
+    default `lbd.load(path, values=names)`)."""
     fmt = check_format(fmt)
     header = lbd.info(path)
     import warnings as _w
@@ -998,16 +1192,21 @@ def render_file(path, spec: Optional[Dict[str, Any]], style: Style, fmt: str = "
     with _w.catch_warnings():  # the same checks run again below on the loaded data
         _w.simplefilter("ignore", RenderWarning)
         resolved = resolve_spec(header, spec, warn_unused=warn_unused)
-    d = lbd.load(path, values=needed_values(header, resolved))
+    names = needed_values(header, resolved)
+    d = load(path, names) if load else lbd.load(path, values=names)
     return render_dataset(d, spec, style, fmt, display, creator, warn_unused=warn_unused)
 
 
 def needed_values(d: "lbd.Dataset", resolved: Dict[str, Any]) -> List[str]:
+    d = flat(d)
     names = list(resolved["values"])
     for key in ("x", "color"):
         n = resolved.get(key)
         if n and n in d.values and n not in names:
             names.append(n)
+    kind = kinds.KINDS.get(resolved.get("kind"))
+    if kind:
+        names += [n for n in kind.needs(resolved) if n not in names]
     return names
 
 
@@ -1025,3 +1224,37 @@ def metadata(fmt: str, d: "lbd.Dataset", creator: Optional[str] = None) -> Dict[
 
 def safe_filename(s: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", s).strip("_") or "figure"
+
+
+# ---- the plot types of this module (the others have a file of their own: kinds.load_types) -------
+
+def _fits_curve(d, name: str) -> Optional[str]:
+    return None if len(d.values[name].shape) > 0 else f"'{name}' is a single number"
+
+
+def _fits_map(d, name: str) -> Optional[str]:
+    from . import groupmap
+
+    v = d.values[name]
+    if groupmap.levels(d, name):
+        return groupmap.fits(d, name)
+    swept = _swept(v)
+    if len(v.shape) < 2:
+        return f"'{name}' is {len(v.shape)}-D; a heat map needs 2 dimensions"
+    if len(swept) < 2:
+        fixed = [a for a in v.axes if a not in swept]
+        return (f"a heat map needs 2 axes with more than one point; '{name}' has "
+                f"{len(swept)} ({fixed} {'is' if len(fixed) == 1 else 'are'} a single point)")
+    return None
+
+
+kinds.register(kinds.Kind(
+    "curve", "Curves", _fits_curve, _resolve_curve_or_map, prepare_curves, draw_curves,
+    frozenset({"x", "series", "index", "x_scale", "y_scale", "x_label", "y_label", "annotations"})))
+kinds.register(kinds.Kind(
+    "heatmap", "Map", _fits_map, _resolve_curve_or_map, prepare_map, draw_map,
+    frozenset({"x", "y", "index", "x_scale", "y_scale", "x_label", "y_label", "z_label", "annotations"})))
+kinds.load_types()
+KINDS = ("auto", *kinds.KINDS)
+
+from . import groupmap  # noqa: E402  (it uses this module; the session reaches its model through here)

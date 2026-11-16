@@ -31,7 +31,7 @@ def test_right_click_on_the_empty_bar(viewer, new_page):
     one = new_page()
     open_file(one, "a.lbd")
     open_file(one, "b.lbd")
-    strip = one.locator(".tabs")
+    strip = one.locator("main:not([hidden]) .tabs")       # the Figure workspace's tab row
     box = strip.bounding_box()
     strip.click(button="right", position={"x": box["width"] - 10, "y": box["height"] / 2})
     expect(menu(one, "Close all")).to_be_visible()
@@ -76,3 +76,50 @@ def test_move_all_tabs_to_another_page(viewer, new_page):
     menu(one, re.compile(rf"^Move all tabs to Page {number}")).click()
     expect(two.locator(".tab")).to_have_count(2)
     expect(one.locator(".tab")).to_have_count(0)
+
+
+def test_explore_right_click_on_the_empty_bar_closes_all(viewer, new_page):
+    """Plan 10: the empty part of the Explore tab bar has the menu for all tabs too."""
+    from test_explore_e2e import frames
+    from pageui import row
+
+    page = new_page("Explore")
+    for name in ("a.lbd", "b.lbd"):
+        frames(page, lambda name=name: row(page, name).dblclick())
+    strip = page.locator("main:not([hidden]) .tabs")
+    box = strip.bounding_box()
+    strip.click(button="right", position={"x": box["width"] - 10, "y": box["height"] / 2})
+    menu(page, "Close all").click()
+    expect(page.locator("main:not([hidden]) .tab")).to_have_count(0)
+
+
+def test_the_tab_bar_keeps_its_height(viewer, new_page):
+    """Plan 10: the bar is the same height with or without files, in Explore and in Figure."""
+    from test_explore_e2e import frames
+    from pageui import row
+
+    page = new_page("Explore")
+    bar = page.locator("main:not([hidden]) .tabbar")
+    empty = bar.bounding_box()["height"]
+    frames(page, lambda: row(page, "a.lbd").dblclick())
+    assert bar.bounding_box()["height"] == empty == 30
+    figure = new_page()
+    open_file(figure, "a.lbd")
+    assert figure.locator("main:not([hidden]) .tabbar").bounding_box()["height"] == 30
+
+
+def test_a_preview_tab_is_as_tall_as_a_kept_one(viewer, new_page):
+    """Plan 11: the preview tab (one click: in italics) has the height and the name's place of
+    a kept tab (it once took the Library preview's margins, being called "preview" too)."""
+    from test_explore_e2e import frames
+    from pageui import row
+
+    page = new_page("Explore")
+    frames(page, lambda: row(page, "a.lbd").dblclick())
+    frames(page, lambda: row(page, "b.lbd").click())
+    tabs = page.locator("main:not([hidden]) .tabbar .tab")
+    expect(tabs).to_have_count(2)
+    kept, preview = tabs.nth(0), tabs.nth(1)
+    expect(preview).to_have_class(re.compile(r"\bpreview\b"))
+    assert preview.bounding_box()["height"] == kept.bounding_box()["height"]
+    assert preview.locator(".tab-label").bounding_box()["y"] == kept.locator(".tab-label").bounding_box()["y"]

@@ -251,25 +251,36 @@ def test_release_notes_of_a_dev_version(notes, tmp_path, capfdbinary):
 # ---- smoke_test_app.py --------------------------------------------------------------------------
 
 
-def test_smoke_test_passes_on_the_source_viewer(load_module, capsys):
+def test_smoke_test_passes_on_the_source_viewer(load_module, example_files, capsys):
     smoke = load_module("scripts/smoke_test_app.py")
-    assert smoke.run([sys.executable, "-m", "lbd_viewer"], REPO / "examples" / "data", release=False) == 0
+    assert smoke.run([sys.executable, "-m", "lbd_viewer"], example_files, release=False) == 0
     out = capsys.readouterr().out
     assert "ok    export PDF" in out and "SMOKE TEST PASSED" in out
 
 
-def test_smoke_test_release_checks_catch_a_missing_sdk(load_module, capsys):
+def test_smoke_test_release_checks_catch_a_missing_sdk(load_module, example_files, capsys):
     """Run from source, the viewer has no bundled language modules: --release must fail on that."""
     smoke = load_module("scripts/smoke_test_app.py")
-    assert smoke.run([sys.executable, "-m", "lbd_viewer"], REPO / "examples" / "data", release=True) == 1
+    assert smoke.run([sys.executable, "-m", "lbd_viewer"], example_files, release=True) == 1
     out = capsys.readouterr().out
     assert "FAIL  sdk" in out and "not bundled" in out and "SMOKE TEST FAILED" in out
 
 
-def test_smoke_test_reports_a_viewer_that_does_not_start(load_module, capsys):
+def test_smoke_test_reports_a_viewer_that_does_not_start(load_module, example_files, capsys):
     smoke = load_module("scripts/smoke_test_app.py")
-    assert smoke.run([sys.executable, "-c", "raise SystemExit(3)"], REPO / "examples" / "data", release=False) == 1
+    assert smoke.run([sys.executable, "-c", "raise SystemExit(3)"], example_files, release=False) == 1
     assert "exited with code 3" in capsys.readouterr().out
+
+
+def test_smoke_test_makes_the_example_files_when_missing(load_module, tmp_path, monkeypatch):
+    """18.6: the example files aren't in the repository; without examples/data the smoke test
+    writes them into its temporary folder (and uses examples/data when it has been made)."""
+    smoke = load_module("scripts/smoke_test_app.py")
+    monkeypatch.setattr(smoke, "DEFAULT_OUT", tmp_path / "not made")
+    data = smoke.example_files(tmp_path / "scratch")
+    assert data == tmp_path / "scratch" / "examples" and (data / "rabi.lbd").is_file()
+    monkeypatch.setattr(smoke, "DEFAULT_OUT", data)
+    assert smoke.example_files(tmp_path / "elsewhere") == data and not (tmp_path / "elsewhere").exists()
 
 
 # ---- build_wheels.py ----------------------------------------------------------------------------

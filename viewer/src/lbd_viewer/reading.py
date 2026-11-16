@@ -1,0 +1,880 @@
+"""Reading values in the Explore view: cursors on the stored data, max / min / peak, the cuts
+through a map, the histogram of a map's values, and saving a cut as a file of its own.
+
+Everything here reads the session's full data (explore.py `ExploreSession`), never its picture.
+Positions travel in plot units (the axes' unit prefixes applied, as the picture's limits);
+read-outs are given as plotted (e.g. |S21| in dB) in the plotted value's own unit, with the
+stored indices they come from.
+
+One `cursors` answer holds everything the page draws for one cursor state: the snapped
+positions, their read-outs and, for maps, the cuts. The page draws them together, so the cursor,
+its numbers and the cuts never disagree (docs/viewer/explore.md, "Reading values").
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple
+
+import numpy as np
+from matplotlib import colors as mcolors
+
+import lbd
+from lbd.plot import render as rnd
+from lbd.plot.reduce import cell_edges, curve_minmax
+
+from . import crange, summaries
+from .explore import ExploreError
+
+if TYPE_CHECKING:
+    from .explore import ExploreSession
+
+CURSOR_TYPES = ("cross", "vertical", "horizontal")
+FIND = ("max", "min", "peak")
+TABLE_LIMIT = 2000      # a vertical cursor lists at most this many traces' values
+CROSSINGS_SHOWN = 10    # a horizontal cursor lists at most this many crossings per trace
+AT_LINE = ("interpolated", "stored")
+NEAR_POINTS = 4096      # curves too big for memory: a cursor looks this many points each side for its point
+HIST_BINS = 128
+AUTO_RANGE = (0.5, 99.5)  # "Auto" colour range: leave out 0.5 % of the cells at each end
+
+
+# -- pixels of a view (plot units <-> plot-area pixels; x to the right, y up) ---------------------
+
+def _f(scale: str, v):
+    return np.log10(v) if scale == "log" else v
+
+
+def _pixels(v, lim: Sequence[float], scale: str, n: int):
+    a, b = _f(scale, lim[0]), _f(scale, lim[1])
+    with np.errstate(invalid="ignore", divide="ignore"):
+        return (_f(scale, np.asarray(v, dtype=float)) - a) / (b - a) * n
+
+
+def _edges(lim: Sequence[float], scale: str, n: int) -> np.ndarray:
+    """The n + 1 pixel boundaries of a view, in plot units, increasing."""
+    a, b = sorted((_f(scale, lim[0]), _f(scale, lim[1])))
+    e = np.linspace(a, b, max(n, 1) + 1)
+    return 10 ** e if scale == "log" else e
+
+
+def _num(v) -> Optional[float]:
+    v = float(v)
+    return v if np.isfinite(v) else None
+
+
+# -- what is plotted ---------------------------------------------------------------------------------
+
+def _plotted(s: "ExploreSession", name: str) -> Tuple[str, str]:
+    """The plotted value's label and unit (after the complex mode, e.g. |S21| in dB)."""
+    v = s.data.values[name]
+    probe = np.array([1 + 1j]) if np.iscomplexobj(v.data) else np.array([1.0])
+    _, label, unit = rnd.apply_complex(probe, v.label or v.name, v.unit, s.spec["complex"])
+    return label, unit
+
+
+def _operated(s: "ExploreSession") -> bool:
+    """Operations are on and change what is shown (explore.py `_apply_ops`; complex corrections
+    alone count too: their result is shown, the file's value is the stored one)."""
+    return s.ops_result is not None and s.ops_result.applied > 0 and s.ops_shown is not None
+
+
+def _value_item(s: "ExploreSession", role: str, name: str, plot_value, line: Optional[int] = None) -> Dict[str, Any]:
+    """A shown value read out, in its own unit; after operations as they made it (a ratio such as
+    dB/GHz as shown, so it reads like the axis). `line`: the curve it is on, when values of two
+    units share the plot (each line then has its own scale: explore.py `_units_apart`)."""
+    apart = getattr(s.model, "units_apart", None) if s.kind == "curve" else None
+    if apart and line is not None:
+        scale, offset = apart["per_line"][line]
+        label, unit = _plotted(s, name)
+        return {"role": role, "name": name, "label": label, "unit": unit, "value": _num((plot_value - offset) / scale)}
+    factor = s.model.zf if s.kind == "heatmap" else s.model.yf
+    if _operated(s):
+        q, sh = s.ops_result.grid.value, s.ops_shown
+        if "/" in sh.value_unit:
+            return {"role": role, "name": name, "label": q.label, "unit": sh.value_unit, "value": _num(plot_value)}
+        return {"role": role, "name": name, "label": q.label, "unit": q.unit, "value": _num(plot_value / factor)}
+    label, unit = _plotted(s, name)
+    return {"role": role, "name": name, "label": label, "unit": unit, "value": _num(plot_value / factor)}
+
+
+def _model_axis_item(s: "ExploreSession", role: str, q, plot_value, factor: float, i: int) -> Dict[str, Any]:
+    """An axis the operations made (FFT: frequency; histogram: the value): no stored axis."""
+    return {"role": role, "name": q.label, "label": q.label, "unit": q.unit, "index": int(i),
+            "value": _num(plot_value / factor)}
+
+
+def _stored(s: "ExploreSession", name: str, base_value, factor: float) -> Optional[Dict[str, Any]]:
+    """The stored value behind a shown point (the file's, as plotted) when operations or complex
+    corrections changed what is shown and the point is still a stored one; else None."""
+    if _operated(s) and not s.ops_result.grid.one_to_one:
+        return None
+    if not _operated(s) and s.base_model is s.raw_model:
+        return None
+    label, unit = _plotted(s, name)
+    return {"label": label, "unit": unit, "value": _num(base_value / factor)}
+
+
+def _axis_item(s: "ExploreSession", role: str, axis: str, i: int) -> Dict[str, Any]:
+    a = s.data.axes[axis]
+    return {"role": role, "name": axis, "label": a.label or axis, "unit": a.unit, "index": int(i),
+            "value": _num(np.asarray(a.data, dtype=float)[i]), "text": rnd.position_text(a, int(i))}
+
+
+def _per_value(s: "ExploreSession") -> int:
+    series = s.spec.get("series")
+    return len(s.data.axes[series].data) if series else 1
+
+
+def _trace_value(s: "ExploreSession", k: int) -> str:
+    """The plotted value a curve belongs to (lines: per value, one per series step)."""
+    vals = s.spec["values"]
+    return vals[min(k // _per_value(s), len(vals) - 1)]
+
+
+def _visible(s: "ExploreSession") -> List[int]:
+    return [k for k, v in enumerate(s.visible) if v]
+
+
+def _selected_rows(s: "ExploreSession") -> Optional[set]:
+    sel = (s.settings.get("select") or {}).get(s.spec.get("y"))
+    return None if sel is None else set(sel)
+
+
+def _map_z(s: "ExploreSession") -> np.ndarray:
+    """The map as shown: rows left out of the selection are empty."""
+    z = s.model.z
+    rows = _selected_rows(s)
+    if rows is not None:
+        z = z.copy()
+        z[[j for j in range(z.shape[0]) if j not in rows], :] = np.nan
+    return z
+
+
+def _nearest(arr: np.ndarray, v: float) -> int:
+    """Index of the finite entry of arr closest to v (arr may be unsorted)."""
+    d = np.abs(np.asarray(arr, dtype=float) - v)
+    d[~np.isfinite(d)] = np.inf
+    return int(np.argmin(d))
+
+
+# -- cursors ---------------------------------------------------------------------------------------
+
+def cursors(s: "ExploreSession", items: List[Dict[str, Any]], kind: str, view: Dict[str, Any],
+            size: Sequence[int], cuts: bool = True, lines: bool = True, every: bool = True,
+            at_line: str = "interpolated", limit: int = 20, together: bool = False) -> Dict[str, Any]:
+    """Snap each cursor to the stored data and read it out; with a map, the cuts through the cursors.
+
+    `items`: per cursor {x, y} in plot units, optionally `trace` (curves: stay on this trace),
+    `free` (keep the position: Alt), `step` [along x, along y or traces] in stored points.
+    `kind`: cross, vertical or horizontal. `view` {xlim, ylim} and `size` [w, h] are the plot area
+    as the page shows it (for the nearest point in pixels and the cuts' pixel columns). `lines`:
+    with each curve cursor's trace as last drawn (plot units; None breaks it), to highlight it.
+    `factors`: plot units per stored unit, to turn typed stored values into positions.
+    `every`: a vertical or horizontal cursor on curves reads every visible trace at its line;
+    `at_line` "interpolated" (between a trace's stored points) or "stored" (the nearest stored
+    point); `limit`: markers and crossings for at most this many visible traces. `together`: the
+    cursors' `step`s are one move of both, as far as both can go (see _same_steps)."""
+    if kind not in CURSOR_TYPES:
+        raise ExploreError(f"unknown cursor type {kind!r}; use one of {', '.join(CURSOR_TYPES)}")
+    if at_line not in AT_LINE:
+        raise ExploreError(f"unknown way to read at a cursor line {at_line!r}; use one of {', '.join(AT_LINE)}")
+    if not 1 <= len(items) <= 2:
+        raise ExploreError("there are one or two cursors")
+    xlim, ylim = view.get("xlim"), view.get("ylim")
+    if not xlim or not ylim:
+        xlim, ylim = s.full
+    w, h = (max(int(v), 1) for v in size)
+    with rnd.RENDER_LOCK:
+        s._check_open()
+        scales = (s.ax.get_xscale(), s.ax.get_yscale())
+    if kind not in s.view.cursor_types:                  # chosen on another plot type
+        kind = s.view.cursor_types[0]
+    geo = (xlim, ylim, w, h, scales)
+    m = s.model
+    if together and len(items) == 2 and (s.kind in ("curve", "heatmap") or s.view.room(items[0]) is not None):
+        items = _same_steps(s, items)
+    out: Dict[str, Any] = {"type": kind, "factors": {"x": m.xf, "y": m.yf, "z": getattr(m, "zf", 1.0)}}
+    s.view.line_options = {"every": every, "at_line": at_line, "limit": limit}
+    out["cursors"] = [s.view.read(c, kind, geo) for c in items]
+    first = out["cursors"][0]
+    if cuts and first is not None:
+        cut = s.view.cuts(first, kind, geo)
+        if cut is not None:
+            out["cuts"] = cut
+            second = out["cursors"][1] if len(out["cursors"]) > 1 else None
+            if second is not None:
+                out["cuts2"] = s.view.cuts(second, kind, geo)
+    out.update(s.view.read_all(out["cursors"], kind, geo))
+    if s.kind == "curve":
+        if lines and len(_visible(s)) > 1:          # a single curve needs no highlight: it would only cover it
+            for c in out["cursors"]:
+                drawn = s._drawn(c["trace"]) if c else None
+                if drawn is not None:
+                    c["line"] = [[float(a), float(b)] if np.isfinite(a) and np.isfinite(b) else None
+                                 for a, b in zip(*drawn)]
+    if s.path.name.lower().endswith(".lbd.writing"):
+        _not_measured_yet(out["cursors"])
+    return out
+
+
+def _room(s: "ExploreSession", c: Dict[str, Any]) -> List[Tuple[int, int]]:
+    """How many stored points a cursor can step down and up: along x, and along y on a map."""
+    room = s.view.room(c)
+    if room is not None:
+        return room
+    m = s.model
+    x, y = _check_point(c)
+    if s.kind == "heatmap":
+        i, j = _clip_cell(m.x, x), _clip_cell(m.y, y)
+        return [(-i, len(m.x) - 1 - i), (-j, len(m.y) - 1 - j)]
+    k = int(c.get("trace", 0))
+    xs, ys = np.asarray(m.xs[k], dtype=float), np.asarray(m.lines[k][0], dtype=float)
+    ok = xs[np.isfinite(xs) & np.isfinite(ys)]
+    return [(-int((ok < x).sum()), int((ok > x).sum())), (0, 0)]
+
+
+def _same_steps(s: "ExploreSession", items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Both cursors move together: each takes the same number of stored points, as many as the one
+    nearer the data's edge can, so the distance between them stays. Without steps: as they are."""
+    step = items[0].get("step")
+    if not step or not all(c.get("step") == step for c in items):
+        return items
+    rooms = [_room(s, c) for c in items]
+    done = [int(np.clip(int(step[a]), max(r[a][0] for r in rooms), min(r[a][1] for r in rooms))) for a in (0, 1)]
+    return [{**c, "step": done} for c in items]
+
+
+def nearest_point(xs: Any, ys: Any, x: float, y: float, view: Dict[str, Any], size: Sequence[int]) -> Optional[int]:
+    """The index of the point nearest (x, y) on screen, in pixels, or None. `view`: {xlim, ylim,
+    xscale, yscale}; `size`: (w, h). A point without a number never wins."""
+    px = _pixels(np.asarray(xs, dtype=float), view["xlim"], view.get("xscale", "linear"), size[0])
+    py = _pixels(np.asarray(ys, dtype=float), view["ylim"], view.get("yscale", "linear"), size[1])
+    cx = _pixels(np.asarray([x], dtype=float), view["xlim"], view.get("xscale", "linear"), size[0])[0]
+    cy = _pixels(np.asarray([y], dtype=float), view["ylim"], view.get("yscale", "linear"), size[1])[0]
+    with np.errstate(invalid="ignore"):
+        d = (px - cx) ** 2 + (py - cy) ** 2
+    d = np.where(np.isfinite(d), d, np.inf)
+    if not d.size or not np.isfinite(d.min()):
+        return None
+    return int(np.argmin(d))
+
+
+def _not_measured_yet(found: Any) -> None:
+    """In a file being measured, a value without a number is one not measured yet: say so
+    (the page shows an item's `text` instead of its number)."""
+    if isinstance(found, dict):
+        if "value" in found and found.get("value") is None and "text" not in found and "unit" in found:
+            found["text"] = "not measured yet"
+        for v in found.values():
+            _not_measured_yet(v)
+    elif isinstance(found, list):
+        for v in found:
+            _not_measured_yet(v)
+
+
+def _check_point(c: Dict[str, Any]) -> Tuple[float, float]:
+    try:
+        x, y = float(c["x"]), float(c["y"])
+    except (KeyError, TypeError, ValueError):
+        raise ExploreError("a cursor needs a position: x and y numbers") from None
+    if not (np.isfinite(x) and np.isfinite(y)):
+        raise ExploreError("a cursor's position must be finite numbers")
+    return x, y
+
+
+def _map_cursor(s: "ExploreSession", c: Dict[str, Any], kind: str) -> Optional[Dict[str, Any]]:
+    m = s.model
+    x, y = _check_point(c)
+    i = _clip_cell(m.x, x)
+    j = _clip_cell(m.y, y)
+    step = c.get("step") or [0, 0]
+    i = int(np.clip(i + int(step[0]), 0, len(m.x) - 1))
+    j = int(np.clip(j + int(step[1]), 0, len(m.y) - 1))
+    free = bool(c.get("free")) and not any(step)
+    px = x if free or kind == "horizontal" else float(m.x[i])
+    py = y if free or kind == "vertical" else float(m.y[j])
+    z = _map_z(s)[j, i]
+    name = s.spec["values"][0]
+    sh = s.ops_shown if _operated(s) else None
+    g = s.ops_result.grid if sh else None
+    x_item = (_model_axis_item(s, "x", g.xq, m.x[i], m.xf, i) if sh and sh.x_changed
+              else _axis_item(s, "x", s.spec["x"], i))
+    y_item = (_model_axis_item(s, "y", g.tq, m.y[j], m.yf, j) if sh and sh.t_changed
+              else _axis_item(s, "y", s.spec["y"], j))
+    out = {"x": px, "y": py, "free": free, "items": [x_item, y_item, _value_item(s, "z", name, z)],
+           "index": {s.spec["x"]: i, s.spec["y"]: j} if not sh or g.one_to_one else {},
+           "cell": [float(v) for v in _cell_box(m, i, j)], "at": [i, j]}
+    # only for a stored cell: an operation's own cells (an I/Q histogram) have no stored value
+    keeps = s.kind == s.base_kind and (not sh or g.one_to_one)
+    stored = _stored(s, name, s.raw_model.z[j, i], s.raw_model.zf) if keeps else None
+    if stored:
+        out["stored"] = stored
+    return out
+
+
+def _clip_cell(centres: np.ndarray, v: float) -> int:
+    """The cell holding v, or the nearest cell at the map's edge."""
+    e = cell_edges(centres)
+    inc = e[0] < e[-1]
+    es = e if inc else e[::-1]
+    k = int(np.clip(np.searchsorted(es, v, side="right") - 1, 0, len(centres) - 1))
+    return k if inc else len(centres) - 1 - k
+
+
+def _cell_box(m, i: int, j: int) -> Tuple[float, float, float, float]:
+    xe, ye = cell_edges(m.x), cell_edges(m.y)
+    x0, x1 = sorted((xe[i], xe[i + 1]))
+    y0, y1 = sorted((ye[j], ye[j + 1]))
+    return x0, y0, x1, y1
+
+
+def _curve_cursor(s: "ExploreSession", c: Dict[str, Any], kind: str, geo, every: bool = True,
+                  at_line: str = "interpolated", limit: int = 20) -> Optional[Dict[str, Any]]:
+    m = s.model
+    x, y = _check_point(c)
+    shown = _visible(s)
+    if not shown:
+        return None
+    step = c.get("step") or [0, 0]
+    k = c.get("trace")
+    if not isinstance(k, int) or k not in shown:
+        k = None
+    if k is not None and step[1]:                    # the next / previous visible trace
+        pos = shown.index(k)
+        k = shown[int(np.clip(pos - int(step[1]), 0, len(shown) - 1))]   # up the list: earlier traces
+    if k is None:
+        k, i = _nearest_point(s, x, y, shown, geo)
+        if k is None:
+            return None
+    else:
+        xs, ys, at = _near_trace(m, k, x)
+        ok = np.isfinite(ys) & np.isfinite(xs)
+        if not ok.any():
+            return None
+        d = np.abs(xs - x)
+        d[~ok] = np.inf
+        i = at + int(np.argmin(d))
+    if step[0]:
+        i = _step_point(m, k, i, int(step[0]))
+    free = bool(c.get("free")) and not any(step)
+    xs_k, ys_k = m.xs[k], m.lines[k][0]
+    px = x if free else float(xs_k[i])
+    py = y if free or kind == "horizontal" else _num(ys_k[i])
+    if py is None:
+        py = y
+    name = _trace_value(s, k)
+    items = [_curve_x_item(s, k, i), _value_item(s, "y", name, ys_k[i], k)]
+    series = s.spec.get("series")
+    index = {s.spec.get("along", s.spec["x"]): int(i)}
+    same_traces = s.base_kind == "curve" and len(m.lines) == len(s.base_model.lines)   # the file's traces still
+    if series and same_traces:
+        j = k % _per_value(s)
+        items.append(_axis_item(s, "series", series, j))
+        index[series] = int(j)
+    one_to_one = not _operated(s) or s.ops_result.grid.one_to_one
+    out = {"x": px, "y": py, "free": free, "trace": int(k), "label": m.lines[k][1],
+           "index": index if one_to_one else {}, "items": items}
+    if one_to_one and same_traces:
+        stored = _stored(s, name, s.raw_model.lines[k][0][i], s.raw_model.yf)
+        if stored:
+            out["stored"] = stored
+    if every and kind in ("vertical", "horizontal"):
+        off = _lines_off(s, shown, limit)
+        if off:
+            out["line_note"] = off
+        if kind == "vertical":
+            out["table"] = _table(s, k, i, shown, px, at_line if not off else "stored", not off, geo[4][0] == "log")
+            if not off:
+                out["points"] = [_dot(s, r["trace"], r["px"], r["py"]) for r in out["table"]["rows"] if r["py"] is not None]
+        elif not off:
+            out["crossings"] = _crossings(s, k, i, py, shown, at_line, geo[4])
+            out["points"] = [_dot(s, r["trace"], x, y) for r in out["crossings"]["rows"] for x, y in zip(r["px"], r["py"])]
+    return out
+
+
+def _series_of(s: "ExploreSession", t: int) -> Optional[Dict[str, Any]]:
+    """The step of the swept axis a trace belongs to, for a table's rows; None when the traces
+    aren't simply one per step (several values in a panel, operations that made other traces)."""
+    series = s.spec.get("series")
+    if not series or s.base_kind != "curve" or len(s.model.lines) != len(s.base_model.lines) \
+            or len(s.model.lines) != _per_value(s):
+        return None
+    it = _axis_item(s, "series", series, t)
+    return {"label": it["label"], "unit": it["unit"], "value": it["value"], "text": it["text"]}
+
+
+def _lines_off(s: "ExploreSession", shown: List[int], limit: int) -> Optional[str]:
+    """Why a cursor line doesn't mark every trace here (None: it does)."""
+    if s.summarised:
+        return "These curves are shown from a summary: markers and crossings are for curves that fit in memory."
+    if len(shown) > limit:
+        return (f"{len(shown)} traces shown: markers and crossings are shown for up to {limit} "
+                "(Settings → Explore). Choose fewer traces, or raise the limit.")
+    return None
+
+
+def _dot(s: "ExploreSession", t: int, x: float, y: float) -> Dict[str, Any]:
+    """A place where a cursor line meets trace t: drawn on the plot, named when pointed at."""
+    artists = getattr(s, "lines", None) or []
+    color = "#444444"
+    if t < len(artists) and hasattr(artists[t], "get_color"):
+        color = mcolors.to_hex(artists[t].get_color())
+    return {"x": float(x), "y": float(y), "trace": int(t), "label": s.model.lines[t][1], "color": color}
+
+
+def _at_x(xs: Any, ys: Any, x0: float, log: bool) -> Optional[float]:
+    """Trace (xs, ys) at x0, straight between its two neighbouring stored points (on a log axis
+    in log x). None outside the trace or next to a gap."""
+    a, b = np.asarray(xs, dtype=float), np.asarray(ys, dtype=float)
+    ok = np.isfinite(a)
+    a, b = a[ok], b[ok]
+    if not a.size:
+        return None
+    order = np.argsort(a, kind="stable")
+    a, b = a[order], b[order]
+    if x0 < a[0] or x0 > a[-1]:
+        return None
+    j = int(np.searchsorted(a, x0))
+    if a[j] == x0:
+        return _num(b[j])
+    x1, x2, y1, y2 = a[j - 1], a[j], b[j - 1], b[j]
+    if not (np.isfinite(y1) and np.isfinite(y2)):
+        return None
+    f = (np.log(x0 / x1) / np.log(x2 / x1)) if log and x1 > 0 else (x0 - x1) / (x2 - x1)
+    return float(y1 + f * (y2 - y1))
+
+
+def _crossings(s: "ExploreSession", k: int, i: int, y0: float, shown: List[int], at_line: str, scales) -> Dict[str, Any]:
+    """Where each visible trace crosses the height y0 (plot units): between its stored points
+    ("interpolated": straight, on log axes in log) or the nearer of them ("stored")."""
+    m = s.model
+    xlog, ylog = scales[0] == "log", scales[1] == "log"
+    rows = []
+    for t in shown[:TABLE_LIMIT]:
+        xs, ys = np.asarray(m.xs[t], dtype=float), np.asarray(m.lines[t][0], dtype=float)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            d = np.log10(ys) - np.log10(y0) if ylog and y0 > 0 else ys - y0
+        a, b = d[:-1], d[1:]
+        with np.errstate(invalid="ignore"):
+            hits = np.flatnonzero(np.isfinite(a) & np.isfinite(b) & ((a * b < 0) | (a == 0)))
+        found = [int(j) for j in hits]
+        px, py = [], []
+        for j in found[:CROSSINGS_SHOWN]:
+            if at_line == "stored" or a[j] == 0:
+                n = j if abs(a[j]) <= abs(b[j]) else j + 1
+                px.append(float(xs[n]))
+                py.append(float(ys[n]))
+                continue
+            f = a[j] / (a[j] - b[j])
+            if xlog and xs[j] > 0 and xs[j + 1] > 0:
+                px.append(float(xs[j] * (xs[j + 1] / xs[j]) ** f))
+            else:
+                px.append(float(xs[j] + f * (xs[j + 1] - xs[j])))
+            py.append(float(y0))
+        if len(ys) and np.isfinite(d[-1]) and d[-1] == 0 and len(px) < CROSSINGS_SHOWN:
+            px.append(float(xs[-1]))
+            py.append(float(ys[-1]))
+        rows.append({"trace": int(t), "label": m.lines[t][1], "series": _series_of(s, t), "x": [p / m.xf for p in px],
+                     "px": px, "py": py, "more": max(len(found) - CROSSINGS_SHOWN, 0)})
+    xi, yi = _curve_x_item(s, k, i), _value_item(s, "y", _trace_value(s, k), y0, k)
+    return {"rows": rows, "more": max(len(shown) - TABLE_LIMIT, 0), "x_label": xi["label"], "x_unit": xi["unit"],
+            "label": yi["label"], "unit": yi["unit"], "y": yi["value"], "mode": at_line}
+
+
+def _near_trace(m, k: int, x: float, n: int = NEAR_POINTS) -> Tuple[np.ndarray, np.ndarray, int]:
+    """Trace k's x and y to search for a point near x: all of them, or for curves shown from their
+    summary (too big for memory; x sorted) the `n` points each side of x. And the index of the
+    first one."""
+    xs, y = m.xs[k], m.lines[k][0]
+    if not isinstance(y, summaries.BigTrace):
+        return np.asarray(xs, dtype=float), np.asarray(y, dtype=float), 0
+    c = int(np.searchsorted(xs, x))
+    a, b = max(c - n, 0), min(c + n, len(xs))
+    return np.asarray(xs[a:b], dtype=float), np.asarray(y[a:b], dtype=float), a
+
+
+def _curve_x_item(s: "ExploreSession", k: int, i: int) -> Dict[str, Any]:
+    m = s.model
+    if _operated(s) and s.ops_shown.x_changed:       # FFT, histogram: an axis the operations made
+        return _model_axis_item(s, "x", s.ops_result.grid.xq, m.xs[k][i], m.xf, i)
+    if s.spec["x"] in s.data.values:                 # a value as x: its stored number at this point
+        xv = s.data.values[s.spec["x"]]
+        return {"role": "x", "name": xv.name, "label": xv.label or xv.name, "unit": xv.unit, "index": int(i),
+                "value": _num(m.xs[k][i] / m.xf)}
+    return _axis_item(s, "x", s.spec.get("along", s.spec["x"]), i)
+
+
+def _nearest_point(s: "ExploreSession", x: float, y: float, shown: List[int], geo) -> Tuple[Optional[int], int]:
+    """The visible trace and point nearest to (x, y) on screen (pixels, not data units)."""
+    xlim, ylim, w, h, (xscale, yscale) = geo
+    m = s.model
+    cx, cy = _pixels(x, xlim, xscale, w), _pixels(y, ylim, yscale, h)
+    best = (np.inf, None, 0)
+    for xg, ks, is_sorted in s.x_groups:
+        ks = [k for k in ks if s.visible[k]]
+        if not ks:
+            continue
+        if is_sorted and xg.size > 64:
+            # the points near x on screen: a window of pixels each side, at least two points
+            inc = xg[0] <= xg[-1]
+            xs = xg if inc else xg[::-1]
+            span = abs(_f(xscale, xlim[1]) - _f(xscale, xlim[0])) / w * 12      # 12 pixels
+            a, b = _f(xscale, x) - span, _f(xscale, x) + span
+            a, b = (10 ** a, 10 ** b) if xscale == "log" else (a, b)
+            i0 = max(int(np.searchsorted(xs, a, side="left")) - 2, 0)
+            i1 = min(int(np.searchsorted(xs, b, side="right")) + 2, xs.size)
+            idx = np.arange(i0, i1) if inc else xg.size - 1 - np.arange(i0, i1)
+        else:
+            idx = np.arange(xg.size)
+        if not idx.size:
+            continue
+        ys = np.stack([np.asarray(m.lines[k][0][idx], dtype=float) for k in ks])
+        dx = _pixels(xg[idx], xlim, xscale, w) - cx
+        dy = _pixels(ys, ylim, yscale, h) - cy
+        d = dx[None, :] ** 2 + dy ** 2
+        d[~np.isfinite(d)] = np.inf
+        r, n = np.unravel_index(int(np.argmin(d)), d.shape)
+        if d[r, n] < best[0]:
+            best = (float(d[r, n]), ks[r], int(idx[n]))
+    if best[1] is None:
+        return None, 0
+    return best[1], best[2]
+
+
+def _step_point(m, k: int, i: int, n: int) -> int:
+    """Move n stored points along curve k (in the direction of increasing x), over missing ones."""
+    xs, ys, at = _near_trace(m, k, float(m.xs[k][i]), abs(n) + NEAR_POINTS)
+    ok = np.flatnonzero(np.isfinite(ys) & np.isfinite(xs))
+    if not ok.size:
+        return i
+    order = ok[np.argsort(xs[ok], kind="stable")]
+    pos = int(np.searchsorted(xs[order], m.xs[k][i]))
+    pos = int(np.clip(pos + n, 0, order.size - 1))
+    return at + int(order[pos])
+
+
+def _table(s: "ExploreSession", k: int, i: int, shown: List[int], at: Optional[float] = None,
+           at_line: str = "stored", dots: bool = False, xlog: bool = False) -> Dict[str, Any]:
+    """A vertical cursor: every visible trace's value at the cursor's x, in the file's order: its
+    nearest stored point, or ("interpolated") its value at exactly `at` (plot units)."""
+    m = s.model
+    x0 = m.xs[k][i]
+    order = shown if k in shown else sorted([k, *shown])
+    listed = order[:TABLE_LIMIT]
+    if k not in listed:
+        listed[-1] = k                                   # the cursor's own trace is always in the table
+    rows = []
+    for t in listed:
+        xs = m.xs[t]
+        if at_line == "interpolated":
+            y = _at_x(xs, m.lines[t][0], float(at if at is not None else x0), xlog)
+            row_item = _value_item(s, "y", _trace_value(s, t), np.nan if y is None else y, t)
+            rows.append({"trace": int(t), "label": m.lines[t][1], "series": _series_of(s, t),
+                         "value": row_item["value"], "unit": row_item["unit"],
+                         "x": _num(float(at if at is not None else x0) / m.xf),
+                         "px": float(at if at is not None else x0), "py": y})
+            continue
+        want = x0 if at is None else at                  # (a free cursor: its own x, not its nearest point's)
+        it = i if xs is m.xs[k] and want == x0 else _nearest(xs, want)
+        row_item = _value_item(s, "y", _trace_value(s, t), m.lines[t][0][it], t)
+        rows.append({"trace": int(t), "label": m.lines[t][1], "series": _series_of(s, t),
+                     "value": row_item["value"], "unit": row_item["unit"], "x": _num(xs[it] / m.xf)})
+        if dots:
+            rows[-1].update({"px": float(xs[it]), "py": _num(m.lines[t][0][it])})
+    name = _trace_value(s, k)
+    shown_item = _value_item(s, "y", name, 0.0, k)
+    label, unit = shown_item["label"], shown_item["unit"]
+    return {"rows": rows, "more": max(len(order) - TABLE_LIMIT, 0), "label": label, "unit": unit, "mode": at_line}
+
+
+# -- cuts through a map ----------------------------------------------------------------------------
+
+def _cuts(s: "ExploreSession", cur: Dict[str, Any], kind: str, geo) -> Dict[str, Any]:
+    """The row and the column through a cursor, as stored, reduced to the plot area's pixels
+    (min and max per pixel when they have more points than pixels)."""
+    xlim, ylim, w, h, (xscale, yscale) = geo
+    m = s.model
+    z = _map_z(s)
+    i, j = cur["at"]                                  # the cell shown (a stored one, or made by an operation)
+    out: Dict[str, Any] = {"zf": m.zf}
+    if kind != "vertical":
+        out["row"] = _cut(m.x, z[j, :], xlim, xscale, w, s.spec.get("y") or "y", j)
+    if kind != "horizontal":
+        out["column"] = _cut(m.y, z[:, i], ylim, yscale, h, s.spec.get("x") or "x", i)
+    return out
+
+
+def _cut(pos: np.ndarray, vals: np.ndarray, lim, scale: str, n: int, fixed: str, at: int) -> Dict[str, Any]:
+    pos = np.asarray(pos, dtype=float)
+    order = np.argsort(pos, kind="stable")
+    (p, v) = curve_minmax(pos[order], [np.asarray(vals, dtype=float)[order]], _edges(lim, scale, n))[0][0]
+    inside = (p >= min(lim)) & (p <= max(lim)) & np.isfinite(v)
+    shown = v[inside]
+    rng = [_num(shown.min()), _num(shown.max())] if shown.size else [None, None]
+    return {"pos": [float(a) for a in p], "z": [_num(b) for b in v], "range": rng, "fixed": fixed, "index": int(at)}
+
+
+# -- max, min, peak --------------------------------------------------------------------------------
+
+def find(s: "ExploreSession", what: str, xlim: Sequence[float], ylim: Sequence[float],
+         trace: Optional[int] = None) -> Dict[str, Any]:
+    """The stored point (curves) or cell (maps) with the highest (max) or lowest (min) value, or
+    the one farthest from the median (peak: a dip or a spike), in this x range (curves: of `trace`,
+    else of every visible trace) or this rectangle (maps). Returns its position in plot units."""
+    if what not in FIND:
+        raise ExploreError(f"unknown search {what!r}; use one of {', '.join(FIND)}")
+    return s.view.find(what, xlim, ylim, trace)
+
+
+def _find_map(s: "ExploreSession", what: str, xlim: Sequence[float], ylim: Sequence[float]) -> Dict[str, Any]:
+    x0, x1 = sorted(float(v) for v in xlim)
+    y0, y1 = sorted(float(v) for v in ylim)
+    m = s.model
+    ii = np.flatnonzero((m.x >= x0) & (m.x <= x1))
+    jj = np.flatnonzero((m.y >= y0) & (m.y <= y1))
+    part = _map_z(s)[np.ix_(jj, ii)] if ii.size and jj.size else np.empty((0, 0))
+    if not np.isfinite(part).any():
+        raise ExploreError("no stored values in this range to search")
+    score = _score(part, what)
+    r, c = np.unravel_index(int(np.nanargmax(score)), score.shape)
+    return {"x": float(m.x[ii[c]]), "y": float(m.y[jj[r]])}
+
+
+def _find_curve(s: "ExploreSession", what: str, xlim: Sequence[float], trace: Optional[int]) -> Dict[str, Any]:
+    x0, x1 = sorted(float(v) for v in xlim)
+    m = s.model
+    best: Optional[Tuple[float, Dict[str, Any]]] = None
+    shown = _visible(s)
+    traces = [trace] if isinstance(trace, int) and trace in shown else shown
+    for k in traces:
+        xs, ys = m.xs[k], m.lines[k][0]
+        if isinstance(ys, summaries.BigTrace):           # x sorted: read only the range
+            a, b = int(np.searchsorted(xs, x0, side="left")), int(np.searchsorted(xs, x1, side="right"))
+            xs, ys = np.asarray(xs[a:b], dtype=float), np.asarray(ys[a:b], dtype=float)
+        else:
+            xs, ys = np.asarray(xs, dtype=float), np.asarray(ys, dtype=float)
+        sel = np.flatnonzero((xs >= x0) & (xs <= x1) & np.isfinite(ys))
+        if not sel.size:
+            continue
+        score = _score(ys[sel], what)
+        n = int(np.argmax(score))
+        if best is None or score[n] > best[0]:
+            best = (float(score[n]), {"x": float(xs[sel[n]]), "y": float(ys[sel[n]]), "trace": int(k)})
+    if best is None:
+        raise ExploreError("no stored values in this range to search")
+    return best[1]
+
+
+def _score(v: np.ndarray, what: str) -> np.ndarray:
+    """Higher is better: the value (max), minus the value (min), the distance from the median (peak)."""
+    v = np.asarray(v, dtype=float)
+    if what == "max":
+        out = v.copy()
+    elif what == "min":
+        out = -v
+    else:
+        out = np.abs(v - np.nanmedian(v))
+    out[~np.isfinite(out)] = -np.inf
+    return out
+
+
+# -- the histogram of a map's values (contrast) ----------------------------------------------------
+
+def histogram(s: "ExploreSession", bins: int = HIST_BINS) -> Dict[str, Any]:
+    """Counts of the map's shown cells (all of them, not the view) in `bins` bins, in plot units;
+    on a log colour scale in log-spaced bins of the positive cells. With the lowest and highest
+    value and the automatic range (AUTO_RANGE percentiles). Cached per selection and scale."""
+    if s.kind != "heatmap":
+        raise ExploreError("the contrast histogram is for maps")
+    log = s.settings.get("cscale") == "log"
+    # the colour range from every slider position (crange "all"): the numbers of every slice
+    whole = crange.get(s, s.settings)[0] if s.settings.get("crange") == "all" else None
+    if whole is not None and (whole.lo, whole.hi) != getattr(s, "zspan", None):
+        whole = None                                  # ready just now: the map isn't drawn for it yet (units)
+    key = (tuple(sorted(_selected_rows(s) or [])), _selected_rows(s) is None, log, bins, whole is not None)
+    cache = getattr(s, "_hist", None)
+    if cache and cache[0] == key and cache[2] is s.model:
+        return cache[1]
+    if whole is not None:
+        # a sample of every slice's numbers (all of them when few), with the exact lowest and highest
+        ends = [e for e in (whole.lo, whole.lo_pos, whole.hi) if np.isfinite(e)]
+        v = np.concatenate([whole.sample, ends]) * float(s.model.zf or 1.0)
+    elif s.summarised:                                # too big for memory: from its summary
+        v = s.view.values()
+        v = v[np.isfinite(v)]
+    else:
+        z = _map_z(s)
+        v = z[np.isfinite(z)]
+    if log:
+        v = v[v > 0]
+    if not v.size:
+        raise ExploreError("the map has no values to count" + (" above 0 (log colour scale)" if log else ""))
+    t = np.log10(v) if log else v
+    lo, hi = float(t.min()), float(t.max())
+    if lo == hi:
+        lo, hi = lo - 0.5, hi + 0.5
+    fine = 64 * bins                                  # percentiles from a fine histogram: one pass
+    counts, _ = np.histogram(t, bins=fine, range=(lo, hi))
+    cum = np.cumsum(counts) / counts.sum()
+    step = (hi - lo) / fine
+    auto = [lo + step * int(np.searchsorted(cum, q / 100)) for q in AUTO_RANGE]
+    auto[1] = min(auto[1] + step, hi)
+    back = (lambda a: 10 ** np.asarray(a)) if log else (lambda a: np.asarray(a))
+    out = {"edges": [float(e) for e in back(np.linspace(lo, hi, bins + 1))],
+           "counts": [int(c) for c in counts.reshape(bins, 64).sum(axis=1)],
+           "lowest": float(back(lo)), "highest": float(back(hi)),
+           "auto": [float(a) for a in back(auto)], "log": log, "cells": int(v.size),
+           "slices": whole.slices if whole is not None else 1}
+    if s.summarised and whole is None:      # counts of the summary's blocks: the shape is right, the numbers are not cells
+        out["cells"] = summaries.histogram_cells(s.model.z)[1]
+        out["approximate"] = True
+    s._hist = (key, out, s.model)
+    return out
+
+
+# -- taking a cut out ------------------------------------------------------------------------------
+
+def cut_plan(s: "ExploreSession", which: str, index: Dict[str, int], trace: Optional[int] = None):
+    """What a cut keeps and fixes: (kept axis, {fixed axis: index}, value names)."""
+    if _operated(s) and not s.ops_result.grid.one_to_one or s.kind != s.base_kind:
+        raise ExploreError("after this operation the shown points aren't stored ones; turn the operations "
+                           "off to save the stored data of a cut")
+    spec = s.spec
+    fixed = dict(spec.get("index") or {})
+    if s.kind == "heatmap":
+        if which == "row":
+            keep, fixed[spec["y"]] = spec["x"], int(index[spec["y"]])
+        elif which == "column":
+            keep, fixed[spec["x"]] = spec["y"], int(index[spec["x"]])
+        else:
+            raise ExploreError("a map's cut is a 'row' or a 'column'")
+        return keep, fixed, [spec["values"][0]]
+    if which != "trace" or not isinstance(trace, int) or not 0 <= trace < len(s.model.lines):
+        raise ExploreError("a curve plot's cut is a 'trace': give the cursor's trace")
+    keep = spec.get("along", spec["x"])
+    if spec.get("series"):
+        fixed[spec["series"]] = int(trace % _per_value(s))
+    names = [_trace_value(s, trace)]
+    if spec["x"] in s.data.values:
+        names.append(spec["x"])
+    return keep, fixed, names
+
+
+def _fixed_text(s: "ExploreSession", fixed: Dict[str, int]) -> str:
+    parts = []
+    for a, i in fixed.items():
+        ax = s.data.axes[a]
+        parts.append(f"{ax.label or a} = {si_text(float(np.asarray(ax.data, dtype=float)[i]), ax.unit)}")
+    return ", ".join(parts)
+
+
+def _save_group_cut(s: "ExploreSession", group, path: Path) -> Path:
+    """A variable sweep's row or column (16.10) as a new file: its stored points against their
+    real coordinates, sorted along them."""
+    a, x, v, data, at, where = group
+    order = np.argsort(x, kind="stable")
+    src = s.flat_data._unflat
+    d = lbd.Dataset(title=f"{src.title or s.path.stem} – {_at_text(at)}",
+                    description=f"Cut from '{s.path.name}' by LBD Viewer's Explore view.")
+    d.add_axis(a.name, x[order], unit=a.unit, label=a.label)
+    d.add_value(v.name, data[order], axes=a.name, unit=v.unit, label=v.label)
+    d.meta = {"cut_from": s.path.name, "cut_index": {k: int(i) for k, i in where.items()},
+              "cut_at": _at_text(at)}
+    if src.meta:
+        d.meta["source_meta"] = src.meta
+    d.plot = {"kind": "curve", "values": [v.name]}
+    if np.iscomplexobj(data):
+        d.plot["complex"] = s.spec["complex"]
+    d._parent_id = src.id
+    d.save(path)
+    return path
+
+
+def si_text(v: float, unit: str) -> str:
+    """A number with an SI prefix for its unit, e.g. 0.0003 A -> '300 µA' (file names, titles)."""
+    if unit and v != 0 and np.isfinite(v):
+        for p, f in (("G", 1e9), ("M", 1e6), ("k", 1e3), ("", 1.0), ("m", 1e-3), ("µ", 1e-6), ("n", 1e-9), ("p", 1e-12)):
+            if abs(v) >= f * 0.9999999:
+                return f"{v / f:.6g} {p}{unit}"
+        return f"{v:.6g} {unit}"
+    return f"{v:.6g}" + (f" {unit}" if unit else "")
+
+
+def _group_cut(s: "ExploreSession", which: str, index: Dict[str, int]):
+    """A row or column of a variable sweep's map (16.10), or None for any other plot."""
+    if getattr(s.view, "name", None) != "groupmap":
+        return None
+    if which not in ("row", "column"):
+        raise ExploreError("a map's cut is a 'row' or a 'column'")
+    try:
+        point = int(index[s.spec["x"]])
+    except (KeyError, TypeError, ValueError):
+        raise ExploreError("place cursor 1 on the map first") from None
+    return s.view.cut_points(which, point)
+
+
+def _at_text(at: Dict[str, Any]) -> str:
+    return ", ".join(k if v is None else f"{k} = {si_text(v[0], v[1])}" for k, v in at.items())
+
+
+def suggest_cut_path(s: "ExploreSession", which: str, index: Dict[str, int], trace: Optional[int] = None) -> Path:
+    group = _group_cut(s, which, index)
+    if group is not None:
+        text = _at_text(group[4])
+    else:
+        keep, fixed, _ = cut_plan(s, which, index, trace)
+        new = {a: i for a, i in fixed.items() if (s.spec.get("index") or {}).get(a) != i or a not in (s.spec.get("index") or {})}
+        text = _fixed_text(s, new or fixed)
+    text = text.replace("/", "-").replace(":", "-").replace("\\", "-")
+    base = f"{s.path.stem} – {text}"
+    path = s.path.with_name(base + ".lbd")
+    n = 2
+    while path.exists():
+        path = s.path.with_name(f"{base} ({n}).lbd")
+        n += 1
+    return path
+
+
+def save_cut(s: "ExploreSession", which: str, index: Dict[str, int], path: Path,
+             trace: Optional[int] = None) -> Path:
+    """Write a cut (a map's row or column, or one trace) as a new .lbd file: the stored data
+    (complex values stay complex) along the kept axis, with metadata saying where it came from.
+    The source file is never changed; an existing file is never overwritten."""
+    group = _group_cut(s, which, index)
+    if group is None:
+        keep, fixed, names = cut_plan(s, which, index, trace)
+    path = Path(path)
+    if path.suffix.lower() != ".lbd":
+        raise ExploreError(f"a cut is saved as a .lbd file, not '{path.name}'")
+    if path.exists():
+        raise ExploreError(f"'{path.name}' exists already; choose another name")
+    if not path.parent.is_dir():
+        raise ExploreError(f"the folder '{path.parent}' doesn't exist")
+    if group is not None:
+        return _save_group_cut(s, group, path)
+    src = s.data
+    d = lbd.Dataset(title=f"{src.title or s.path.stem} – {_fixed_text(s, fixed)}",
+                    description=f"Cut from '{s.path.name}' by LBD Viewer's Explore view.")
+    a = src.axes[keep]
+    d.add_axis(keep, a.data, unit=a.unit, label=a.label)
+    for name in names:
+        v = src.values[name]
+        if keep not in v.axes:
+            raise ExploreError(f"'{name}' doesn't run along '{keep}'")
+        missing = [ax for ax in v.axes if ax != keep and ax not in fixed]
+        if missing:
+            raise ExploreError(f"'{name}' has axes {missing} that the cut doesn't fix")
+        data = np.asarray(v._read(tuple(slice(None) if ax == keep else fixed[ax] for ax in v.axes)))
+        d.add_value(name, data, axes=keep, unit=v.unit, label=v.label)
+    d.meta = {"cut_from": s.path.name,
+              "cut_index": {ax: int(i) for ax, i in fixed.items()},
+              "cut_at": {ax: float(np.asarray(src.axes[ax].data, dtype=float)[i]) for ax, i in fixed.items()}}
+    if src.meta:
+        d.meta["source_meta"] = src.meta
+    d.plot = {"kind": "curve", "values": names[:1]}
+    if np.iscomplexobj(src.values[names[0]].data):
+        d.plot["complex"] = s.spec["complex"]
+    d._parent_id = src.id                    # a new measurement made from the source (format 1.1)
+    d.save(path)
+    return path

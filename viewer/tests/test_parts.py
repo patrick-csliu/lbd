@@ -20,8 +20,75 @@ from lbd_viewer.config import Config, ConfigError
 
 def test_config_settings_roundtrip(tmp_path):
     cfg = Config(tmp_path / "c")
-    assert cfg.settings() == {"roots": [], "default_style": "default", "open_files_in": "viewer", "theme": "system"}
+    assert cfg.settings() == {"roots": [], "default_style": "default", "open_files_in": "viewer",
+                              "open_data_in": "explore", "theme": "system",
+                              "library": {"read_headers": True, "notice_seen": False, "columns": ["name", "date", "sweep"],
+                                          "column_widths": {}, "previews": "all", "list_view": "list", "sidebar_scopes": ["library"],
+                                          "sidebar_layout": "two", "sidebar_main": "title",
+                                          "sidebar_fields": ["date", "sweep", "project", "tags"], "date_zone": "local", "card_main": "title", "card_fields": ["date"],
+                                          "data_file_edits": "in_place"},
+                              "memory": {"reserve_gb": None, "maximum_gb": None, "summary_cache_gb": 20.0},
+                              "measurements": {"progress": True, "time": True, "percent": True, "points": True,
+                                               "axes": True, "notify": False}, "explore": {"line_traces": 20, "new_panels": 1, "looks": {"curve": {"grid": False, "points": False}, "scatter": {"grid": False}}, "keep": {
+                                  "panels": True, "plot": True, "traces": True, "colours": True, "limits": True,
+                                  "sliders": True, "operations": False, "zoom": False, "sync": False,
+                                  "cursor_options": False}},
+                              "last_version": None,
+                              "updates": {"last_check": None, "latest": None, "url": None, "remind": None},
+                              "first_start_done": False, "check_updates": None}
     assert cfg.problems() == []
+    # panels for a new file (16.45): 1 to 6
+    assert cfg.set_explore({"new_panels": 6})["new_panels"] == 6
+    for bad in (0, 7, 2.5, True, "all"):
+        with pytest.raises(ConfigError, match="new_panels"):
+            cfg.set_explore({"new_panels": bad})
+    cfg.set_explore({"new_panels": 1})
+    # what a file opened again keeps (16.44): a part changed, the others stay; unknown parts refused
+    assert cfg.set_explore({"keep": {"zoom": True}})["keep"]["zoom"] is True
+    assert cfg.settings()["explore"]["keep"]["colours"] is True
+    for bad in ({"cursor_positions": True}, {"zoom": "yes"}, []):
+        with pytest.raises(ConfigError, match="keep"):
+            cfg.set_explore({"keep": bad})
+    cfg.set_explore({"keep": {"zoom": False}})
+    # the looks new plots start with (18.2): per plot type, only the options it has
+    assert cfg.set_explore({"looks": {"curve": {"grid": True}}})["looks"] == {
+        "curve": {"grid": True, "points": False}, "scatter": {"grid": False}}
+    for bad in ({"bars": {"grid": True}}, {"scatter": {"points": True}}, {"curve": {"grid": "on"}}):
+        with pytest.raises(ConfigError, match="looks"):
+            cfg.set_explore({"looks": bad})
+    # the Library's settings: checked, kept
+    assert cfg.set_library({"card_main": "file", "card_fields": ["sweep", "tags"], "date_zone": "Europe/Paris"})["card_fields"] == ["sweep", "tags"]
+    assert cfg.set_library({"card_main": "title", "card_fields": ["date"], "date_zone": "local"})["date_zone"] == "local"
+    assert cfg.set_library({"data_file_edits": "copy_and_swap"})["data_file_edits"] == "copy_and_swap"
+    for bad in ({"card_fields": ["name"]}, {"card_main": "x"}, {"date_zone": ""}, {"data_file_edits": "sideways"}):
+        with pytest.raises(ConfigError):
+            cfg.set_library(bad)
+    assert cfg.set_library({"read_headers": False, "columns": ["name", "values"]})["read_headers"] is False
+    assert cfg.settings()["library"]["columns"] == ["name", "values"]
+    with pytest.raises(ConfigError, match="columns"):
+        cfg.set_library({"columns": ["colour"]})
+    # the columns' order is the one chosen (★ first, say), and dragged widths are kept and checked
+    assert cfg.set_library({"columns": ["star", "name", "date", "star"]})["columns"] == ["star", "name", "date"]
+    assert cfg.set_library({"column_widths": {"name": 300, "date": 150}})["column_widths"] == {"name": 300, "date": 150}
+    for bad in ({"colour": 100}, {"name": 5}, {"name": 99999}, {"name": "wide"}, {"name": True}):
+        with pytest.raises(ConfigError, match="column_widths"):
+            cfg.set_library({"column_widths": bad})
+    cfg.set_library({"columns": ["name", "values"], "column_widths": {}})
+    with pytest.raises(ConfigError, match="unknown Library setting"):
+        cfg.set_library({"thumbnails": True})
+    # the Files sidebar's lists: the Library's always, in a fixed order, each once
+    assert cfg.set_library({"sidebar_scopes": ["recent", "library", "folders", "recent"]})["sidebar_scopes"] == \
+        ["library", "folders", "recent"]
+    with pytest.raises(ConfigError, match="sidebar_scopes"):
+        cfg.set_library({"sidebar_scopes": ["folders"]})                 # without the Library's list
+    with pytest.raises(ConfigError, match="sidebar_scopes"):
+        cfg.set_library({"sidebar_scopes": ["library", "history"]})
+    # how the sidebar shows a file: the layout, the main field and the fields
+    lib = cfg.set_library({"sidebar_layout": "columns", "sidebar_main": "file", "sidebar_fields": ["tags", "date", "tags"]})
+    assert (lib["sidebar_layout"], lib["sidebar_main"], lib["sidebar_fields"]) == ("columns", "file", ["tags", "date"])
+    for bad in ({"sidebar_layout": "grid"}, {"sidebar_main": "path"}, {"sidebar_fields": ["name"]}):
+        with pytest.raises(ConfigError, match="sidebar_"):
+            cfg.set_library(bad)
     folder = tmp_path / "data"
     folder.mkdir()
     assert cfg.add_root(str(folder)) == [str(folder.resolve())]
@@ -40,6 +107,7 @@ def test_config_settings_roundtrip(tmp_path):
     (json.dumps({"roots": [1]}), "'roots' must be a list"),
     (json.dumps({"default_style": 3}), "'default_style' must be text"),
     (json.dumps({"open_files_in": "window"}), "'open_files_in' must be one of viewer, browser-tab"),
+    (json.dumps({"open_data_in": "graph"}), "'open_data_in' must be one of explore, figure"),
     (json.dumps({"theme": "blue"}), "'theme' must be one of system, light, dark"),
 ])
 def test_config_broken_settings(tmp_path, content, match):
@@ -59,6 +127,15 @@ def test_config_open_files_in(tmp_path):
         cfg.set_open_files_in("popup")
 
 
+def test_config_open_data_in(tmp_path):
+    cfg = Config(tmp_path / "c")
+    assert cfg.settings()["open_data_in"] == "explore"                # the default workspace
+    cfg.set_open_data_in("figure")
+    assert Config(tmp_path / "c").settings()["open_data_in"] == "figure"
+    with pytest.raises(ConfigError, match="one of explore, figure"):
+        cfg.set_open_data_in("library")
+
+
 def test_config_theme(tmp_path):
     cfg = Config(tmp_path / "c")
     cfg.set_theme("dark")
@@ -66,6 +143,28 @@ def test_config_theme(tmp_path):
     assert Config(tmp_path / "c").settings()["theme"] == "dark"
     with pytest.raises(ConfigError, match="one of system, light, dark"):
         cfg.set_theme("blue")
+
+
+def test_a_settings_section_is_reset_to_its_defaults(tmp_path):
+    from lbd_viewer.config import section_defaults
+
+    cfg = Config(tmp_path / "c")
+    cfg.set_theme("dark")
+    cfg.set_open_data_in("figure")
+    cfg.set_library({"read_headers": False, "previews": "off", "columns": ["star", "name"]})
+    cfg.set_memory({"maximum_gb": 4})
+    cfg.reset_section("general")
+    s = cfg.settings()
+    assert (s["theme"], s["open_data_in"]) == ("system", "explore") and s["library"]["read_headers"] is False
+    cfg.reset_section("library")
+    lib = cfg.settings()["library"]
+    assert lib["read_headers"] is True and lib["previews"] == "all" and lib["columns"] == ["star", "name"]   # not the list's columns
+    cfg.reset_section("memory")
+    assert cfg.settings()["memory"]["maximum_gb"] is None
+    assert section_defaults()["general"] == {"theme": "system", "open_files_in": "viewer", "open_data_in": "explore"}
+    assert section_defaults()["sidebar"] == {"library.sidebar_scopes": ["library"]}
+    with pytest.raises(ConfigError, match="no settings section"):
+        cfg.reset_section("colours")
 
 
 def test_config_default_style_and_problems(tmp_path):
@@ -663,3 +762,36 @@ def test_mac_app_setting_browser_tab(mac_app, tmp_path):
     app.open_documents(str(f))
     app.tick(0.0)
     assert len(opened) == 1 and "open=" in opened[0]
+
+
+def test_reset_puts_the_explore_section_back(cfg):
+    """Settings → Explore → Reset this section…: every Explore setting back to its default (it
+    did nothing: reset_section had no explore case)."""
+    from lbd_viewer.config import EXPLORE_DEFAULTS
+
+    cfg.set_explore({"new_panels": 4, "line_traces": 3, "keep": {"zoom": True}, "looks": {"curve": {"grid": True}}})
+    cfg.reset_section("explore")
+    assert cfg.settings()["explore"] == EXPLORE_DEFAULTS
+
+
+
+def test_the_first_start_questions_and_an_upgrade(cfg, tmp_path):
+    """18.8: a new settings file starts with the first start's questions unanswered; settings from
+    before them with folders in them are past the first start, but the version check is unanswered."""
+    import json
+
+    from lbd_viewer.config import Config
+
+    assert cfg.settings()["first_start_done"] is False and cfg.settings()["check_updates"] is None
+    cfg.set_check_updates(True)
+    cfg.set_first_start_done(True)
+    assert cfg.settings()["first_start_done"] is True and cfg.settings()["check_updates"] is True
+    with pytest.raises(ConfigError):
+        cfg.set_check_updates("yes")
+    old = tmp_path / "old"
+    old.mkdir()
+    (old / "settings.json").write_text(json.dumps({"roots": [str(tmp_path)]}), encoding="utf-8")   # from 1.2
+    upgraded = Config(old)
+    assert upgraded.settings()["first_start_done"] is True and upgraded.settings()["check_updates"] is None
+    (old / "settings.json").write_text(json.dumps({"roots": []}), encoding="utf-8")                # no folders yet
+    assert Config(old).settings()["first_start_done"] is False

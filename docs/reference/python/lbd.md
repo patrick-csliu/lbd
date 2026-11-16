@@ -31,9 +31,53 @@ and recipes, see [Reading and writing files](../../python/files.md).
     options:
       heading_level: 3
 
+::: lbd.open
+    options:
+      heading_level: 3
+
+::: lbd.OnDisk
+    options:
+      heading_level: 3
+
+## Writing while measuring
+
+::: lbd.Writer
+    options:
+      heading_level: 3
+
+::: lbd.writing_status
+    options:
+      heading_level: 3
+
+::: lbd.recover
+    options:
+      heading_level: 3
+
+::: lbd.writing_progress
+    options:
+      heading_level: 3
+
 ## Changing a file's saved view
 
 ::: lbd.set_plot
+    options:
+      heading_level: 3
+
+## Labels
+
+::: lbd.Labels
+    options:
+      heading_level: 3
+
+::: lbd.labels
+    options:
+      heading_level: 3
+
+::: lbd.set_labels
+    options:
+      heading_level: 3
+
+::: lbd.remove_labels
     options:
       heading_level: 3
 

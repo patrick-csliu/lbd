@@ -403,7 +403,7 @@ export default function StylesPage({ previewPath, onChanged }: Props) {
             )}
           </div>
 
-          <div className="preview">
+          <div className="styles-preview">
             <h3>Preview</h3>
             {!previewPath && <p className="muted small">Open a data file on the Data page to preview the style with it.</p>}
             {previewPath && <p className="muted small">{baseName(previewPath)} {dirty && "· unsaved changes"}</p>}

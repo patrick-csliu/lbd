@@ -1,0 +1,342 @@
+# Library
+
+**Library** is where you find measurements, like Labber's Log Browser: every data file under
+your folders in one list, which you narrow down by folder, date and search, and the file you
+select described on the right.
+
+![The Library workspace: numbered parts](img/library.png)
+
+1. **Folders:** the folders you opened in the viewer, with the number of data files below each.
+   **All folders** lists everything in all of them as one list; a folder lists everything below
+   it, at any depth. **+ Add folder** adds one; to remove one, right-click it (or point at it and
+   click **⋯**) → **Remove from the Library…**. LBD first says what changes: how many files leave
+   the Library (and how many have labels), the labels only they have, and open tabs showing them.
+   Nothing on disk is changed, and the files and their labels come back when you add the folder
+   again. The same menu shows a folder in Explorer / Finder and copies its path.
+2. **Dates:** year → month → day, with the number of files on each. Click one to see only those
+   files; click it again to see all dates.
+3. **Search:** type words to find files that contain all of them, in their name, description,
+   value and axis names and units, or metadata (keys and values). The line below says what is
+   shown, e.g. "37 of 412 files · Date: 2026 › Mar · Search: "resonator"", with an **×** for each
+   filter and **Clear all**.
+4. **The list:** one row per data file, newest first. Click a column title to sort by it; click
+   again to reverse. Right-click the titles to choose the columns (see [Columns](#columns)).
+
+5. **The selected file:** see [The selected file](#the-selected-file).
+
+The folders, dates and labels on the left are the **filters**. Their sidebar hides with the
+◧‹ button at the top of it, and comes back with ◧› at the edge of the list (the number on it
+counts the filters in use while they are hidden). Drag the sidebar's edge, or the edge of the
+selected file, to make them wider or narrower (double-click the sidebar's edge: fit the longest
+name); the widths are remembered in this browser. The filters belong to the browser tab: they
+stay while you go to Explore or Figure and back, and the
+[Files sidebar](folders-and-files.md#the-files-sidebar) there lists the same files.
+
+**Finding a file by its id:** every `.lbd` file has an id, and a CSV saved from it names that id
+in its comments (`# id: 0192d4e2-…`). Paste the id, its first 8 characters or more, or the whole
+comment line into the search box: the Library lists the file with that id, its copies in other
+open folders, and the files made from it (marked *made from this file*). A file's details show
+its id with a copy button. Only open folders are searched: if nothing is found, add the folder
+that holds the file.
+
+## The selected file
+
+The right side shows as much as it can without scrolling, and works out its layout from its own
+width (any screen, any zoom, any width you drag it to):
+
+- **The header:** ☆ / ★ (click to star), the title, **Open in Explore** and **Open in Figure**;
+  then the date and the path on one line (⧉ copies it; point at it for the whole path).
+- **The [preview](#previews) and the file's facts side by side** when the side is wide enough
+  (about 650 pixels): the description, when it was created, its size, and its labels, one row
+  each: **Project**, **Users**, **Tags** and **Comment** (one line; click it to write more).
+  On a narrower side, one under the other.
+- **Values** and **Axes:** the tables of what the file holds (a column that is empty in every row,
+  such as Unit, is left out; a wide table scrolls by itself on a narrow side).
+- **Metadata**, in columns, with a filter box.
+- At the end, folded: **File (written by, format)**.
+
+When a file holds a lot (many values, axes or metadata), the side scrolls; nothing is squeezed.
+
+## Columns
+
+| Column | Shows |
+|---|---|
+| **Name** (shown) | the file's title; the file name when it has none |
+| **Date** (shown) | when the data was created, in the time zone of **Show dates in** (see [Dates](#dates)) |
+| **Sweep size** (shown) | the swept axes' points, e.g. `401×31`; empty for a file of single numbers |
+| **Values** | the names of the values in the file |
+| **Folder** | where the file is, below its open folder |
+| **File size**, **File name**, **Modified** | from the disk |
+
+- **Move a column:** drag its title left or right (a line shows where it goes), e.g. ★ first.
+  Without a mouse: right-click a title → **Move … left / right / to the start**.
+- **Change a column's width:** drag the right edge of its title; double-click that edge for its
+  own width again. Columns you didn't resize share the rest of the width.
+- **Right-click the titles** to choose the columns (a new one goes at the end), and **Reset
+  columns** for the first order and widths.
+
+The columns, their order and widths are remembered. When the list is too narrow for them all, the ones least
+needed to tell files apart are left out (Modified first, then File name, Folder, …; Name always
+stays), and a **+N** at the end of the titles says how many: point at it for which, click it to
+choose. A wider window shows them again.
+
+## Dates
+
+The date of a file is its `created` time: when its data was created, written into the file by
+the program that made it, in the time zone it was made in. A measurement at 23:30 in Taipei is
+on that day wherever you browse it from, and copying, syncing or renaming the file doesn't change
+it. A file whose date can't be read is dated by its file's modification time, shown greyed
+(point at it to see why).
+
+**⚙ → Library → Show dates in** sets how the Date column, the pictures and the Files sidebar show
+dates:
+
+- **This computer's time zone** (the default): every file's time converted, so files made in
+  different zones compare by eye.
+- **Another time zone**: the same, in a zone you choose.
+- **As written in the file**: the time in the zone it was made in, with that zone shown short
+  (`+08`) when it isn't your computer's.
+
+Point at a date for the other form. Sorting always goes by the real moment. A file's **Created**
+line, the date tree and the date filter stay as written in the file, so a file made at 23:30 at
+`+00` is under its own day there, though Date may show the next day.
+
+## Keys and mouse
+
+| Do | What happens |
+|---|---|
+| Click a row | shows the file on the right |
+| ↑ ↓, Page Up, Page Down, Home, End | move through the list (the right side follows) |
+| ← → | in the picture view: the file before or after |
+| Enter, or double-click | opens the file in [Explore](explore.md) |
+| Shift+Enter | opens it in Figure ([Plotting](plotting.md)) |
+| Right-click a row | open in Explore or Figure, show in folder, copy the path, open in a new browser tab, rename, move to the Recycle Bin / Trash |
+
+## Files that change
+
+The list keeps itself up to date: a new data file appears, a removed one disappears and a changed
+one is read again, usually within a second or two (see [How the Library notices new
+files](#how-the-library-notices-new-files)), while your selection stays. A file that can't be read
+(damaged, not an LBD file, or from a newer LBD) stays in the list, greyed and marked ⚠; select it
+to see why in plain words (the technical message is under **Details**).
+
+**Check folders now** (next to the search box) looks through every open folder at once, for a
+file that should be there but isn't listed yet. It says **Checking the folders…**, then what it
+found: e.g. **3 new files, 1 changed**, or **Nothing new**, and it names every folder (or file) it
+couldn't read, with why: a network drive that isn't connected, a folder you have no permission
+for. **×** closes the message.
+
+### How the Library notices new files
+
+- **When the viewer starts**, it looks through every open folder.
+- **While it runs**, the system tells it when something changes in an open folder or the
+  folders inside it (the way file managers and sync programs notice files), and only that folder
+  is looked at again: a new file appears in about a second.
+- **Every 7 minutes** it looks through every open folder again, as a safety net: now and then a
+  notice can be lost (many changes at once, a computer waking from sleep). Such a file waits
+  until then, or until you click **Check folders now**.
+- **A folder on a network drive** (a NAS, a mapped drive, `\\server\share`) is looked through
+  **every 60 seconds** instead: notices of files added by another computer don't reliably
+  arrive over the network, and checking less often lets the drive rest.
+- **A folder where notices can't be had** (the system refused, or they stopped) is looked
+  through **every 10 seconds** instead, and the reason is told.
+
+The status line under the search says how the folders are watched: **New files: noticed at
+once**, or how many are checked every 60 or 10 seconds; point at it for each folder and why. A
+file you see in the [Files sidebar](folders-and-files.md#the-files-sidebar) or an open tab is
+checked on its own every 2 seconds, whatever the Library does.
+
+## Narrow windows
+
+In a window narrower than about 1280 pixels (half a screen, a laptop), the filters slide over the
+list when you click ◧›, and close when you choose a folder or a date, press Esc or click beside
+them. Below about 900 pixels the Library shows one thing at a time: the list, or
+the file you clicked, with **← Back to the list** (or Esc).
+
+## Files being written
+
+A measurement written with the Writer (see
+[Writing while measuring](../getting-started/writing-while-measuring.md)) is called
+`name.lbd.writing` until it is finished. The Library lists it with its state:
+
+- **measuring…**: its measurement is writing it right now, on this computer. Explore and the
+  selected file show its progress as it grows. It shows **Live** in place of a preview and gets
+  one once it is finished, and LBD
+  never writes into it (only the measuring program does).
+- **measuring elsewhere…**: it is measured on another computer and synced here (its heartbeat,
+  `name.lbd.live`, says so and keeps changing): *Measuring on LAB-PC*.
+- **no sign lately**: measured on another computer, but no sign of it came for about ten minutes
+  (longer for a measurement with slow steps): it probably stopped, or the sync is paused; this
+  computer can't tell which. **Recover a copy…** makes `name (recovered).lbd` and leaves the
+  file being written as it is.
+- **stopped before finishing**: its measurement ended without finishing it (a crash, an error,
+  a script that ended without closing it). Select it and click **Recover**: it becomes
+  `name.lbd` (or `name (2).lbd`) with everything it holds.
+
+See [Writing while measuring](../getting-started/writing-while-measuring.md) and
+[Several computers](../getting-started/several-computers.md).
+
+## Previews
+
+The selected file shows a picture of its data on the right: **one panel**, of the plot saved in
+the file (**Save view** on the Figure page, `lbd.set_plot` in a script) when it has one;
+otherwise of its first value that isn't a single number, as curves over one swept axis or a
+heat map over two. A file of single numbers only has no picture, and says so. A preview
+is **the data only**: no axes, numbers, colour bar or legend (those are in the file's details
+next to it); it is drawn sharp enough for high-density (4K, Retina) screens. Step through
+the list with ↑ ↓ and the pictures follow at once: the files near the selection are drawn ahead.
+
+- **Pictures** (above the list, next to **List**): **Name** and **Date** beside it sort the
+  pictures, one order with the list, and **⋯** chooses what each picture shows: the title or file
+  name, and any of the fields. It shows the files as a grid of pictures, with
+  their name, date and state (*measuring…*, *stopped*); click, select several, right-click and
+  the keys work as in the list. The selected file on the right then leaves out its preview (the
+  grid shows it). Point at "No preview" on a card to see why.
+
+    ![The picture view](img/library-pictures.png)
+
+- **A preview stays.** Once a file has a picture, it keeps it when the file changes (data added,
+  a plot saved later). It changes only when you ask:
+    - **Update preview** (right-click the file; several selected files: **Update N previews**)
+      draws it again from the file as it is now, by the rule above, so it picks up a plot saved
+      in the file since. On a file with a picture chosen in Explore it asks first, because that
+      picture can't be drawn again.
+    - **Use as Library picture** in Explore (below).
+- **Choose a file's picture:** open it in Explore, show what you want (panels, zoom, operations),
+  then **⋯ → Use as Library picture** (at the top). The Library then shows that picture, "Chosen in
+  Explore on …", and keeps it however you change Explore afterwards. It is the only way to a
+  picture of several panels; each gets a thin frame, with a gap between them, so two maps don't
+  read as one. Only the picture is kept, so it shows the data as it was then: if the file
+  changes later, it says "before the file last changed"; choose again to update it. **Reset
+  preview** goes back to an automatic one, drawn of the file as it is now. Identical copies of a
+  measurement share a chosen picture.
+- Automatic pictures use LBD's default style, not the file's: a preview is about the data.
+- A file without a picture says why, e.g. "only single numbers"; one that couldn't be drawn is
+  tried again when it changes.
+
+**⚙ → Library → Previews** sets which pictures are drawn without being asked:
+
+| Choice | What happens |
+|---|---|
+| **Every file, drawn in the background** (default) | every file's picture is drawn once, after the list is read (the line above the list counts them); then every preview shows at once |
+| **The selected file and the rows near it** | only what you look at, and the files near it |
+| **Only when I click Show preview** | no file is read for a picture by itself; the right side has **Show preview** |
+
+"Every file" reads every file in full, so it needs **Read each data file's details** on (see
+below); while that is off, the files near the selection are drawn instead. Drawing happens in the
+background at low priority, so Explore and the rest of the computer stay quick. The pictures are
+kept on this computer (about 20–40 kB each); **⚙ → Library → Picture cache → Empty** removes
+them (they are drawn again when needed; pictures you chose in Explore are kept).
+
+## Reading each file's details (cloud storage)
+
+To list dates, sweep sizes and values, and to search inside files, the viewer opens each data
+file once and reads its header (not its data); after that only files that changed are read again.
+
+In a folder kept in cloud storage with files only in the cloud (Synology Drive on-demand sync,
+OneDrive Files On-Demand, Dropbox online-only …), opening a file downloads all of it. For such
+folders, switch off **⚙ → Library → Read each data file's details**. The list then shows only
+what the disk tells (file name, size, file dates), search looks at names only, and a file's
+details are read when you select it. The setting is on when the viewer is installed; a notice
+above the list says so the first time.
+
+## Labels: star, project, users, tags, comment
+
+Give files labels to find them again, as in Labber's Log Browser:
+
+| Label | Per file | Example |
+|---|---|---|
+| **★ Star** | yes or no | the good measurements |
+| **Project** | one | `Qubit A/Device 3` |
+| **Users** | any number | `Lab A/Qubit team/Patrick` (group / sub-group / name) |
+| **Tags** | any number | `resonator`, `flux/bias` |
+| **Comment** | text | "punch-out at −20 dBm; redo with more averages" |
+
+Projects, users and tags can be **nested** with `/`: choosing `Qubit A` in the filter also shows
+everything under `Qubit A/…`.
+
+- **Set them** for the selected file: ☆ in front of its title, and the rows Project, Users and
+  Tags beside its preview, each label a pill with its **×** (a nested label reads
+  `quality › redo`; a long one is shortened in the middle, the whole of it shown when you point
+  at it). **Set** / **+ Add** opens a box with the labels used most first (for users, this
+  computer's login name). Type to find one: a word finds it anywhere; a path shows the next level
+  only (`Lab A/` lists Lab A's teams), at most 8 at a time, and **Tab** goes into the group
+  shown. **Enter** takes it, or makes a new label with the path typed. Comment is saved when
+  you leave the box.
+- **Make and manage labels** on the left, under **Labels**: **Project**, **Users** and **Tags**
+  are always there.
+  - **+ New** makes a label even before a file has it (a new project before its first
+    measurement). Type its whole path (`Lab A/Qubit team/Dana`); the suggestions show what is
+    there, one level at a time. It is kept in the labels file of an open folder (you choose which
+    when there are several) until you remove it.
+  - Right-click a label: **New … under it**, **Rename…**, **Move into…** (type the group, or
+    leave it empty for the top level), **Remove from all files…**. Every file with it follows, with the labels inside
+    it; LBD first says how many files it changes, and asks.
+  - **Drag and drop:** a label onto another moves it inside it; onto its heading (Project, Users,
+    Tags), to the top level. Files dragged from the list (the selected ones) onto a label get it
+    (onto a project: it becomes their project). Each asks first.
+- **Several files at once:** select them (**Ctrl**+click, **Shift**+click, **Ctrl+A**), then
+  label them in the right column ("5 of 12" shows a label only some of them have) or with the
+  right-click menu. **Space** stars or unstars the selected files.
+- **Filter** with the boxes on the left (Project, Users, Tags, ★ Starred only): several choices
+  in one box show files with any of them; choices in different boxes must all match. Search also
+  finds labels and comments.
+- **Many labels:** each heading (Project · 12, Users · 300 …) says how many there are, stays at
+  the top while its labels scroll by, and folds its section away with a click (this browser
+  remembers it; a label chosen in a folded section still shows under its heading). A level
+  shows its 12 most used labels, then **Show N more…**; with more than 15 labels, **Find a
+  label…** narrows all three lists. A label no file has yet is shown in italic, with 0.
+- Labels are kept in a small file in each folder, `.lbd-library.json`, next to the data files:
+  **data files are never changed for a label**, and labels travel with the folder (copied,
+  synced, backed up). Its format is described in
+  [The Library's label file](../developers/library-sidecar.md).
+- **Two computers** (a folder synced with Synology Drive, OneDrive, Dropbox …) can label the same
+  folder: changes are merged, label by label, and nothing is lost. If both changed it while
+  apart, the sync tool keeps a "conflict" copy of the label file; LBD merges it and moves it to
+  the Recycle Bin, and tells you.
+- **The file's description** (written by the program that measured) is shown above, unchanged:
+  the comment is for notes added later.
+
+## Copies and the same measurement
+
+When a file is first saved, LBD gives the measurement a **hidden identity** inside the file
+(format 1.1; every language module does it, with no setup). That is how the Library recognises
+the same measurement in two places — a backup, a shared folder, a file copied in Explorer — even
+under another name.
+
+- **Identical copies** show "2 copies" and, in the right column, "Also at …" with **Show it**.
+  They share their labels: labelling one labels all of them.
+- **Files renamed or moved outside LBD** keep their labels: the Library finds them again by
+  their identity (older files without one: by their place on the disk, then by their date).
+  Labels whose file can't be found are listed under **Missing** on the left: **Point to a file…**
+  or **Discard**.
+- **Copies that differ** (⚠): two files with the same identity but different contents — usually
+  one was changed after it was copied (for example its description was edited in Python), or a
+  program copied the identity by hand. The right column shows both files side by side, what
+  differs, and three choices:
+    - **Make this a new measurement** — this file gets its own identity (written into this file
+      only, after you confirm; the other file is not touched). Its labels stay, and stop
+      following the other file's.
+    - **They are the same measurement** — nothing is written into either file; their labels
+      follow each other again. If one of them changes again, you are asked again.
+    - **Move this one to the Recycle Bin** — you can get it back from there.
+  Until you choose, nothing about the two files is changed, merged or shared.
+- **To make a separate measurement on purpose:** right-click → **Duplicate as new measurement**
+  (a copy next to it, `name (copy).lbd`, with its own identity; the original is not touched); or
+  from a program, save under another name (a new identity, with the original's as its parent),
+  or call `new_id()` (`newId()` in MATLAB, `new_id!` in Julia).
+- **Files written before LBD 1.3** have no identity yet; they get one the next time a language
+  module saves them, or right-click → **Give these files an id** (writes it into them, after you
+  confirm).
+
+## What is kept, and where
+
+The list comes from an index on this computer (`library.sqlite`, in LBD's local data folder, see
+[Command line and settings](command-line.md)). It holds only what is in the files, so deleting it
+is safe: the files are read again. **The Library never writes into data files.** The automatic
+previews are a cache next to it (`previews.sqlite`), safe to delete in the same way; pictures
+chosen in Explore are kept with the remembered Explore views (`catalog.sqlite`).
+
+Explore and Figure have the Files sidebar on the left, listing the same files as the Library
+(with this browser tab's filters), so you can open the next file without leaving them: see
+[The Files sidebar](folders-and-files.md#the-files-sidebar).

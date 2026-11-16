@@ -23,6 +23,76 @@ is not plotted: the viewer lists it with its value, e.g. *Q = 12346*.
 Several values can share axes. A sweep can store `S21`, `S11` and a fitted `f0(power)` in one
 file, all using the same `power` axis.
 
+**Elements** (format 1.2): an axis's positions can have names, e.g. a qubit prepared in
+`ground` or `excited`, devices `Q1`, `Q2`, `Q3`. The axis still holds numbers (0, 1, 2 …); plots,
+cursors and sliders show the names.
+
+**Data points with a shape** (format 1.2): each data point of a value is one number, unless you
+say otherwise. A Bloch vector per drive amplitude is a value whose data points have shape `(3,)`
+(elements `x`, `y`, `z`); an I/Q covariance is a `(2, 2)` matrix per point. The value's array is
+then *its axes first, then the data point*: 21 amplitudes × 3 → shape 21 × 3. The value's axes
+are only what was swept (`amp`); the data point is described by the value itself (its shape and
+elements). In the file LBD stores one small axis for each dimension of a data point
+(`bloch_dim1`), so every program reads the file.
+
+## Variable sweeps (axis groups)
+
+The axes above make a **grid**: every combination of their points is a place in each value
+(11 powers × 401 frequencies). Some measurements aren't a grid: the frequencies are chosen
+around a resonance that moves with power, each row has a different number of points, points
+are placed adaptively, or there are several such levels. For these, axes go in an **axis
+group** (format 2.0): the group lists only the measured points, level by level.
+
+For example, B chosen per A: A=1 → B=10; A=2 → B=10, 20; A=3 → B=15, 25, 35. The group stores
+each level once:
+
+| Level | Holds | Here |
+|---|---|---|
+| `A` | each A once | `[1, 2, 3]` |
+| `B` | each (A, B) point's B | `[10, 10, 20, 15, 25, 35]` |
+| `B`'s parent | the A it belongs to (an index into `A`) | `[0, 1, 1, 2, 2, 2]` |
+
+A value measured once per (A, B) point has 6 entries; one measured once per A has 3. A value
+can also lie on a group's points and on fixed axes together (a spectrum over a fixed frequency
+axis at each (A, B) point: 6 × 401).
+
+Three words keep this clear, in every language:
+
+- **Sweep axes** (`axes`): what was swept, fixed axes or the axes of a group. A value's `axes`
+  lists the ones it depends on, e.g. `A, B`.
+- **Dimensions** (`dims`): how the sweep part is stored, one per array dimension: `A` for a fixed
+  axis, `(A, B)` for the points of a group's level.
+- **Data point** (`point_shape`): one measured result: one number, or a vector or matrix.
+
+A value's array is always its dimensions' lengths, then its data point: `(6, 2, 2)` for a 2 × 2
+matrix per (A, B) point. To get a rectangle back, `to_dense` places the points in the full A × B
+grid (gaps are `NaN`); `rows` gives the value row by row; `coords` gives each point's
+coordinates. See the [Python](../python/files.md#variable-sweeps-axis-groups),
+[MATLAB](../matlab.md#variable-sweeps-addgroup) and [Julia](../julia.md#variable-sweeps-add_group)
+pages.
+
+### Grid or group?
+
+**Use fixed axes (a grid)** when every combination of the axes is planned, even if the
+measurement may stop early (the points not measured stay `NaN`) or a few points are skipped.
+**Use a group** when the inner points depend on the outer one.
+
+| | Grid (fixed axes) | Group |
+|---|---|---|
+| Storage | the full rectangle: wasteful when most of it is never measured | only the measured points |
+| Inner points | the same for every outer point | chosen per outer point, any number (0 too) |
+| Reading | `data[i, j]` is A index i, B index j: plain array indexing | `data[k]` is the k-th point: by axis needs `rows`, `coords` or `to_dense` |
+| A rectangle for plots and arrays | it already is one | `to_dense`: a copy, gaps `NaN`; can be large |
+| Writing | an index per axis | coordinates (looked up) or `parent=`; float coordinates that differ only by rounding make two points (with a warning) |
+| File format | 1.2: read by every LBD since 1.2 | **2.0: LBD older than 1.3 can't open it** |
+| Other HDF5 tools (h5py, HDFView, `h5read`) | the arrays are the data, as they look | flat arrays plus `._parent` indices: readable, but you follow the parents yourself |
+| LBD Viewer | every plot, Explore, cursors | maps and curves on the real coordinates (two levels); deeper groups against the point number |
+| Speed | direct | `write` looks coordinates up (in memory, fast); `to_dense` and `coords` copy |
+
+**A grid if you can; a group when a grid would be mostly empty or can't describe the sweep.**
+A triangle (A = 1 … 50, B = 1 … A) leaves half of a 50 × 50 grid empty; 50 rows of 0 to 1 million
+points each are 12 MB as a group and 400 MB as a grid.
+
 ## Dimension order is the same in every language
 
 Some languages store arrays row by row (Python/NumPy, C), others column by column (MATLAB,
@@ -104,11 +174,14 @@ on each plot, such as GHz or µs, so the same quantity from different files can 
 
 ## Versions and compatibility
 
-Each file records the format version it was written with (currently `1.0`).
+Each file records the format version it was written with: the lowest version that holds its
+content. Most files are `1.2`; a file with [labels](../python/files.md#labels) is `1.3`, a file
+with an axis group `2.0`, with both `2.1`.
 
-- A **newer minor version** (for example a `1.3` file read by a reader for `1.0`) can be read.
-  The reader warns that some new content may be ignored.
-- A **newer major version** (`2.0`) is refused with a clear message asking you to update.
+- A **newer minor version** (for example a `1.3` file read by a reader for `1.2`) can be read.
+  The reader warns that some new content may be ignored (here: the labels).
+- A **newer major version** (`2.0` for a reader of `1.x`) is refused with a clear message
+  asking you to update.
 
 The modules and the viewer of one release always share one version number, and the
 [Language modules](../viewer/language-modules.md) page of the viewer shows which one.

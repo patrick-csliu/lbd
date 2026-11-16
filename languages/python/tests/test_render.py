@@ -1,5 +1,6 @@
 """Plot spec resolution and drawing (lbd.plot.render): strict checks, warnings, every branch."""
 
+import hashlib
 import warnings
 
 import numpy as np
@@ -158,6 +159,22 @@ def test_explicit_settings_win_over_saved_view():
     d.plot = {"kind": "curve", "complex": "phase"}
     assert resolve_spec(d, {"complex": "db"})["complex"] == "db"
     assert resolve_spec(d, {})["complex"] == "phase"
+
+
+def test_choosing_the_saved_series_as_x_swaps_them_without_a_warning():
+    """Found by the user: with a saved view of one curve per power, choosing power as the
+    horizontal axis warned "'power' can't be used as series". The two simply swap."""
+    d = sweep()
+    d.plot = {"kind": "curve", "values": ["T"], "x": "freq", "series": "power"}
+    w = quiet()                                      # any warning fails
+    try:
+        curve = resolve_spec(d, {"x": "power"})
+        d.plot = {"kind": "heatmap", "values": ["T"], "x": "freq", "y": "power"}
+        heat = resolve_spec(d, {"x": "power"})
+    finally:
+        w.__exit__(None, None, None)
+    assert curve["x"] == "power" and curve["series"] == "freq"
+    assert heat["x"] == "power" and heat["y"] == "freq"
 
 
 def test_another_plot_kind_takes_only_the_kind_free_settings_of_the_saved_view():
@@ -489,3 +506,157 @@ def test_scatter_coloured_by_a_long_axis_or_a_value_gets_a_colour_bar():
 def test_render_jpg():
     data, _ = rnd.render_dataset(sweep(), {"kind": "curve", "values": ["S21"]}, Style(), fmt="jpeg")
     assert data[:2] == b"\xff\xd8"
+
+
+# ---- a value as the horizontal axis of curves ---------------------------------------------------
+
+
+def varying_span():
+    """A VNA-like sweep whose frequency span changes with power: each trace has its own x."""
+    p = np.array([-40.0, -20.0, 0.0])
+    k = np.arange(11.0)
+    f = 7e9 + np.outer(1 + np.arange(3.0), k - 5) * 1e6             # wider span at higher power
+    d = lbd.Dataset(title="varying span")
+    d.add_axis("power", p, unit="dBm", label="Power")
+    d.add_axis("point", k, label="Point")
+    d.add_value("freq", f, axes=["power", "point"], unit="Hz", label="Frequency")
+    d.add_value("S21", 1 - 0.5 / (1 + ((f - 7e9) / 1e6) ** 2), axes=["power", "point"])
+    d.add_value("c", f * 1j, axes=["power", "point"])
+    return d
+
+
+def test_a_value_can_be_the_horizontal_axis_of_curves():
+    d = varying_span()
+    r = resolve_spec(d, {"kind": "curve", "values": ["S21"], "x": "freq"})
+    assert r["x"] == "freq" and r["along"] == "point" and r["series"] == "power"
+    m = rnd.prepare_curves(d, r, lp_style())
+    assert len(m.xs) == 3 and m.x_label == "Frequency (GHz)"
+    for j in range(3):                                              # each trace on its own x
+        assert np.allclose(m.xs[j], d["freq"].data[j] * 1e-9)
+    assert not np.allclose(m.xs[0], m.xs[2])
+
+
+def test_a_figure_with_a_value_as_x_draws_each_trace_at_its_x():
+    d = varying_span()
+    r = resolve_spec(d, {"kind": "curve", "values": ["S21"], "x": "freq"})
+    with rnd.matplotlib.rc_context(lp_style().to_rcparams()):
+        fig, ax = rnd.build_figure(d, r, lp_style())
+    widths = [np.ptp(line.get_xdata()) for line in ax.get_lines()]
+    assert widths == pytest.approx([0.01, 0.02, 0.03])              # GHz: 10, 20, 30 MHz spans
+
+
+@pytest.mark.parametrize("x, match", [
+    ("c", "complex"),                                               # x needs real numbers
+    ("nope", "horizontal axis"),
+])
+def test_a_value_as_x_must_fit(x, match):
+    with pytest.raises(RenderError, match=match):
+        resolve_spec(varying_span(), {"kind": "curve", "values": ["S21"], "x": x})
+
+
+def test_a_value_as_x_needs_the_same_axes():
+    d = varying_span()
+    d.add_axis("other", [1.0, 2.0])
+    d.add_value("w", np.ones(2), axes="other")
+    with pytest.raises(RenderError, match="needs the same axes"):
+        resolve_spec(d, {"kind": "curve", "values": ["S21"], "x": "w"})
+
+
+def test_a_map_still_needs_axes_for_x():
+    with pytest.raises(RenderError, match="horizontal axis"):
+        resolve_spec(varying_span(), {"kind": "heatmap", "values": ["S21"], "x": "freq"})
+
+
+def lp_style():
+    import lbd.plot as lp
+
+    return lp.load_style()
+
+
+def test_unwrapped_phase_has_no_jumps_and_skips_missing_points():
+    phase = np.linspace(0, 6 * np.pi, 50)
+    z = np.exp(1j * phase)
+    z[20] = np.nan
+    y, label, unit = rnd.apply_complex(z, "S21", "", "phase_unwrap")
+    assert unit == "rad" and label == "arg S21"
+    ok = np.isfinite(y)
+    assert np.isnan(y[20]) and ok.sum() == 49
+    assert np.allclose(y[ok], phase[ok])                           # continuous, also after the gap
+    deg, _, unit = rnd.apply_complex(z, "S21", "", "phase_deg_unwrap")
+    assert unit == "°" and np.allclose(deg[ok], np.degrees(phase[ok]))
+
+
+def test_a_map_unwraps_along_its_horizontal_axis():
+    d = sweep()                                                      # S21 = exp(i·p·f·1e-10), rows = power
+    r = resolve_spec(d, {"kind": "heatmap", "values": ["S21"], "complex": "phase_unwrap"})
+    m = rnd.prepare_map(d, r, lp_style())
+    assert np.all(np.abs(np.diff(m.z, axis=1)) < np.pi)            # no 2π jumps along frequency
+
+
+def test_histogram_saved_view_round_trip(tmp_path):
+    d = lbd.Dataset(title="Shots")
+    d.add_axis("state", [0.0, 1.0], elements=["ground", "excited"])
+    d.add_axis("shot", np.arange(50.0))
+    d.add_value("I", np.random.default_rng(1).normal(size=(2, 50)), axes=["state", "shot"], unit="V")
+    d.plot = {"kind": "histogram", "values": ["I"], "color": "state", "all": ["shot"],
+              "options": {"bins": 12, "hist_y": "fraction"}}
+    d.save(tmp_path / "h.lbd")
+    back = lbd.load(tmp_path / "h.lbd")
+    spec = rnd.resolve_spec(back, None)
+    assert spec["kind"] == "histogram" and spec["color"] == "state" and spec["all"] == ["shot"]
+    assert spec["options"] == {"bins": 12, "hist_style": "bars", "hist_y": "fraction"}
+    png, _ = rnd.render_dataset(back, None, Style(), fmt="png")
+    assert png[:4] == b"\x89PNG"
+
+
+def test_histogram_saved_view_with_a_wrong_choice_falls_back_with_a_warning(tmp_path):
+    d = lbd.Dataset()
+    d.add_axis("t", np.arange(5.0))
+    d.add_value("x", np.arange(5.0), axes="t")
+    d.plot = {"kind": "histogram", "options": {"bins": 1}}
+    with pytest.warns(RenderWarning, match="bins must be"):
+        spec = rnd.resolve_spec(d, None)
+    assert spec["options"]["bins"] == "auto"
+
+
+@pytest.mark.parametrize("fmt", ["svg", "pdf", "png", "jpg"])
+def test_histogram_export_formats(fmt):
+    d = lbd.Dataset()
+    d.add_axis("t", np.arange(5.0))
+    d.add_value("x", np.arange(5.0), axes="t")
+    data, _ = rnd.render_dataset(d, {"kind": "histogram"}, Style(), fmt=fmt)
+    assert len(data) > 500
+
+
+def test_old_saved_scatter_view_is_the_same_picture():
+    """A view saved before `all` existed draws every point: the same as all of them asked for."""
+    d = lbd.Dataset()
+    d.add_axis("g", [0.0, 1.0], elements=["a", "b"])
+    d.add_axis("t", np.arange(40.0))
+    rng = np.random.default_rng(2)
+    d.add_value("x", rng.normal(size=(2, 40)), axes=["g", "t"])
+    d.add_value("y", rng.normal(size=(2, 40)), axes=["g", "t"])
+    old = {"kind": "scatter", "values": ["y"], "x": "x", "color": "g"}
+    a, _ = rnd.render_dataset(d, old, Style(), fmt="png")
+    b, _ = rnd.render_dataset(d, {**old, "all": ["g", "t"]}, Style(), fmt="png")
+    assert hashlib.sha256(a).digest() == hashlib.sha256(b).digest()
+
+
+def test_show_points_puts_a_small_dot_on_every_stored_point():
+    """Show points (16.39): matplotlib's `.` marker on each line, every point; off by default."""
+    import lbd.plot as lp
+
+    ax = lp.plot(sweep(), "curve", "T", series="power", options={"points": True}).axes[0]
+    assert ax.lines and all(line.get_marker() == "." and line.get_markevery() is None for line in ax.lines)
+    assert len(ax.lines[0].get_xdata()) == 21
+    ax = lp.plot(sweep(), "curve", "T", series="power").axes[0]
+    assert all(line.get_marker() in ("None", "", None) for line in ax.lines)
+
+
+def test_show_points_must_be_true_or_false():
+    with pytest.raises(RenderError, match="points must be true or false, not 'yes'"):
+        resolve_spec(sweep(), {"kind": "curve", "values": "T", "options": {"points": "yes"}})
+    d = sweep()
+    d.plot = {"kind": "curve", "values": ["T"], "options": {"points": 1}}
+    with pytest.warns(RenderWarning, match="points must be true or false; using the default instead"):
+        assert "points" not in resolve_spec(d, {}).get("options", {})

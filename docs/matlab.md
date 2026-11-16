@@ -1,7 +1,9 @@
 # MATLAB API reference — `lbd`
 
 All functions live in the `lbd` package: `lbd.Dataset`, `lbd.load`, `lbd.info` and
-`lbd.version`. Requires MATLAB R2021b or newer; no extra toolboxes are needed. To install, see
+`lbd.version`; to write a file while measuring, `lbd.Writer`, `lbd.writingStatus` and
+`lbd.recover` (see [Writing while measuring](getting-started/writing-while-measuring.md); the Writer
+also keeps the heartbeat file `name.lbd.live`). Requires MATLAB R2021b or newer; no extra toolboxes are needed. To install, see
 [Install → MATLAB](getting-started/install.md#matlab).
 
 ## Quick example
@@ -33,10 +35,11 @@ d.Values.S21.Axes           % ["power" "freq"]
 
 <!-- no-check -->
 ```matlab
-d = lbd.Dataset(title, description)
+d = lbd.Dataset(title, description, Created=when)
 ```
 
-Both arguments are optional strings (default `""`).
+All arguments are optional: `title` and `description` are strings (default `""`); `Created` is
+when the data was created (see the `Created` property).
 
 ### Properties
 
@@ -51,6 +54,8 @@ You can set these properties:
 | `Style` | struct, JSON text, or `[]` | Per-file [style](styles/index.md) changes, e.g. `struct("figure", struct("width_mm", 120))`. |
 | `StyleName` | string or empty | Name of a viewer style preset for this file. |
 | `Matplotlib` | string or empty | matplotlib version that last wrote the saved view (set by Python and the viewer). MATLAB keeps it when saving. |
+| `Labels` | struct | The file's [labels](#labels): `Star` (true/false), `Project` (text, `""` for none), `Users` and `Tags` (texts), `Comment` (text); `Written` says when they were last set. Checked when set. |
+| `Created` | string, datetime or empty | When the data was created, ISO-8601 with a UTC offset (`"2026-10-13T16:09:00+08:00"`); a datetime without a time zone, or a text without an offset, is taken in this computer's time zone. Empty: `save` fills in the time of the first save. A loaded file keeps its `Created`, and saving again keeps it. |
 
 These properties are read-only; they are set by the methods and by `lbd.load`:
 
@@ -58,8 +63,9 @@ These properties are read-only; they are set by the methods and by `lbd.load`:
 |---|---|---|
 | `Axes` | struct | `Axes.<name>` is a struct with fields `Name`, `Data` (column vector), `Unit`, `Label`. |
 | `Values` | struct | `Values.<name>` is a struct with fields `Name`, `Data`, `Axes` (string row), `Unit`, `Label`, `Shape` (row vector), `Dtype` (LBD type name). |
-| `Created` | string | ISO-8601 time the file was written. |
 | `Writer` | string | Program that wrote the file, e.g. `"matlab lbd 1.0.0"`. |
+| `Id` | string | The measurement's identity (a UUID, made at the first save; see `save`). `d.newId()` makes a new one. |
+| `ParentId` | string | The `Id` of the file this one was made from. |
 | `LbdVersion` | string | Format version of the file. |
 | `Path` | string | Where it was last loaded from or saved to. |
 
@@ -69,7 +75,7 @@ Access data with `d.Values.S21.Data` and `d.Axes.freq.Data`, or with [`d.get("S2
 
 <!-- no-check -->
 ```matlab
-d.addAxis(name, data, Unit="", Label=name)
+d.addAxis(name, data, Unit="", Label=name, Elements=[])
 ```
 
 Adds a 1-D axis.
@@ -77,9 +83,10 @@ Adds a 1-D axis.
 | Argument | Meaning |
 |---|---|
 | `name` | Axis name ([naming rules](getting-started/concepts.md#names)). |
-| `data` | A real numeric vector, row or column. It is stored as a column. |
+| `data` | A real numeric vector, row or column. It is stored as a column. May be `[]` when `Elements` is given: the positions are then 0, 1, 2 … |
 | `Unit` | Unit string. Prefer plain SI units (`"Hz"`, not `"GHz"`). |
 | `Label` | Display text. Defaults to `name`. |
+| `Elements` | A text for each position (format 1.2), e.g. `["ground" "excited"]`: the viewer shows them instead of the numbers. |
 
 **Returns** the axis struct. **Errors** with `lbd:invalid` if the name is invalid or already
 used, or if `data` is not a real numeric vector.
@@ -88,7 +95,7 @@ used, or if `data` is not a real numeric vector.
 
 <!-- no-check -->
 ```matlab
-d.addValue(name, data, axes, Unit="", Label=name, Dtype="auto")
+d.addValue(name, data, axes, Unit="", Label=name, Dtype="auto", Shape=[], Elements=[])
 ```
 
 Adds an N-D value.
@@ -101,6 +108,8 @@ Adds an N-D value.
 | `Unit` | Unit string. |
 | `Label` | Display text. Defaults to `name`. |
 | `Dtype` | `"auto"` keeps the class of `data`. Or force one of `"float64"`, `"float32"`, `"complex128"`, `"complex64"`, `"bool"`, `"int8"`…`"int64"`, `"uint8"`…`"uint64"`. |
+| `Shape` | The size of one data point (format 1.2): `3` for a vector of 3, `[2 2]` for a matrix. Empty: one number. `data`'s dimensions are the value's axes first, then the data point's. |
+| `Elements` | A data point's position texts: a string array for a vector (`["x" "y" "z"]`), a cell with one string array per dimension for a matrix (`{["I" "Q"], ["I" "Q"]}`; `[]` leaves a dimension numbered). |
 
 - **Vectors:** a value with one axis accepts a row or a column vector and stores it as a column.
 - **Matrices:** `size(data)` must equal the axis lengths in order. MATLAB drops trailing
@@ -122,7 +131,77 @@ d.addValue("trace", v, "t", Unit="V");
 d.addValue("mask", v > 0.5, "t");                  % logical -> bool
 d.addValue("raw", counts, "t", Dtype="float32");   % force a type
 d.addValue("fit_Q", 12345.6);                      % scalar
+d.addAxis("state", [], Elements=["ground" "excited"]);                  % positions 0, 1
+d.addValue("bloch", zeros(numel(v), 3), "t", Shape=3, Elements=["x" "y" "z"]);   % a vector per point
 ```
+
+A value's `Axes` are what was swept (`"t"`); its data point is described by `PointShape` (`3`)
+and `Elements`, and `Shape` is the data's size (`[numel(v) 3]`: the sweep, then the data point).
+In the file, each dimension of a data point is an axis of its own (`bloch_dim1`, with
+`role="point"`), so every reader reads it.
+
+### `write`
+
+Fills a value made with `addValue(name, [], axes, Dtype=...)` (every point `NaN`, or 0 with a
+false `Measured` mask for integers and logicals): a point, a trace, a map, or several values at
+once. Indices count from 1; a position can also be one of an axis's elements.
+
+```matlab
+d = lbd.Dataset("Power sweep");
+d.addAxis("power", linspace(-60, 0, 7), Unit="dBm");
+d.addAxis("freq", linspace(6.99e9, 7.01e9, 201), Unit="Hz");
+d.addValue("S21", [], ["power" "freq"], Dtype="complex128");
+d.addValue("n", [], "power", Dtype="int32");
+for i = 1:3
+    d.write(power=i, S21=ones(1, 201), n=10 * i);    % a trace, and n at power i
+end
+disp(d.Values.n.Measured')                            % 1 1 1 0 0 0 0
+d.save("sweep.lbd");
+```
+
+`d.addAxis("time", [], Grows=true)` makes an axis whose points `write` adds
+(`d.write(time=t, T=x)`). A name that isn't a valid MATLAB name goes as text:
+`d.write("if", 3, "S21", z)`.
+
+### Variable sweeps: `addGroup`
+
+When the inner points depend on the outer one (B chosen per A), put the axes in an axis group
+(format 2.0): only measured points are stored. See [Grid or group?](getting-started/concepts.md#grid-or-group).
+
+```matlab
+d = lbd.Dataset("Variable sweep");
+d.addGroup("AB");                                  % its axes follow, outer to inner
+d.addAxis("A", [], Group="AB", Unit="V");
+d.addAxis("B", [], Group="AB", Unit="Hz");
+d.addValue("f", [], ["A" "B"]);                    % one entry per (A, B) point
+d.addValue("q", [], "A");                          % one per A
+bs = {10, [10 20], [15 25 35]};
+for a = 1:3
+    d.write(A=a, B=bs{a}, f=100 * a + bs{a});      % coordinates, not indices
+    d.write(A=a, q=1.5 * a);
+end
+disp(d.Axes.B.Data')       % 10 10 20 15 25 35: each (A, B) point's B
+disp(d.Axes.B.Parent')     % 1 2 2 3 3 3: the A it belongs to (from 1)
+disp(d.Values.f.Dims)      % {["A" "B"]}: stored as the (A, B) points
+i = d.write(A=4);                                  % write returns the point's index ...
+d.write(Parent=i, B=[5 6], f=[45 46]);             % ... to write under it without a lookup
+m = d.toDense("f");                                % the full rectangle: gaps NaN
+disp(size(m.Values.f.Data))                        % 4 7
+r = d.rows("f", By="A");                           % {key, dataset; ...}
+disp(r{3, 2}.Axes.B.Data')                         % 15 25 35
+c = d.coords("f");                                 % each point's coordinates
+disp([c.A c.B]')
+d.save("variable.lbd");                            % format 2.0
+```
+
+- A group's axis takes a **coordinate**, outer axes first; the same coordinates are the same
+  point. `Parent=` takes the index an earlier `write` returned (indices from 1; the file stores
+  them from 0).
+- A value lies on an outer part of a group (`"A"`, `["A" "B"]`, or the group's name), never on
+  `"B"` alone.
+- `d.toDense(name, Round=9)` or `RTol=1e-9` merges coordinates that differ only by rounding
+  (`write` warns about them); `Limit=Inf` lifts the size limit (1e8 cells).
+- `lbd.Writer` takes the same calls (`w.addGroup`, `w.addAxis(..., Group=)`, `w.write`).
 
 ### `save`
 
@@ -131,7 +210,16 @@ d.addValue("fit_Q", 12345.6);                      % scalar
 path = d.save(path, Compression=false)
 ```
 
-Writes the dataset and returns the path. It also sets `Created`, `Writer` and `Path`.
+Writes the dataset and returns the path. It also sets `Writer` and `Path`, and `Created` if it
+was empty (the time of this first save); a `Created` that is set is written unchanged.
+
+It also sets the file's **id**: the measurement's identity, which LBD Viewer's Library uses to recognise
+the same measurement in two places (a copy, a backup, a synced folder). It is made at the first
+save (a UUID, from the time and random bits of the operating system: no setup, nothing to
+coordinate between computers) and is read-only. Saving again to the same file keeps it;
+saving to **another file** gives that file a new id, and the old one becomes its **parent
+id** (a new measurement made from this one). A file copied by the file system keeps its id. `d.newId()` makes a loaded dataset a new
+measurement on purpose.
 
 | Argument | Meaning |
 |---|---|
@@ -191,6 +279,31 @@ d = lbd.load("sweep.lbd");
 d = lbd.load("big.lbd", Values="S21");
 ```
 
+## `lbd.open`
+
+<!-- no-check -->
+```matlab
+d = lbd.open(path)
+d = lbd.open(path, Mode="r+")
+```
+
+Reads the file's structure and leaves the value data in the file: each value's `Data` is an
+`lbd.OnDisk`. `size` and `class` need no reading; `Data(4, :)` reads row 4 only, `Data.read()`
+everything. `d.close()` closes the file; what was read stays usable.
+
+| Argument | Meaning |
+|---|---|
+| `path` | File to read. A file being written (`.lbd.writing`) opens as it was at that moment. |
+| `Mode` | `"r"` (default): read only; `write` and `save` are refused. `"r+"`: `write` puts data into the file at points that exist, `d.save()` writes the title, description, metadata and saved view into it, `d.save(other)` copies it piece by piece. |
+
+```matlab
+d = lbd.open("big.lbd");
+row = d.Values.S21.Data(4, :);
+d.close();
+```
+
+See [Large files](getting-started/large-files.md).
+
 ## `lbd.info`
 
 <!-- no-check -->
@@ -207,6 +320,46 @@ for k = 1:numel(files)
     fprintf("%s: %s\n", files(k).name, i.Title);
 end
 ```
+
+## Checking before measuring
+
+`Meta`, `Plot`, `Style`, `StyleName` and `Created` are checked when they are set, so a mistake
+(metadata that can't be stored, a saved view that isn't a JSON object, a `Created` that isn't a
+date) shows at once, before the measurement starts. `d.check()` lists what a save would refuse
+(a struct array with `Where`, `What`, `Fix`; empty when it would go through), and
+`[~, report] = d.save(path, DryRun=true)` also checks the folder; neither writes anything.
+
+```matlab
+d = lbd.load("sweep.lbd");
+problems = d.check();                            % empty: a save would go through
+[~, report] = d.save("sweep.lbd", DryRun=true);  % nothing written
+```
+
+## Labels
+
+A file can carry its labels: a star, a project, users, tags and a comment, as LBD Viewer's
+Library shows them. They are stored in the file (format 1.3), so they go wherever the file goes.
+
+```matlab
+d = lbd.load("sweep.lbd");
+d.Labels.Star = true;
+d.Labels.Project = "Chip 3/Cooldown 7";          % a nested label: parts separated by /
+d.addTags(["calibration" "first try"]);
+d.save("sweep.lbd");
+```
+
+Each label is checked when it is set, so a mistake shows before measuring. The labels of an
+existing file change without rewriting its data; tags and users are added (`Replace=true`
+replaces them):
+
+```matlab
+lbd.setLabels("sweep.lbd", Tags="checked", Star=true);
+lbd.removeLabels("sweep.lbd", Tags="checked");
+L = lbd.labels("sweep.lbd");                      % read them
+```
+
+An `lbd.Writer` has `Labels` and `addTags` too: labels set before the first write are in the
+file from the start, labels set while measuring are written when it finishes.
 
 ## `lbd.version`
 

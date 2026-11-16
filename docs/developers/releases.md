@@ -1,5 +1,27 @@
 # Releases
 
+**In short:**
+- **You:** write the CHANGELOG, set the version, run the tests, and push a tag.
+- **GitHub:** builds every installer and package, checks them, and makes a draft release.
+- **You:** look at the draft and click **Publish**.
+
+Building on your own computer is only for trying a change to the packaging (see
+[Building locally](#building-locally)).
+
+## Before releasing
+
+1. **Notes:** every change has a line in `CHANGELOG.md`.
+2. **Screenshots**, if the viewer's look changed:
+   - `uv run python scripts/make_screenshots.py` (all shots), or one shot by name, e.g.
+     `make_screenshots.py library`;
+   - run a shot that fails now and then on its own, one per process;
+   - look at the images and commit them.
+3. **Tests:** `uv run python scripts/test_all.py --perf`: everything, with the Explore benchmark
+   ([Performance](testing.md#performance)).
+4. **Try it by hand** on mock data: `uv run python scripts/dev_viewer.py --build` (builds the
+   web UI and the docs, so Help is up to date; see
+   [Quick start for developers](index.md#quick-start-for-developers)).
+
 ## How to release
 
 GitHub builds every release; you choose the version and click **Publish**. Nothing becomes
@@ -9,10 +31,10 @@ public before that click.
 |---|---|---|
 | 1. Write the notes | you | Every change has a line in `CHANGELOG.md` under the top heading, `## Unreleased` (or `## <version> (in development)`). If the viewer's look changed, redo the documentation's screenshots: `uv run python scripts/make_screenshots.py` (on Windows, with Chromium for Playwright), look at them, and commit them. `tests/scripts/test_screenshots.py` checks that every shot is used and every image exists. |
 | 2. Set the version | you | `uv run python scripts/bump_version.py 0.2.0` (also from `0.2.0-dev`): writes the version into every place `check_versions.py` reads (the viewer, each language's `[[version]]` files, `uv.lock`, `package-lock.json`) and heads the CHANGELOG section `## 0.2.0 (<date>)`. Refuses a lower or malformed version and a missing or empty section. `--dry-run` shows the changes only. |
-| 3. Test | you | `uv run python scripts/test_all.py` |
+| 3. Test | you | `uv run python scripts/test_all.py --perf` (`--perf`: also the Explore benchmark, see [Performance](testing.md#performance)) |
 | 4. Tag and push | you | `git commit -am "Release 0.2.0"`, `git tag -a v0.2.0 -m "LBD 0.2.0"`, `git push --follow-tags`. The tag must be annotated (`-a`): `--follow-tags` doesn't push plain tags. |
-| 5. Build and check | GitHub | The **Release** workflow (`.github/workflows/release.yml`) starts from the tag: it checks that the tag matches the files and that the CHANGELOG has the section, runs all tests, builds `LBD.mltbx` with MATLAB, then the Windows installer, the macOS app for Apple Silicon and Intel (`scripts/build_macos.sh`), the Linux package and the Python wheels (`scripts/build_wheels.py`). Each is checked with `scripts/smoke_test_app.py --release`: the Windows installer is installed silently, checked, and uninstalled (settings must stay); the macOS app is checked, its disk image opened, and a `.lbd` file opened the way Finder does (`open -a`) before the app is quit; the Linux package is unpacked and checked; the wheels are installed on macOS with `uv tool install`, exactly as the install guide says, and checked. |
-| 6. Draft | GitHub | A **draft** release "LBD 0.2.0" with `LBD-Viewer-0.2.0-windows-x64-setup.exe`, `LBD-Viewer-0.2.0-macos-arm64.dmg` and `…-macos-x86_64.dmg`, `lbd-viewer-0.2.0-linux-x86_64.tar.gz`, `LBD.mltbx`, and the two wheels `lbd-0.2.0-py3-none-any.whl` and `lbd_viewer-0.2.0-py3-none-any.whl` (the viewer with its Help and language modules, for macOS and anyone with Python); its text is the CHANGELOG section. Only people with write access see drafts. |
+| 5. Build and check | GitHub | The **Release** workflow (`.github/workflows/release.yml`) starts from the tag: it checks that the tag matches the files and that the CHANGELOG has the section, runs all tests, builds `LBD.mltbx` with MATLAB, then the Windows installer, the macOS app for Apple Silicon and Intel (`scripts/build_macos.sh`), the Linux package and the Python wheels (`scripts/build_wheels.py`). Each is checked with `scripts/smoke_test_app.py --release`: the Windows installer is installed silently, checked, and uninstalled (settings must stay); the macOS app is checked, its disk image opened, and a `.lbd` file opened the way Finder does (`open -a`) before the app is quit; the Linux package is unpacked and checked; on Windows and Linux, `scripts/upgrade_test.py` installs v1.2.0 from its release, the new build over it (settings, labels and Library must survive, the old program files go) and then an older-numbered build of the same installer, which must be refused; the wheels are installed on macOS with `uv tool install`, exactly as the install guide says, and checked. |
+| 6. Draft | GitHub | A **draft** release "LBD 0.2.0" with `LBD-Viewer-0.2.0-windows-x64-setup.exe`, `LBD-Viewer-0.2.0-macos-arm64.dmg` and `…-macos-x86_64.dmg`, `lbd-viewer-0.2.0-linux-x86_64.tar.gz`, `LBD.mltbx`, the two wheels `lbd-0.2.0-py3-none-any.whl` and `lbd_viewer-0.2.0-py3-none-any.whl` (the viewer with its Help and language modules, for macOS and anyone with Python), the install scripts `install.ps1`, `install.sh` and `install-macos.sh` (`packaging/`), and `SHA256SUMS` with the checksum of every file (the install scripts check against it); its text is the CHANGELOG section. Only people with write access see drafts. |
 | 7. Check | you | GitHub → **Releases** → the draft: download the installer, try it, edit the text if needed. |
 | 8. Publish | you | **Publish release**. Now it's public and marked *Latest*. |
 | 9. Documentation | GitHub | Publishing starts the **Docs** workflow (`.github/workflows/docs.yml`): it builds the documentation of the release's tag and puts it on [patrick-csliu.github.io/lbd](https://patrick-csliu.github.io/lbd/). |
@@ -59,7 +81,9 @@ language module is complete.
 
 ## Building locally
 
-The same build steps as on GitHub, for trying a change to the packaging:
+The same build steps as on GitHub, for trying a change to the packaging. For someone who wants
+to build a release for themselves instead of using its installer, the short version is
+[Build LBD yourself](build-yourself.md).
 
 1. **Check the versions.** `uv run python scripts/check_versions.py` prints the version, or
    fails and lists the places that differ: the viewer (`viewer/pyproject.toml`,

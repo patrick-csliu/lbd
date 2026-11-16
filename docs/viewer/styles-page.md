@@ -12,7 +12,7 @@ one, so changing a preset changes every figure that uses it. Presets are shared 
 3. **Save** or **Discard changes**, **Duplicate**, and **Export** as a `.lbd.json` style file or
    a matplotlib `.mplstyle` file.
 4. **The settings**, in sections. Click a section title to open or close it.
-5. **The preview:** the file open on the Data page, drawn with this preset as you edit it.
+5. **The preview:** the file open in Figure, drawn with this preset as you edit it.
 
 Presets decide how every figure looks. The settings are grouped like matplotlib's objects:
 **Figure** (size, resolution, font) → **Axes** → **Frame**, **Title**, **Axis** (label, major and

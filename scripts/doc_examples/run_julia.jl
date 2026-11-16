@@ -9,7 +9,7 @@ t = collect(range(0, 1e-6, 201)); v = sin.(2e7 .* t); counts = collect(1:201)
 d = LBD.Dataset("prelude")
 add_axis!(d, "power", p; unit="dBm"); add_axis!(d, "freq", f; unit="Hz"); add_axis!(d, "t", t; unit="s")
 WITHVALUES
-LBD.save("sweep.lbd", d); LBD.save("run.lbd", d)
+LBD.save("sweep.lbd", d); LBD.save("run.lbd", d); LBD.save("big.lbd", d)
 temperatures = [10, 20]; out = mkpath("out"); measure(T) = ones(401)
 """
 const VALUES = """add_value!(d, "S21", s21, ["power", "freq"]); add_value!(d, "trace", v, "t")"""

@@ -1,6 +1,7 @@
 # Plotting
 
-Double-click a data file to plot it. The controls are on the left and the figure on the right.
+In the **Figure** workspace, double-click a data file to plot it (from Explore: **Open in
+Figure**). The controls are on the left and the figure on the right.
 Every change redraws the figure straight away. The same settings are available in Python as the
 [plot spec](../styles/plot-settings.md) of [`lbd.plot.plot`][lbd.plot.plot].
 
@@ -26,7 +27,10 @@ Every change redraws the figure straight away. The same settings are available i
 
 | Control | Meaning |
 |---|---|
-| **Plot type** | **Curves** draws lines. **Scatter** draws markers (see [below](#common-tasks)). **Heat map** draws a colour map of a value with at least two axes that have more than one point. |
+| **Plot type** | **Curves** draws lines. **Scatter** draws markers (see [below](#common-tasks)). **Heat map** draws a colour map of a value with at least two axes that have more than one point. **Matrix** draws cells with their numbers, **Bars** bars with labels, and **3D bars** a bar per cell; see [Plot types](explore.md#plot-types) for what each one is for. **Histogram** counts the values: see [below](#histogram). |
+| **Value**, **Columns**, **Rows** (Matrix) | Which value and which of its axes; complex values show **Re and Im** side by side, or the usual choices. **Numbers**, **Significant digits**, **Row sums** (each row's sum beside it) and **Colour range** (0 to 1, −1 to 1, Auto) set what the cells show. |
+| **Elevation**, **Azimuth** (3D bars) | The angle of the picture, in degrees; **Default angle** brings the style's back. A figure is a picture: there is no dragging here. |
+| **Values**, **Groups**, **Bars in a group** (Bars) | What the bars are. **Bars** chooses Grouped or Stacked, **Values on the bars** writes each number at its bar. |
 | **Values** (curves, scatter) | Tick several values to draw them together; they share the horizontal axis. **On other axes** lists values measured over another axis; click one to plot it instead. **Numbers** lists the file's single numbers with their value. A single number isn't plotted: there is nothing to draw. A file with only single numbers shows the list instead of a figure. |
 | **Value** (heat map, I/Q scatter) | The value to show. Heat maps list values with two swept axes; the I/Q plane lists complex values. |
 | **Complex data as** | For complex values: magnitude, magnitude in dB (20·log₁₀), phase in radians or degrees, real part, imaginary part. For scatter also **I/Q plane**: real part against imaginary part, with equal scales. |
@@ -35,6 +39,10 @@ Every change redraws the figure straight away. The same settings are available i
 | **One curve per** | Curves of a 2-D value: one curve per point of this axis, e.g. one curve per power. A short axis gets a legend, a long one a colour bar. Choose **— (single curve)** to draw one curve and pick the other axis's point with a slider instead. |
 | **Colour by** | Scatter: colour the points by an axis (e.g. power) or by another value with the same axes. A short axis (e.g. the prepared state) gets one colour per point and a legend; a longer axis or a value gets a colour bar, with the style's fixed scales. |
 | **Log x / Log y** | Logarithmic axes. |
+
+**Show points** (curves, under **Display**) puts a small dot, matplotlib's `.` marker, on every
+stored point; its size is the style's marker size (`figure.axes.lines.marker_size_pt`), halved.
+Its [plot setting](../styles/plot-settings.md) is `points` in `options`.
 
 ### Choosing a point on an axis that isn't drawn
 
@@ -48,7 +56,14 @@ curve, you choose which point of the other axis to show:
    nearest measured point (−40 dBm) and shows that point's exact value. A value beyond the axis
    goes to its nearest end, with a note.
 
-Scatter plots draw all points, so they have no sliders.
+On a scatter plot each axis not drawn has a choice: **All of …** ticked, all its points go in; unticked,
+it has a slider. A new scatter plot starts with a short axis with named positions as the colours, the
+longest axis All and the others sliders. A figure saved before this choice keeps drawing all its points.
+
+A **variable sweep** (an axis group) is drawn as a heat map with its real coordinates: see
+[Plot types](explore.md#plot-types). The `options` setting `cells` chooses `rows`, `nearest` or `smooth`.
+As curves it is drawn on its real axes too, one curve per outer step: see
+[A value as the horizontal axis](explore.md#a-value-as-the-horizontal-axis).
 
 <div style="clear: both"></div>
 
@@ -100,6 +115,28 @@ These changes are not saved until you use **Save this view to the file**
 | Quadrature against in-phase | Scatter; Values = `Q`, Horizontal axis = `I`. |
 | Readout I/Q blobs per prepared state | Scatter; Value = `IQ`, Complex data as = I/Q plane, Colour by = `prep`. |
 | Magnitude in dB | **Complex data as** → Magnitude (dB). |
+
+## Scatter
+
+Scatter has the same **Colour by** and **All of …** as Explore, plus **Grid** and **Equal axes** (under
+Display, as for curves; Equal axes starts off). In Figure, **Colour by** can also
+be another value with the same axes. **Histograms beside the plot** adds a histogram of the points in the
+figure's limits above and to the right of the plot, on its axes; a legend then goes under the figure. Their
+size and opacity are in the style (`figure.axes.scatter`, `sides_size_mm`, `sides_alpha`).
+
+A figure is exact: it always draws its markers, however many (above 5000 they are stored as a picture inside
+SVG and PDF files). The points per pixel are only Explore's way of showing very many.
+
+## Histogram
+
+**Histogram** counts how many numbers fall in each bin. It has the controls it has in Explore: **Colour by**
+(an outline per step of one axis, or None), **All of …** for each other axis (unticked: a slider), **Bins**
+(empty: Auto), **Draw** (Bars or Outline), **Vertical axis** (Count, Fraction or Density) and **Log y**. Values
+of the same unit can be ticked together, as outlines. Complex values are counted after **Complex data as**.
+
+A large file is read part by part while the figure is drawn. The bars' opacity and the outlines' width are
+in the style (`figure.axes.histogram`). A saved view keeps all of this; a viewer older than this version
+says it can't draw the saved view and uses its own default plot.
 
 ## What happens when you change the plot type
 

@@ -5,8 +5,32 @@ import pytest
 from fastapi.testclient import TestClient
 
 import lbd
+from lbd_viewer import memory
 from lbd_viewer.config import Config
 from lbd_viewer.server import AppState, create_app
+
+
+@pytest.fixture(autouse=True)
+def no_github(monkeypatch):
+    """No test asks GitHub for a new version (updates.py); test_updates.py gives fake answers."""
+    from lbd_viewer import updates
+
+    def offline(timeout=updates.TIMEOUT):
+        raise updates.CheckError("no connection to GitHub (the tests don't ask it)")
+
+    offline.real = updates.ask_github           # for the tests of the request itself
+    monkeypatch.setattr(updates, "ask_github", offline)
+
+
+@pytest.fixture(autouse=True)
+def plenty_of_memory(monkeypatch):
+    """10 GB of room for the viewer, whatever else runs on the computer: with the real memory, a
+    computer short of it (suites side by side) has almost none available, and test files above the
+    always-whole size would count as too big (read by part, summarised). A test about
+    little room sets its own (test_large_view.py: `fake`, `little_room`)."""
+    total, available = 4 * memory.GB, 10 * memory.GB
+    cache = memory.PartCache(memory.Memory(system=lambda: (total, available)))
+    monkeypatch.setitem(memory._shared, "cache", cache)
 
 
 @pytest.fixture()
@@ -52,7 +76,36 @@ def cfg(tmp_path):
 @pytest.fixture()
 def client(cfg, data_dir):
     state = AppState(cfg, token="t0k")
+    state.preview_processes = False                   # previews drawn in threads: quicker in tests
     c = TestClient(create_app(state), base_url="http://127.0.0.1:8000")
     c.headers["X-LBD-Token"] = "t0k"
     c.post("/api/roots", json={"path": str(data_dir)}).raise_for_status()
-    return c
+    yield c
+    state.close()                                   # the Library's indexing thread, the databases
+
+
+@pytest.fixture()
+def values_files(data_dir):
+    """The mock files with several values (mock_values.py, small), in the data folder."""
+    import mock_values
+
+    return mock_values.write_all(data_dir, small=True)
+
+
+@pytest.fixture()
+def library_files(data_dir):
+    """The mock library (mock_library.py, 120 files) in the data folder: {"Lab data": [...], "Shared": [...]}."""
+    import mock_library
+
+    return mock_library.write_library(data_dir, 120)
+
+
+@pytest.fixture()
+def many_labels_files(data_dir):
+    """A small mock library with a large label vocabulary (mock_library.many_labels: 300 users,
+    800 tags, very long names), every label kept in the data folder: for long lists."""
+    import mock_library
+
+    written = mock_library.write_library(data_dir, 60)
+    mock_library.add_labels(data_dir, keep_in=data_dir, many=True)
+    return written

@@ -6,6 +6,9 @@ files side by side), so these rules decide who may do what (docs/viewer/folders-
 
 1. One owner per open file. A file is open in at most one page, so two pages never hold competing
    unsaved edits of it. `acquire` refuses a file another page owns and names that page.
+   This is about the Figure workspace, whose tabs can save into their file. Explore tabs never
+   write to their file and don't take part: a page shows any file in Explore without acquiring
+   it (a file delivered to Explore is released again by the page).
 2. A page is alive while it polls for commands (`poll`). It is gone after `bye`, after `stale_after`
    seconds without a poll (asleep, frozen), or after `offline_grace` seconds *offline*, unless it
    polls meanwhile. A page is offline from `register` until its first poll, and when its long-poll
@@ -144,6 +147,7 @@ class Pages:
         self._listed: Optional[list] = None         # the page list last sent (pages_changed)
         self._command_ids = itertools.count(1)
         self._changed = threading.Condition(threading.RLock())
+        self.closed = False                         # the viewer is stopping: no poll waits any more (close)
 
     # ---- pages ----------------------------------------------------------------------------------
 
@@ -282,16 +286,25 @@ class Pages:
                 self._pages_changed()
             return page.polls
 
+    def close(self) -> None:
+        """The viewer is stopping: every waiting long poll answers at once (with its command, if
+        one is queued, else nothing), so the server doesn't wait for them to time out."""
+        with self._changed:
+            self.closed = True
+            self._changed.notify_all()
+
     def wait_for_command(self, page_id: str, poll: int, timeout: float) -> Optional[Command]:
         """The long poll started by `start_poll`: wait up to `timeout` real seconds for the first
         unconfirmed command. Returns None after the timeout, or at once if the connection
-        dropped or a newer poll of the same page replaced this one."""
+        dropped, a newer poll of the same page replaced this one, or the viewer is stopping (`close`)."""
         deadline = time.monotonic() + timeout
         with self._changed:
             while True:
                 page = self.page(page_id)
                 if page.polls != poll or page.offline_since is not None:
                     return None
+                if self.closed:
+                    return page.queue[0] if page.queue else None
                 page.last_seen = self.clock()
                 left = deadline - time.monotonic()
                 if page.queue or left <= 0:

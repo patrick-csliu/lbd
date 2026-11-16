@@ -24,7 +24,102 @@ __all__ = ["Config", "ConfigError", "Style", "QuantityStyle", "StyleError", "dee
 # Where files opened from Explorer / Finder (double-click) appear: in the viewer page that is
 # already open, or each in a new browser tab.
 OPEN_FILES_IN = ("viewer", "browser-tab")
+# The workspace a data file opens in when it comes from Explorer / Finder.
+OPEN_DATA_IN = ("explore", "figure")
 THEMES = ("system", "light", "dark")      # the viewer's colours; "system" follows the OS setting
+# The Library (library.py): read each data file's header for the list (off: names, sizes and
+# file dates only; for cloud storage, where opening a file downloads it), whether the notice
+# about that was seen, and the list's columns. Previews (plan 8c, previews.py): drawn for every
+# file in the background ("all"), for the selected file and the rows near it ("nearby"), or only
+# when asked ("off"); "all" needs read_headers (it reads every file). The list shows rows
+# ("list") or pictures ("pictures").
+LIBRARY_COLUMNS = ("name", "date", "sweep", "values", "folder", "size", "file", "modified",
+                   "star", "project", "users", "tags", "comment", "copies")
+PREVIEW_MODES = ("all", "nearby", "off")
+DATA_FILE_EDITS = ("in_place", "copy_and_swap")   # how finished data files are changed (files.edit_data_file)
+LIST_VIEWS = ("list", "pictures")
+# The Files sidebar of Explore and Figure: which lists it offers. "library": the Library's list
+# with the browser tab's filters (always offered); "folders": the folder tree (in Figure with
+# images and style files); "starred": the starred files; "recent": the files opened lately.
+SIDEBAR_SCOPES = ("library", "folders", "starred", "recent")
+# How the sidebar shows a file: one line (the main field and a small one on the right), two lines
+# (the second one with the chosen fields), or columns (a small Library list that can be sorted).
+# The main field is the title or the file name; the fields are Library columns other than Name.
+SIDEBAR_LAYOUTS = ("one", "two", "columns")
+SIDEBAR_MAIN = ("title", "file")
+SIDEBAR_FIELDS = tuple(c for c in LIBRARY_COLUMNS if c != "name")
+LIBRARY_DEFAULTS: Dict[str, Any] = {"read_headers": True, "notice_seen": False, "columns": ["name", "date", "sweep"],
+                                    "column_widths": {},
+                                    "previews": "all", "list_view": "list", "sidebar_scopes": ["library"],
+                                    "sidebar_layout": "two", "sidebar_main": "title",
+                                    "sidebar_fields": ["date", "sweep", "project", "tags"],
+                                    "date_zone": "local", "card_main": "title", "card_fields": ["date"],
+                                    "data_file_edits": "in_place"}
+# Memory for data (plan 6d, memory.py): what to leave free for the rest of the computer (None:
+# automatic, max(2 GB, 10% of RAM)), the most LBD may use (None: no maximum), and the disk cache
+# of large maps' and curves' summaries. In GB.
+MEMORY_DEFAULTS: Dict[str, Any] = {"reserve_gb": None, "maximum_gb": None, "summary_cache_gb": 20.0}
+# Files being measured (plan 9, live.py): show the progress at all, and each of its parts; a
+# browser notification when a measurement finishes or stops while the page is in the background.
+MEASUREMENTS_DEFAULTS: Dict[str, Any] = {"progress": True, "time": True, "percent": True, "points": True,
+                                         "axes": True, "notify": False}
+# Explore (plan 13): a vertical or horizontal cursor marks every trace at its line for at most
+# this many visible traces (more makes each cursor move slow, and the plot unreadable).
+# `new_panels`: how many panels a file opened for the first time gets, one per value (1: the first
+# value only; 6, the most: every value up to six), 16.45.
+# `keep`: the parts of a file's Explore view brought back when it is opened again (16.44; the page's
+# keep.ts); cursor positions always start afresh.
+KEEP_DEFAULTS: Dict[str, bool] = {"panels": True, "plot": True, "traces": True, "colours": True, "limits": True,
+                                  "sliders": True, "operations": False, "zoom": False, "sync": False,
+                                  "cursor_options": False}
+# `looks`: the look options a new Explore plot starts with on, per plot type that has them (18.2).
+# On: on. Off: as the style says (Grid) or off (Show points). Explore only: the Figure page keeps the
+# style's look. A plot type gets a line here when it gets such an option.
+LOOKS_DEFAULTS: Dict[str, Dict[str, bool]] = {"curve": {"grid": False, "points": False}, "scatter": {"grid": False}}
+EXPLORE_DEFAULTS: Dict[str, Any] = {"line_traces": 20, "new_panels": 1, "keep": dict(KEEP_DEFAULTS),
+                                    "looks": {k: dict(v) for k, v in LOOKS_DEFAULTS.items()}}
+MOST_PANELS = 6                                   # (ExploreTab.tsx MAX_PANELS)
+# The check for a new version (plan 16.25, updates.py), kept by the viewer, not set by the user:
+# when it last asked GitHub (local time, ISO), the newest release then and its page, and the
+# reminder's choice: {"later": "YYYY-MM-DD"} (not again that day) or {"never": "X.Y.Z"} (not for
+# that version).
+UPDATES_DEFAULTS: Dict[str, Any] = {"last_check": None, "latest": None, "url": None, "remind": None}
+# The sections of the Settings dialog (SettingsDialog.tsx) and the settings in each, as
+# "key" (top level) or "group.key"; "Reset this section" puts these back to their defaults.
+GENERAL_DEFAULTS: Dict[str, Any] = {"theme": "system", "open_files_in": "viewer", "open_data_in": "explore"}
+SETTINGS_SECTIONS: Dict[str, List[str]] = {
+    "general": ["theme", "open_files_in", "open_data_in"],
+    "library": ["library.read_headers", "library.previews", "library.data_file_edits"],
+    "sidebar": ["library.sidebar_scopes"],
+    "memory": [f"memory.{k}" for k in MEMORY_DEFAULTS],
+    "measurements": [f"measurements.{k}" for k in MEASUREMENTS_DEFAULTS],
+    "explore": [f"explore.{k}" for k in EXPLORE_DEFAULTS],
+}
+
+
+def setting_default(key: str) -> Any:
+    """The default of a setting named as in SETTINGS_SECTIONS."""
+    group, _, name = key.rpartition(".")
+    table = {"": GENERAL_DEFAULTS, "library": LIBRARY_DEFAULTS, "memory": MEMORY_DEFAULTS,
+             "measurements": MEASUREMENTS_DEFAULTS, "explore": EXPLORE_DEFAULTS}[group]
+    value = table[name]
+    return list(value) if isinstance(value, list) else dict(value) if isinstance(value, dict) else value
+
+
+def section_defaults() -> Dict[str, Dict[str, Any]]:
+    """{section: {key: default}}: what the Settings dialog compares with, to mark changed sections."""
+    return {section: {k: setting_default(k) for k in keys} for section, keys in SETTINGS_SECTIONS.items()}
+
+
+EVERY_FILE_NEEDS_HEADERS = ("Previews of every file can't be drawn while \"Read each data file's details\" is "
+                            "off: drawing them would read every file. Turn that on first, or choose \"The "
+                            "selected file and nearby rows\".")
+
+
+def previews_mode(library: Dict[str, Any]) -> str:
+    """The previews mode in effect: "all" counts as "nearby" while headers aren't read."""
+    mode = library.get("previews", "all")
+    return "nearby" if mode == "all" and not library.get("read_headers") else mode
 
 
 class ConfigError(ValueError):
@@ -50,11 +145,15 @@ class Config:
     def _stored(self) -> Dict[str, Any]:
         """settings.json as stored, checked:
         {"roots": [...], "default_style": str or None, "open_files_in": one of OPEN_FILES_IN,
-         "theme": one of THEMES}."""
+         "open_data_in": one of OPEN_DATA_IN, "theme": one of THEMES}."""
         with self._lock:
             data = _read_json(self.settings_path)
         if data is None:
-            return {"roots": [], "default_style": None, "open_files_in": "viewer", "theme": "system"}
+            return {"roots": [], "default_style": None, "open_files_in": "viewer", "open_data_in": "explore",
+                    "theme": "system", "library": dict(LIBRARY_DEFAULTS), "memory": dict(MEMORY_DEFAULTS),
+                    "measurements": dict(MEASUREMENTS_DEFAULTS), "explore": dict(EXPLORE_DEFAULTS),
+                    "last_version": None, "updates": dict(UPDATES_DEFAULTS),
+                    "first_start_done": False, "check_updates": None}
         if not isinstance(data, dict):
             raise ConfigError(f"{self.settings_path} must contain a JSON object; fix or delete the file")
         roots = data.get("roots", [])
@@ -67,21 +166,63 @@ class Config:
         if open_in not in OPEN_FILES_IN:
             raise ConfigError(f"{self.settings_path}: 'open_files_in' must be one of {', '.join(OPEN_FILES_IN)}, "
                               f"not {open_in!r}; fix or delete the file")
+        open_data = data.get("open_data_in", "explore")
+        if open_data not in OPEN_DATA_IN:
+            raise ConfigError(f"{self.settings_path}: 'open_data_in' must be one of {', '.join(OPEN_DATA_IN)}, "
+                              f"not {open_data!r}; fix or delete the file")
         theme = data.get("theme", "system")
         if theme not in THEMES:
             raise ConfigError(f"{self.settings_path}: 'theme' must be one of {', '.join(THEMES)}, "
                               f"not {theme!r}; fix or delete the file")
-        return {"roots": list(roots), "default_style": default or None, "open_files_in": open_in, "theme": theme}
+        library = {**LIBRARY_DEFAULTS, **(data.get("library") or {})}
+        try:
+            library = _check_library(library)
+        except ConfigError as e:
+            raise ConfigError(f"{self.settings_path}: {e}; fix or delete the file") from None
+        try:
+            memory = _check_memory({**MEMORY_DEFAULTS, **(data.get("memory") or {})})
+        except ConfigError as e:
+            raise ConfigError(f"{self.settings_path}: {e}; fix or delete the file") from None
+        try:
+            measurements = _check_measurements({**MEASUREMENTS_DEFAULTS, **(data.get("measurements") or {})})
+        except ConfigError as e:
+            raise ConfigError(f"{self.settings_path}: {e}; fix or delete the file") from None
+        try:
+            explore = _check_explore({**EXPLORE_DEFAULTS, **(data.get("explore") or {})})
+        except ConfigError as e:
+            raise ConfigError(f"{self.settings_path}: {e}; fix or delete the file") from None
+        try:
+            updates = _check_updates({**UPDATES_DEFAULTS, **(data.get("updates") or {})})
+        except ConfigError as e:
+            raise ConfigError(f"{self.settings_path}: {e}; fix or delete the file") from None
+        # The first start's questions (18.8): asked until answered. Settings from before them with
+        # folders in them are past their first start; the version-check question is still asked.
+        done = data.get("first_start_done", bool(roots))
+        if not isinstance(done, bool):
+            raise ConfigError(f"{self.settings_path}: 'first_start_done' must be true or false; fix or delete the file")
+        check_updates = data.get("check_updates")
+        if check_updates is not None and not isinstance(check_updates, bool):
+            raise ConfigError(f"{self.settings_path}: 'check_updates' must be true, false or empty; fix or delete the file")
+        last_version = data.get("last_version")     # the viewer that used these settings last
+        if last_version is not None and not isinstance(last_version, str):
+            raise ConfigError(f"{self.settings_path}: 'last_version' must be text; fix or delete the file")
+        return {"roots": list(roots), "default_style": default or None, "open_files_in": open_in,
+                "open_data_in": open_data, "theme": theme, "library": library, "memory": memory,
+                "measurements": measurements, "explore": explore, "last_version": last_version,
+                "updates": updates, "first_start_done": done, "check_updates": check_updates}
 
     def settings(self) -> Dict[str, Any]:
-        """{"roots": [...], "default_style": name, "open_files_in": ..., "theme": ...}; a default
-        style that no longer exists is 'default'."""
+        """{"roots": [...], "default_style": name, "open_files_in": ..., "open_data_in": ...,
+        "theme": ...}; a default style that no longer exists is 'default'."""
         stored = self._stored()
         default = stored["default_style"] or "default"
         if default not in self.style_names():
             default = "default"
         return {"roots": stored["roots"], "default_style": default, "open_files_in": stored["open_files_in"],
-                "theme": stored["theme"]}
+                "open_data_in": stored["open_data_in"], "theme": stored["theme"], "library": stored["library"],
+                "memory": stored["memory"], "measurements": stored["measurements"], "explore": stored["explore"],
+                "last_version": stored["last_version"], "updates": stored["updates"],
+                "first_start_done": stored["first_start_done"], "check_updates": stored["check_updates"]}
 
     def problems(self) -> List[str]:
         """Things the user should know about the settings (shown as warnings in the viewer)."""
@@ -96,7 +237,32 @@ class Config:
         return out
 
     def _save_settings(self, settings: Dict[str, Any]) -> None:
-        _write_json(self.settings_path, settings)
+        """Write the settings. Settings this version doesn't know (a newer viewer's, used on this
+        computer before) are kept as they are, so going back to the newer one finds them."""
+        with self._lock:
+            try:
+                on_disk = _read_json(self.settings_path)
+            except ConfigError:
+                on_disk = None                    # unreadable: replaced (the viewer said so)
+            if isinstance(on_disk, dict):
+                merged = dict(on_disk)
+                for key, new in settings.items():
+                    old = on_disk.get(key)
+                    # a group (library, memory, ...): its unknown keys stay too
+                    merged[key] = {**old, **new} if isinstance(old, dict) and isinstance(new, dict) else new
+                settings = merged
+            _write_json(self.settings_path, settings)
+
+    def note_version(self, version: str) -> Optional[str]:
+        """Record `version` as the viewer that used these settings last (at each real start);
+        returns the version recorded before (None the first time)."""
+        with self._lock:
+            s = self.settings()
+            before = s["last_version"]
+            if before != version:
+                s["last_version"] = version
+                self._save_settings(s)
+            return before
 
     def add_root(self, path: str) -> List[str]:
         p = Path(path).expanduser()
@@ -129,6 +295,15 @@ class Config:
             s["default_style"] = name
             self._save_settings(s)
 
+    def set_open_data_in(self, where: str) -> None:
+        """The workspace data files from Explorer / Finder open in: "explore" or "figure"."""
+        if where not in OPEN_DATA_IN:
+            raise ConfigError(f"open_data_in must be one of {', '.join(OPEN_DATA_IN)}, not {where!r}")
+        with self._lock:
+            s = self.settings()
+            s["open_data_in"] = where
+            self._save_settings(s)
+
     def set_open_files_in(self, where: str) -> None:
         """Where double-clicked files open: "viewer" (the open viewer page) or "browser-tab"."""
         if where not in OPEN_FILES_IN:
@@ -136,6 +311,105 @@ class Config:
         with self._lock:
             s = self.settings()
             s["open_files_in"] = where
+            self._save_settings(s)
+
+    def set_library(self, changes: Dict[str, Any]) -> Dict[str, Any]:
+        """Change Library settings (read_headers, notice_seen, columns, previews, list_view,
+        sidebar_scopes); returns them all."""
+        unknown = sorted(set(changes) - set(LIBRARY_DEFAULTS))
+        if unknown:
+            raise ConfigError(f"unknown Library setting(s) {unknown}; known: {sorted(LIBRARY_DEFAULTS)}")
+        with self._lock:
+            s = self.settings()
+            new = _check_library({**s["library"], **changes})
+            if changes.get("previews") == "all" and not new["read_headers"]:
+                raise ConfigError(EVERY_FILE_NEEDS_HEADERS)
+            s["library"] = new
+            self._save_settings(s)
+            return s["library"]
+
+    def set_memory(self, changes: Dict[str, Any]) -> Dict[str, Any]:
+        """Change the memory settings (reserve_gb, maximum_gb: a number or None; summary_cache_gb);
+        returns them all."""
+        unknown = sorted(set(changes) - set(MEMORY_DEFAULTS))
+        if unknown:
+            raise ConfigError(f"unknown memory setting(s) {unknown}; known: {sorted(MEMORY_DEFAULTS)}")
+        with self._lock:
+            s = self.settings()
+            s["memory"] = _check_memory({**s["memory"], **changes})
+            self._save_settings(s)
+            return s["memory"]
+
+    def set_explore(self, changes: Dict[str, Any]) -> Dict[str, Any]:
+        """Change the Explore settings (EXPLORE_DEFAULTS); returns them all."""
+        unknown = sorted(set(changes) - set(EXPLORE_DEFAULTS))
+        if unknown:
+            raise ConfigError(f"unknown Explore setting(s) {unknown}; known: {sorted(EXPLORE_DEFAULTS)}")
+        with self._lock:
+            s = self.settings()
+            s["explore"] = _check_explore({**s["explore"], **changes})
+            self._save_settings(s)
+            return s["explore"]
+
+    def set_measurements(self, changes: Dict[str, Any]) -> Dict[str, Any]:
+        """Change what the status of a file being measured shows (MEASUREMENTS_DEFAULTS, each
+        true or false); returns them all."""
+        unknown = sorted(set(changes) - set(MEASUREMENTS_DEFAULTS))
+        if unknown:
+            raise ConfigError(f"unknown measurement setting(s) {unknown}; known: {sorted(MEASUREMENTS_DEFAULTS)}")
+        with self._lock:
+            s = self.settings()
+            s["measurements"] = _check_measurements({**s["measurements"], **changes})
+            self._save_settings(s)
+            return s["measurements"]
+
+    def set_updates(self, changes: Dict[str, Any]) -> Dict[str, Any]:
+        """Change what the check for a new version keeps (UPDATES_DEFAULTS); returns it all."""
+        unknown = sorted(set(changes) - set(UPDATES_DEFAULTS))
+        if unknown:
+            raise ConfigError(f"unknown update setting(s) {unknown}; known: {sorted(UPDATES_DEFAULTS)}")
+        with self._lock:
+            s = self.settings()
+            s["updates"] = _check_updates({**s["updates"], **changes})
+            self._save_settings(s)
+            return s["updates"]
+
+    def reset_section(self, section: str) -> None:
+        """Put the settings of one Settings section back to their defaults."""
+        if section not in SETTINGS_SECTIONS:
+            raise ConfigError(f"no settings section {section!r}; known: {', '.join(SETTINGS_SECTIONS)}")
+        groups: Dict[str, Dict[str, Any]] = {}
+        for key in SETTINGS_SECTIONS[section]:
+            group, _, name = key.rpartition(".")
+            groups.setdefault(group, {})[name] = setting_default(key)
+        for name, value in groups.pop("", {}).items():
+            {"theme": self.set_theme, "open_files_in": self.set_open_files_in, "open_data_in": self.set_open_data_in}[name](value)
+        if "library" in groups:
+            self.set_library(groups["library"])
+        if "memory" in groups:
+            self.set_memory(groups["memory"])
+        if "measurements" in groups:
+            self.set_measurements(groups["measurements"])
+        if "explore" in groups:
+            self.set_explore(groups["explore"])
+
+    def set_first_start_done(self, done: bool) -> None:
+        """The first start's questions were answered (18.8): they aren't asked again."""
+        if not isinstance(done, bool):
+            raise ConfigError(f"first_start_done must be true or false, not {done!r}")
+        with self._lock:
+            s = self.settings()
+            s["first_start_done"] = done
+            self._save_settings(s)
+
+    def set_check_updates(self, on: bool) -> None:
+        """Whether the viewer asks GitHub for a newer version, once a day at a real start (16.25;
+        asked at the first start, 18.8). Until answered (None) it doesn't."""
+        if not isinstance(on, bool):
+            raise ConfigError(f"check_updates must be true or false, not {on!r}")
+        with self._lock:
+            s = self.settings()
+            s["check_updates"] = on
             self._save_settings(s)
 
     def set_theme(self, theme: str) -> None:
@@ -209,6 +483,96 @@ class Config:
                 warnings.append(f"This file asks for the style {file_style_name!r}, which doesn't exist here; "
                                 f"{default!r} is used.")
         return default
+
+
+def _check_library(library: Dict[str, Any]) -> Dict[str, Any]:
+    for key in ("read_headers", "notice_seen"):
+        if not isinstance(library.get(key), bool):
+            raise ConfigError(f"Library setting '{key}' must be true or false, not {library.get(key)!r}")
+    cols = library.get("columns")
+    if not isinstance(cols, list) or not cols or any(c not in LIBRARY_COLUMNS for c in cols):
+        raise ConfigError(f"Library 'columns' must be a list of {', '.join(LIBRARY_COLUMNS)}, not {cols!r}")
+    library = {**library, "columns": list(dict.fromkeys(cols))}                    # once each, in the order chosen
+    widths = library.get("column_widths")
+    if (not isinstance(widths, dict) or any(k not in LIBRARY_COLUMNS for k in widths)
+            or any(isinstance(w, bool) or not isinstance(w, int) or not 24 <= w <= 2000 for w in widths.values())):
+        raise ConfigError(f"Library 'column_widths' must map columns to widths of 24 to 2000 pixels, not {widths!r}")
+    scopes = library.get("sidebar_scopes")
+    if not isinstance(scopes, list) or "library" not in scopes or any(x not in SIDEBAR_SCOPES for x in scopes):
+        raise ConfigError(f"Library 'sidebar_scopes' must be a list of {', '.join(SIDEBAR_SCOPES)} with library in it, "
+                          f"not {scopes!r}")
+    library = {**library, "sidebar_scopes": [x for x in SIDEBAR_SCOPES if x in scopes]}   # in this order, once each
+    fields = library.get("sidebar_fields")
+    if not isinstance(fields, list) or any(f not in SIDEBAR_FIELDS for f in fields):
+        raise ConfigError(f"Library 'sidebar_fields' must be a list of {', '.join(SIDEBAR_FIELDS)}, not {fields!r}")
+    library = {**library, "sidebar_fields": list(dict.fromkeys(fields))}             # once each, in the order chosen
+    fields = library.get("card_fields")
+    if not isinstance(fields, list) or any(f not in SIDEBAR_FIELDS for f in fields):
+        raise ConfigError(f"Library 'card_fields' must be a list of {', '.join(SIDEBAR_FIELDS)}, not {fields!r}")
+    library = {**library, "card_fields": list(dict.fromkeys(fields))}                # once each, in the order chosen
+    for key, allowed in (("previews", PREVIEW_MODES), ("list_view", LIST_VIEWS), ("sidebar_layout", SIDEBAR_LAYOUTS),
+                         ("sidebar_main", SIDEBAR_MAIN), ("card_main", SIDEBAR_MAIN),
+                         ("data_file_edits", DATA_FILE_EDITS)):
+        if library.get(key) not in allowed:
+            raise ConfigError(f"Library setting '{key}' must be one of {', '.join(allowed)}, not {library.get(key)!r}")
+    zone = library.get("date_zone")     # "local", "file" or a zone's name: the page knows the names
+    if not isinstance(zone, str) or not 1 <= len(zone) <= 64:
+        raise ConfigError(f"Library setting 'date_zone' must be local, file or a time zone's name, not {zone!r}")
+    return {k: library[k] for k in LIBRARY_DEFAULTS}
+
+
+def _check_memory(memory: Dict[str, Any]) -> Dict[str, Any]:
+    for key in ("reserve_gb", "maximum_gb"):
+        x = memory.get(key)
+        if x is not None and (isinstance(x, bool) or not isinstance(x, (int, float)) or x < 0):
+            raise ConfigError(f"memory setting '{key}' must be a number of GB (≥ 0) or empty (automatic), not {x!r}")
+    x = memory.get("summary_cache_gb")
+    if isinstance(x, bool) or not isinstance(x, (int, float)) or x < 0:
+        raise ConfigError(f"memory setting 'summary_cache_gb' must be a number of GB (≥ 0), not {x!r}")
+    return {k: (None if memory[k] is None else float(memory[k])) for k in MEMORY_DEFAULTS}
+
+
+def _check_explore(e: Dict[str, Any]) -> Dict[str, Any]:
+    x = e.get("line_traces")
+    if isinstance(x, bool) or not isinstance(x, int) or x < 0:
+        raise ConfigError(f"Explore setting 'line_traces' must be a whole number of traces (≥ 0), not {x!r}")
+    n = e.get("new_panels")
+    if isinstance(n, bool) or not isinstance(n, int) or not 1 <= n <= MOST_PANELS:
+        raise ConfigError(f"Explore setting 'new_panels' must be a whole number from 1 to {MOST_PANELS}, not {n!r}")
+    keep = e.get("keep")
+    if not isinstance(keep, dict) or set(keep) - set(KEEP_DEFAULTS) or not all(isinstance(v, bool) for v in keep.values()):
+        raise ConfigError(f"Explore setting 'keep' must say true or false for some of {sorted(KEEP_DEFAULTS)}, not {keep!r}")
+    looks = e.get("looks")
+    good = isinstance(looks, dict) and all(
+        kind in LOOKS_DEFAULTS and isinstance(opts, dict) and all(k in LOOKS_DEFAULTS[kind] and isinstance(v, bool)
+                                                                  for k, v in opts.items())
+        for kind, opts in looks.items())
+    if not good:
+        raise ConfigError(f"Explore setting 'looks' must say true or false for these options: {LOOKS_DEFAULTS}, "
+                          f"not {looks!r}")
+    looks = {kind: {**opts, **looks.get(kind, {})} for kind, opts in LOOKS_DEFAULTS.items()}
+    return {**{k: e[k] for k in EXPLORE_DEFAULTS if k not in ("keep", "looks")}, "keep": {**KEEP_DEFAULTS, **keep},
+            "looks": looks}
+
+
+def _check_updates(u: Dict[str, Any]) -> Dict[str, Any]:
+    for key in ("last_check", "latest", "url"):
+        if u.get(key) is not None and not isinstance(u.get(key), str):
+            raise ConfigError(f"update setting '{key}' must be text or empty, not {u.get(key)!r}")
+    remind = u.get("remind")
+    if remind is not None and not (isinstance(remind, dict) and len(remind) == 1
+                                   and next(iter(remind)) in ("later", "never")
+                                   and isinstance(next(iter(remind.values())), str)):
+        raise ConfigError(f"update setting 'remind' must be {{\"later\": date}}, {{\"never\": version}} or empty, "
+                          f"not {remind!r}")
+    return {k: u[k] for k in UPDATES_DEFAULTS}
+
+
+def _check_measurements(m: Dict[str, Any]) -> Dict[str, Any]:
+    for k in MEASUREMENTS_DEFAULTS:
+        if not isinstance(m.get(k), bool):
+            raise ConfigError(f"measurement setting '{k}' must be true or false, not {m.get(k)!r}")
+    return {k: m[k] for k in MEASUREMENTS_DEFAULTS}
 
 
 def _same_path(a: str, b: str) -> bool:

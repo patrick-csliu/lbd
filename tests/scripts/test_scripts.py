@@ -139,7 +139,7 @@ def test_check_versions_on_the_repository(load_module, capsys):
     assert cv.main() == 0
     version = capsys.readouterr().out.strip()
     assert re.fullmatch(r"\d+\.\d+\.\d+(-dev)?", version) and cv.release_version() == version
-    assert cv.spec_version() == "1.0"
+    assert cv.spec_version() == "2.1"
 
 
 def test_check_versions_reports_a_mismatch(load_module, monkeypatch, capsys):
@@ -302,16 +302,19 @@ def test_test_all_summary(load_module, monkeypatch, capsys):
         def __init__(self, code):
             self.returncode, self.stdout, self.stderr = code, "out", ""
 
-    monkeypatch.setattr(ta, "run", lambda cmd, cwd: R(0))
+    monkeypatch.setattr(ta, "run", lambda cmd, cwd, env=None: R(0))
     monkeypatch.setattr(ta.shutil, "which", lambda name: None)
     langs = ta.discover()
     for lang in langs:
         monkeypatch.setattr(type(lang), "run", lambda self, cmd, **kw: R(0))
     monkeypatch.setattr(type(langs[0]), "missing_tool", lambda self, section: None)
+    made = []                                             # never into the repository from a test
+    monkeypatch.setattr(ta, "make_example_files", lambda: made.append(1))
     assert ta.main(["--fast"]) == 0
+    assert made == [1]                    # the language tests read examples/data: made once, first
     out = capsys.readouterr().out
     assert "skipped" in out and "PASSED, but" in out      # web type check skipped without npm
-    monkeypatch.setattr(ta, "run", lambda cmd, cwd: R(1))
+    monkeypatch.setattr(ta, "run", lambda cmd, cwd, env=None: R(1))
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     assert ta.main(["--fast"]) == 1
     out = capsys.readouterr().out
@@ -324,17 +327,85 @@ def test_test_all_annotates_failures_on_github(load_module, monkeypatch, capsys)
     class R:
         returncode, stdout, stderr = 1, "line 1\n50% done, a: b\n", ""
 
-    monkeypatch.setattr(ta, "run", lambda cmd, cwd: R())
+    monkeypatch.setattr(ta, "run", lambda cmd, cwd, env=None: R())
     monkeypatch.setattr(ta.shutil, "which", lambda name: None)
     langs = ta.discover()
     for lang in langs:
         monkeypatch.setattr(type(lang), "run", lambda self, cmd, **kw: R())
     monkeypatch.setattr(type(langs[0]), "missing_tool", lambda self, section: None)
+    monkeypatch.setattr(ta, "make_example_files", lambda: None)
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
-    assert ta.main(["--fast"]) == 1
+    assert ta.main(["--fast", "--workers", "1"]) == 1
     errors = [l for l in capsys.readouterr().out.splitlines() if l.startswith("::error")]
     assert errors and all("%0A" in e for e in errors)                  # one line per annotation
     assert "::error title=Viewer tests failed::line 1%0A50%25 done, a: b" in errors
+
+
+def test_test_all_runs_the_benchmark_only_when_needed(load_module, monkeypatch, capsys):
+    ta = load_module("scripts/test_all.py")
+    bench = load_module("scripts/benchmark_explore.py")
+    ran = []
+
+    class R:
+        returncode, stdout, stderr = 0, "", ""
+
+    def run(cmd, cwd, env=None):
+        ran.append(" ".join(map(str, cmd)))
+        return R()
+
+    monkeypatch.setattr(ta, "run", run)
+    monkeypatch.setattr(ta.shutil, "which", lambda name: None)
+    monkeypatch.setattr(ta, "discover", lambda: [])
+    monkeypatch.setattr(ta, "_e2e_missing", lambda: "not here")
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.setattr(bench, "why_run", lambda: None)               # drawing code unchanged
+    assert ta.main([]) == 0
+    assert not any("benchmark_explore" in c for c in ran) and "not needed" in capsys.readouterr().out
+    assert ta.main(["--fast", "--perf"]) == 0                          # asked for: runs anyway
+    assert any("benchmark_explore" in c for c in ran)
+    ran.clear()
+    monkeypatch.setattr(bench, "why_run", lambda: "drawing code changed")
+    assert ta.main(["--fast"]) == 0                                    # --fast never runs it
+    assert not any("benchmark_explore" in c for c in ran)
+    assert ta.main([]) == 0
+    assert any("benchmark_explore" in c for c in ran)
+    ran.clear()
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")                       # shared machines: never
+    ta.main(["--perf"])
+    assert not any("benchmark_explore" in c for c in ran)
+
+
+def test_benchmark_baseline_is_this_computers_recent_passed_runs(load_module):
+    bench = load_module("scripts/benchmark_explore.py")
+
+    def run(t, passed=True, accepted=False):
+        return {"times": {"full view": t}, "passed": passed, "accepted": accepted}
+
+    runs = [run(500), run(100), run(110), run(999, passed=False), run(90), run(100), run(105), run(95)]
+    assert bench.baseline(runs) == {"full view": 100}      # the last 5 passed; the failed one left out
+    runs.append(run(200, passed=False, accepted=True))     # a wanted slowdown, accepted
+    assert bench.baseline(runs) == {"full view": 200}
+    assert bench.baseline([]) == {}
+
+
+def test_benchmark_runs_when_drawing_code_changed(load_module, monkeypatch, tmp_path):
+    bench = load_module("scripts/benchmark_explore.py")
+    monkeypatch.setattr(bench, "HISTORY", tmp_path / "explore.jsonl")
+    assert bench.why_run() == "no earlier run on this computer"
+    other = {"machine": "another computer", "commit": "abc", "times": {}}
+    bench.HISTORY.write_text(json.dumps(other) + "\n", encoding="utf-8")
+    assert bench.why_run() == "no earlier run on this computer"        # other computers don't count
+    here = {"machine": bench.machine(), "commit": "abc", "times": {}}
+    bench.HISTORY.write_text(json.dumps(other) + "\n" + json.dumps(here) + "\n", encoding="utf-8")
+    answers = {"cat-file": "", "diff": "", "ls-files": ""}
+    monkeypatch.setattr(bench, "git", lambda *args: answers[args[0]])
+    assert bench.why_run() is None
+    answers["diff"] = "viewer/src/lbd_viewer/explore.py"
+    assert "explore.py" in bench.why_run()
+    answers["diff"], answers["ls-files"] = "", "languages/python/src/lbd/plot/new.py"   # a new file
+    assert "new.py" in bench.why_run()
+    answers["cat-file"] = None                                         # e.g. after a rebase
+    assert bench.why_run() == "the last run's commit is unknown here"
 
 
 # ---- crosslang runner ----------------------------------------------------------------------------
@@ -378,3 +449,82 @@ def test_docs_site_is_published_from_releases_only():
     # Inputs reach the script as variables, never pasted into it (script injection).
     assert not any("${{" in s.get("run", "") for s in steps)
     assert re.search(r"^site_url: https://patrick-csliu\.github\.io/lbd/", (REPO / "mkdocs.yml").read_text(encoding="utf-8"), re.M)
+
+
+def test_test_all_runs_what_a_change_affects(load_module):
+    ta = load_module("scripts/test_all.py")
+    every = {"python", "matlab", "julia", "viewer", "tools", "web", "docs", "examples", "crosslang", "e2e"}
+    langs = ["python", "matlab", "julia"]
+
+    def picked(*paths):
+        return sorted(ta.affected(list(paths), every, langs))
+
+    assert picked("languages/matlab/+lbd/Dataset.m") == ["crosslang", "examples", "matlab"]
+    assert picked("languages/julia/crosslang/check.jl") == ["crosslang"]
+    assert picked("tests/crosslang/README.md") == ["crosslang", "docs"]           # included in the docs
+    assert {"viewer", "e2e", "tools"} <= set(picked("languages/python/src/lbd/io.py"))   # the viewer is built on it
+    assert picked("viewer/web/src/App.tsx") == ["e2e", "web"]
+    assert picked("docs/matlab.md") == ["docs", "examples"]
+    assert picked("planning/plans/x.md", "CLAUDE.md") == []
+    assert picked("something/new.txt") == sorted(every)                  # not known: everything
+    assert picked("viewer/src/lbd_viewer/server.py", "spec/LBD-v1.md") == ["docs", "e2e", "viewer"]
+    # the language tests read the files make_examples.py writes
+    assert picked("examples/make_examples.py") == ["julia", "matlab", "python", "tools", "viewer"]
+
+
+def test_test_all_only_and_side_by_side(load_module, monkeypatch, capsys):
+    ta = load_module("scripts/test_all.py")
+    ran = []
+
+    class R:
+        returncode, stdout, stderr = 0, "", ""
+
+    def run(cmd, cwd, env=None):
+        ran.append(" ".join(map(str, cmd)))
+        return R()
+
+    monkeypatch.setattr(ta, "run", run)
+    monkeypatch.setattr(ta.shutil, "which", lambda name: None)
+    monkeypatch.setattr(ta, "discover", lambda: [])
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    assert ta.main(["--only", "docs", "tools", "--jobs", "4", "--workers", "1"]) == 0
+    out = capsys.readouterr().out
+    assert "Docs build (strict)" in out and "Script and packaging tests" in out and "Viewer tests" not in out
+    assert "PASSED (2 of" in out and len(ran) == 2
+    with pytest.raises(SystemExit):
+        ta.main(["--only", "nonsense"])
+    ran.clear()
+    assert ta.main(["--fast", "--jobs", "1", "--workers", "1"]) == 0 and len(ran) == 4   # one after the other: the same suites
+
+
+def test_test_all_reruns_viewer_tests_that_failed_side_by_side(load_module, monkeypatch, capsys):
+    ta = load_module("scripts/test_all.py")
+    calls = []
+
+    class R:
+        def __init__(self, code, out=""):
+            self.returncode, self.stdout, self.stderr = code, out, ""
+
+    envs = []
+
+    def run(cmd, cwd, env=None):
+        calls.append(cmd)
+        if "--lf" in cmd:
+            envs.append(env)
+            return R(0)                                    # alone: passes
+        if "viewer/tests/e2e" in cmd:
+            return R(1, "FAILED viewer/tests/e2e/test_x.py::test_slow - timeout\n")
+        return R(0)
+
+    monkeypatch.setattr(ta, "run", run)
+    monkeypatch.setattr(ta.shutil, "which", lambda name: None)
+    monkeypatch.setattr(ta, "discover", lambda: [])
+    monkeypatch.setattr(ta, "_e2e_missing", lambda: "")
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    assert ta.main(["--only", "e2e"]) == 0
+    out = capsys.readouterr().out
+    assert "test_slow failed side by side, passed alone" in out
+    assert any("--lf" in c for c in calls)
+    # a shard's failures run again without the shard (it would deselect them: --lf keeps fewer files)
+    assert ta.main(["--only", "e2e", "--shard", "1/2"]) == 0
+    assert envs[-1] is None or "LBD_SHARD" not in envs[-1]

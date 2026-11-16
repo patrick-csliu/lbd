@@ -44,6 +44,9 @@ from lbd_viewer import server  # noqa: E402
 from lbd_viewer.config import Config  # noqa: E402
 from lbd_viewer.server import AppState, create_app  # noqa: E402
 
+sys.path.append(str(REPO / "examples"))
+from make_examples import ensure_examples  # noqa: E402
+
 VIEWER_IMG = REPO / "docs" / "viewer" / "img"
 QUICKSTART_IMG = REPO / "docs" / "getting-started" / "img"
 TOKEN = "screenshots"
@@ -56,6 +59,9 @@ Mark = Tuple[int, str, int, str]
 
 MARK_JS = r"""
 (marks) => {
+  // a neutral example path instead of the scratch folder's (first: a shorter path can move the page)
+  for (const el of document.querySelectorAll(".path, .path-line .path-folder"))
+    el.textContent = el.textContent.replace(/^.*[\\/]Lab data/, String.raw`C:\Users\me\Documents\Lab data`);
   document.getElementById("doc-marks")?.remove();
   const layer = document.createElement("div");
   layer.id = "doc-marks";
@@ -77,10 +83,7 @@ MARK_JS = r"""
       "text-align:center;border:2px solid #fff;box-shadow:0 1px 4px rgb(0 0 0/.4);box-sizing:content-box";
     layer.append(box, dot);
   }
-  document.body.append(layer);
-  // a neutral example path instead of the scratch folder's
-  for (const el of document.querySelectorAll(".path"))
-    el.textContent = el.textContent.replace(/^.*[\\/]Lab data/, String.raw`C:\Users\me\Documents\Lab data`);
+  (document.querySelector("dialog[open]") || document.body).append(layer);   // above an open dialog
 }
 """
 
@@ -115,7 +118,7 @@ def make_files(folder: Path) -> None:
     d.meta["T_mK"] = 12
     d.save(folder / "sweep.lbd")
 
-    shutil.copytree(REPO / "examples" / "data", folder / "examples")
+    ensure_examples(folder / "examples")             # examples/make_examples.py
 
     # values on two different axes, and a single number
     delay = np.logspace(-7, -3.5, 60)
@@ -128,6 +131,20 @@ def make_files(folder: Path) -> None:
     d.add_value("S_V", 1e-15 * (1 / freq ** 0.92 + 3e-4), axes="f", unit="V²/Hz", label="S_V")
     d.add_value("T1", 21e-6, unit="s", label="T1")
     d.save(folder / "t1_noise.lbd")
+
+    # several recorded values (panels): the Rabi mock file of the viewer's tests
+    sys.path.insert(0, str(REPO / "viewer" / "tests"))
+    import mock_values
+
+    mock_values.rabi(small=False).save(folder / "rabi_readout.lbd")
+    mock_values.density_matrix(small=False).save(folder / "density_matrix.lbd")
+    mock_values.single_shot_iq(small=False).save(folder / "single_shot_iq.lbd")
+    mock_values.variable_sweep(small=False).save(folder / "variable_sweep.lbd")
+
+    # a library of measurements over two years (the Library's list): the viewer tests' mock library
+    import mock_library
+
+    mock_library.write_library(folder / "Lab library", 120)
 
     # a parameter that wasn't swept: an axis with one point
     d = lbd.Dataset(title="Resonator at one power")
@@ -146,6 +163,13 @@ def start_viewer(data: Path) -> Tuple[str, uvicorn.Server]:
         port = s.getsockname()[1]
     cfg = Config(SCRATCH / "config")
     cfg.add_root(str(data))
+    # the Files sidebar offers every list; most shots open files from its folder tree (see main)
+    cfg.set_library({"sidebar_scopes": ["library", "folders", "starred", "recent"]})
+    # the pictures show files with several values in several panels (a new file opens with one, 16.45)
+    cfg.set_explore({"new_panels": 4})
+    # past the first start's questions (18.8), never online
+    cfg.set_first_start_done(True)
+    cfg.set_check_updates(False)
     state = AppState(cfg, token=TOKEN, port=port)
     srv = uvicorn.Server(uvicorn.Config(create_app(state), host="127.0.0.1", port=port, log_level="warning"))
     threading.Thread(target=srv.run, daemon=True).start()
@@ -208,10 +232,12 @@ def region(page: Page, selector: str, pad: int = 12, nth: int = 0, extra_right: 
             "height": min(SIZE["height"] - y, box["height"] + 2 * pad + extra_bottom)}
 
 
-def fresh(page: Page, url: str) -> None:
-    """A new page with nothing open (tabs are not restored)."""
+def fresh(page: Page, url: str, workspace: str = "Figure") -> None:
+    """A new page with nothing open (tabs are not restored), showing a workspace (most shots are
+    of Figure)."""
     page.goto(url)
     page.locator(".page-badge").wait_for()
+    page.get_by_role("tab", name=workspace, exact=True).click()
     page.wait_for_timeout(500)
 
 
@@ -235,7 +261,7 @@ def overview(page: Page, url: str, ctx) -> None:
         (3, ".settings", 0, "b"),
         (4, ".help-button", 0, "b"),
         (5, ".sidebar", 0, "r"),
-        (6, ".tabs .tab", 0, "b"),
+        (6, "main:not([hidden]) .tabs .tab", 0, "b"),
         (7, ".tab-body:not([hidden]) .file-head", 0, "r"),
         (8, ".tab-body:not([hidden]) .controls", 0, "tr"),
         (9, ".tab-body:not([hidden]) .figure-toolbar", 0, "b"),
@@ -246,6 +272,256 @@ def overview(page: Page, url: str, ctx) -> None:
 
 
 @shot
+def explore(page: Page, url: str, ctx) -> None:
+    fresh(page, url, "Explore")
+    page.locator(".row-label", has_text="sweep.lbd").first.dblclick()
+    host = page.locator("main:not([hidden]) .explore-overlay")
+    page.locator("main:not([hidden]) .explore-note").first.wait_for()
+    page.wait_for_timeout(800)
+    box = host.bounding_box()
+    page.mouse.click(box["x"] + box["width"] * 0.45, box["y"] + box["height"] * 0.5)   # read a cell
+    page.locator("main:not([hidden]) .explore-pick").wait_for()
+    page.keyboard.press("c")                    # without the cuts (shown in reading.png): all fits
+    page.wait_for_timeout(1500)
+    mark(page, [                                # the numbers of the list in explore.md
+        (1, ".pages", 0, "b"),
+        (2, "main:not([hidden]) .tabs .tab", 0, "b"),
+        (3, "main:not([hidden]) .controls-section", 0, "r"),
+        (4, "main:not([hidden]) .explore-toolbar .ib", 0, "b"),
+        (5, "main:not([hidden]) .explore-readout", 0, "b"),
+        (6, "main:not([hidden]) .explore-host", 0, "tr"),
+        (7, "main:not([hidden]) .inspector-tabs", 0, "l"),
+    ])
+    save(page, VIEWER_IMG / "explore.png")
+
+
+@shot
+def explore_reading(page: Page, url: str, ctx) -> None:
+    fresh(page, url, "Explore")
+    page.locator(".row-label", has_text="sweep.lbd").first.dblclick()
+    host = page.locator("main:not([hidden]) .explore-overlay")
+    page.locator("main:not([hidden]) .explore-note").first.wait_for()
+    explore_area = page.locator("main:not([hidden])")
+    explore_area.get_by_label("Plot type").select_option("heatmap")               # the sweep as a map
+    page.wait_for_timeout(1200)
+    explore_area.get_by_label("Complex values").select_option("db")
+    page.wait_for_timeout(1500)
+    box = host.bounding_box()
+    page.mouse.click(box["x"] + box["width"] * 0.35, box["y"] + box["height"] * 0.45)      # cursor 1
+    page.locator("main:not([hidden]) .explore-pick").first.wait_for()
+    page.keyboard.down("Shift")
+    page.mouse.click(box["x"] + box["width"] * 0.6, box["y"] + box["height"] * 0.7)        # cursor 2
+    page.keyboard.up("Shift")
+    page.locator("main:not([hidden]) .explore-pick").nth(1).wait_for()
+    cuts = explore_area.get_by_role("button", name="Cuts")             # the explore shot left them off
+    if cuts.get_attribute("aria-pressed") != "true":
+        cuts.click()
+    page.locator("main:not([hidden]) .explore-cut-top").first.wait_for()
+    page.wait_for_timeout(600)
+    mark(page, [
+        (1, "main:not([hidden]) .explore-cut-top", 0, "l"),
+        (2, "main:not([hidden]) .explore-cut-right", 0, "t"),
+        (3, "main:not([hidden]) .explore-host", 0, "tr"),
+    ])
+    save(page, VIEWER_IMG / "reading.png")
+
+
+@shot
+def explore_operations(page: Page, url: str, ctx) -> None:
+    fresh(page, url, "Explore")
+    page.locator(".row-label", has_text="sweep.lbd").first.dblclick()
+    area = page.locator("main:not([hidden])")
+    page.locator("main:not([hidden]) .explore-note").first.wait_for()
+    area.get_by_label("Plot type").select_option("heatmap")
+    page.wait_for_timeout(1200)
+    area.get_by_label("Complex values").select_option("db")
+    page.wait_for_timeout(1200)
+    summary = area.locator(".controls-section > summary", has_text="Processing")
+    if summary.locator("xpath=..").get_attribute("open") is None:
+        summary.click()
+    area.locator(".operations").get_by_role("button", name="+ Add operation ▾").click()
+    page.locator(".context-menu").get_by_role("menuitem", name="Subtract the mean", exact=True).click()
+    page.wait_for_timeout(1000)
+    area.get_by_label("Subtract the mean: along").select_option("traces")      # along Power: the background
+    page.wait_for_timeout(2000)
+    mark(page, [
+        (1, "main:not([hidden]) .operations", 0, "r"),
+        (2, "main:not([hidden]) .explore-host", 0, "tr"),
+    ])
+    save(page, VIEWER_IMG / "operations.png")
+
+
+@shot
+def bars3d(page: Page, url: str, ctx) -> None:
+    """A density matrix as 3D bars, Re and Im side by side."""
+    fresh(page, url, "Explore")
+    page.locator(".row-label", has_text="density_matrix.lbd").first.dblclick()
+    plot = page.locator("main:not([hidden])").get_by_label("Plot type")
+    plot.wait_for()
+    page.wait_for_timeout(800)
+    plot.select_option("bars3d")
+    page.wait_for_timeout(1500)
+    page.locator("main:not([hidden]) .controls input[type=range]").fill("7")      # a step with an imaginary part
+    page.wait_for_timeout(2000)
+    save(page, VIEWER_IMG / "bars3d.png", region(page, "main:not([hidden]) .explore-stage", pad=0))
+
+
+@shot
+def explore_group_map(page: Page, url: str, ctx) -> None:
+    fresh(page, url, "Explore")
+    page.locator(".row-label", has_text="variable_sweep.lbd").first.dblclick()
+    area = page.locator("main:not([hidden])")
+    area.get_by_label("Plot type").select_option("heatmap")
+    page.wait_for_timeout(2000)
+    save(page, VIEWER_IMG / "explore_group_map.png", region(page, "main:not([hidden]) .explore-stage", pad=0))
+
+
+@shot
+def explore_histogram(page: Page, url: str, ctx) -> None:
+    fresh(page, url, "Explore")
+    page.locator(".row-label", has_text="single_shot_iq.lbd").first.dblclick()
+    area = page.locator("main:not([hidden])")
+    area.get_by_label("Plot type").select_option("histogram")
+    page.wait_for_timeout(1200)
+    area.get_by_role("checkbox", name="I (V)", exact=True).check()
+    page.wait_for_timeout(1500)
+    mark(page, [
+        (1, "main:not([hidden]) .axes-choice", 0, "r"),
+        (2, "main:not([hidden]) .explore-host", 0, "tr"),
+    ])
+    save(page, VIEWER_IMG / "explore_histogram.png")
+
+
+@shot
+def explore_scatter(page: Page, url: str, ctx) -> None:
+    fresh(page, url, "Explore")
+    page.locator(".row-label", has_text="single_shot_iq.lbd").first.dblclick()
+    area = page.locator("main:not([hidden])")
+    area.get_by_label("Plot type").select_option("scatter")
+    page.wait_for_timeout(1500)
+    mark(page, [
+        (1, "main:not([hidden]) .axes-choice", 0, "r"),
+        (2, "main:not([hidden]) .explore-cut-top", 0, "tr"),
+    ])
+    save(page, VIEWER_IMG / "explore_scatter.png")
+
+
+@shot
+def explore_equations(page: Page, url: str, ctx) -> None:
+    fresh(page, url, "Explore")
+    page.locator(".row-label", has_text="sweep.lbd").first.dblclick()
+    area = page.locator("main:not([hidden])")
+    page.locator("main:not([hidden]) .explore-note").first.wait_for()
+    area.get_by_label("Complex values").select_option("db")
+    page.wait_for_timeout(1200)
+    for section in ("Processing",):             # folded at first
+        summary = area.locator(".controls-section > summary", has_text=section)
+        if summary.locator("xpath=..").get_attribute("open") is None:
+            summary.click()
+    area.locator(".equations > summary").click()
+    area.locator(".eq-names > summary").click()
+    box = area.get_by_label("Equation for z")
+    box.fill("z - max(z)")                      # each power's row against its own maximum
+    box.press("Enter")
+    page.wait_for_timeout(1500)
+    area.locator(".equations").scroll_into_view_if_needed()
+    page.wait_for_timeout(300)
+    mark(page, [
+        (1, "main:not([hidden]) .eq-legend", 0, "r"),
+        (2, "main:not([hidden]) .eq-field", 2, "r"),
+    ])
+    save(page, VIEWER_IMG / "equations.png", clip=region(page, "main:not([hidden]) .operations", pad=16, extra_right=40))
+
+
+@shot
+def explore_panels(page: Page, url: str, ctx) -> None:
+    page.set_viewport_size({"width": SIZE["width"], "height": 1420})   # the panels and the Cursors section
+    fresh(page, url, "Explore")
+    page.locator(".row-label", has_text="rabi_readout.lbd").first.dblclick()
+    area = page.locator("main:not([hidden])")
+    expect_pictures = area.locator(".panel .explore-picture")
+    for k in range(4):
+        expect_pictures.nth(k).wait_for()
+    page.wait_for_timeout(1500)
+    box = area.locator(".panel .explore-overlay").nth(0).bounding_box()
+    page.mouse.click(box["x"] + box["width"] * 0.42, box["y"] + box["height"] * 0.5)   # one cursor in every panel
+    if not area.locator(".inspector-body").is_visible():
+        area.get_by_role("tab", name="Cursors").click()       # the inspector folded at this width
+    area.locator(".cursor-others").wait_for()
+    page.mouse.move(5, 400)                     # no mouse position over the plots
+    page.wait_for_timeout(1500)
+    mark(page, [                                # the numbers of the list in explore.md
+        (1, "main:not([hidden]) .panel-bar button", 0, "L"),
+        (2, "main:not([hidden]) .panel.active", 0, "L"),
+        (3, "main:not([hidden]) .panel-title", 1, "t"),
+        (4, "main:not([hidden]) .controls fieldset", 0, "r"),
+        (5, "main:not([hidden]) .panel-sync", 0, "b"),
+    ])
+    save(page, VIEWER_IMG / "panels.png")
+    page.set_viewport_size(SIZE)
+
+
+LABEL_JS = r"""
+async () => {
+  // a few labels, as people give them, so the label trees on the left aren't empty
+  const h = { "x-lbd-token": sessionStorage.getItem("lbd-token"), "content-type": "application/json" };
+  const r = await (await fetch("/api/library/list?q=&date=&sort=date&order=desc&offset=0&limit=60", { headers: h })).json();
+  const paths = r.rows.filter((x) => !x.error && !x.writing).map((x) => x.path);
+  const post = (ps, c) => fetch("/api/library/labels", { method: "POST", headers: h, body: JSON.stringify({ paths: ps, ...c }) });
+  await post(paths.filter((_, i) => i % 3 === 0), { project: "Qubit A/Device 3", add_users: ["Alice"], add_tags: ["cooldown-7"] });
+  await post(paths.filter((_, i) => i % 3 === 1), { project: "Resonator B", add_users: ["Bob"], add_tags: ["calibration"] });
+  await post(paths.filter((_, i) => i % 7 === 2), { star: true, add_tags: ["good fit"] });
+}
+"""
+
+
+def give_labels(page: Page) -> None:
+    page.evaluate(LABEL_JS)
+    page.locator(".library-tree[aria-label='Tags']").wait_for(timeout=15_000)
+
+
+@shot
+def library(page: Page, url: str, ctx) -> None:
+    fresh(page, url, "Library")
+    page.locator(".library-row").first.wait_for(timeout=60_000)   # the index reads the files first
+    give_labels(page)
+    page.get_by_label("Search the files").fill("resonator")       # a search, shown as it is used
+    rows = page.locator(".library-row", has_text="Late resonator sweep")
+    rows.first.wait_for()
+    rows.first.click()
+    page.locator(".library-detail h1", has_text="Late resonator sweep").wait_for()
+    page.locator(".library-detail .library-preview img").wait_for(timeout=60_000)   # drawn by the server
+    page.mouse.move(5, 400)
+    page.wait_for_timeout(800)
+    mark(page, [                                # the numbers of the list in library.md
+        (1, ".library-tree[aria-label='Folders']", 0, "r"),
+        (2, ".library-tree[aria-label='Dates']", 0, "r"),
+        (3, ".library-search", 0, "r"),
+        (4, ".library-head", 0, "b"),
+        (5, ".library-detail .library-file-head", 0, "L"),
+    ])
+    save(page, VIEWER_IMG / "library.png")
+
+
+@shot
+def library_pictures(page: Page, url: str, ctx) -> None:
+    fresh(page, url, "Library")
+    page.locator(".library-row").first.wait_for(timeout=60_000)
+    page.get_by_role("button", name="Pictures", exact=True).click()
+    cards = page.locator(".library-card:not(.loading)")
+    cards.nth(1).click()
+    page.wait_for_function(                             # the pictures in view, drawn (or why not)
+        "() => [...document.querySelectorAll('.library-card:not(.loading)')].every(c => !c.textContent.includes('Drawing'))",
+        timeout=60_000)
+    page.locator(".library-detail .library-file-head").wait_for()   # (no second preview on the right)
+    page.mouse.move(5, 400)
+    page.wait_for_timeout(800)
+    mark(page, [])                                      # no numbers; the path as on the other shots
+    save(page, VIEWER_IMG / "library-pictures.png")
+    page.get_by_role("button", name="List", exact=True).click()   # as the other shots expect
+
+
+@shot
 def folders(page: Page, url: str, ctx) -> None:
     fresh(page, url)
     expand(page, "examples")
@@ -253,13 +529,39 @@ def folders(page: Page, url: str, ctx) -> None:
     page.locator(".context-menu").wait_for()
     mark(page, [
         (1, ".sidebar .filter", 0, "r"),
-        (2, ".sidebar .panel-head .actions", 0, "tl"),
+        (2, ".sidebar .filter-row .icon", 0, "r"),
         (3, ".sidebar .root-row", 0, "r"),
         (4, ".sidebar .dir-row", 0, "r"),
         (5, ".sidebar .file-row", 0, "r"),
         (6, ".context-menu", 0, "tr"),
     ])
     save(page, VIEWER_IMG / "folders.png", clip={"x": 0, "y": 0, "width": 640, "height": 520})
+
+
+@shot
+def files_sidebar(page: Page, url: str, ctx) -> None:
+    fresh(page, url, "Library")
+    page.locator(".library-row").first.wait_for(timeout=60_000)
+    page.get_by_label("Search the files").fill("resonator")
+    page.locator(".library-row", has_text="Late resonator sweep").first.wait_for()
+    page.get_by_role("tab", name="Figure", exact=True).click()
+    page.locator(".files-scope").select_option("library")
+    # narrows the sidebar only (labels match "resonator" too, so the list is long)
+    page.locator(".sidebar").get_by_label("Search in these files").fill("late")
+    row = page.locator(".files-row", has_text="Late resonator sweep").first
+    row.dblclick()                                       # in Figure: plotted (a click shows what is inside)
+    page.locator(".tab-body:not([hidden]) .figure img").first.wait_for()
+    settle(page)
+    page.locator(".sidebar .files-row.active").wait_for()
+    page.wait_for_timeout(400)
+    mark(page, [
+        (1, ".sidebar .files-scope", 0, "L"),
+        (2, ".sidebar .files-filters", 0, "r"),
+        (3, ".sidebar .filter", 0, "r"),
+        (4, ".sidebar .files-row.active", 0, "r"),
+        (5, ".sidebar .sidebar-toggle", 0, "r"),
+    ])
+    save(page, VIEWER_IMG / "files-sidebar.png", clip={"x": 0, "y": 0, "width": 720, "height": 560})
 
 
 @shot
@@ -349,31 +651,34 @@ def tabs_menu(page: Page, url: str, ctx) -> None:
 def settings(page: Page, url: str, ctx) -> None:
     fresh(page, url)
     page.get_by_role("button", name="Settings").click()
-    pop = page.locator(".settings-popover")
-    pop.wait_for()
+    dialog = page.locator("dialog.settings-dialog")
+    dialog.wait_for()
+    dialog.get_by_role("tab", name="Library").click()
+    page.wait_for_timeout(300)
     mark(page, [
-        (1, ".settings-popover .settings-title", 0, "L"),
-        (2, ".settings-popover .settings-title", 1, "L"),
+        (1, ".settings-sections", 0, "r"),
+        (2, ".settings-find", 0, "b"),
+        (3, ".setting-row", 0, "l"),
     ])
-    box = pop.bounding_box()
-    save(page, VIEWER_IMG / "settings.png", clip={"x": box["x"] - 48, "y": 0, "width": SIZE["width"] - box["x"] + 48,
-                                                  "height": box["y"] + box["height"] + 16})
+    box = dialog.bounding_box()
+    save(page, VIEWER_IMG / "settings.png", clip={"x": box["x"] - 40, "y": box["y"] - 16, "width": box["width"] + 80,
+                                                  "height": box["height"] + 32})
 
 
 @shot
 def styles_page(page: Page, url: str, ctx) -> None:
     fresh(page, url)
     open_file(page, "sweep.lbd")               # the preview shows the open file
-    page.get_by_role("tab", name="Styles").click()
+    page.get_by_role("button", name="Styles", exact=True).click()
     page.locator(".style-editor").wait_for()
-    page.locator(".preview img").wait_for()
+    page.locator(".styles-preview img").wait_for()
     page.wait_for_timeout(800)
     mark(page, [
         (1, ".style-list ul", 0, "r"),
         (2, ".style-list .panel-head .actions", 0, "b"),
         (3, ".editor-head .actions", 0, "tl"),
         (4, ".style-editor .group", 0, "tl"),
-        (5, ".preview", 0, "tl"),
+        (5, ".styles-preview", 0, "tl"),
     ])
     save(page, VIEWER_IMG / "styles-page.png")
 
@@ -381,7 +686,7 @@ def styles_page(page: Page, url: str, ctx) -> None:
 @shot
 def language_modules(page: Page, url: str, ctx) -> None:
     fresh(page, url)
-    page.get_by_role("tab", name="Language modules").click()
+    page.get_by_role("button", name="Language modules", exact=True).click()
     page.locator(".sdk-page").wait_for()
     page.wait_for_timeout(500)
     # Shown as an installed viewer shows it: its module folder, not this checkout's.
@@ -457,6 +762,8 @@ def main(names: List[str]) -> int:
             for name in [n.replace("-", "_") for n in names] or list(SHOTS):
                 # a fresh browser window per shot: one page, nothing left from the shot before
                 ctx = browser.new_context(viewport=SIZE, color_scheme="light")
+                ctx.add_init_script("try { if (!sessionStorage.getItem('lbd-sidebar-scope')) "
+                                    "sessionStorage.setItem('lbd-sidebar-scope', 'folders') } catch (e) {}")
                 ctx.set_default_timeout(15_000)
                 page = ctx.new_page()
                 SHOTS[name](page, url, ctx)

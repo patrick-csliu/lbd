@@ -3,6 +3,7 @@
     lbd-view                      open the viewer
     lbd-view file.lbd             open a file (this is what double-clicking runs)
     lbd-view some/folder          add a folder to the folder panel and open the viewer
+    lbd-view --stop               stop the running viewer gently (the installers use this)
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import socket
 import sys
 import threading
@@ -26,6 +28,7 @@ import platformdirs
 import lbd
 
 from . import VERSION
+from . import updates
 from .config import Config, ConfigError
 from .server import AppState, create_app
 
@@ -158,6 +161,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--dev", action="store_true",
                     help="development: port 8765, token 'dev', never exit; for the Vite dev server")
     ap.add_argument("--new", action="store_true", help="always start a new server")
+    ap.add_argument("--stop", action="store_true",
+                    help="stop the running viewer (labels waiting are written first) and exit")
     ap.add_argument("--version", action="version", version=f"lbd-view {VERSION}")
     return ap
 
@@ -167,6 +172,7 @@ class Running:
 
     def __init__(self, state: AppState, server, port: int, lock: Optional[Path]):
         self.state, self.server, self.port, self.lock = state, server, port, lock
+        self.notice: Optional[str] = None     # for the user at the start (an older version: _note_version)
 
     def url(self, open_path: Optional[str] = None) -> str:
         return viewer_url(self.port, self.state.token, open_path)
@@ -182,6 +188,14 @@ class Running:
         try:
             self.server.run()
         finally:
+            # Stopping. A second Ctrl+C now would cut short what follows (writing labels), so it
+            # is ignored until the end; closing the window still stops at once.
+            with _ignoring_ctrl_c():
+                _wait_for_requests()             # a save still running finishes first
+                try:
+                    self.state.close()           # labels still waiting are written into their files
+                except Exception as e:           # noqa: BLE001 - stopping anyway; said in the log
+                    print(f"lbd-view: while stopping: {e}", file=sys.stderr)
             if self.lock:
                 try:
                     if json.loads(self.lock.read_text(encoding="utf-8")).get("pid") == os.getpid():
@@ -190,8 +204,101 @@ class Running:
                     pass
 
 
+GRACEFUL_STOP = 2.0     # seconds the server waits for running requests (a save) to answer when stopping
+WAKE_GRACE = 15.0       # after the computer woke up, the open pages have this long to say they are there
+
+
+class IdleWatch:
+    """When the viewer stops by itself (`--idle-exit`): `idle` seconds after the last page's last
+    heartbeat (every 10 s from each open page), or 60 s or more if no page ever came.
+
+    After the computer slept, the clock has moved on (on Windows the monotonic clock counts the
+    sleep), so the first look would see a long silence and stop the viewer under an open page.
+    A look that comes much later than its TICK means the computer slept: the pages then get
+    WAKE_GRACE seconds to send their next heartbeat (plan 16.17)."""
+
+    TICK = 2.0
+
+    def __init__(self, idle: float, clock: Callable[[], float] = time.monotonic):
+        self.idle, self.clock = idle, clock
+        self.last_look = clock()
+        self.not_before = 0.0
+
+    def should_stop(self, last_heartbeat: Optional[float], started: float) -> bool:
+        if self.idle <= 0:                       # 0: never
+            return False
+        now = self.clock()
+        if now - self.last_look > 3 * self.TICK:  # this watch didn't run: the computer slept
+            self.not_before = now + WAKE_GRACE
+        self.last_look = now
+        if now < self.not_before:
+            return False
+        limit = self.idle if last_heartbeat else max(self.idle, 60)   # the first tab needs time to start
+        return now - (last_heartbeat or started) > limit
+
+
+def _make_server(config, on_stop: Callable[[], None]):
+    """The uvicorn server, with a quick and quiet stop (plan 16.16).
+
+    - `on_stop` runs as the stop begins: the open pages' waiting requests (long polls) answer at
+      once, so the server doesn't wait for them.
+    - Ctrl+C (Ctrl+Break, or the system asking the program to stop) stops it; a second one
+      stops it without waiting. uvicorn's own handler raises the signal again once the server
+      has stopped: that printed a KeyboardInterrupt traceback, and on Windows a Ctrl+Break
+      ended the program before the waiting labels were written. This one doesn't.
+    """
+    import uvicorn  # imported late: it is slow to import and not needed when reusing a server
+
+    class Server(uvicorn.Server):
+        def handle_exit(self, sig, frame) -> None:
+            if self.should_exit:
+                self.force_exit = True
+            else:
+                self.should_exit = True
+
+        async def shutdown(self, sockets=None) -> None:
+            on_stop()
+            await super().shutdown(sockets)
+
+    return Server(config)
+
+
+def _wait_for_requests() -> None:
+    """Wait for requests still running in their threads after the server stopped (a save that
+    takes longer than GRACEFUL_STOP), so the data is written before the program ends."""
+    running = [t for t in threading.enumerate()
+               if t.name == "AnyIO worker thread" and t is not threading.current_thread()]
+    if not running:
+        return
+    for t in running:
+        t.join(timeout=1.0)
+    if any(t.is_alive() for t in running):
+        print("lbd-view: waiting for a save to finish...", file=sys.stderr, flush=True)
+        for t in running:
+            t.join()
+
+
+class _ignoring_ctrl_c:
+    """In the main thread: Ctrl+C and Ctrl+Break do nothing inside the `with` block."""
+
+    SIGNALS = [s for s in (getattr(signal, "SIGINT", None), getattr(signal, "SIGBREAK", None)) if s is not None]
+
+    def __enter__(self):
+        self.saved = {}
+        if threading.current_thread() is threading.main_thread():
+            for s in self.SIGNALS:
+                self.saved[s] = signal.signal(s, signal.SIG_IGN)
+        return self
+
+    def __exit__(self, *exc) -> None:
+        for s, handler in self.saved.items():
+            signal.signal(s, handler)
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.stop:
+        return stop_running()
 
     files, dirs = _split_args(args.paths)
     if args.paths and not files and not dirs:
@@ -223,7 +330,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             _open_tabs(port, token, files, args.no_browser)
             return 0
 
-    start(args, files, dirs).run()
+    try:
+        start(args, files, dirs).run()
+    except KeyboardInterrupt:                    # Ctrl+C while starting: a normal stop too
+        pass
+    print("LBD viewer stopped", flush=True)
     return 0
 
 
@@ -254,14 +365,19 @@ def start(args: argparse.Namespace, files: List[str], dirs: List[str],
     import uvicorn  # imported late: it is slow to import and not needed when reusing a server
 
     log_config = None if sys.stdout is None else uvicorn.config.LOGGING_CONFIG  # windowed (no console) builds
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning",
-                                           log_config=log_config))
+    server = _make_server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning",
+                                         log_config=log_config, timeout_graceful_shutdown=GRACEFUL_STOP),
+                          on_stop=state.pages.close)
 
     lock = None
     if not args.dev:
         lock = lock_path()
         lock.write_text(json.dumps({"port": port, "token": state.token, "pid": os.getpid()}), encoding="utf-8")
     running = Running(state, server, port, lock)
+    state.on_stop = running.stop                 # POST /api/stop (lbd-view --stop)
+    if not args.dev:
+        running.notice = _note_version(cfg)
+        _start_update_check(state)
 
     def after_start():
         while not server.started:
@@ -276,18 +392,91 @@ def start(args: argparse.Namespace, files: List[str], dirs: List[str],
             _open_tabs(port, state.token, files, args.no_browser)
 
     def watchdog():
-        idle = 0 if args.dev else args.idle_exit
-        while idle > 0 and not server.should_exit:
-            time.sleep(2)
-            last = state.last_heartbeat or state.started
-            # Give the first browser tab extra time to start up.
-            limit = idle if state.last_heartbeat else max(idle, 60)
-            if time.monotonic() - last > limit:
+        watch = IdleWatch(0 if args.dev else args.idle_exit)
+        while watch.idle > 0 and not server.should_exit:
+            time.sleep(watch.TICK)
+            if watch.should_stop(state.last_heartbeat, state.started):
                 server.should_exit = True
 
     threading.Thread(target=after_start, daemon=True).start()
     threading.Thread(target=watchdog, daemon=True).start()
     return running
+
+
+def _alive(pid: int) -> bool:
+    import psutil
+
+    try:
+        return psutil.Process(pid).status() != psutil.STATUS_ZOMBIE
+    except psutil.Error:                          # gone (or no longer ours to look at)
+        return False
+
+
+def stop_running(wait: float = 10.0) -> int:
+    """`lbd-view --stop`: ask the running viewer to stop (POST /api/stop) and wait up to `wait`
+    seconds for its process to end. 0 if it stopped or none was running; 1 if it couldn't be asked
+    or is still running (an installer then stops it by force)."""
+    info = _running_server()
+    if info is None:
+        print("lbd-view: no viewer is running", flush=True)
+        return 0
+    pid = info.get("pid")
+    try:
+        _api(info["port"], info["token"], "POST", "/api/stop", {}, timeout=5)
+    except urllib.error.HTTPError as e:
+        try:
+            detail = json.loads(e.read().decode() or "{}").get("detail", e.reason)
+        except ValueError:
+            detail = e.reason
+        if e.code == 404:
+            detail = "it is a version without this way to stop (older than 1.3.0)"
+        print(f"lbd-view: the running viewer (process {pid}) refused to stop: {detail}", file=sys.stderr)
+        return 1
+    except (OSError, ValueError) as e:
+        print(f"lbd-view: couldn't ask the running viewer (process {pid}) to stop: {e}", file=sys.stderr)
+        return 1
+    deadline = time.monotonic() + wait
+    while _alive(pid):                            # server.json always has the process id
+        if time.monotonic() > deadline:
+            print(f"lbd-view: the viewer (process {pid}) is still running {wait:g} s after it was asked to stop",
+                  file=sys.stderr)
+            return 1
+        time.sleep(0.1)
+    print("lbd-view: the viewer stopped", flush=True)
+    return 0
+
+
+def _start_update_check(state: AppState) -> None:
+    """A real start (not --dev): the check for a new version, in the background, once a day; and
+    the reminder for the first page that asks (updates.py). LBD_NO_UPDATE_CHECK=1 skips it (tests
+    that start a real viewer, so they never ask GitHub)."""
+    if os.environ.get("LBD_NO_UPDATE_CHECK") == "1":
+        return
+    try:
+        if state.config.settings().get("check_updates") is not True:   # off, or not answered yet (18.8)
+            return
+    except ConfigError:
+        return                                   # unreadable settings: the viewer's page says so
+    state.updates.automatic = True
+    try:
+        state.updates.start()
+    except ConfigError:
+        pass                                     # unreadable settings: the viewer's page says so
+
+
+def _note_version(cfg: Config) -> Optional[str]:
+    """Record this version as the one using the settings; the message for the user if the one
+    used before was newer (an older version installed over it), else None."""
+    try:
+        notice = updates.older_than_before(cfg.note_version(VERSION))
+    except ConfigError:
+        return None                              # unreadable settings: the viewer's page says so
+    except OSError as e:
+        print(f"lbd-view: couldn't record the version in the settings: {e}", file=sys.stderr)
+        return None
+    if notice:
+        print(f"lbd-view: {notice}", file=sys.stderr)
+    return notice
 
 
 if __name__ == "__main__":

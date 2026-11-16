@@ -1,7 +1,20 @@
-import { CSSProperties, KeyboardEvent, MouseEvent, PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, ApiError, AppState, baseName, fileKind, OpenFilesIn, PageCommand, PageEntry, TabState, Theme, viewerUrl } from "./api";
-import FolderPanel from "./FolderPanel";
+import { FirstStart, firstStartNeeded } from "./FirstStart";
+import { setDateZone } from "./libraryColumns";
+import { setAutoUnits } from "./units";
+import { CSSProperties, KeyboardEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { DEFAULT_MEASUREMENTS, MeasurementsContext, notifyInBackground } from "./MeasuringStatus";
+import { onFinished } from "./watch";
+import { api, ApiError, AppState, baseName, fileKind, LibraryQuery, OpenDataIn, SidebarScope, OpenFilesIn, PageCommand, PageEntry, PlotSpec, TabState, Theme, viewerUrl, Workspace } from "./api";
+import FilesSidebar from "./FilesSidebar";
+import { lastSection, SECTIONS, SettingsDialog, SettingsSection } from "./SettingsDialog";
+import { UpdateReminder } from "./Updates";
+import { DRAWER_MEDIA, useMedia } from "./useMedia";
+import { useResizable, widestContent } from "./resizable";
+import { SidebarToggle } from "./SidebarToggle";
+import { loadLibraryQuery, saveLibraryQuery } from "./libraryQuery";
 import FileView from "./FileView";
+import LibraryPage from "./LibraryPage";
+import ExploreTab, { setKeepParts, setNewPanels } from "./ExploreTab";
 import ImageView from "./ImageView";
 import StyleFileView from "./StyleFileView";
 import StylesPage from "./StylesPage";
@@ -13,33 +26,63 @@ import { docsUrl } from "./help";
 import { applyTheme } from "./theme";
 import { fileEntries, renameRequest } from "./fileActions";
 
-type Page = "data" | "styles" | "sdk";
+// The three workspaces (find files, explore data, make figures), and two pages of settings.
+type Page = Workspace | "styles" | "sdk";
 
-// Width of the Folders panel: dragged by the user, remembered in this browser.
+// Width of the Files sidebar: dragged by the user, remembered in this browser.
 const SIDEBAR_KEY = "lbd-sidebar-width";
 const SIDEBAR_DEFAULT = 300;
 const SIDEBAR_MIN = 180;
-// Whether this browser tab shows the Folders panel (per tab: hide it in one of two windows).
+// Whether this browser tab shows the Files sidebar (per tab: hide it in one of two windows).
 const FOLDERS_SHOWN_KEY = "lbd-folders-shown";
+// The workspace this browser tab shows, so reloading the page stays there (per tab).
+const WORKSPACE_KEY = "lbd-workspace";
 
-function clampSidebar(w: number): number {
-  return Math.round(Math.max(SIDEBAR_MIN, Math.min(w, window.innerWidth * 0.6)));
+/** The page this browser tab starts on (16.14): after a reload, the one it showed; opened for a
+ * file (`?open=`, `?claim=`), the workspace that file goes to, so the Library never flashes
+ * first; otherwise the Library. */
+function loadPage(): Page {
+  try {
+    const p = sessionStorage.getItem(WORKSPACE_KEY);
+    if (p === "library" || p === "explore" || p === "figure" || p === "styles" || p === "sdk") return p;
+  } catch {
+    /* storage unavailable: from the address */
+  }
+  const url = new URL(window.location.href);
+  const open = url.searchParams.get("open"), where = url.searchParams.get("in");
+  if (where === "explore" || where === "figure") return where;
+  if (url.searchParams.get("claim")) return "explore";
+  if (open) return fileKind(open) === "lbd" ? "explore" : "figure";   // the setting may still say Figure
+  return "library";
 }
 
-function loadSidebarWidth(): number {
+// The Files sidebar's list, and the data files opened lately (per browser tab).
+const SCOPE_KEY = "lbd-sidebar-scope";
+const RECENT_KEY = "lbd-recent";
+const RECENT_MAX = 30;
+
+function loadSession(key: string, fallback: string): string {
   try {
-    const w = Number(localStorage.getItem(SIDEBAR_KEY));
-    return w > 0 ? clampSidebar(w) : SIDEBAR_DEFAULT;
+    return sessionStorage.getItem(key) ?? fallback;
   } catch {
-    return SIDEBAR_DEFAULT;
+    return fallback;
   }
 }
 
-function saveSidebarWidth(w: number) {
+function saveSession(key: string, value: string) {
   try {
-    localStorage.setItem(SIDEBAR_KEY, String(w));
+    sessionStorage.setItem(key, value);
   } catch {
-    /* storage unavailable: the width just isn't remembered */
+    /* storage unavailable: just not kept over a reload */
+  }
+}
+
+function parseList(text: string): string[] {
+  try {
+    const v = JSON.parse(text);
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
   }
 }
 
@@ -61,9 +104,6 @@ interface Lock {
   reason: string;
   transfer?: string; // set while the tab is being moved to another page
 }
-
-/** The operating system's name, for "System (follows Windows)". */
-const systemName = (platform: string) => (platform === "win32" ? "Windows" : platform === "darwin" ? "macOS" : "the system");
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
@@ -104,8 +144,29 @@ export default function App() {
 function Shell() {
   const toast = useToast();
   const [state, setState] = useState<AppState | null>(null);
+  if (state) setDateZone(state.library.date_zone); // before the lists draw their dates
+  if (state) setAutoUnits(state.auto_units); // the plots' units that take a prefix, before numbers are written
+  if (state) setNewPanels(state.explore.new_panels); // panels a new file opens with (16.45)
+  if (state) setKeepParts(state.explore.keep); // what a file opened again brings back (16.44)
   const [fatal, setFatal] = useState<string | null>(null);
-  const [page, setPage] = useState<Page>("data");
+  const [page, setPage] = useState<Page>(loadPage);
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(WORKSPACE_KEY, page);
+    } catch {
+      /* storage unavailable: a reload shows Explore */
+    }
+  }, [page]);
+  // Explore tabs: a file shown in Explore. They don't own their file (Explore never writes to it),
+  // so unlike Figure tabs they need no agreement from the other pages.
+  const [exploreTabs, setExploreTabs] = useState<Tab[]>([]);
+  const [exploreActive, setExploreActive] = useState<string | null>(null);
+  const [exploreMenu, setExploreMenu] = useState<{ x: number; y: number; path: string } | null>(null);
+  // Explore: each open file's title (its tab shows it; the file name is in the tooltip), and the list of all tabs
+  const [exploreTitles, setExploreTitles] = useState<Record<string, string>>({});
+  const [exploreList, setExploreList] = useState<MenuAt | null>(null);
+  const exploreStrip = useRef<HTMLDivElement>(null);
+  const [libraryPath, setLibraryPath] = useState<string | null>(null);
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [active, setActive] = useState<string | null>(null);
   const [styleRevision, setStyleRevision] = useState(0);
@@ -116,11 +177,47 @@ function Shell() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const selectAnchor = useRef<string | null>(null);
   const [foldersShown, setFoldersShown] = useState(loadFoldersShown);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  // this browser tab's Library filters: the Library page and the Files sidebar share them
+  const [libraryQuery, setLibraryQuery] = useState<LibraryQuery>(loadLibraryQuery);
+  useEffect(() => saveLibraryQuery(libraryQuery), [libraryQuery]);
+  // the Files sidebar's list (shared by Explore and Figure), and the data files opened lately
+  const [sidebarScope, setSidebarScope] = useState<SidebarScope>(() => loadSession(SCOPE_KEY, "library") as SidebarScope);
+  useEffect(() => saveSession(SCOPE_KEY, sidebarScope), [sidebarScope]);
+  const [recent, setRecent] = useState<string[]>(() => parseList(loadSession(RECENT_KEY, "[]")));
+  useEffect(() => saveSession(RECENT_KEY, JSON.stringify(recent)), [recent]);
+  useEffect(() => {
+    for (const p of [active, exploreActive])
+      if (p && fileKind(p) === "lbd") setRecent((r) => (r[0] === p ? r : [p, ...r.filter((x) => x !== p)].slice(0, RECENT_MAX)));
+  }, [active, exploreActive]);
+  // ⚙ Settings: the section shown, or null (closed); #settings/<section> in the address opens it
+  const [settingsSection, setSettingsSection] = useState<SettingsSection | null>(() => {
+    const m = /^#settings(?:\/(\w+))?$/.exec(window.location.hash);
+    return m ? (SECTIONS.some((x) => x.id === m[1]) ? (m[1] as SettingsSection) : lastSection()) : null;
+  });
+  const openSettings = useCallback((section?: SettingsSection) => setSettingsSection(section ?? lastSection()), []);
+  useEffect(() => {
+    const onHash = () => {
+      const m = /^#settings(?:\/(\w+))?$/.exec(window.location.hash);
+      if (m) setSettingsSection(SECTIONS.some((x) => x.id === m[1]) ? (m[1] as SettingsSection) : lastSection());
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+  const closeSettings = useCallback(() => {
+    setSettingsSection(null);
+    if (window.location.hash.startsWith("#settings")) history.replaceState(null, "", window.location.pathname + window.location.search);
+  }, []);
   const pageRef = useRef<HTMLDivElement>(null);
   const sidebarRef = useRef<HTMLElement>(null);
-  const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
-  const dragging = useRef(false);
+  // the Files sidebar's width: dragged at its edge, double-click fits the longest name
+  const sidebar = useResizable({
+    key: SIDEBAR_KEY,
+    initial: SIDEBAR_DEFAULT,
+    min: SIDEBAR_MIN,
+    container: pageRef,
+    fit: () => widestContent(sidebarRef.current, ".tree .row-label, .files-row .files-name", 48),
+  });
+  const sidebarWidth = sidebar.width;
 
   // The other open pages (from the viewer's page list, kept current): "Move to Page N".
   const [otherPages, setOtherPages] = useState<PageEntry[]>([]);
@@ -134,7 +231,10 @@ function Shell() {
   // Unsaved settings of each data tab (reported by FileView), and the ones moved-in tabs start with.
   const tabStates = useRef(new Map<string, TabState>());
   const initialStates = useRef(new Map<string, TabState>());
+  const [figureStarts, setFigureStarts] = useState<Record<string, number>>({}); // a new start: the figure is made anew
 
+  const stateRef = useRef(state);
+  stateRef.current = state;
   const shownWarnings = useRef(new Set<string>());
   const refreshState = useCallback(async () => {
     try {
@@ -192,7 +292,7 @@ function Shell() {
 
   /** Add tabs locally (the viewer already agreed this page owns them). */
   const addTabs = useCallback((paths: string[], pinned: boolean) => {
-    setPage("data");
+    setPage("figure");
     setTabs((prev) => {
       let next = prev;
       for (const path of paths) {
@@ -284,8 +384,69 @@ function Shell() {
     [toast],
   );
 
+  // ---- Explore tabs ------------------------------------------------------------------------------
+
+  /** Show data files in Explore (a single click: the preview tab; a double-click: kept). Other
+   *  files (images, style files) open in Figure, which shows them. */
+  const openExplore = useCallback(
+    (paths: string[], pinned: boolean) => {
+      const data = paths.filter((p) => fileKind(p) === "lbd");
+      const other = paths.filter((p) => fileKind(p) !== "lbd");
+      for (const p of other) openTab(p, pinned);
+      if (!data.length) return;
+      setPage("explore");
+      setExploreTabs((prev) => {
+        let next = pinned ? prev : prev.filter((t) => t.pinned || data.includes(t.path));
+        for (const path of data) {
+          next = next.some((t) => t.path === path)
+            ? next.map((t) => (t.path === path ? { ...t, pinned: t.pinned || pinned } : t))
+            : [...next, { path, pinned }];
+        }
+        return next;
+      });
+      setExploreActive(data[data.length - 1]);
+    },
+    [openTab],
+  );
+
+  // the active Explore tab (a new preview tab too) is scrolled into view in the tab strip
+  useEffect(() => {
+    exploreStrip.current?.querySelector(".tab.active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [exploreActive, exploreTabs.length]);
+  const closeExplore = useCallback((paths: string[]) => {
+    const gone = new Set(paths);
+    setExploreTabs((prev) => {
+      const next = prev.filter((t) => !gone.has(t.path));
+      setExploreActive((a) => (a && gone.has(a) ? (next.length ? next[next.length - 1].path : null) : a));
+      return next;
+    });
+  }, []);
+
+  /** Open a file in a chosen workspace (menus, "Open in Explore" / "Open in Figure"). */
+  const openIn = useCallback(
+    (path: string, where: "explore" | "figure", spec?: PlotSpec, looks?: PlotSpec["options"]) => {
+      if (where === "explore") openExplore([path], true);
+      else {
+        if (spec || looks) {
+          // the plot shown in Explore: the figure starts from it, keeping its own preset and style;
+          // `looks`: options Explore's curves take along (Show points), added to the figure's own
+          const now = tabStates.current.get(path) ?? initialStates.current.get(path);
+          const base = spec ?? now?.spec ?? {};
+          initialStates.current.set(path, { preset: null, override: {}, ...now, spec: looks ? { ...base, options: { ...(base.options ?? {}), ...looks } } : base });
+          setFigureStarts((old) => ({ ...old, [path]: (old[path] ?? 0) + 1 }));
+        }
+        setPage("figure");
+        openTab(path, true);
+      }
+    },
+    [openExplore, openTab],
+  );
+
   // A file renamed: its tab, unsaved settings and lock follow the new name.
   const fileRenamed = useCallback((oldPath: string, newPath: string) => {
+    setExploreTabs((prev) => prev.map((t) => (t.path === oldPath ? { ...t, path: newPath } : t)));
+    setExploreActive((a) => (a === oldPath ? newPath : a));
+    setLibraryPath((a) => (a === oldPath ? newPath : a));
     setTabs((prev) => prev.map((t) => (t.path === oldPath ? { ...t, path: newPath } : t)));
     setActive((a) => (a === oldPath ? newPath : a));
     setSelected((prev) => new Set([...prev].map((p) => (p === oldPath ? newPath : p))));
@@ -299,6 +460,20 @@ function Shell() {
       initialStates.current.set(newPath, state);
     }
   }, []);
+
+  // A measurement shown here finished: its tabs move to the finished file (as a rename), and say so.
+  const measurementsRef = useRef(DEFAULT_MEASUREMENTS);
+  measurementsRef.current = state?.measurements ?? DEFAULT_MEASUREMENTS;
+  useEffect(
+    () =>
+      onFinished((old, now) => {
+        fileRenamed(old, now);
+        const text = `Finished: now ${baseName(now)}`;
+        toast(text);
+        notifyInBackground(measurementsRef.current, "LBD: a measurement finished", text);
+      }),
+    [fileRenamed, toast],
+  );
 
   // ---- moving tabs to another page (rule 4: a two-step hand-off, nothing lost or doubled) -----
 
@@ -393,7 +568,13 @@ function Shell() {
             return null;
           });
           if (!result) return;
-          addTabs(result.granted, true);
+          if ((stateRef.current ?? (await api.state())).open_data_in === "explore") {
+            // Explore doesn't keep files: give back what was granted for the data files.
+            const data = result.granted.filter((p) => fileKind(p) === "lbd");
+            for (const p of data) await api.release(page.id, p).catch(() => undefined);
+            addTabs(result.granted.filter((p) => !data.includes(p)), true);
+            openExplore(data, true);
+          } else addTabs(result.granted, true);
           for (const [p, n] of Object.entries(result.elsewhere)) toast(`${baseName(p)} is already open in Page ${n}.`);
           for (const p of result.busy) toast(`${baseName(p)} is being moved between pages; try again in a moment.`, "error");
           if (result.granted.length) attention(`${plural(result.granted.length, "file")} opened`);
@@ -428,6 +609,7 @@ function Shell() {
         case "event":
           if (data.event === "renamed") fileRenamed(data.old as string, data.new as string);
           else if (data.event === "trashed" && tabsRef.current.some((t) => t.path === data.path)) {
+            closeExplore([data.path as string]);
             dropTabs([data.path as string]);
             toast(`${baseName(data.path as string)} was moved to the Recycle Bin / Trash; its tab was closed.`);
           } else if (data.event === "roots_changed" || data.event === "settings_changed") await refreshState();
@@ -437,7 +619,7 @@ function Shell() {
           }
       }
     },
-    [addTabs, dropTabs, fileRenamed, lockTabs, receiveTransfer, refreshState, toast],
+    [addTabs, closeExplore, dropTabs, fileRenamed, lockTabs, openExplore, receiveTransfer, refreshState, toast],
   );
 
   // Registered as a page: open what the address asks for, or (after sleep) re-check the tabs.
@@ -462,13 +644,21 @@ function Shell() {
       const url = new URL(window.location.href);
       const open = url.searchParams.get("open");
       const claim = url.searchParams.get("claim");
+      const where = url.searchParams.get("in");
       url.searchParams.delete("open");
       url.searchParams.delete("claim");
+      url.searchParams.delete("in");
+      url.searchParams.delete("library"); // the Library filters it came with: already taken (loadLibraryQuery)
       window.history.replaceState(null, "", url.toString());
       if (claim) await receiveTransfer(page, claim);
-      if (open) await openTab(open, true);
+      if (open) {
+        // A data file goes to the workspace asked for, else to the one set in the settings (Explore by default).
+        const ws = where ?? (stateRef.current ?? (await api.state())).open_data_in;
+        if (ws === "explore" && fileKind(open) === "lbd") openExplore([open], true);
+        else await openTab(open, true);
+      }
     },
-    [lockTabs, openTab, pageReady, receiveTransfer],
+    [lockTabs, openExplore, openTab, pageReady, receiveTransfer],
   );
 
   const onCommandFailed = useCallback(
@@ -566,7 +756,47 @@ function Shell() {
     return { x: tabMenu.x, y: tabMenu.y, items };
   }, [tabMenu, otherPages, tabs, selected, locks, closeTabs, moveTabs, state?.platform, toast, askRenameTab]);
 
+  // In a narrower window the sidebar slides over the content when asked for (and closes again:
+  // Esc, a click beside it, a file kept open); the choice made in a wide window is kept for it.
+  const drawerMode = useMedia(DRAWER_MEDIA);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  // a switch to a page with no file open there shows the Files bar (16.15): in a narrow window, the drawer
+  const drawerOnSwitch = useRef(false);
+  useEffect(() => {
+    setDrawerOpen(drawerOnSwitch.current);
+    drawerOnSwitch.current = false;
+  }, [drawerMode, page]);
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const onKey = (e: globalThis.KeyboardEvent) => e.key === "Escape" && setDrawerOpen(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [drawerOpen]);
+  const sidebarShown = drawerMode ? drawerOpen : foldersShown;
+
+  /** Go to a page; Explore or Figure with no file open there shows the Files bar, to choose one
+   * (16.15). Hiding it again works until the next switch. */
+  const goTo = (p: Page) => {
+    const empty = (p === "explore" && exploreTabs.length === 0) || (p === "figure" && tabs.length === 0);
+    if (empty && p !== page) {
+      if (drawerMode) drawerOnSwitch.current = true;
+      else if (!foldersShown) {
+        try {
+          sessionStorage.setItem(FOLDERS_SHOWN_KEY, "yes");
+        } catch {
+          /* storage unavailable: not remembered */
+        }
+        setFoldersShown(true);
+      }
+    }
+    setPage(p);
+  };
+
   const toggleFolders = () => {
+    if (drawerMode) {
+      setDrawerOpen((o) => !o);
+      return;
+    }
     setFoldersShown((shown) => {
       try {
         sessionStorage.setItem(FOLDERS_SHOWN_KEY, shown ? "no" : "yes");
@@ -600,52 +830,67 @@ function Shell() {
     }
   };
 
-  // ---- Folders panel width: drag the handle, double-click to fit the longest name
-
-  const setWidth = (w: number) => {
-    const c = clampSidebar(w);
-    setSidebarWidth(c);
-    saveSidebarWidth(c);
+  const setLibraryReadHeaders = async (on: boolean) => {
+    setState((s) => s && { ...s, library: { ...s.library, read_headers: on } });
+    try {
+      setState(await api.setLibrary({ read_headers: on }));
+      toast(on ? "The Library now reads each data file's details." : "The Library now lists names, sizes and file dates only.");
+    } catch (e) {
+      toast((e as Error).message, "error");
+      await refreshState();
+    }
   };
 
-  const onHandleDown = (e: PointerEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.currentTarget.setPointerCapture(e.pointerId);
-    dragging.current = true;
-    document.body.classList.add("resizing");
+  const setOpenDataIn = async (where: OpenDataIn) => {
+    setState((s) => s && { ...s, open_data_in: where });
+    try {
+      setState(await api.setOpenDataIn(where));
+      toast(`Data files opened from Explorer / Finder now open in ${where === "explore" ? "Explore" : "Figure"}.`);
+    } catch (e) {
+      toast((e as Error).message, "error");
+      await refreshState();
+    }
   };
 
-  const onHandleMove = (e: PointerEvent<HTMLDivElement>) => {
-    if (!dragging.current || !pageRef.current) return;
-    setSidebarWidth(clampSidebar(e.clientX - pageRef.current.getBoundingClientRect().left));
-  };
-
-  const onHandleUp = () => {
-    if (!dragging.current) return;
-    dragging.current = false;
-    document.body.classList.remove("resizing");
-    saveSidebarWidth(sidebarWidth);
-  };
-
-  const fitToNames = () => {
-    const side = sidebarRef.current;
-    if (!side) return;
-    const left = side.getBoundingClientRect().left;
-    let widest = 0;
-    side.querySelectorAll<HTMLElement>(".tree .row-label").forEach((el) => {
-      widest = Math.max(widest, el.getBoundingClientRect().left - left + el.scrollWidth);
+  /** The list of all Explore tabs (show one) and Close all: the ⋯ button and a right-click on
+   * the empty part of the tab bar. */
+  const showExploreList = (x: number, y: number) =>
+    setExploreList({
+      x,
+      y,
+      items: [
+        ...exploreTabs.map((t) => ({
+          label: `${t.path === exploreActive ? "✓ " : " "}${exploreTitles[t.path] || baseName(t.path)}`,
+          onClick: () => setExploreActive(t.path),
+        })),
+        "-" as const,
+        { label: "Close all", onClick: () => closeExplore(exploreTabs.map((t) => t.path)) },
+      ],
     });
-    // room for the row's right padding, the folder's × button and a scroll bar
-    if (widest) setWidth(widest + 48);
-  };
 
-  const onHandleKey = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === "ArrowLeft") setWidth(sidebarWidth - 20);
-    else if (e.key === "ArrowRight") setWidth(sidebarWidth + 20);
-    else if (e.key === "Home") setWidth(SIDEBAR_DEFAULT);
-    else return;
-    e.preventDefault();
-  };
+  // The Explore tab menu: this tab, all tabs, and its file.
+  const exploreMenuShown = useMemo<MenuAt | null>(() => {
+    if (!exploreMenu) return null;
+    const { path } = exploreMenu;
+    const all = exploreTabs.map((t) => t.path);
+    const items: MenuEntry[] = [
+      { label: "Close", onClick: () => closeExplore([path]) },
+      { label: "Close others", onClick: () => closeExplore(all.filter((p) => p !== path)), disabled: all.length < 2 },
+      { label: "Close all", onClick: () => closeExplore(all) },
+      "-",
+      { label: "Open in Figure", onClick: () => openIn(path, "figure") },
+      {
+        label: "Open in a new browser tab",
+        onClick: () => {
+          if (!window.open(viewerUrl({ open: path, in: "explore" }), "_blank"))
+            toast("The browser blocked the new tab. Allow pop-ups for the viewer.", "error");
+        },
+      },
+      "-",
+      ...fileEntries(path, state?.platform ?? "", toast, () => setConfirm(renameRequest(path, (n) => fileRenamed(path, n), toast))),
+    ];
+    return { x: exploreMenu.x, y: exploreMenu.y, items };
+  }, [exploreMenu, exploreTabs, closeExplore, openIn, state?.platform, toast, fileRenamed]);
 
   if (fatal) {
     return (
@@ -657,6 +902,7 @@ function Shell() {
   }
 
   return (
+    <MeasurementsContext.Provider value={state?.measurements ?? DEFAULT_MEASUREMENTS}>
     <div className="app">
       <header className="topbar">
         <div className="brand">
@@ -673,54 +919,51 @@ function Shell() {
             </span>
           )}
         </div>
-        <nav className="pages" role="tablist">
+        <nav className="pages" role="tablist" aria-label="Workspaces">
           {(
             [
-              ["data", "Data"],
-              ["styles", "Styles"],
-              ["sdk", "Language modules"],
-            ] as [Page, string][]
-          ).map(([p, label]) => (
-            <button key={p} role="tab" aria-selected={page === p} className={page === p ? "active" : ""} onClick={() => setPage(p)}>
+              ["library", "Library", "Find files: folders, contents"],
+              ["explore", "Explore", "Look at data: zoom, read values"],
+              ["figure", "Figure", "Make figures: styles, export"],
+            ] as [Page, string, string][]
+          ).map(([p, label, title]) => (
+            <button key={p} role="tab" aria-selected={page === p} className={page === p ? "active" : ""} title={title} onClick={() => goTo(p)}>
               {label}
             </button>
           ))}
         </nav>
-        <div className="version">{state ? `v${state.version} · format ${state.lbd_version}` : ""}</div>
+        <nav className="pages secondary" aria-label="Settings pages">
+          {(
+            [
+              ["styles", "Styles"],
+              ["sdk", "Language modules"],
+            ] as [Page, string][]
+          ).map(([p, label]) => (
+            <button key={p} aria-current={page === p ? "page" : undefined} className={page === p ? "active" : ""} onClick={() => goTo(p)}>
+              {label}
+            </button>
+          ))}
+        </nav>
         {state && (
           <div className="settings">
-            <button className="icon" title="Settings" aria-label="Settings" aria-expanded={settingsOpen} onClick={() => setSettingsOpen((o) => !o)}>
+            <button className="icon" title="Settings" aria-label="Settings" aria-haspopup="dialog" aria-expanded={settingsSection !== null} onClick={() => openSettings()}>
               ⚙
             </button>
-            {settingsOpen && (
-              <div className="settings-popover" role="dialog" aria-label="Settings" onMouseLeave={() => setSettingsOpen(false)}>
-                <div className="settings-title">Files opened from Explorer / Finder</div>
-                {(
-                  [
-                    ["viewer", "In the open viewer (as a tab)"],
-                    ["browser-tab", "In a new browser tab"],
-                  ] as [OpenFilesIn, string][]
-                ).map(([value, label]) => (
-                  <label key={value} className="settings-choice">
-                    <input type="radio" name="open-files-in" checked={state.open_files_in === value} onChange={() => setOpenFilesIn(value)} />
-                    {label}
-                  </label>
-                ))}
-                <div className="settings-title">Theme</div>
-                {(
-                  [
-                    ["system", `System (follows ${systemName(state.platform)})`],
-                    ["light", "Light"],
-                    ["dark", "Dark"],
-                  ] as [Theme, string][]
-                ).map(([value, label]) => (
-                  <label key={value} className="settings-choice">
-                    <input type="radio" name="theme" checked={state.theme === value} onChange={() => setTheme(value)} />
-                    {label}
-                  </label>
-                ))}
-              </div>
+            {settingsSection && (
+              <SettingsDialog
+                state={state}
+                section={settingsSection}
+                onSection={setSettingsSection}
+                onClose={closeSettings}
+                onSettings={setState}
+                setTheme={setTheme}
+                setOpenFilesIn={setOpenFilesIn}
+                setOpenDataIn={setOpenDataIn}
+                setReadHeaders={setLibraryReadHeaders}
+              />
             )}
+            <UpdateReminder onOpenAbout={() => openSettings("about")} />
+            {firstStartNeeded(state) && <FirstStart state={state} onSettings={setState} />}
           </div>
         )}
         <a className="help-button" href={docsUrl()} target="_blank" rel="noopener" title="Open the documentation (works offline)">
@@ -728,57 +971,158 @@ function Shell() {
         </a>
       </header>
 
+      {page === "library" && state && (
+        <LibraryPage
+          state={state}
+          query={libraryQuery}
+          onQuery={setLibraryQuery}
+          selected={libraryPath}
+          onSelect={setLibraryPath}
+          onRootsChanged={(roots) => setState({ ...state, roots })}
+          onLibrarySettings={setState}
+          onOpenIn={openIn}
+          onOpenInNewBrowserTab={openInNewBrowserTab}
+          onRenamed={fileRenamed}
+          onDeleted={(path) => {
+            closeExplore([path]);
+            closeTabs([path]);
+            setLibraryPath((a) => (a === path ? null : a));
+          }}
+        />
+      )}
+
       <div
-        className={"page" + (foldersShown ? "" : " no-folders")}
-        hidden={page !== "data"}
+        className={"page" + (drawerMode ? " drawer-mode" : foldersShown ? "" : " no-folders")}
+        hidden={page !== "explore" && page !== "figure"}
         ref={pageRef}
         style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}
       >
-        <aside className="sidebar" ref={sidebarRef} hidden={!foldersShown}>
+        {drawerMode && drawerOpen && <div className="drawer-backdrop" onClick={() => setDrawerOpen(false)} aria-hidden="true" />}
+        <aside className="sidebar" ref={sidebarRef} hidden={!sidebarShown}>
           {state && (
-            <FolderPanel
-              roots={state.roots}
-              activePath={active}
-              platform={state.platform}
-              onRootsChanged={(roots) => setState({ ...state, roots })}
-              onSelect={selectFile}
-              onOpen={openFile}
+            <FilesSidebar
+              hideButton={<SidebarToggle open onToggle={toggleFolders} what="Files" />}
+              onSettings={setState}
+              workspace={page === "explore" ? "explore" : "figure"}
+              state={state}
+              query={libraryQuery}
+              scope={sidebarScope}
+              onScope={setSidebarScope}
+              recent={recent}
+              activePath={page === "explore" ? exploreActive : active}
+              onSelect={page === "explore" ? (path) => openExplore([path], false) : selectFile}
+              onOpen={(path) => {
+                if (page === "explore") openExplore([path], true);
+                else openFile(path);
+                setDrawerOpen(false); // kept open as a tab: the drawer has done its job
+              }}
+              onEditInLibrary={() => setPage("library")}
               onOpenInNewBrowserTab={openInNewBrowserTab}
               onRenamed={fileRenamed}
-              onDeleted={(path) => closeTabs([path])}
+              onDeleted={(path) => {
+                closeExplore([path]);
+                closeTabs([path]);
+              }}
+              onOpenIn={openIn}
             />
           )}
         </aside>
-        {foldersShown && (
+        {foldersShown && !drawerMode && (
           <div
             className="sidebar-handle"
-            role="separator"
-            aria-orientation="vertical"
-            aria-label="Width of the folder panel"
-            aria-valuenow={sidebarWidth}
-            aria-valuemin={SIDEBAR_MIN}
-            tabIndex={0}
+            aria-label="Width of the Files sidebar"
             title="Drag to change the width · Double-click: fit the longest name"
-            onPointerDown={onHandleDown}
-            onPointerMove={onHandleMove}
-            onPointerUp={onHandleUp}
-            onPointerCancel={onHandleUp}
-            onDoubleClick={fitToNames}
-            onKeyDown={onHandleKey}
+            {...sidebar.handle}
           />
         )}
-        <main className="main">
+        <main className="main" hidden={page !== "explore"}>
+          <div
+            className="tabbar"
+            onContextMenu={(e) => {
+              // the empty part of the bar (a tab has its own menu): all tabs, Close all
+              if (!exploreTabs.length || (e.target as HTMLElement).closest(".tab")) return;
+              e.preventDefault();
+              showExploreList(e.clientX, e.clientY);
+            }}
+          >
+            {!sidebarShown && <SidebarToggle open={false} onToggle={toggleFolders} what="Files: the Library selection" className="folders-toggle" />}
+            <div className="tabs" role="tablist" aria-label="Files in Explore" ref={exploreStrip}
+                 onKeyDown={(e) => {
+                   // one Tab stop for the strip: ← → move between the tabs
+                   if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+                   const i = exploreTabs.findIndex((t) => t.path === exploreActive);
+                   const next = exploreTabs[(i + (e.key === "ArrowRight" ? 1 : -1) + exploreTabs.length) % exploreTabs.length];
+                   if (next) {
+                     setExploreActive(next.path);
+                     e.preventDefault();
+                     window.setTimeout(() => exploreStrip.current?.querySelector<HTMLElement>(".tab.active .tab-label")?.focus(), 0);
+                   }
+                 }}>
+              {exploreTabs.map((t) => (
+                <div
+                  key={t.path}
+                  className={"tab" + (t.path === exploreActive ? " active" : "") + (t.pinned ? "" : " preview")}
+                  title={`${exploreTitles[t.path] ? `${exploreTitles[t.path]}\n` : ""}${t.path}${t.pinned ? "" : "\nPreview: double-click to keep it open"}\nRight-click: close, open in Figure`}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setExploreMenu({ ...menuAt(e, []), path: t.path });
+                  }}
+                >
+                  <button
+                    role="tab"
+                    aria-selected={t.path === exploreActive}
+                    tabIndex={t.path === exploreActive ? 0 : -1}
+                    className="tab-label"
+                    onClick={() => setExploreActive(t.path)}
+                    onDoubleClick={() => openExplore([t.path], true)}
+                  >
+                    {measuredMark(t.path)}
+                    {exploreTitles[t.path] || baseName(t.path)}
+                  </button>
+                  <button className="tab-close" tabIndex={-1} aria-label={`Close ${baseName(t.path)}`} onClick={() => closeExplore([t.path])}>
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+            {exploreTabs.length > 0 && (
+              <button
+                className="tabs-more"
+                title="All tabs: show one, close all"
+                aria-label="All Explore tabs"
+                aria-haspopup="menu"
+                onClick={(e) => {
+                  const r = e.currentTarget.getBoundingClientRect();
+                  showExploreList(r.right - 260, r.bottom);
+                }}
+              >
+                ⋯
+              </button>
+            )}
+          </div>
+          {exploreList && <ContextMenu menu={exploreList} onClose={() => setExploreList(null)} />}
+          {exploreMenuShown && <ContextMenu menu={exploreMenuShown} onClose={() => setExploreMenu(null)} />}
+          {exploreTabs.length === 0 && <EmptyMain hasRoots={!!state?.roots.length} where="explore" onShowFiles={sidebarShown ? undefined : toggleFolders} />}
+          {exploreTabs.map((t) => (
+            <div key={t.path} className="tab-body" hidden={t.path !== exploreActive}>
+              <ExploreTab
+                path={t.path}
+                onTitle={(title) => setExploreTitles((old) => (old[t.path] === title ? old : { ...old, [t.path]: title }))}
+                onOpenInFigure={(spec, looks) => openIn(t.path, "figure", spec, looks)}
+                onError={(m) => toast(m, "error")}
+                onMenu={(e) => {
+                  e.preventDefault();
+                  setExploreMenu({ ...menuAt(e, []), path: t.path });
+                }}
+              />
+            </div>
+          ))}
+        </main>
+        <main className="main" hidden={page !== "figure"}>
           {/* The open-files bar. Right-click on a tab: that tab's menu; anywhere else on the bar,
               or the ⋯ button (always visible, outside the part that scrolls): the menu for all tabs. */}
           <div className="tabbar" onContextMenu={(e) => tabs.length > 0 && openTabMenu(e, null)}>
-            <button
-              className="folders-toggle"
-              aria-pressed={foldersShown}
-              title={foldersShown ? "Hide the Folders panel (more room for plots)" : "Show the Folders panel"}
-              onClick={toggleFolders}
-            >
-              ◧ Folders
-            </button>
+            {!sidebarShown && <SidebarToggle open={false} onToggle={toggleFolders} what="Files: the Library selection" className="folders-toggle" />}
             <div className="tabs" role="tablist">
               {tabs.map((t) => {
                 const lock = locks.get(t.path);
@@ -804,6 +1148,7 @@ function Shell() {
                       onDoubleClick={() => openFile(t.path)}
                     >
                       {lock ? (lock.transfer ? "⇢ " : "🔒 ") : ""}
+                      {measuredMark(t.path)}
                       {baseName(t.path)}
                     </button>
                     <button className="tab-close" aria-label={`Close ${baseName(t.path)}`} onClick={() => closeTabs([t.path])}>
@@ -827,7 +1172,7 @@ function Shell() {
           </div>
           {tabMenuShown && <ContextMenu menu={tabMenuShown} onClose={closeTabMenu} />}
           {confirm && <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />}
-          {tabs.length === 0 && <EmptyMain hasRoots={!!state?.roots.length} />}
+          {tabs.length === 0 && <EmptyMain hasRoots={!!state?.roots.length} where="figure" onShowFiles={sidebarShown ? undefined : toggleFolders} />}
           {state &&
             tabs.map((t) => (
               <div key={t.path} className="tab-body" hidden={t.path !== active}>
@@ -845,6 +1190,7 @@ function Shell() {
                   />
                 ) : (
                   <FileView
+                    key={figureStarts[t.path] ?? 0}
                     path={t.path}
                     plotted={t.pinned}
                     onPlot={() => openFile(t.path)}
@@ -856,6 +1202,7 @@ function Shell() {
                     onStateChange={(s) => tabStates.current.set(t.path, s)}
                     onMenu={(e) => openTabMenu(e, t.path)}
                     locked={locks.get(t.path)?.reason ?? null}
+                    onOpenInExplore={() => openIn(t.path, "explore")}
                   />
                 )}
               </div>
@@ -884,21 +1231,42 @@ function Shell() {
         </div>
       )}
     </div>
+    </MeasurementsContext.Provider>
   );
 }
 
-function EmptyMain({ hasRoots }: { hasRoots: boolean }) {
+function EmptyMain({ hasRoots, where, onShowFiles }: { hasRoots: boolean; where: "explore" | "figure"; onShowFiles?: () => void }) {
   return (
     <div className="empty">
       <h2>No file open</h2>
       {hasRoots ? (
-        <p>Click a file in the folder panel to see what is inside it, and double-click it to plot it.</p>
+        <>
+          {where === "explore" ? (
+            <p>Click a file in the Files sidebar to look at it, and double-click it to keep it open. Zoom with the wheel; click a point to read its value.</p>
+          ) : (
+            <p>Click a file in the Files sidebar to see what is inside it, and double-click it to plot it.</p>
+          )}
+          {onShowFiles && (
+            <button className="primary" onClick={onShowFiles}>
+              Show files
+            </button>
+          )}
+        </>
       ) : (
         <p>
-          Add a folder that contains <code>.lbd</code> files using <strong>Add folder</strong> on the left. You can also
+          Add a folder that contains <code>.lbd</code> files in the <strong>Library</strong> (<strong>+ Add folder</strong>). You can also
           double-click an <code>.lbd</code> file on your computer to open it here.
         </p>
       )}
     </div>
   );
+}
+
+/** "● " before the name of a file being measured (name.lbd.writing). */
+function measuredMark(path: string) {
+  return /\.lbd\.writing$/i.test(path) ? (
+    <span className="tab-measuring" title="Being measured" aria-label="being measured">
+      ●{" "}
+    </span>
+  ) : null;
 }

@@ -115,6 +115,9 @@ jobs:
         with:
           name: mltbx
           path: mltbx
+      # examples/data, which the smoke and upgrade tests open (not kept in the repository)
+      - name: Make the example files
+        run: uv run --no-project --with "./languages/python[plot]" python examples/make_examples.py
 
       - name: Inno Setup (if the runner lacks it)
         run: |
@@ -159,6 +162,26 @@ jobs:
           if ($left) { throw "the uninstaller left behind: $($left -join ', ')" }
           "installed, smoke-tested and uninstalled; settings kept, nothing else left behind"
 
+      # Plan 16.26: v1.2.0 from its release, settings, labels and a Library, the new version over
+      # it (all kept, the old program files gone), then an older version refused. The refusal is
+      # in the installer being run, so the "older" one is this build's installer with a lower number.
+      - name: Upgrade from v1.2.0, and refuse an older version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $old = "$env:RUNNER_TEMP\old"
+          gh release download v1.2.0 --repo $env:GITHUB_REPOSITORY --pattern "*-windows-x64-setup.exe" --dir $old
+          if ($LASTEXITCODE -ne 0) { throw "couldn't download v1.2.0's installer" }
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { $iscc = (Get-Command ISCC.exe).Source }
+          & $iscc /Q /DAppVersion=0.0.1 "/DDistDir=$env:RUNNER_TEMP\build\dist\LBDViewer" "/O$env:RUNNER_TEMP\older" packaging\windows\LBDViewer.iss
+          if ($LASTEXITCODE -ne 0) { throw "couldn't build the older-numbered installer" }
+          uv run --no-project python scripts/upgrade_test.py --new-version $env:VERSION `
+            --old (Get-ChildItem "$old\*.exe").FullName `
+            --new "$env:RUNNER_TEMP\build\LBD-Viewer-$env:VERSION-windows-x64-setup.exe" `
+            --older "$env:RUNNER_TEMP\older\LBD-Viewer-0.0.1-windows-x64-setup.exe"
+          if ($LASTEXITCODE -ne 0) { throw "the upgrade test failed" }
+
       - uses: actions/upload-artifact@v7
         with:
           name: windows
@@ -183,6 +206,9 @@ jobs:
         with:
           name: mltbx
           path: mltbx
+      # examples/data, which the smoke and upgrade tests open (not kept in the repository)
+      - name: Make the example files
+        run: uv run --no-project --with "./languages/python[plot]" python examples/make_examples.py
 
       - name: Install Arial (the default style's font, for the smoke test)
         run: |
@@ -200,6 +226,21 @@ jobs:
           mkdir -p "$RUNNER_TEMP/unpacked"
           tar -xzf "$RUNNER_TEMP/build/$name.tar.gz" -C "$RUNNER_TEMP/unpacked"
           uv run --no-project python scripts/smoke_test_app.py --release --exe "$RUNNER_TEMP/unpacked/$name/LBDViewer/lbd-view"
+
+      # Plan 16.26, as in the Windows job; the "older" package is this one with a lower VERSION.
+      - name: Upgrade from v1.2.0, and refuse an older version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          name="lbd-viewer-$VERSION-linux-$(uname -m)"
+          gh release download v1.2.0 --repo "$GITHUB_REPOSITORY" --pattern "*-linux-$(uname -m).tar.gz" --dir "$RUNNER_TEMP/old"
+          mkdir -p "$RUNNER_TEMP/older"
+          cp -a "$RUNNER_TEMP/unpacked/$name" "$RUNNER_TEMP/older/lbd-viewer-0.0.1"
+          echo 0.0.1 > "$RUNNER_TEMP/older/lbd-viewer-0.0.1/LBDViewer/VERSION"
+          tar -C "$RUNNER_TEMP/older" -czf "$RUNNER_TEMP/older.tar.gz" lbd-viewer-0.0.1
+          uv run --no-project python scripts/upgrade_test.py --new-version "$VERSION" \
+            --old "$(ls "$RUNNER_TEMP"/old/*.tar.gz)" --new "$RUNNER_TEMP/build/$name.tar.gz" \
+            --older "$RUNNER_TEMP/older.tar.gz"
 
       - uses: actions/upload-artifact@v7
         with:
@@ -246,6 +287,9 @@ jobs:
         with:
           name: wheels
           path: wheels
+      # examples/data, which the smoke test opens (not kept in the repository)
+      - name: Make the example files
+        run: uv run --no-project --with "./languages/python[plot]" python examples/make_examples.py
       # Exactly the commands of docs/getting-started/install.md ("LBD Viewer on macOS").
       - name: Install with uv, as a Mac user would
         working-directory: wheels
@@ -286,6 +330,9 @@ jobs:
         with:
           name: mltbx
           path: mltbx
+      # examples/data, which the smoke test and the Finder check open (not kept in the repository)
+      - name: Make the example files
+        run: uv run --no-project --with "./languages/python[plot]" python examples/make_examples.py
 
       - name: Build (app, ad-hoc signature, minimum macOS, disk image)
         run: LBD_PREBUILT="matlab=$GITHUB_WORKSPACE/mltbx" sh scripts/build_macos.sh "$RUNNER_TEMP/build"
@@ -346,9 +393,28 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       VERSION: ${{ needs.check.outputs.version }}
     steps:
+      - uses: actions/checkout@v7
+        with:
+          path: source         # the install scripts (packaging/install*.ps1|sh)
       - uses: actions/download-artifact@v8
         with:
           path: artifacts      # one folder per artifact: notes, mltbx, windows, linux
+
+      # Every file of the release, with the install scripts, and SHA256SUMS of them all (the
+      # install scripts check the download against it; plan 16.27).
+      - name: Install scripts and SHA256SUMS
+        run: |
+          mkdir -p release
+          cp artifacts/windows/*.exe artifacts/linux/*.tar.gz artifacts/macos-*/*.dmg \
+             artifacts/mltbx/LBD.mltbx artifacts/wheels/*.whl release/
+          cp source/packaging/install.ps1 source/packaging/install.sh source/packaging/install-macos.sh release/
+          (cd release && sha256sum -- * > ../SHA256SUMS) && mv SHA256SUMS release/
+          cat release/SHA256SUMS
+          # each system's install script finds its file in SHA256SUMS
+          grep -Eq ' LBD-Viewer-[^ ]+-windows-x64-setup\.exe$' release/SHA256SUMS
+          grep -Eq ' lbd-viewer-[^ ]+-linux-x86_64\.tar\.gz$' release/SHA256SUMS
+          grep -Eq ' LBD-Viewer-[^ ]+-macos-arm64\.dmg$' release/SHA256SUMS
+          grep -Eq ' LBD-Viewer-[^ ]+-macos-x86_64\.dmg$' release/SHA256SUMS
 
       - name: Create the draft (replaces an earlier draft of this version)
         run: |
@@ -365,6 +431,5 @@ jobs:
           fi
           gh release create "$tag" --repo "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" \
             --title "$title" --notes-file artifacts/notes/notes.md \
-            artifacts/windows/*.exe artifacts/linux/*.tar.gz artifacts/macos-*/*.dmg \
-            artifacts/mltbx/LBD.mltbx artifacts/wheels/*.whl
+            release/*
           echo "Draft created: https://github.com/$GITHUB_REPOSITORY/releases (check it, then Publish)" >> "$GITHUB_STEP_SUMMARY"

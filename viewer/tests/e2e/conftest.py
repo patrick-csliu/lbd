@@ -44,10 +44,29 @@ def browser():
         b.close()
 
 
-def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+def _listening_socket() -> socket.socket:
+    """A socket already bound to a free port: tests running side by side (pytest -n) can't pick the
+    same port between choosing it and the server taking it."""
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    return s
+
+
+def pytest_collection_modifyitems(config, items):
+    """LBD_SHARD=i/N: only this shard's test files (shards.py), for CI jobs side by side."""
+    import os
+
+    import shards
+
+    shard = shards.parse(os.environ.get("LBD_SHARD"))
+    if not shard:
+        return
+    i, n = shard
+    files = sorted({Path(item.fspath).name for item in items})
+    mine = set(shards.assign(files, n)[i - 1])
+    keep = [item for item in items if Path(item.fspath).name in mine]
+    config.hook.pytest_deselected(items=[item for item in items if item not in keep])
+    items[:] = keep
 
 
 class Viewer:
@@ -57,14 +76,22 @@ class Viewer:
         self.data = data_dir
         for name in ("a", "b", "c"):
             shutil.copy(data_dir / "curve.lbd", data_dir / f"{name}.lbd")
-        self.port = _free_port()
+        self.socket = _listening_socket()
+        self.port = self.socket.getsockname()[1]
         pages = Pages(ack_timeout=1, transfer_timeout=2, new_tab_timeout=3, offline_grace=2)
         self.state = AppState(cfg, token=TOKEN, port=self.port, pages=pages)
         cfg.add_root(str(data_dir))
+        # These tests are about files opened as figures (tabs that own their file, moving between
+        # pages); Explore has tests of its own (test_explore_e2e.py), which choose it.
+        cfg.set_open_data_in("figure")
+        # Most tests find files in the folder tree: the Files sidebar offers it ("folders"), and
+        # every page starts on it (`context`). The sidebar's other lists have tests of their own
+        # (test_files_sidebar_e2e.py), which choose them.
+        cfg.set_library({"sidebar_scopes": ["library", "folders", "starred", "recent"]})
         config = uvicorn.Config(create_app(self.state), host="127.0.0.1", port=self.port,
                                 log_level="warning", timeout_graceful_shutdown=1)
         self.server = uvicorn.Server(config)
-        self.thread = threading.Thread(target=self.server.run, daemon=True)
+        self.thread = threading.Thread(target=self.server.run, kwargs={"sockets": [self.socket]}, daemon=True)
         self.thread.start()
         deadline = time.monotonic() + 10
         while not self.server.started:
@@ -82,12 +109,25 @@ class Viewer:
     def stop(self):
         self.server.should_exit = True
         self.thread.join(timeout=5)
+        self.socket.close()
+        self.state.close()                          # the Library's indexing thread, the databases
 
 
 @pytest.fixture
 def viewer(cfg, data_dir, monkeypatch):
     # "Move to the Recycle Bin" deletes the file at once: tests never fill the real trash.
     monkeypatch.setattr(server.files.send2trash, "send2trash", lambda p: Path(p).unlink())
+
+    def no_dialog(*a):                                 # tests never open a real window; a test may set its own
+        raise server.HTTPException(501, "no save dialog in the tests")
+
+    monkeypatch.setattr(server, "native_save_dialog", no_dialog)
+    # most tests look at several panels, as a new file opened before 16.45; the default (1) and
+    # the setting are tested in test_panels_e2e.py
+    cfg.set_explore({"new_panels": 4})
+    # past the first start's questions (18.8), never online; test_first_start_e2e.py asks them
+    cfg.set_first_start_done(True)
+    cfg.set_check_updates(False)
     v = Viewer(cfg, data_dir)
     yield v
     v.stop()
@@ -98,6 +138,10 @@ def context(browser, viewer):
     """One browser window: its pages share pop-ups (a "new browser tab" opens in it).
     Closed before the viewer stops (it uses `viewer`), so no page is still waiting on it."""
     c = browser.new_context(viewport={"width": 1280, "height": 800})
+    # each browser tab starts with the Files sidebar on the folder tree (see Viewer)
+    c.add_init_script("try { if (!sessionStorage.getItem('lbd-sidebar-scope')) sessionStorage.setItem('lbd-sidebar-scope', 'folders') } catch (e) {}")
+    # Explore's control sections (Data, Display, Processing) all open, as the tests reach into each
+    c.add_init_script("try { if (!localStorage.getItem('lbd-explore-sections')) localStorage.setItem('lbd-explore-sections', '{\"data\":true,\"display\":true,\"processing\":true}'); if (!localStorage.getItem('lbd-explore-inspector-open')) localStorage.setItem('lbd-explore-inspector-open', 'yes') } catch (e) {}")
     c.set_default_timeout(TIMEOUT_MS)
     sync_api.expect.set_options(timeout=TIMEOUT_MS)
     yield c
@@ -106,12 +150,14 @@ def context(browser, viewer):
 
 @pytest.fixture
 def new_page(context, viewer):
-    """Open the viewer in a new browser tab; returns the Playwright page once it has its number."""
+    """Open the viewer in a new browser tab; returns the Playwright page once it has its number,
+    showing the Figure workspace (or `workspace`)."""
 
-    def open_page():
+    def open_page(workspace: str = "Figure"):
         page = context.new_page()
         page.goto(viewer.url)
         sync_api.expect(page).to_have_title(re.compile(r"Page \d+$"))
+        page.get_by_role("tab", name=workspace, exact=True).click()
         return page
 
     return open_page

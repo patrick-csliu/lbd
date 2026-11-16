@@ -58,3 +58,7 @@ contains.
 | SVG | Editing in Inkscape or Illustrator, web pages. |
 | PNG | Word, PowerPoint, chat and email, at the style's resolution (or the **DPI** set next to Width/Height). |
 | JPG | Only when something insists on JPG. It compresses with loss: thin lines and small text get blurred edges, so the viewer shows a short warning after saving. Prefer PNG. |
+
+**Copy picture** (next to the export buttons) puts the same PNG on the clipboard, to paste into
+slides, a chat or notes without saving a file. Explore can copy its pictures too, as on screen
+(see [Getting data out](explore.md#copy-picture)).

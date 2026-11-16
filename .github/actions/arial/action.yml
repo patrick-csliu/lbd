@@ -1,0 +1,27 @@
+# Arial for the default style on Linux: Microsoft's core fonts (accepting their licence
+# non-interactively, as packaging/linux/install.sh offers users), kept between runs so a job
+# doesn't run apt-get each time.
+name: Arial (Linux)
+description: Install Microsoft's core fonts (Arial), from a cache when there is one
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache@v4
+      id: fonts
+      with:
+        path: ~/.fonts/msttcorefonts
+        key: msttcorefonts-${{ runner.os }}-1
+    - name: Install the fonts (not in the cache yet)
+      if: steps.fonts.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | sudo debconf-set-selections
+        sudo apt-get update -q
+        sudo apt-get install -y -q ttf-mscorefonts-installer
+        mkdir -p ~/.fonts/msttcorefonts
+        cp /usr/share/fonts/truetype/msttcorefonts/*.ttf ~/.fonts/msttcorefonts/
+    - name: Check that Arial is found
+      shell: bash
+      run: |
+        fc-cache -f
+        fc-list : family | grep -qix arial

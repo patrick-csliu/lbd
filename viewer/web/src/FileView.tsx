@@ -1,8 +1,14 @@
+import { kindOf } from "./plotKinds";
+import { PlotKindSelect } from "./PlotKindSelect";
 import { MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, ApiError, AxisValues, baseName, FileInfo, formatBytes, Json, JsonObject, lastDownloadWarnings, PlotSpec, RenderResult, Slice, TabState, ValueInfo } from "./api";
+import { api, ApiError, AxisInfo, AxisValues, baseName, figurePng, FileInfo, formatBytes, Json, JsonObject, lastDownloadWarnings, PlotSpec, RenderResult, Slice, TabState, ValueInfo } from "./api";
 import { deepMerge, isEmptyObject } from "./util";
+import { copyPng } from "./clipboard";
 import { ConfirmDialog, ConfirmRequest } from "./menu";
 import { useToast } from "./toast";
+import { copyPath } from "./fileActions";
+import { Icon } from "./icons";
+import { MeasuringStatus } from "./MeasuringStatus";
 import { HelpLink } from "./help";
 import { useDiskVersion } from "./watch";
 
@@ -22,13 +28,17 @@ interface Props {
   locked?: string | null;
   /** Right-click on the file's header: the same menu as its tab. */
   onMenu?: (e: MouseEvent) => void;
+  /** Open this file in the Explore workspace. */
+  onOpenInExplore?: () => void;
 }
 
-const COMPLEX_MODES: [string, string][] = [
+export const COMPLEX_MODES: [string, string][] = [
   ["abs", "Magnitude"],
   ["db", "Magnitude (dB)"],
   ["phase", "Phase (rad)"],
   ["phase_deg", "Phase (°)"],
+  ["phase_unwrap", "Phase, unwrapped (rad)"],
+  ["phase_deg_unwrap", "Phase, unwrapped (°)"],
   ["real", "Real part"],
   ["imag", "Imaginary part"],
   ["iq", "I/Q plane (real vs imaginary)"],
@@ -46,7 +56,7 @@ const MM_TO_PX = 96 / 25.4;
 const GIVE_UP_AFTER = 10_000;
 
 export default function FileView(props: Props) {
-  const { path, plotted, onPlot, styles, defaultStyle, styleRevision, onError, initialState, onStateChange, locked, onMenu } = props;
+  const { path, plotted, onPlot, styles, defaultStyle, styleRevision, onError, initialState, onStateChange, locked, onMenu, onOpenInExplore } = props;
   const toast = useToast();
   const [info, setInfo] = useState<FileInfo | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -237,6 +247,16 @@ export default function FileView(props: Props) {
     }
   };
 
+  // Copy picture: the exported PNG on the clipboard.
+  const copyFigure = async () => {
+    try {
+      await copyPng(figurePng(path, spec, preset, isEmptyObject(override) ? null : override));
+      toast("Picture copied: paste it into slides, a chat or your notes.");
+    } catch (e) {
+      onError(`${(e as Error).message}.`);
+    }
+  };
+
   // Save the view into the file. `overwrite`: even if the file changed since this tab loaded it.
   const saveToFile = async (overwrite = false) => {
     if (!result || !info) return;
@@ -326,11 +346,17 @@ export default function FileView(props: Props) {
           <div className="muted small path" title={info.path}>
             {info.path}
           </div>
+          {/\.lbd\.writing$/i.test(info.path) && <MeasuringStatus path={info.path} />}
         </div>
         <div className="actions">
           {!plotted && (
             <button className="primary" onClick={onPlot}>
               Plot
+            </button>
+          )}
+          {onOpenInExplore && !onlyNumbers && (
+            <button onClick={onOpenInExplore} title="Explore this file: zoom, pan, read values">
+              Open in Explore
             </button>
           )}
           <button onClick={() => api.reveal(info.path).catch((e) => onError(e.message))}>Show in folder</button>
@@ -392,6 +418,9 @@ export default function FileView(props: Props) {
               <button onClick={() => doExport("svg")}>SVG</button>
               <button onClick={() => doExport("png")}>PNG</button>
               <button onClick={() => doExport("jpg")} title="Blurs thin lines and text a little; prefer PDF or PNG">JPG</button>
+              <button onClick={copyFigure} title="The figure as PNG on the clipboard, as Export makes it: paste it into slides or a chat">
+                Copy picture
+              </button>
             </div>
             {renderError && <div className="error-box">{renderError}</div>}
             {(() => {
@@ -487,16 +516,24 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
   if (!resolved) return <div className="controls muted small">Preparing…</div>;
 
   const kind = resolved.kind ?? "auto";
+  const kindRow = kindOf(kind);
+  const KindControls = kindRow.controls;
+  const KindDisplay = kindRow.display; // the plot type's look options (16.47)
+  const logScales = kindRow.scales ?? ["x", "y"];
   const valuesByName = Object.fromEntries(info.values.map((v) => [v.name, v]));
   const selected = resolved.values ?? [];
   const first = valuesByName[selected[0]];
-  const firstAxes = first?.axes ?? [];
+  // a variable sweep's curves: the axes and values as drawn, on their real axes (16.41)
+  const real = resolved.real_axes;
+  const axesOf = (v: ValueInfo) => real?.values[v.name] ?? v.axes;
+  const inStep = (a: string) => !!real?.axes.find((x) => x.name === a)?.in_step;
+  const firstAxes = resolved.levels?.slice(-2) ?? (first ? axesOf(first) : []); // a variable sweep's map: its two inner levels
   const anyComplex = selected.some((n) => valuesByName[n]?.complex);
   // values with exactly the same axes as the first one: usable point by point in scatter plots
   const sameShape = info.values.filter((v) => v.axes.length > 0 && v.axes.join(",") === firstAxes.join(","));
   const axisLabel = (name: string) => {
-    const a = info.axes.find((x) => x.name === name);
-    return a ? `${a.label}${a.unit ? ` (${a.unit})` : ""}` : name;
+    const a = real?.axes.find((x) => x.name === name) ?? info.axes.find((x) => x.name === name);
+    return a ? `${a.label.replace(/ \(point number\)$/, resolved.levels || real ? "" : " (point number)")}${a.unit ? ` (${a.unit})` : ""}` : name;
   };
 
   const toggleValue = (name: string, checked: boolean) => {
@@ -505,7 +542,7 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
   };
 
   // Axes with one point are fixed parameters (not swept): they don't count as dimensions.
-  const lengthOf = (axis: string) => info.axes.find((a) => a.name === axis)?.length ?? 0;
+  const lengthOf = (axis: string) => (real?.axes.find((a) => a.name === axis) ?? info.axes.find((a) => a.name === axis))?.length ?? 0;
   const sweptAxes = (v: ValueInfo) => v.axes.filter((a) => lengthOf(a) > 1);
   /** Whether a value can be drawn as plot kind k (the same rule as the renderer). */
   const fits = (v: ValueInfo, k: string) => (k === "heatmap" ? sweptAxes(v).length >= 2 : v.axes.length > 0);
@@ -514,16 +551,23 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
   // Values that can join the plot: they share its horizontal axis (scatter: or its exact axes).
   const x = resolved.x;
   const joins = (v: ValueInfo) =>
-    kind === "scatter" && !(x && firstAxes.includes(x)) ? v.axes.join(",") === firstAxes.join(",") : !!x && v.axes.includes(x);
+    kind === "histogram"
+      ? v.unit === first?.unit && v.complex === first?.complex // overlaid when they share a unit
+      : kind === "scatter" && !(x && firstAxes.includes(x))
+        ? v.axes.join(",") === firstAxes.join(",")
+        : !!x && (real?.coordinates.includes(x) ? axesOf(v).join(",") === firstAxes.join(",") : axesOf(v).includes(x));
   const here = withAxes.filter(joins);
   const elsewhere = withAxes.filter((v) => !joins(v));
   // Another value on its own: it brings its own axes, so the axis choices start afresh.
-  const fresh: PlotSpec = { x: undefined, y: undefined, series: undefined, color: undefined, index: {} };
+  const fresh: PlotSpec = { x: undefined, y: undefined, series: undefined, color: undefined, all: undefined, index: {} };
   const switchTo = (name: string) => update({ ...fresh, values: [name] });
-  const chooseKind = (k: string) => {
+  const chooseKind = (k: string, drawable: string[] | null) => {
+    const can = (v: ValueInfo) => (drawable ? drawable.includes(v.name) : fits(v, k));
     const now = valuesByName[selected[0]];
-    const value = now && fits(now, k) ? undefined : info.values.find((v) => fits(v, k));
-    update(value ? { ...fresh, kind: k as PlotSpec["kind"], values: [value.name] } : { kind: k as PlotSpec["kind"] });
+    const value = now && can(now) ? undefined : info.values.find(can);
+    const starting = kindOf(k).starting?.(info, value ?? now);
+    const complex = resolved.complex === "re_im" ? { complex: undefined } : {};
+    update({ ...(value ? { ...fresh, values: [value.name] } : { color: undefined, all: undefined, x: undefined, y: undefined, series: undefined }), ...complex, kind: k, options: undefined, ...starting });
   };
   const axisName = (v: ValueInfo) => v.axes.filter((a) => lengthOf(a) > 1).map((a) => info.axes.find((x) => x.name === a)?.label || a).join(" × ") || v.axes.join(", ");
 
@@ -578,14 +622,10 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
         </legend>
         <label className="field">
           <span>Plot type</span>
-          <select value={kind} onChange={(e) => chooseKind(e.target.value)}>
-            <option value="curve">Curves</option>
-            <option value="scatter">Scatter</option>
-            <option value="heatmap">Heat map</option>
-          </select>
+          <PlotKindSelect path={info.path} value={kind} first={selected[0]} page="figure" onChoose={chooseKind} />
         </label>
 
-        {kind === "curve" || (kind === "scatter" && resolved.complex !== "iq") ? (
+        {kindRow.ownData ? null : kind === "curve" || kind === "histogram" || (kind === "scatter" && resolved.complex !== "iq") ? (
           <div className="field">
             <span>Values</span>
             <div className="checks">
@@ -633,7 +673,7 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
           </label>
         )}
 
-        {anyComplex && (
+        {anyComplex && !kindRow.ownData && (
           <label className="field">
             <span>Complex data as</span>
             <select value={resolved.complex ?? "abs"} onChange={(e) => update({ complex: e.target.value })}>
@@ -669,35 +709,13 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
             </select>
           </label>
         )}
-        {kind === "scatter" && (
-          <label className="field">
-            <span>Colour by</span>
-            <select value={resolved.color ?? "none"} onChange={(e) => update({ color: e.target.value })}>
-              <option value="none">— (series colours)</option>
-              <optgroup label="Axes">
-                {firstAxes.map((a) => (
-                  <option key={a} value={a}>
-                    {axisLabel(a)}
-                  </option>
-                ))}
-              </optgroup>
-              {sameShape.length > 0 && (
-                <optgroup label="Values">
-                  {sameShape.map((v) => (
-                    <option key={v.name} value={v.name}>
-                      {v.label}
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-            </select>
-          </label>
-        )}
-        {kind !== "scatter" && firstAxes.length > 0 && (
+        {KindControls && <KindControls info={info} spec={resolved} resolved={resolved} update={update} page="figure" />}
+        {kind !== "scatter" && !kindRow.ownData && !kindRow.noAxes && firstAxes.length > 0 && (
           <label className="field">
             <span>Horizontal axis</span>
             <select value={resolved.x ?? ""} onChange={(e) => update({ x: e.target.value, y: undefined, series: undefined, index: {} })}>
-              {firstAxes.map((a) => (
+              {/* a variable sweep's curves: its real coordinates first, the position inside a step last */}
+              {[...(real?.coordinates ?? []), ...firstAxes.filter((a) => !inStep(a)), ...firstAxes.filter(inStep)].map((a) => (
                 <option key={a} value={a}>
                   {axisLabel(a)}
                 </option>
@@ -719,13 +737,13 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
             </select>
           </label>
         )}
-        {kind === "curve" && selected.length === 1 && firstAxes.some((a) => a !== resolved.x && lengthOf(a) > 1) && (
+        {kind === "curve" && selected.length === 1 && firstAxes.some((a) => a !== (resolved.along ?? resolved.x) && lengthOf(a) > 1) && (
           <label className="field">
             <span>One curve per</span>
             <select value={resolved.series ?? "none"} onChange={(e) => update({ series: e.target.value, index: {} })}>
               <option value="none">— (single curve)</option>
               {firstAxes
-                .filter((a) => a !== resolved.x && lengthOf(a) > 1) // a single-point axis would give one curve
+                .filter((a) => a !== (resolved.along ?? resolved.x) && lengthOf(a) > 1) // a single-point axis would give one curve
                 .map((a) => (
                   <option key={a} value={a}>
                     {axisLabel(a)}
@@ -754,17 +772,30 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
           ),
         )}
 
-        <div className="field inline">
-          <label className="check">
-            <input type="checkbox" checked={resolved.x_scale === "log"} onChange={(e) => update({ x_scale: e.target.checked ? "log" : "linear" })} />
-            Log x
-          </label>
-          <label className="check">
-            <input type="checkbox" checked={resolved.y_scale === "log"} onChange={(e) => update({ y_scale: e.target.checked ? "log" : "linear" })} />
-            Log y
-          </label>
-        </div>
+        {logScales.length > 0 && (
+          <div className="field inline">
+            {logScales.includes("x") && (
+              <label className="check">
+                <input type="checkbox" checked={resolved.x_scale === "log"} onChange={(e) => update({ x_scale: e.target.checked ? "log" : "linear" })} />
+                Log x
+              </label>
+            )}
+            {logScales.includes("y") && (
+              <label className="check">
+                <input type="checkbox" checked={resolved.y_scale === "log"} onChange={(e) => update({ y_scale: e.target.checked ? "log" : "linear" })} />
+                Log y
+              </label>
+            )}
+          </div>
+        )}
       </fieldset>
+
+      {KindDisplay && (
+        <fieldset aria-label="Display">
+          <legend>Display</legend>
+          <KindDisplay info={info} spec={resolved} resolved={resolved} update={update} page="figure" />
+        </fieldset>
+      )}
 
       <fieldset>
         <legend>
@@ -779,7 +810,7 @@ function PlotControls({ info, resolved, update, styles, defaultStyle, preset, se
                 ["title", "Title"],
                 ["x_label", "Horizontal axis label"],
                 ["y_label", "Vertical axis label"],
-                ...(kind === "heatmap" || (kind === "scatter" && resolved.color) ? [["z_label", "Colour bar label"]] : []),
+                ...(kind === "heatmap" || kind === "matrix" || (kind === "scatter" && resolved.color) ? [["z_label", "Colour bar label"]] : []),
               ] as [keyof PlotSpec, string][]
             ).map(([key, label]) => (
               // keyed on the current value so Reset refreshes the uncontrolled input
@@ -889,14 +920,26 @@ function axisValues(path: string, version: string | null, axis: string): Promise
 
 /** The position on an axis that isn't drawn: a slider, and a box to type the axis value. A typed
  *  value goes to the nearest measured point; the box then shows that point's exact value. */
-function SliceControl({ path, version, slice: s, onIndex }: { path: string; version: string | null; slice: Slice; onIndex: (i: number) => void }) {
-  const shown = s.value === null ? "" : String(s.value);
+export function SliceControl({ path, version, slice: s, onIndex }: { path: string; version: string | null; slice: Slice; onIndex: (i: number) => void }) {
+  const shown = s.text ?? (s.value === null ? "" : String(s.value));
   const [text, setText] = useState(shown);
   const [note, setNote] = useState<string | null>(null);
   useEffect(() => setText(shown), [shown]);
 
   const commit = async () => {
     if (text.trim() === shown) return;
+    if (s.elements) {
+      // an axis with elements (format 1.2): its positions are chosen by their text
+      const i = s.elements.findIndex((e) => e.toLowerCase() === text.trim().toLowerCase());
+      if (i < 0) {
+        setNote(`Type one of: ${s.elements.slice(0, 8).join(", ")}${s.elements.length > 8 ? ", …" : ""}`);
+        setText(shown);
+        return;
+      }
+      setNote(null);
+      if (i !== s.index) onIndex(i);
+      return;
+    }
     const wanted = Number(text.trim());
     if (text.trim() === "" || !Number.isFinite(wanted)) {
       setNote("Type a number");
@@ -955,34 +998,57 @@ function SliceControl({ path, version, slice: s, onIndex }: { path: string; vers
   );
 }
 
-function FileDetails({ info }: { info: FileInfo }) {
+/** What is inside a data file. `metaFilter`: the metadata tree folds (nested groups) and has a
+ * filter box (the Library's right column, where metadata can be long). `layout` "library": the
+ * Library's selected file, whose description, date and size are shown beside the preview
+ * (FileFacts): here only the tables (without columns empty in every row), the metadata in
+ * columns, and at the end, folded, what wrote the file. */
+/** An axis's points: a variable sweep's inner axis counts its points per step (16.42). */
+function pointsText(a: AxisInfo): string {
+  const v = a.variable;
+  if (!v) return String(a.length);
+  if (!v.per_step) return String(v.total);
+  const [lo, hi] = v.per_step;
+  return `${lo === hi ? lo : `${lo}–${hi}`} per step (${v.total} in all)`;
+}
+
+export function FileDetails({ info, metaFilter = false, layout = "explore", part = "all" }: { info: FileInfo; metaFilter?: boolean; layout?: "explore" | "library"; part?: "all" | "tables" | "meta" }) {
+  const tables = part !== "meta", metaShown = part !== "tables";
+  const [filter, setFilter] = useState("");
+  const meta = metaFilter && filter.trim() ? filterMeta(info.meta, filter.trim().toLowerCase()) : info.meta;
+  const library = layout === "library";
+  // the Library leaves out a column that is empty in every row (a file without units, labels …)
+  const vCols = { label: !library || info.values.some((v) => v.label), unit: !library || info.values.some((v) => v.unit) };
+  const aCols = { label: !library || info.axes.some((a) => a.label || a.role === "point" || a.group), unit: !library || info.axes.some((a) => a.unit) };
   return (
-    <div className="details">
-      {info.description && <p>{info.description}</p>}
-      <dl className="props">
+    <div className={"details" + (library ? " library" : "")}>
+      {!library && info.description && <p>{info.description}</p>}
+      {!library && <dl className="props">
         <dt>Created</dt>
-        <dd>{info.created ?? "—"}</dd>
+        <dd>{info.created ? readableDate(info.created) : "—"}</dd>
         <dt>Written by</dt>
         <dd>{info.writer ?? "—"}</dd>
         <dt>Size</dt>
         <dd>{formatBytes(info.size)}</dd>
         <dt>Format</dt>
         <dd>LBD {info.lbd_version}</dd>
+        <FileId info={info} />
         {info.matplotlib && (
           <>
             <dt>View saved with</dt>
             <dd>matplotlib {info.matplotlib}</dd>
           </>
         )}
-      </dl>
+      </dl>}
 
+      {tables && <>
       <h3>Values</h3>
       <table>
         <thead>
           <tr>
             <th>Name</th>
-            <th>Label</th>
-            <th>Unit</th>
+            {vCols.label && <th>Label</th>}
+            {vCols.unit && <th>Unit</th>}
             <th>Axes</th>
             <th>Shape</th>
             <th>Type</th>
@@ -992,11 +1058,11 @@ function FileDetails({ info }: { info: FileInfo }) {
           {info.values.map((v) => (
             <tr key={v.name}>
               <td><code>{v.name}</code></td>
-              <td>{v.label}</td>
-              <td>{v.unit}</td>
-              <td>{v.axes.join(", ") || "—"}</td>
-              <td className="num">{v.shape.length ? v.shape.join(" × ") : `single number: ${v.text ?? "?"}`}</td>
-              <td>{v.dtype}</td>
+              {vCols.label && <td data-label="Label">{v.label}</td>}
+              {vCols.unit && <td data-label="Unit">{v.unit}</td>}
+              <td data-label="Axes">{(v.variable?.axes ?? v.axes).join(", ") || "—"}</td>
+              <td className="num" data-label="Shape">{v.variable ? v.variable.shape : v.shape.length ? v.shape.join(" × ") : `single number: ${v.text ?? "?"}`}</td>
+              <td data-label="Type">{v.dtype}</td>
             </tr>
           ))}
         </tbody>
@@ -1007,8 +1073,8 @@ function FileDetails({ info }: { info: FileInfo }) {
         <thead>
           <tr>
             <th>Name</th>
-            <th>Label</th>
-            <th>Unit</th>
+            {aCols.label && <th>Label</th>}
+            {aCols.unit && <th>Unit</th>}
             <th>Points</th>
             <th>From</th>
             <th>To</th>
@@ -1018,19 +1084,100 @@ function FileDetails({ info }: { info: FileInfo }) {
           {info.axes.map((a) => (
             <tr key={a.name}>
               <td><code>{a.name}</code></td>
-              <td>{a.label}</td>
-              <td>{a.unit}</td>
-              <td className="num">{a.length}</td>
-              <td className="num">{fmt(a.min)}</td>
-              <td className="num">{fmt(a.max)}</td>
+              {aCols.label && <td data-label="Label">
+                {a.variable?.label ?? a.label}
+                {a.role === "point" && <span className="muted small"> (inside each data point)</span>}
+                {a.variable?.depends_on && (
+                  <span className="muted small" title={`The points differ from one step of ${a.variable.depends_on} to the next`}>
+                    {" "}(variable sweep: depends on {a.variable.depends_on})
+                  </span>
+                )}
+              </td>}
+              {aCols.unit && <td data-label="Unit">{a.unit}</td>}
+              <td className="num" data-label="Points">{pointsText(a)}</td>
+              {a.elements ? (
+                <td colSpan={2} data-label="Elements" title={a.elements.join(", ")}>
+                  {a.elements.slice(0, 6).join(", ")}
+                  {a.elements.length > 6 ? ", …" : ""}
+                </td>
+              ) : (
+                <>
+                  <td className="num" data-label="From">{fmt(a.variable ? a.variable.min : a.min)}</td>
+                  <td className="num" data-label="To">{fmt(a.variable ? a.variable.max : a.max)}</td>
+                </>
+              )}
             </tr>
           ))}
         </tbody>
       </table>
 
+      </>}
+      {metaShown && <>
       <h3>Metadata</h3>
-      {isEmptyObject(info.meta) ? <p className="muted">None</p> : <MetaTree value={info.meta} />}
+      {metaFilter && !isEmptyObject(info.meta) && (
+        <input className="meta-filter" type="search" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter metadata…" aria-label="Filter metadata" />
+      )}
+      {isEmptyObject(info.meta) ? (
+        <p className="muted">None</p>
+      ) : isEmptyObject(meta) ? (
+        <p className="muted">Nothing in the metadata matches "{filter.trim()}".</p>
+      ) : (
+        <MetaTree value={meta} fold={metaFilter} />
+      )}
+      </>}
+      {library && tables && (
+        <details className="file-written">
+          <summary>File (written by, format)</summary>
+          <dl className="props">
+            <dt>Written by</dt>
+            <dd>{info.writer ?? "—"}</dd>
+            <dt>Format</dt>
+            <dd>LBD {info.lbd_version}</dd>
+            {info.matplotlib && (
+              <>
+                <dt>View saved with</dt>
+                <dd>matplotlib {info.matplotlib}</dd>
+              </>
+            )}
+          </dl>
+        </details>
+      )}
     </div>
+  );
+}
+
+/** The Library's selected file beside its preview: its description, when it was created and its
+ * size (what the "explore" layout of FileDetails shows above its tables). */
+export function FileFacts({ info }: { info: FileInfo }) {
+  return (
+    <>
+      {info.description && <p className="file-description">{info.description}</p>}
+      <dl className="props">
+        <dt>Created</dt>
+        <dd>{info.created ? readableDate(info.created) : "—"}</dd>
+        <dt>Size</dt>
+        <dd>{formatBytes(info.size)}</dd>
+        <FileId info={info} />
+      </dl>
+    </>
+  );
+}
+
+/** The measurement's id, to paste into a notebook or the Library's search (a CSV's comments
+ *  name it too). Nothing for a file without one. */
+function FileId({ info }: { info: FileInfo }) {
+  const toast = useToast();
+  if (!info.id) return null;
+  return (
+    <>
+      <dt title="The measurement's identity: the same wherever the file is moved or copied">Id</dt>
+      <dd className="file-id">
+        <code>{info.id}</code>
+        <button className="ib" aria-label="Copy the id" title="Copy the id" onClick={() => void copyPath(info.id!, toast)}>
+          <Icon name="copy" />
+        </button>
+      </dd>
+    </>
   );
 }
 
@@ -1039,17 +1186,46 @@ function fmt(x: number | null): string {
   return Math.abs(x) >= 1e5 || (x !== 0 && Math.abs(x) < 1e-3) ? x.toExponential(4) : String(Number(x.toPrecision(6)));
 }
 
-function MetaTree({ value }: { value: JsonObject }) {
+function MetaTree({ value, fold = false }: { value: JsonObject; fold?: boolean }) {
   return (
     <ul className="meta">
-      {Object.entries(value).map(([k, v]) => (
-        <li key={k}>
-          <span className="meta-key">{k}</span>
-          {isObject(v) && !(v as JsonObject).array ? <MetaTree value={v as JsonObject} /> : <span className="meta-val">{metaText(v)}</span>}
-        </li>
-      ))}
+      {Object.entries(value).map(([k, v]) =>
+        isObject(v) && !(v as JsonObject).array ? (
+          fold ? (
+            <li key={k}>
+              <details open>
+                <summary className="meta-key">{k}</summary>
+                <MetaTree value={v as JsonObject} fold />
+              </details>
+            </li>
+          ) : (
+            <li key={k}>
+              <span className="meta-key">{k}</span>
+              <MetaTree value={v as JsonObject} />
+            </li>
+          )
+        ) : (
+          <li key={k}>
+            <span className="meta-key">{k}</span>
+            <span className="meta-val">{metaText(v)}</span>
+          </li>
+        ),
+      )}
     </ul>
   );
+}
+
+/** The metadata whose keys or values contain `text` (lower case); a group whose key matches is kept whole. */
+function filterMeta(value: JsonObject, text: string): JsonObject {
+  const out: JsonObject = {};
+  for (const [k, v] of Object.entries(value)) {
+    if (k.toLowerCase().includes(text)) out[k] = v;
+    else if (isObject(v) && !(v as JsonObject).array) {
+      const inner = filterMeta(v as JsonObject, text);
+      if (!isEmptyObject(inner)) out[k] = inner;
+    } else if (metaText(v).toLowerCase().includes(text)) out[k] = v;
+  }
+  return out;
 }
 
 function isObject(v: Json): boolean {
@@ -1062,4 +1238,11 @@ function metaText(v: Json): string {
     return `array ${(o.shape as number[]).join(" × ")} (${o.dtype}): ${JSON.stringify(o.preview)} …`;
   }
   return typeof v === "string" ? v : JSON.stringify(v);
+}
+
+/** "2026-10-15T20:02:28+08:00" → "2026-10-15 20:02:28 +08:00" (the Library's date format). */
+function readableDate(iso: string): string {
+  const m = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}(?::\d{2})?)(?:\.\d+)?(Z|[+-]\d{2}:?\d{2})?$/i.exec(iso);
+  if (!m) return iso;
+  return `${m[1]} ${m[2]}${m[3] ? ` ${m[3] === "Z" || m[3] === "z" ? "UTC" : m[3]}` : ""}`;
 }

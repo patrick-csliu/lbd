@@ -10,6 +10,9 @@ dependencies = [
     "uvicorn>=0.29",
     "pillow>=10.0",       # image metadata (also a matplotlib dependency)
     "send2trash>=1.8",    # "Move to Recycle Bin" in the folder panel
+    "psutil>=5.9",        # the memory available now: large values are read by part (memory.py)
+    "watchdog>=4.0",      # the system's notices of new and changed files in the open folders (library_watch.py)
+    "tzdata>=2024.1; sys_platform == 'win32'",   # time zone names for Python's zoneinfo: Windows has none of its own
 ]
 
 [project.scripts]

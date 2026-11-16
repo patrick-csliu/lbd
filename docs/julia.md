@@ -4,8 +4,11 @@
 using LBD
 ```
 
-Exported names are `Dataset`, `Axis`, `Value`, `add_axis!`, `add_value!`, `LBDError` and
-`LBDVersionError`. The file functions are called with the module prefix (`LBD.save`,
+Exported names are `Dataset`, `Axis`, `Value`, `add_axis!`, `add_value!`, `write!`,
+`LBDError` and `LBDVersionError`, and for writing while measuring `Writer`, `lbd_writer`,
+`writing_status` and `recover` (see
+[Writing while measuring](getting-started/writing-while-measuring.md); the Writer also keeps the
+heartbeat file `name.lbd.live`). The file functions are called with the module prefix (`LBD.save`,
 `LBD.load`, `LBD.info`, `LBD.version`), so they don't clash with other packages.
 
 Requires Julia 1.9 or newer; it installs HDF5.jl, JSON3.jl and OrderedCollections.jl. To
@@ -38,7 +41,7 @@ d["S21"].axes           # ["power", "freq"]
 ## `Dataset`
 
 ```julia
-Dataset(title::AbstractString=""; description::AbstractString="")
+Dataset(title::AbstractString=""; description::AbstractString="", created=nothing)
 ```
 
 A mutable struct with these fields:
@@ -54,7 +57,10 @@ A mutable struct with these fields:
 | `style` | `Dict{String,Any}` or `nothing` | Per-file [style](styles/index.md) changes. |
 | `style_name` | `String` or `nothing` | Viewer style preset for this file. |
 | `matplotlib` | `String` or `nothing` | matplotlib version that last wrote the saved view (set by Python and the viewer). Julia keeps it when saving. |
-| `created` | `String` or `nothing` | ISO-8601 time the file was written. Set by `save`. |
+| `id` | `String` or `nothing` | The measurement's identity (a UUID, made at the first save; see `LBD.save`). Don't set it by hand; `new_id!(d)` makes a new one. |
+| `parent_id` | `String` or `nothing` | The `id` of the file this one was made from. |
+| `labels` | `Labels` | The file's [labels](#labels): `star`, `project` (or `nothing`), `users`, `tags`, `comment`; `written` says when they were last set. Checked when set. |
+| `created` | `String`, `DateTime` or `nothing` | When the data was created, ISO-8601 with a UTC offset (`"2026-10-13T16:09:00+08:00"`). Editable: give it as such a text or a `DateTime` (taken in this computer's time zone); a text without an offset gets this computer's offset. `nothing`: `save` fills in the time of the first save. A loaded file keeps its `created`, and saving again keeps it. |
 | `writer` | `String` or `nothing` | Program that wrote the file, e.g. `"julia LBD 1.0.0"`. |
 | `lbd_version` | `String` | Format version of the file. |
 | `path` | `String` or `nothing` | Last loaded or saved path. |
@@ -69,7 +75,7 @@ haskey(d, "S21")   # true if an axis or value has that name
 ## `add_axis!`
 
 ```julia
-add_axis!(d, name, data; unit="", label=name) -> Axis
+add_axis!(d, name, data=nothing; unit="", label=name, elements=nothing) -> Axis
 ```
 
 Adds a 1-D axis.
@@ -80,13 +86,15 @@ Adds a 1-D axis.
 | `data` | A 1-D collection of real numbers. Ranges work and are `collect`ed. `Bool` is not allowed. |
 | `unit` | Unit string. Prefer plain SI units. |
 | `label` | Display text. |
+| `elements` | A text for each position (format 1.2), e.g. `["ground", "excited"]`; `data` may then be left out (positions 0, 1, 2 …). |
 
-**Throws** `LBDError` if the name is invalid or used, `data` isn't 1-D, or `data` isn't real.
+**Throws** `LBDError` if the name is invalid or used, `data` isn't 1-D, `data` isn't real, or
+`elements` don't fit the positions.
 
 ## `add_value!`
 
 ```julia
-add_value!(d, name, data, axes=String[]; unit="", label=name, dtype=:auto) -> Value
+add_value!(d, name, data, axes=String[]; unit="", label=name, dtype=:auto, shape=(), elements=nothing) -> Value
 ```
 
 Adds an N-D value.
@@ -99,6 +107,8 @@ Adds an N-D value.
 | `unit` | Unit string. |
 | `label` | Display text. |
 | `dtype` | `:auto` keeps the element type, or pass a type to force it: `Float32`, `Float64`, `Int8`…`Int64`, `UInt8`…`UInt64`, `ComplexF32`, `ComplexF64`, `Bool`. |
+| `shape` | The shape of one data point (format 1.2): `(3,)` for a vector, `(2, 2)` for a matrix; `()`: one number. `data`'s dimensions are the value's axes first, then the data point's. |
+| `elements` | A data point's position texts: one vector for a vector (`["x", "y", "z"]`), one per dimension for a matrix (`[["I", "Q"], nothing]`). |
 
 `size(data)` must equal the axis lengths in order.
 
@@ -115,7 +125,81 @@ add_value!(d, "trace", v, "t"; unit="V")
 add_value!(d, "mask", v .> 0.5, "t")            # Bool
 add_value!(d, "raw", counts, "t"; dtype=Float32)
 add_value!(d, "fit_Q", 12345.6)                 # scalar
+add_axis!(d, "state"; elements=["ground", "excited"])                      # positions 0, 1
+add_value!(d, "bloch", zeros(length(v), 3), "t"; shape=(3,), elements=["x", "y", "z"])
 ```
+
+A value's `axes` are what was swept (`["t"]`); its data point is described by `v.point_shape`
+(`(3,)`) and `v.elements`, and `v.shape` is the data's size (the sweep, then the data point).
+In the file, each dimension of a data point is an axis of its own (`bloch_dim1`,
+`role="point"`), so every reader reads it.
+
+## `write!`
+
+Fills a value made with `add_value!(d, name; axes=..., dtype=...)` (every point `NaN`, or 0 with
+`measured` false for integers and `Bool`): a point, a trace, a map, or several values at once.
+Indices count from 1; a position can also be one of an axis's elements.
+
+```julia
+using LBD
+
+d = LBD.Dataset("Power sweep")
+add_axis!(d, "power", collect(range(-60.0, 0, 7)); unit="dBm")
+add_axis!(d, "freq", collect(range(6.99e9, 7.01e9, 201)); unit="Hz")
+add_value!(d, "S21"; axes=["power", "freq"], dtype=ComplexF64)
+add_value!(d, "n"; axes="power", dtype=Int32)
+for i in 1:3
+    write!(d; power=i, S21=ones(201), n=10i)          # a trace, and n at power i
+end
+println(d["n"].measured)                              # Bool[1, 1, 1, 0, 0, 0, 0]
+LBD.save("sweep.lbd", d)
+```
+
+`add_axis!(d, "time"; grows=true)` makes an axis whose points `write!` adds
+(`write!(d; time=t, T=x)`). Names that can't be keywords go in a `Dict`:
+`write!(d, Dict("if" => 3); S21=z)`.
+
+## Variable sweeps: `add_group!`
+
+When the inner points depend on the outer one (B chosen per A), put the axes in an axis group
+(format 2.0): only measured points are stored. See [Grid or group?](getting-started/concepts.md#grid-or-group).
+
+```julia
+using LBD
+
+d = LBD.Dataset("Variable sweep")
+add_group!(d, "AB")                                 # its axes follow, outer to inner
+add_axis!(d, "A"; group="AB", unit="V")
+add_axis!(d, "B"; group="AB", unit="Hz")
+add_value!(d, "f"; axes=["A", "B"])                 # one entry per (A, B) point
+add_value!(d, "q"; axes="A")                        # one per A
+for (a, bs) in (1 => [10], 2 => [10, 20], 3 => [15, 25, 35])
+    write!(d; A=a, B=bs, f=100a .+ bs)              # coordinates, not indices
+    write!(d; A=a, q=1.5a)
+end
+println(d.axes["B"].data)      # [10, 10, 20, 15, 25, 35]: each (A, B) point's B
+println(d.axes["B"].parent)    # [1, 2, 2, 3, 3, 3]: the A it belongs to (from 1)
+println(d["f"].dims)           # [("A", "B")]: stored as the (A, B) points
+i = write!(d; A=4)                                  # write! returns the point's index ...
+write!(d; parent=i, B=[5, 6], f=[45.0, 46.0])       # ... to write under it without a lookup
+m = to_dense(d, "f")                                # the full rectangle: gaps NaN
+println(size(m["f"].data))                          # (4, 7)
+for (a, row) in rows(d, "f"; by="A")                # key => dataset
+    println(a, " ", row.axes["B"].data)
+end
+c = coords(d, "f")                                  # each point's coordinates
+println(c["A"], c["B"])
+LBD.save("variable.lbd", d)                         # format 2.0
+```
+
+- A group's axis takes a **coordinate**, outer axes first; the same coordinates are the same
+  point. `parent=` takes the index an earlier `write!` returned (from 1; the file stores them
+  from 0).
+- A value lies on an outer part of a group (`"A"`, `["A", "B"]`, or the group's name), never on
+  `"B"` alone.
+- `to_dense(d, name; round=9)` or `rtol=1e-9` merges coordinates that differ only by rounding
+  (`write!` warns about them); `limit=nothing` lifts the size limit (10^8 cells).
+- `LBD.Writer` takes the same calls (`add_group!(w, ...)`, `add_axis!(w, ...; group=)`, `write!`).
 
 ## `LBD.save`
 
@@ -123,7 +207,16 @@ add_value!(d, "fit_Q", 12345.6)                 # scalar
 LBD.save(path, d; compression=false) -> path
 ```
 
-Writes the dataset. It also sets `d.created`, `d.writer` and `d.path`.
+Writes the dataset. It also sets `d.writer` and `d.path`, and `d.created` if it was `nothing`
+(the time of this first save); a `created` that is set is written unchanged.
+
+It also sets the file's **id**: the measurement's identity, which LBD Viewer's Library uses to recognise
+the same measurement in two places (a copy, a backup, a synced folder). It is made at the first
+save (a UUID, from the time and random bits of the operating system: no setup, nothing to
+coordinate between computers) and is read-only. Saving again to the same file keeps it;
+saving to **another file** gives that file a new id, and the old one becomes its **parent
+id** (a new measurement made from this one). A file copied by the file system keeps its id. `new_id!(d)` makes a loaded dataset a new
+measurement on purpose.
 
 - `compression=true` gzip-compresses arrays of 1024 elements or more. This is lossless.
 - A path not ending in `.lbd` logs a warning.
@@ -154,6 +247,28 @@ Reads a file.
 It logs a warning (`@warn`) if the minor format version is newer or the stored plot JSON is
 invalid.
 
+## `LBD.open`
+
+```julia
+LBD.open(path; mode="r") -> Dataset
+LBD.open(f, path; mode="r")          # do-block: closed at its end
+```
+
+Reads the file's structure and leaves the value data in the file: each value's `data` is an
+`LBD.OnDisk{T,N} <: AbstractArray{T,N}`. `size` reads nothing; `x[4, :]` reads row 4 only,
+`collect(x)` everything. `close(d)` (or the end of the do-block) closes the file; what was read
+stays usable. `mode="r+"`: `write!` puts data into the file at points that exist,
+`LBD.save(d)` writes the title, description, metadata and saved view into it,
+`LBD.save(other, d)` copies it piece by piece.
+
+```julia
+LBD.open("big.lbd") do d
+    row = d["S21"].data[4, :]
+end
+```
+
+See [Large files](getting-started/large-files.md).
+
 ## `LBD.info`
 
 ```julia
@@ -161,6 +276,57 @@ LBD.info(path) -> Dataset
 ```
 
 Reads everything except value data. It is the same as `LBD.load(path; values=String[])`.
+
+## If a save goes wrong
+
+A save never loses the measurement:
+
+- `d.meta = ...`, `d.plot = ...`, `d.style = ...`, `d.created = ...` are checked when they are
+  set, so a mistake shows before the measurement starts.
+- Metadata or a saved view that still can't be stored (changed by hand, such as
+  `d.meta["x"] = nothing`) is left out: everything else is saved, a warning names it, and its
+  text is kept in the file's `/extra/not_saved`. `LBD.save(path, d; report=true)` returns
+  `(path, left_out, problems)`.
+- Data that can't make a valid file (a value whose data no longer fits its axes) is written as
+  it is to `name.lbd.rescue`, and an `LBDError` names that file; `LBD.recover` reads it back as
+  a Dict, to fix and save.
+
+`LBD.check(d)` lists what a save would refuse or leave out, and
+`LBD.save(path, d; dry_run=true)` also checks the folder and the room on the disk; neither
+writes anything:
+
+```julia
+d = LBD.load("sweep.lbd")
+isempty(LBD.check(d))                            # true: a save would go through
+LBD.save("sweep.lbd", d; dry_run=true).problems  # nothing written
+```
+
+## Labels
+
+A file can carry its labels: a star, a project, users, tags and a comment, as LBD Viewer's
+Library shows them. They are stored in the file (format 1.3), so they go wherever the file goes.
+
+```julia
+d = LBD.load("sweep.lbd")
+d.labels.star = true
+d.labels.project = "Chip 3/Cooldown 7"           # a nested label: parts separated by /
+add_tags!(d, "calibration", "first try")
+d.labels = (project="Chip 3/Cooldown 7", users=["Ana"])   # or all at once
+LBD.save("sweep.lbd", d)
+```
+
+Each label is checked when it is set, so a mistake shows before measuring. The labels of an
+existing file change without rewriting its data; tags and users are added (`replace=true`
+replaces them):
+
+```julia
+LBD.set_labels("sweep.lbd"; tags=["checked"], star=true)
+LBD.remove_labels("sweep.lbd"; tags=["checked"])
+LBD.labels("sweep.lbd")                          # read them; nothing if it has none
+```
+
+An `LBD.Writer` has `w.labels` and `add_tags!` too: labels set before the first write are in
+the file from the start, labels set while measuring are written when it finishes.
 
 ## `LBD.version`
 

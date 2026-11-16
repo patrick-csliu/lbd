@@ -149,7 +149,7 @@ LBD only adds prefixes, it never converts between units. See
 
 ### From a dataset or file
 
-[`lp.plot`][lbd.plot.plot] draws a curve, scatter or heat map exactly like LBD Viewer. `data` is
+[`lp.plot`][lbd.plot.plot] draws a curve, scatter, heat map, matrix, bars or 3D bars exactly like LBD Viewer. `data` is
 a `Dataset` in memory or an `.lbd` path; the other arguments are the
 [plot settings](../styles/plot-settings.md). Settings saved in the file's view are used unless
 you override them, as in the viewer. The result is a normal matplotlib figure: add
@@ -158,7 +158,58 @@ annotations, change limits, then `plt.show()` or `lp.save(...)`.
 ```python
 fig = lp.plot("sweep.lbd")                                   # the file's saved view and style
 fig = lp.plot(d, "curve", "S21", complex="phase_deg", series="power")
+fig = lp.plot(d, "curve", "S21", series="power", options={"points": True})   # a small dot on every point
 fig = lp.plot(d, "scatter", "S21", complex="iq", color="power", style="thesis")
+```
+
+For few positions, a matrix shows the numbers themselves and bars compare them. A type's own
+choices go in `options`:
+
+```python
+m = lbd.Dataset(title="Assignment")
+m.add_axis("prepared", [0.0, 1.0], label="Prepared", elements=["ground", "excited"])
+m.add_axis("measured", [0.0, 1.0], label="Measured", elements=["ground", "excited"])
+m.add_value("p", [[0.97, 0.03], [0.06, 0.94]], axes=["prepared", "measured"], label="Probability")
+fig = lp.plot(m, "matrix", "p", options={"digits": 2, "row_sums": True})
+fig = lp.plot(m, "bars", "p", x="prepared", series="measured", options={"layout": "stacked", "numbers": True})
+fig = lp.plot(m, "bars3d", "p", options={"elev": 25, "azim": -60})
+```
+
+A scatter plot takes all the points, unless `index` fixes an axis. With `all`, the axes listed keep all their
+points and the others not drawn are fixed; `options` holds `equal` (the same scale both ways) and `sides`
+(histograms of the points beside the plot):
+
+```python
+fig = lp.plot(d, "scatter", "S21", complex="iq", color="none", all=["freq"], index={"power": 0},
+              options={"sides": True})
+```
+
+A histogram counts the numbers of a value. `all` lists the axes whose points all go in, `index` fixes
+the others, `color` gives an outline per step of one axis (or `"none"`), and `options` holds the bins
+(`"auto"` or a number), `hist_style` (`"bars"`, `"outline"`) and `hist_y` (`"count"`, `"fraction"`,
+`"density"`). A large file opened with `lbd.open` is counted part by part.
+
+```python
+fig = lp.plot(d, "histogram", "S21", complex="db", all=["freq"], index={"power": 0})
+fig = lp.plot(d, "histogram", "S21", complex="db", color="none", all=["freq", "power"],
+              options={"bins": 40, "hist_style": "outline", "hist_y": "density"})
+```
+
+Bars take `all` too: each bar then stands for all the numbers of those axes, and `options` says
+what it shows, `stat` (`"mean"`, `"median"`, `"max"`, `"min"`, `"sum"`; empty points are left out),
+and whether `errors` (one standard deviation) are drawn on it:
+
+```python
+fig = lp.plot(d, "bars", "S21", x="power", series="none", all=["freq"], options={"stat": "median", "errors": True})
+```
+
+To count numbers of your own, `count_bins` does what the plot does:
+
+```python
+from lbd.plot.histogram import auto_bins, count_bins
+
+numbers = np.abs(d["S21"].data).ravel()
+edges, counts = count_bins(numbers, auto_bins(numbers))
 ```
 
 Annotations (lines, text, arrows, shapes) can be passed the same way, or stored in the file's
@@ -176,6 +227,12 @@ fig = lp.plot("sweep.lbd", "curve", "S21", complex="db", series="none",
                   {"patch": "Rectangle", "args": [[5.5, -0.5], 1.0, 1.0], "kwargs": {"fill": False}},
               ])
 ```
+
+A **variable sweep** of two levels (an axis group: say Frequency chosen per Power) is drawn as the
+viewer draws it: `lp.plot(d, "curve", "S21")` gives one curve per power against its own real
+frequencies (`x="freq"`, the default), `x="power"` one curve per position inside a step, and
+`x="freq_n"` (the position inside a step) the points numbered. A value with one number per power
+can join with `x="power"`. `lp.table` gives the same lines, each stored point once.
 
 Pass `ax=` to draw into one panel of a larger figure:
 
@@ -206,6 +263,54 @@ lp.save(fig, "fig2.pdf", style="thesis")
 t = np.linspace(0, 1e-6, 201)
 fig = lp.quick(t, {"data": np.sin(2e7 * t), "fit": 0.9 * np.sin(2e7 * t)},
                x_label="Time", x_unit="s", y_label="Signal", y_unit="V")
+```
+
+### As numbers: a CSV table
+
+[`lp.table`][lbd.plot.table] gives the numbers a curve plot or heat map shows (the complex mode
+applied, the series and slices chosen), with the same arguments as `lp.plot`. This is what LBD
+Viewer's **Save as CSV** writes ([Explore](../viewer/explore.md#getting-data-out)).
+`to_csv` writes one data point per row, or for 2-D data a table (matrix):
+
+```python
+t = lp.table("sweep.lbd", "curve", "S21", complex="db", series="power")
+t.to_csv("sweep_S21_dB.csv")                       # columns power, freq, S21
+t.to_csv("sweep_matrix.csv", layout="matrix")      # rows = power, columns = freq
+
+a = np.loadtxt("sweep_S21_dB.csv", delimiter=",", encoding="utf-8")
+cols = np.genfromtxt("sweep_S21_dB.csv", delimiter=",", names=True, encoding="utf-8")
+print(cols["freq"][:3], cols["S21"][:3])
+```
+
+| Argument | Choices |
+|---|---|
+| `numbers=` | `"shown"` (as plotted), `"stored"` (the file's numbers; complex as `S21_re`, `S21_im`), `"both"` |
+| `xlim=`, `ylim=` | keep only this range (stored units: Hz, not GHz) |
+| `to_csv(layout=)` | `"rows"` or `"matrix"`; `rows_are="x"` turns the matrix the other way |
+
+Numbers are always in the units stored in the file (Hz, not GHz: nothing rounded); the header
+names each column's unit. (`units=` was removed in 1.3.)
+
+The file starts with comment lines (`#`): the column names, where the numbers come from (file,
+the file's `id` and the `parent_id` it was made from, complex mode, fixed parameters), and each
+column's unit. Numbers are written at full precision,
+with `.` as decimal point and `,` between columns. Give `encoding="utf-8"` when reading: units
+like µ and ° are in the comments. `t.estimate()` says how big the file will be before writing it.
+
+### The whole file as CSV
+
+A file can hold values on different axes, for example `u(A)`, `v(A, B)` and `t(C)`. A table holds
+one **group**, the values on the same axes (mixed, most of its cells would be empty).
+[`lp.groups`][lbd.plot.groups] lists them; `lp.table(..., group=)` makes a group's table, as
+stored, for any number of axes: a column per axis, then per value, a row per data point. A
+complex value is two columns (`S21_re`, `S21_im`), a data point of several numbers a column each,
+and a variable sweep gives each point its coordinates. Single numbers and the metadata are in the
+comments. A file is read block by block, so it may be bigger than memory.
+
+```python
+for g in lp.groups("sweep.lbd"):
+    print(g.label, g.rows)                         # S21, ... (power, freq) 1234
+lp.table("sweep.lbd", group="S21").to_csv("sweep_all.csv")
 ```
 
 ## Recipes

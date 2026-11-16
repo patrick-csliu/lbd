@@ -5,14 +5,15 @@ set win over the ones saved in the file.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `kind` | text | `"auto"` | `curve`, `scatter`, `heatmap`, or `auto`: `heatmap` when the value has two or more axes with more than one point, else `curve`. Axes with a single point are fixed parameters. |
-| `values` | list of names | the first value with axes | Values to plot. Curves and scatter can show several; heat maps use the first. Single numbers (values without axes) can't be plotted; the viewer lists them with the values. |
-| `complex` | text | `"abs"` | How complex values are shown: `abs` (magnitude), `db` (20·log₁₀\|z\|), `phase` (radians), `phase_deg` (degrees), `real`, `imag`, and for scatter only `iq` (the I/Q plane). Real values are shown as they are (with a warning if you asked for another mode). |
-| `x` | name | the value's last axis | Horizontal axis. Curves and heat maps: an axis. Scatter: an axis, or a **value** with the same axes as the plotted one (value against value). |
+| `kind` | text | `"auto"` | `curve`, `scatter`, `heatmap`, `matrix`, `bars`, `bars3d`, or `auto`: `heatmap` when the value has two or more axes with more than one point, else `curve`. Axes with a single point are fixed parameters. |
+| `values` | list of names | the first value with axes | Values to plot. Curves, scatter and bars can show several; heat maps and matrices use the first. Single numbers (values without axes) can only be drawn as bars; the viewer lists them with the values. |
+| `complex` | text | `"abs"` | How complex values are shown: `abs` (magnitude), `db` (20·log₁₀\|z\|), `phase` (radians), `phase_deg` (degrees), `phase_unwrap` and `phase_deg_unwrap` (the phase without its 2π jumps along the horizontal axis; missing points are skipped), `real`, `imag`, for scatter only `iq` (the I/Q plane), for matrices, bars and 3D bars `re_im` (both parts side by side; matrices and 3D bars of complex numbers start with it), and for 3D bars `abs_phase` (height the magnitude, colour the phase). Real values are shown as they are (with a warning if you asked for another mode). |
+| `x` | name | the value's last axis | Horizontal axis. Heat maps: an axis. Curves and scatter: an axis, or a **value** with the same axes as the plotted one (value against value; for curves each trace is then drawn at its own x, along the value's last swept axis). |
 | `y` | axis name | the last remaining axis | Heat maps: vertical axis. |
 | `series` | axis name or `"none"` | the first other axis | Curves of a single 2-D (or higher) value: one curve per point of this axis. `"none"` draws one curve and uses a slice instead. |
 | `color` | name or `"none"` | none | Scatter: colour the points by an axis (its coordinates) or by a value with the same axes. A short axis (e.g. the prepared state) gets one colour per point and a legend; a longer axis or a value gets a colour bar. |
 | `index` | object `{axis: index}` | `0` for each | Curves and heat maps: for every dimension not shown, which point to show (0-based, whole numbers; `-1` is the last point; sliders in the viewer). Scatter: by default **all** points are drawn; an axis listed here is fixed at that index. |
+| `all` | list of axis names | none | Scatter, histogram and bars: axes whose points all go in, instead of a slider (`index`). Bars: each bar then stands for all its numbers, shown as `options.stat`. |
 | `x_scale` | text | `"linear"` | `linear` or `log`. |
 | `y_scale` | text | `"linear"` | `linear` or `log`. A quantity with `"scale": "log"` also makes it log. |
 | `title` | text | none | Title above the plot. Usually left empty for publication figures. |
@@ -20,6 +21,7 @@ set win over the ones saved in the file.
 | `y_label` | text | the value's label | Replaces the vertical axis label. With several values, the default is `Value`, since the legend names them. |
 | `z_label` | text | the label | Replaces the colour bar label (heat maps, coloured scatter). |
 | `annotations` | list | none | Extra drawing on the plot: lines, text, arrows, shapes. See [Annotations](#annotations). |
+| `options` | object | none | A plot type's own choices. Curves: `points` (false: a small dot, matplotlib's `.` marker, on every stored point). Curves and Scatter: `grid` (true or false; missing: the style's), `equal` (false: one stored unit as long on both axes, linear axes only). Matrix: `numbers` (true), `digits` (3), `range` (`auto`, `unit` for 0 to 1, `signed` for −1 to 1), `row_sums` (false). Bars: `layout` (`grouped`, `stacked`), `numbers` (false: the numbers at the bars), and with `all`: `stat` (`mean`, `median`, `max`, `min`, `sum`; empty points are left out) and `errors` (false: one standard deviation on each bar). 3D bars: `elev`, `azim` (degrees), `zoom`. |
 
 **Scatter modes**
 

@@ -1,26 +1,39 @@
 # LBD Viewer
 
-LBD Viewer lists the `.lbd` files in your folders and plots them. It also shows your figures
-and style files. It runs on your own computer and shows its window in your web browser.
-Nothing is uploaded anywhere.
+LBD Viewer lists the `.lbd` files in your folders, lets you explore their data (zoom, read
+values, step through traces) and makes figures of them. It also shows your figures and style
+files. It runs on your own computer and shows its window in your web browser. Nothing is
+uploaded anywhere.
+
+It has three workspaces, switched at the top left:
+
+- **[Library](library.md):** find measurements: every data file under your folders as one list, by folder, date and search.
+- **[Explore](explore.md):** look at data. The default: double-clicking a data file opens it here.
+- **Figure:** make a figure to export, with its style ([Plotting](plotting.md),
+  [Saving views and exporting](saving-and-exporting.md)). The window below shows Figure.
 
 ## The window at a glance
 
 ![LBD Viewer with a data file open: numbered parts](img/overview.png)
 
-1. **Pages of the viewer:** **Data** (your files and plots), **Styles** (how figures look) and
-   **Language modules** (installing the module for each programming language you use). See
-   [The viewer's pages](#the-viewers-pages) below.
+1. **Workspaces and pages:** **Library**, **Explore** and **Figure** on the left; **Styles** (how
+   figures look) and **Language modules** (installing the module for each programming language
+   you use) on the right. See [The viewer's pages](#the-viewers-pages) below. A new page starts
+   on the **Library**; one opened for a file (from Explorer or a script) starts on that file; a
+   reloaded page stays where it was.
 2. **Page number:** this browser tab's number. You can open the viewer in several browser tabs.
    Each is a numbered *page*, and you can move open files between them. See
    [Several browser tabs](folders-and-files.md#several-browser-tabs).
 3. **⚙ Settings:** where files opened from Explorer go, and the light or dark theme. See
    [Settings](#settings).
 4. **Help** opens this documentation. It is part of the viewer, so it works without internet.
-5. **Folder panel:** the folders you added, with their data files, style files and images.
-   Click a file to look at it, double-click to plot it. See [Folders and files](folders-and-files.md).
-6. **Tabs:** the files open in this page. **◧ Folders** at the left hides the folder panel for
-   more room. Right-click a tab to close it or move it to another page. See
+5. **Files sidebar:** the Library's list with this browser tab's filters (or, as chosen in ⚙, the
+   folder tree, the starred or the recent files). Click a file to look at it, double-click to keep
+   it open (here, in Figure: to plot it); ↑ ↓ step through the list. See
+   [The Files sidebar](folders-and-files.md#the-files-sidebar).
+6. **Tabs:** the files open in this page. **◧‹** at the top of the Files sidebar hides it for
+   more room; **◧›** at the left of the tabs shows it again. Going to Explore or Figure with no
+   file open there shows it, so you can choose one. Right-click a tab to close it or move it to another page. See
    [Tabs](folders-and-files.md#tabs).
 7. **File header:** the file's title and path, and **Show in folder**.
 8. **Plot controls:** what to plot and how, and the style. See [Plotting](plotting.md).
@@ -47,26 +60,41 @@ Only one copy of the viewer runs at a time. Opening more files adds them to the 
 
 ## Settings
 
-![The ⚙ settings](img/settings.png){ width="380" }
+![The ⚙ settings](img/settings.png){ width="620" }
 
-**⚙** at the top right holds two settings. They are saved, and apply to every viewer tab and to
-the next start:
+**⚙** at the top right opens the settings, in sections (1). They are saved, and apply to every
+viewer tab and to the next start. **Find a setting…** (2) finds one in any section by a word
+("cloud", "dark", "GB"); a dot marks a section where something isn't as LBD starts, and **Reset
+this section…** puts it back. Each setting has its name, a line about it, and its control (3).
+Esc, **×** or a click beside the dialog closes it. A link can open a section:
+`#settings/memory` at the end of the viewer's address.
 
-1. **Files opened from Explorer / Finder:** *in the open viewer (as a tab)*, which is the
-   default, or *in a new browser tab* every time.
-2. **Theme:**
-    - **System** follows the light or dark mode of Windows, macOS or Linux, also when it changes
-      while the viewer is open.
-    - **Light** and **Dark** stay as chosen.
+A setting takes effect at once, except one that changes a lot, which asks first and says what will
+happen: how data files are edited (in place or copy and swap), reading each file's details (how many
+files), previews of every file (how many are drawn), less room for summaries than they take now, and
+emptying the picture cache or the summaries (how much is deleted). **Reset this section…** names
+those it would switch. A risky memory limit is only warned about, under its field.
 
-    Figures always stay on white, because they are print figures. The Help pages have their own
-    light/dark switch.
+| Section | Settings |
+|---|---|
+| **General** | **Theme**: *System* follows the light or dark mode of Windows, macOS or Linux, also when it changes while the viewer is open; *Light* and *Dark* stay as chosen. Figures always stay on white, because they are print figures; the Help pages have their own light/dark switch. **Files opened from Explorer / Finder** open *in this viewer (a tab)*, the default, or *in a new browser tab*, and data files go to *Explore* (the default) or *Figure*. |
+| **Library** | **Read each file's details** (for folders in cloud storage, see [Library](library.md#reading-each-files-details-cloud-storage)); which **previews** are drawn, and the picture cache ([Previews](library.md#previews)). |
+| **Library, Dates** | **Show dates in**: this computer's time zone (the default), another time zone, or as written in each file (see [Library](library.md)) |
+| **Files sidebar** | What the [Files sidebar](folders-and-files.md#the-files-sidebar) of Explore and Figure can list besides the Library selection: Folders, Starred, Recent. |
+| **Explore** | **Panels for a new file**; **New plots start with**: Grid on Curves, Show points on Curves, Grid on Scatter (on: a new plot starts with it; off: as the style says, or without points); **Kept when a file is opened again**; how many visible traces a vertical or horizontal cursor marks at its line, at most (more can make each cursor move slow) |
+| **Memory** | How much memory to leave free for the rest of the computer, an optional most to use, and how much disk the summaries of large data may take ([Large files](../getting-started/large-files.md#large-files-in-lbd-viewer)). |
+| **About** | The viewer's version and the file format's. |
+| **Measurements** | What the status line of a file being measured shows (time left, percentage, points, the slow outer axes; or nothing), and a browser notification when a measurement finishes or stops while the viewer is in the background (off at first; the browser asks once) ([Writing while measuring](../getting-started/writing-while-measuring.md)). |
+
+The Library's own choices (its columns, the sidebar's layout) are made where they are used.
 
 ## The viewer's pages
 
 | Page | What it does |
 |---|---|
-| **Data** | The folder panel and the open files: [Folders and files](folders-and-files.md), [Plotting](plotting.md), [Saving views and exporting](saving-and-exporting.md). |
+| **Library** | Every data file under your folders as one list, by folder, date and search; what is inside the file you select: [Library](library.md), [Folders and files](folders-and-files.md). |
+| **Explore** | Look at data: zoom, read values, choose traces: [Explore](explore.md). |
+| **Figure** | The figures of your files, their styles and export: [Plotting](plotting.md), [Saving views and exporting](saving-and-exporting.md). |
 | **Styles** | Create and edit style presets, and choose the default one: [Styles page](styles-page.md). |
 | **Language modules** | How to install the module for each programming language on this computer: [Language modules page](language-modules.md). |
 | **Help** | Opens this documentation in a new tab. |
@@ -86,4 +114,10 @@ page open the matching page of this documentation.
   file to the running viewer, instead of starting a second server.
 - **Automatic shutdown:** open tabs tell the viewer every 10 seconds that they are still there.
   About 90 seconds after the last tab closes, the viewer stops by itself. If no tab connects at
-  all after a start, it waits at least 60 seconds first.
+  all after a start, it waits at least 60 seconds first. While a tab is open the viewer keeps
+  running, however long nothing happens, also after the computer slept: on waking, the tabs get
+  15 seconds to say they are still there.
+- **Stopping it yourself:** Ctrl+C in the terminal where it runs stops it within a second or
+  two (it prints "LBD viewer stopped"). A save in progress finishes first, and labels not yet
+  written go into their files. The drawing processes of the Library's previews stop with it, and
+  also stop by themselves if the viewer was ended another way (killed, crashed).

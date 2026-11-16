@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import getpass
 import json
+import logging
 import math
 import os
 import secrets
@@ -37,12 +39,23 @@ from pydantic import BaseModel, ConfigDict  # noqa: E402
 import lbd  # noqa: E402
 from lbd.plot import render as rnd  # noqa: E402
 from lbd.plot.style import STYLE_SUFFIX, read_style_file  # noqa: E402
-from lbd.plot.units import prefix_scale  # noqa: E402
+from lbd.plot import whole as whole_file  # noqa: E402
+from lbd.plot.units import AUTO_UNITS, prefix_scale  # noqa: E402
 
 from . import VERSION  # noqa: E402
 from . import files, images, scan, sdk  # noqa: E402
+from .catalog import Catalog, catalog_dir, fitting, structure  # noqa: E402
+from . import labels, library_labels  # noqa: E402
+from .label_writer import LabelWriter  # noqa: E402
+from .library import LibraryIndex, writing_status  # noqa: E402
+from .previews import PreviewCache, PreviewError, Previewer  # noqa: E402
+from . import live, memory, reading, summaries, versions  # noqa: E402
+from .updates import CheckError, Updates  # noqa: E402
+from . import export as csv_export  # noqa: E402
+from .explore import KINDS as EXPLORE_KINDS, ExploreClosed, ExploreError, ExploreSession, Sessions  # noqa: E402
 from .pages import PageError, Pages, UnknownPage  # noqa: E402
-from .config import Config, ConfigError, Style, StyleError, from_dict  # noqa: E402
+from .config import (MEMORY_DEFAULTS, Config, ConfigError, Style, StyleError, _same_path, from_dict,  # noqa: E402
+                     previews_mode, section_defaults)
 
 CREATOR = f"LBD viewer {VERSION} (matplotlib {matplotlib.__version__})"
 
@@ -103,8 +116,110 @@ class AppState:
         self.port = port
         self.check_host = check_host
         self.opened: Set[str] = set()
+        self.chosen: Set[str] = set()     # files the user chose in the system's Save dialog: may be written
+        self.explore = Sessions()           # the Explore views' sessions (explore.py)
+        self.exports = csv_export.Exports()  # CSV files being written (export.py)
+        self.live = live.shared()           # files being measured: state and progress (live.py)
+        self._catalog: Optional[Catalog] = None
+        self._library: Optional[LibraryIndex] = None
+        self._label_writer: Optional[LabelWriter] = None
+        self._previews: Optional[Previewer] = None
         self.started = time.monotonic()
         self.last_heartbeat: Optional[float] = None
+        self.on_stop: Any = None            # stops the server: set by cli.start (POST /api/stop)
+        self.updates = Updates(config)      # the check for a new version; automatic only at a real start (cli)
+
+    @property
+    def catalog(self) -> Catalog:
+        """What LBD remembers about files (catalog.py), next to the settings it belongs to."""
+        if self._catalog is None:
+            self._catalog = Catalog(catalog_dir(self.config.dir))
+        return self._catalog
+
+    @property
+    def library(self) -> LibraryIndex:
+        """The Library's index of the data files under the open folders (library.py), kept up to
+        date in the background from the first time it is used."""
+        if self._library is None:
+            cfg = self.config
+            self._library = LibraryIndex(catalog_dir(cfg.dir), lambda: cfg.settings()["roots"],
+                                         lambda: cfg.settings()["library"]["read_headers"])
+            self._library.edit_method = lambda: cfg.settings()["library"]["data_file_edits"]
+            # labels go into the data files too, a moment after each edit (plan 17)
+            self._label_writer = LabelWriter(self._library, self._library.edit_method)
+            self._library.after_apply.append(self._label_writer.check)
+            self._label_writer.start()
+            self._library.start()
+        return self._library
+
+    def labels_note(self, path: str) -> Dict[str, Any]:
+        """Whether a file's labels are still to be written into it, and why they couldn't be yet."""
+        w = self._label_writer
+        if w is None:
+            return {"labels_pending": False, "labels_problem": None}
+        return {"labels_pending": w.pending(path), "labels_problem": w.problems.get(path)}
+
+    # Previews are drawn in worker processes; tests set this False (threads: quicker to start).
+    preview_processes = True
+
+    @property
+    def previews(self) -> Previewer:
+        """The Library's automatic previews (previews.py), drawn in the background from the first
+        time they are asked for, as the Library setting says."""
+        if self._previews is None:
+            cfg, lib = self.config, self.library
+            self._previews = Previewer(
+                PreviewCache(catalog_dir(cfg.dir)), lib.versions, lambda: lib.generation,
+                mode=lambda: previews_mode(cfg.settings()["library"]),
+                style=lambda: cfg.resolve().model_dump(),     # the default style: never the file's
+                chosen=lambda path: self.chosen_preview(path) is not None,
+                processes=self.preview_processes)
+            self._previews.start()
+        return self._previews
+
+    def preview_keys(self, path: str) -> Tuple[List[str], bool]:
+        """Where a file's chosen preview is kept (catalog.py), the key to choose under first:
+        its id, so identical copies share it, else its path; and whether the file is one of
+        copies that differ (then a new choice is kept under its path, for it alone)."""
+        ident, conflict = None, False
+        if self._library is not None:
+            ident, conflict, _ = self._library.identity(path)
+        if ident is None:
+            try:
+                ident = lbd.info(path).id                 # not indexed (yet), or headers aren't read
+            except Exception:
+                ident = None
+        keys = [f"id:{ident}"] if ident else []
+        return (([f"path:{path}"] + keys) if conflict else (keys + [f"path:{path}"])), conflict
+
+    def chosen_preview(self, path: str) -> Optional[Dict[str, Any]]:
+        """The preview chosen for this file, or None. Copies that differ don't share one: a
+        picture chosen under their id belongs only to the file it was chosen for."""
+        keys, conflict = self.preview_keys(path)
+        row = self.catalog.chosen_preview(keys)
+        if row and conflict and row["key"].startswith("id:") and row["path"] != path:
+            return None
+        return row
+
+    def close(self) -> None:
+        """Write the labels still waiting into their data files, stop the Library's indexing and
+        previews, and close LBD's databases (the server is stopping)."""
+        if self._label_writer is not None:
+            self._label_writer.close()
+            self._label_writer = None
+        if self._previews is not None:
+            self._previews.close()
+            self._previews = None
+        if self._library is not None:
+            self._library.close()
+            self._library = None
+        if self._catalog is not None:
+            self._catalog.close()
+
+    def wake_library(self) -> None:
+        """The open folders or the Library settings changed: the index checks at once (if it runs)."""
+        if self._library is not None:
+            self._library.wake()
 
     def open_file(self, path: str) -> str:
         p = Path(path).expanduser().resolve()
@@ -145,6 +260,21 @@ _WARN_LOCK = threading.RLock()
 
 
 @contextlib.contextmanager
+def quiet_writing() -> Iterator[None]:
+    """Leave out lbd's "still being written" warning (the viewer shows a file's status instead)."""
+    with _WARN_LOCK, warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=r".*is still being written", category=lbd.LBDWarning)
+        yield
+
+
+def refuse_writing(p: Path, what: str) -> None:
+    """A file being written belongs to its measurement: LBD doesn't change, move or recycle it."""
+    if p.name.lower().endswith(".lbd.writing"):
+        raise HTTPException(409, f"{p.name} is being written by a measurement, or it stopped before finishing: "
+                                 f"LBD doesn't {what} it. When it stopped, Recover makes it an .lbd file.")
+
+
+@contextlib.contextmanager
 def collect_warnings() -> Iterator[List[str]]:
     """Collect LBD warnings raised inside the block into a list (filled when the block ends).
 
@@ -157,6 +287,8 @@ def collect_warnings() -> Iterator[List[str]]:
     for w in caught:
         if issubclass(w.category, lbd.LBDWarning):
             text = str(w.message)
+            if "is still being written" in text:      # a file being measured: its status line says so
+                continue
             if text not in found:
                 found.append(text)
 
@@ -176,6 +308,73 @@ class PathBody(_Body):
 class RenameBody(_Body):
     path: str
     name: str
+
+
+class LabelKindBody(_Body):
+    kind: str                                # "project", "users" or "tags"
+
+
+class LabelCreateBody(LabelKindBody):
+    label: str
+    root: Optional[str] = None               # the open folder that keeps it (default: the first)
+
+
+class LabelRenameBody(LabelKindBody):
+    old: str
+    new: str
+    dry: bool = False                        # only count the files it would change
+
+
+class LabelRemoveBody(LabelKindBody):
+    label: str
+    dry: bool = False
+
+
+class LabelsBody(_Body):
+    paths: List[str]
+    star: Optional[bool] = None
+    project: Optional[str] = None            # "" removes it
+    comment: Optional[str] = None
+    add_tags: List[str] = []
+    remove_tags: List[str] = []
+    add_users: List[str] = []
+    remove_users: List[str] = []
+
+
+class ResolveBody(_Body):
+    path: str
+    action: str                              # "new_id", "same" or "trash"
+
+
+class DuplicateBody(_Body):
+    path: str
+    labels: bool = True
+
+
+class PathsBody(_Body):
+    paths: List[str]
+
+
+class WantBody(_Body):
+    paths: List[str]
+    now: bool = False                        # the selected file (or Show preview); else rows near it
+
+
+class UpdatePreviewBody(_Body):
+    paths: List[str]
+    replace_chosen: bool = False             # the page asked: a picture chosen in Explore is replaced too
+
+
+class ChooseBody(_Body):
+    path: str
+    panels: List[Dict[str, Any]]             # Explore's panels as shown: spec, settings, stat, view
+    grid: List[int]                          # rows, columns
+    preset: Optional[str] = None
+
+
+class MissingBody(_Body):
+    entry: Dict[str, Any]
+    path: Optional[str] = None               # None: discard the labels
 
 
 class RenderBody(_Body):
@@ -200,7 +399,18 @@ class ImportBody(_Body):
 class SettingsBody(_Body):
     default_style: Optional[str] = None
     open_files_in: Optional[str] = None   # "viewer" or "browser-tab" (config.OPEN_FILES_IN)
+    open_data_in: Optional[str] = None    # "explore" or "figure" (config.OPEN_DATA_IN)
     theme: Optional[str] = None           # "system", "light" or "dark" (config.THEMES)
+    library: Optional[Dict[str, Any]] = None  # {read_headers?, notice_seen?, columns?} (config.LIBRARY_DEFAULTS)
+    memory: Optional[Dict[str, Any]] = None   # {reserve_gb?, maximum_gb?, summary_cache_gb?} (config.MEMORY_DEFAULTS)
+    measurements: Optional[Dict[str, Any]] = None   # {progress?, time?, percent?, points?, axes?, notify?}
+    explore: Optional[Dict[str, Any]] = None  # {line_traces?} (config.EXPLORE_DEFAULTS)
+    first_start_done: Optional[bool] = None   # the first start's questions answered (18.8)
+    check_updates: Optional[bool] = None      # ask GitHub for a newer version at a real start (18.8)
+
+
+class SectionBody(_Body):
+    section: str          # a section of the Settings dialog (config.SETTINGS_SECTIONS)
 
 
 class FilePlotBody(_Body):
@@ -240,15 +450,147 @@ class ChangesBody(_Body):
     dirs: List[str] = []                  # the folders it lists
 
 
+class ExploreBody(_Body):
+    path: str
+    spec: Optional[Dict[str, Any]] = None
+    preset: Optional[str] = None
+    width: int                            # the plot panel, in CSS pixels
+    height: int
+    dpr: float = 1.0                      # the screen's device pixel ratio (sharpness; capped at 2)
+
+
+class ExploreRenderBody(_Body):
+    xlim: Optional[List[float]] = None    # None: the whole data
+    ylim: Optional[List[float]] = None
+    stat: str = "max"                     # how a pixel shows several map cells: max, min, mean
+    format: str = "raw"                   # "raw" RGBA pixels or "png"
+    draft: bool = False                   # while zooming or panning: data at half resolution (faster)
+    settings: Optional[Dict[str, Any]] = None   # view settings: select, cmap, invert, scales, clim (explore.py)
+    width: Optional[int] = None           # the panel's size now, if it changed since opening
+    height: Optional[int] = None
+    dpr: Optional[float] = None
+    angle: Optional[Dict[str, Any]] = None      # a 3D plot: {elev, azim, zoom} of this picture
+
+
+class RememberBody(_Body):
+    path: str
+    state: Dict[str, Any]                 # an Explore view: spec, view settings, zoom (opaque here)
+
+
+class ExploreSpecBody(_Body):
+    spec: Dict[str, Any]                  # the plot settings to show from now on (values, kind, axes, ...)
+
+
+class ExplorePickBody(_Body):
+    x: float                              # a pixel of the last picture (top-left origin)
+    y: float
+
+
+class KindsBody(_Body):
+    path: str
+    spec: Optional[Dict[str, Any]] = None
+
+
+class CursorsBody(_Body):
+    cursors: List[Dict[str, Any]]         # 1 or 2: {x, y} in plot units, trace?, free?, step? (reading.py)
+    type: str = "cross"                   # cross, vertical or horizontal
+    xlim: List[float]                     # the view the page shows, and its plot area in CSS pixels
+    ylim: List[float]
+    width: int
+    height: int
+    cuts: bool = True                     # maps: the rows and columns through the cursors
+    lines: bool = True                    # curves: each cursor's trace as drawn (to highlight it)
+    every: bool = True                    # a vertical or horizontal cursor reads every trace at its line
+    at_line: str = "interpolated"         # ... between stored points, or "stored": the nearest
+    together: bool = False                # two cursors: their steps are one move of both
+
+
+class FindBody(_Body):
+    what: str                             # max, min or peak
+    xlim: List[float]                     # where to search (the view, or between the cursors)
+    ylim: List[float]
+    trace: Optional[int] = None           # curves: only this trace
+
+
+class HistogramBody(_Body):
+    settings: Optional[Dict[str, Any]] = None   # the view settings to count with (selection, colour scale)
+
+
+class CalculateBody(_Body):
+    what: str                             # "delay" or "rotation"
+    index: int                            # the operation's place in the list (0-based)
+    xlim: List[float]                     # the x range to use (plot units): between the cursors, or the view
+    trace: Optional[int] = None           # curves: cursor 1's trace (else all shown traces)
+
+
+class ExportBody(_Body):
+    sessions: List[str]                   # the panels' sessions; the first is the panel asked from
+    numbers: str = "shown"                # "shown", "stored" or "both"
+    zoomed: bool = False                  # only the zoomed range (views below), else everything
+    views: Optional[List[Dict[str, List[float]]]] = None   # per session {"xlim", "ylim"} in plot units
+    layout: str = "rows"                  # "rows" or "matrix"
+    rows_are: str = "t"                   # matrix: "t" (series / map rows) or "x"
+    names: Optional[List[str]] = None     # per session the panel's name, for "left out: ..."
+    cuts: Optional[List[Dict[str, Any]]] = None   # per session a cut {which, index, trace}: saved instead of the panel
+    path: Optional[str] = None            # None: only the size, the options and a file name
+
+
+class JobBody(_Body):
+    job: str
+
+
+class FileCsvBody(_Body):
+    file: str                             # the data file
+    group: Optional[str] = None           # a value of the group to save (None: the first group)
+    layout: str = "rows"                  # "rows" or "matrix"
+    rows_are: str = "t"
+    path: Optional[str] = None            # None: only the groups, the size and a file name
+
+
+class PickSaveBody(_Body):
+    path: str                             # the data file: the dialog starts in its folder
+    name: str                             # the file name proposed
+    fmt: str                              # "csv", "png" or "lbd"
+    title: str = "Save"
+
+
+class SaveCutBody(_Body):
+    which: str                            # "row" or "column" (maps), "trace" (curves)
+    index: Dict[str, int]                 # the cursor's stored indices
+    trace: Optional[int] = None
+    path: Optional[str] = None            # None: only suggest a file name
+
+
+# What a request was doing, for the message of an unexpected error.
+UNEXPECTED_DOING = (("/render", "drawing the plot"), ("/cursors", "reading the cursors"), ("/find", "searching"),
+                    ("/histogram", "counting the values"), ("/calculate", "calculating"),
+                    ("/save-cut", "saving the cut"), ("/export-csv", "saving the numbers"), ("/spec", "changing the plot"), ("/api/explore", "opening the file"))
+
+
+def viewer_log(settings_dir: Path) -> Path:
+    """The viewer's log of unexpected errors: next to its database (catalog_dir), set up once.
+    Rotates at 1 MB, keeping one older file."""
+    import logging.handlers
+
+    path = catalog_dir(settings_dir) / "viewer.log"
+    log = logging.getLogger("lbd_viewer")
+    if not any(getattr(h, "baseFilename", None) == str(path) for h in log.handlers):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handler = logging.handlers.RotatingFileHandler(path, maxBytes=1_000_000, backupCount=1, encoding="utf-8")
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        log.addHandler(handler)
+    return path
+
+
 def canonical(path: str) -> str:
     """One spelling per file, so the page rules never see one file as two."""
     return str(Path(path).expanduser().resolve())
 
 
 def file_version(path: Path) -> str:
-    """Changes when the file is written: modification time and size."""
-    st = path.stat()
-    return f"{st.st_mtime_ns}-{st.st_size}"
+    """Changes when the file is written (modification time and size), but not when LBD itself
+    writes only its labels (versions.py)."""
+    return versions.content(path)
 
 
 # ---- JSON helpers -------------------------------------------------------------------
@@ -274,7 +616,50 @@ def jsonable(x: Any) -> Any:
     return x
 
 
+def variable_sweeps(real: "lbd.Dataset") -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+    """What the Values & axes table shows for variable sweeps (axis groups, 16.42), from the real
+    dataset (not the flat view): per axis of a group its label, its range over the file, its points
+    in all and, below the first level, its points per step and the axis it depends on; per value
+    on a group's level its axes and its shape in steps ("40 steps × 1–40 (820 points)"). Cheap: the
+    `_parent` arrays are small next to the data."""
+    axes: Dict[str, Dict[str, Any]] = {}
+    for g in real.groups.values():
+        for k, name in enumerate(g.order):
+            a = real.axes[name]
+            data = np.asarray(a.data, dtype=float)
+            finite = data[np.isfinite(data)]
+            info: Dict[str, Any] = {"label": a.label, "total": int(data.size),
+                                    "min": jsonable(finite.min()) if finite.size else None,
+                                    "max": jsonable(finite.max()) if finite.size else None}
+            if k and a.parent is not None:
+                above = real.axes[g.order[k - 1]]
+                counts = np.bincount(np.asarray(a.parent, dtype=np.int64), minlength=len(above.data))
+                info.update(steps=int(counts.size), per_step=[int(counts.min()), int(counts.max())] if counts.size else [0, 0],
+                            depends_on=above.label or above.name)
+            axes[name] = info
+    values: Dict[str, Dict[str, Any]] = {}
+    for v in real.values.values():
+        dims = getattr(v, "dims", None) or [(a,) for a in v.axes]
+        if not any(real.axes[dim[-1]].group is not None for dim in dims if dim and dim[-1] in real.axes):
+            continue
+        parts = []
+        for dim in dims:
+            info = axes.get(dim[-1])
+            if info is None:
+                parts.append(str(len(real.axes[dim[-1]].data)))
+            elif "per_step" in info:
+                lo, hi = info["per_step"]
+                parts.append(f"{info['steps']} steps × {lo if lo == hi else f'{lo}–{hi}'} ({info['total']} points)")
+            else:
+                parts.append(str(info["total"]))
+        parts += [str(n) for n in getattr(v, "point_shape", ())]
+        values[v.name] = {"axes": [a for dim in dims for a in dim], "shape": " × ".join(parts)}
+    return axes, values
+
+
 def file_summary(d: "lbd.Dataset") -> Dict[str, Any]:
+    sweeps, swept_values = variable_sweeps(d)      # the real axes of variable sweeps (16.42)
+    d = rnd.flat(d)                     # the page shows one axis per dimension, a data point's too
     # HDF5 lists group members alphabetically; show axes in the order the values use them.
     order: List[str] = []
     for v in d.values.values():
@@ -286,11 +671,15 @@ def file_summary(d: "lbd.Dataset") -> Dict[str, Any]:
         finite = data[np.isfinite(data)] if data.dtype.kind == "f" else data
         axes.append({
             "name": a.name, "unit": a.unit, "label": a.label, "length": int(data.size), "dtype": str(data.dtype),
+            "elements": a.elements, "role": a.role, "group": a.group,
             "min": jsonable(finite.min()) if finite.size else None,
             "max": jsonable(finite.max()) if finite.size else None,
+            **({"variable": sweeps[a.name]} if a.name in sweeps else {}),
         })
     values = [{"name": v.name, "unit": v.unit, "label": v.label, "axes": v.axes, "shape": list(v.shape),
-               "dtype": v.dtype, "complex": v.dtype.startswith("complex")} for v in d.values.values()]
+               "point_axes": [a for a in v.axes if d.axes[a].role == "point"],
+               "dtype": v.dtype, "complex": v.dtype.startswith("complex"),
+               **({"variable": swept_values[v.name]} if v.name in swept_values else {})} for v in d.values.values()]
     numbers = _single_numbers(d)
     for v in values:
         if v["name"] in numbers:
@@ -299,11 +688,21 @@ def file_summary(d: "lbd.Dataset") -> Dict[str, Any]:
     return {
         "path": str(d.path), "name": d.path.name if d.path else "",
         "title": d.title, "description": d.description, "created": d.created, "writer": d.writer,
+        "id": d.id, "parent_id": d.parent_id,
         "lbd_version": d.lbd_version, "size": stat.st_size if stat else None,
         "axes": axes, "values": values, "meta": jsonable(d.meta),
+        "groups": {g.name: list(g.order) for g in d.groups.values()},
         "plot": d.plot, "style": d.style, "style_name": d.style_name, "matplotlib": d.matplotlib,
+        # the labels the file holds (/labels, plan 17), or None; the Library may show newer ones
+        "labels": {**d.labels.as_dict(), "written": d.labels.written} if d.labels.written else None,
         "version": file_version(d.path) if d.path else None,
+        "writing": writing_status(str(d.path)) if d.path else None,
     }
+
+
+def _load_for_view(path: str, names: List[str]) -> "lbd.Dataset":
+    """The values a figure needs: whole if they fit in memory, else read by part (memory.py)."""
+    return memory.load_values(path, names, file_version(Path(path)))
 
 
 def _single_numbers(d: "lbd.Dataset") -> Dict[str, str]:
@@ -400,22 +799,22 @@ def native_folder_dialog() -> Optional[str]:
         "folder", fallback)
 
 
-def native_save_dialog(folder: Path, name: str, fmt: str) -> Optional[str]:
+def native_save_dialog(folder: Path, name: str, fmt: str, title: str = "Export figure",
+                       fallback: str = "the figure is saved to your browser's download folder instead") -> Optional[str]:
     """Native "Save as" dialog in `folder` with `name` filled in. Returns None if cancelled.
 
     The system dialog asks before replacing an existing file.
     """
-    fallback = "the figure is saved to your browser's download folder instead"
     if _dialog_backend() == "osascript":
         return _mac_dialog(
-            f'POSIX path of (choose file name with prompt "Export figure" '
+            f'POSIX path of (choose file name with prompt {_applescript_string(title)} '
             f'default name {_applescript_string(name)} '
             f'default location (POSIX file {_applescript_string(str(folder))}))',
             "save", fallback)
     ext = f".{fmt}"
     return _tk_dialog(
         lambda fd, root: fd.asksaveasfilename(
-            parent=root, title="Export figure", initialdir=str(folder), initialfile=name,
+            parent=root, title=title, initialdir=str(folder), initialfile=name,
             defaultextension=ext, filetypes=[(f"{fmt.upper()} file", f"*{ext}")], confirmoverwrite=True),
         "save", fallback)
 
@@ -444,13 +843,102 @@ def deliver_files(state: AppState, files: List[str], dirs: List[str]) -> Dict[st
     return {"delivered": not unplaced, "shown": offer.shown, "busy": offer.busy, "unplaced": unplaced}
 
 
+LOCAL_CLIENTS = ("127.0.0.1", "::1")
+
+
+def add_stop_route(app: FastAPI, state: AppState) -> None:
+    """POST /api/stop: stop this viewer gently (`lbd-view --stop`, run by the installers before
+    they replace the program). The server stops as after its idle time: labels still waiting are
+    written into their files and the previews are stopped (AppState.close, run by cli.Running).
+    Only from this computer, with the session token (from server.json) like every /api request."""
+
+    @app.post("/api/stop")
+    def stop(request: Request):
+        client = request.client.host if request.client else ""
+        if client not in LOCAL_CLIENTS:
+            raise HTTPException(403, f"the viewer can only be stopped from this computer, not from {client}")
+        if state.on_stop is None:
+            raise HTTPException(409, "this viewer wasn't started by lbd-view, so it can't stop itself; "
+                                     "stop it where it was started")
+        state.on_stop()
+        return {"stopping": True, "pid": os.getpid()}
+
+
+class RemindBody(_Body):
+    choice: str
+
+
+def add_update_routes(app: FastAPI, state: AppState) -> None:
+    """The check for a new version (updates.py): what is known, a check by hand, the reminder's
+    choice. Only the page that passes claim=true can get the reminder, and only once per start."""
+
+    @app.get("/api/updates")
+    def updates_state(claim: bool = False):
+        remind = state.updates.claim_reminder() if claim else False
+        return {**state.updates.state(), "remind": remind}
+
+    @app.post("/api/updates/check")
+    def updates_check():
+        try:
+            return {**state.updates.check_now(), "remind": False}
+        except CheckError as e:
+            raise HTTPException(502, f"Couldn't check for a new version: {e}.") from None
+
+    @app.post("/api/updates/remind")
+    def updates_remind(body: RemindBody):
+        try:
+            return {**state.updates.remind(body.choice), "remind": False}
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from None
+
+
+class _UiFiles(StaticFiles):
+    """The built web UI. Its page (index.html) is checked again on every load, so a browser never
+    keeps showing an older viewer after an update; the scripts it names have a content hash in
+    their file names, so they may be kept."""
+
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        if not path.replace("\\", "/").startswith("assets/"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 # ---- app ---------------------------------------------------------------------------------
+
+
+def apply_memory(settings: Dict[str, Any]) -> None:
+    """The memory settings (GB, None: no reserve / no maximum) in effect for every Explore tab."""
+    gb = lambda x: None if x is None else int(float(x) * memory.GB)   # noqa: E731
+    memory.configure(gb(settings.get("reserve_gb")), gb(settings.get("maximum_gb")))
+
+
+def memory_now() -> Dict[str, Any]:
+    """This computer's memory and the room the viewer has now, for the settings page (GB)."""
+    m = memory.shared().memory
+    try:
+        total, available = m._system()
+    except Exception:                                   # psutil missing or failing: say so
+        return {"total_gb": None, "reserve_now_gb": None, "room_gb": None}
+    return {"total_gb": round(total / memory.GB, 1), "reserve_now_gb": round(m.reserve() / memory.GB, 1),
+            "room_gb": round(m.room() / memory.GB, 1)}
 
 
 def create_app(state: AppState) -> FastAPI:
     app = FastAPI(title="LBD viewer", version=VERSION, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.lbd = state
     cfg = state.config
+    with contextlib.suppress(ConfigError):
+        apply_memory(cfg.settings()["memory"])
+
+    def summary_limit() -> float:
+        try:
+            return float(cfg.settings()["memory"]["summary_cache_gb"])
+        except ConfigError:
+            return MEMORY_DEFAULTS["summary_cache_gb"]
+
+    # summaries of maps bigger than memory (summaries.py): on disk, next to the database
+    summaries.configure(catalog_dir(cfg.dir) / "summaries", summary_limit)
 
     @app.middleware("http")
     async def guard(request: Request, call_next):
@@ -479,6 +967,22 @@ def create_app(state: AppState) -> FastAPI:
     async def _style_error(request: Request, exc: StyleError):
         return JSONResponse({"detail": str(exc)}, status_code=400)
 
+    @app.exception_handler(Exception)
+    async def _unexpected(request: Request, exc: Exception):
+        # A bug: say so plainly, with what was being done and where the details are; the page
+        # keeps its last picture and settings, so whatever caused it can be changed back.
+        path = request.url.path
+        doing = next((what for end, what in UNEXPECTED_DOING if path.endswith(end)), "answering the page")
+        log_file = viewer_log(state.config.dir)
+        logging.getLogger("lbd_viewer").error("unexpected error on %s %s", request.method, path, exc_info=exc)
+        return JSONResponse({"detail": f"An unexpected error while {doing}: {type(exc).__name__}: {exc}. "
+                                       f"This is a bug; the details are in {log_file}."}, status_code=500)
+
+    @app.exception_handler(ExploreError)
+    async def _explore_error(request: Request, exc: ExploreError):
+        # a session closed while this request used it: like an unknown session, the page reopens it
+        return JSONResponse({"detail": str(exc)}, status_code=404 if isinstance(exc, ExploreClosed) else 400)
+
     @app.exception_handler(images.ImageError)
     async def _image_error(request: Request, exc: images.ImageError):
         return JSONResponse({"detail": str(exc)}, status_code=400)
@@ -502,17 +1006,50 @@ def create_app(state: AppState) -> FastAPI:
         state.last_heartbeat = time.monotonic()
         return {"ok": True}
 
+    add_stop_route(app, state)
+    add_update_routes(app, state)
+
+    # -- summaries of maps bigger than memory (summaries.py)
+
+    @app.get("/api/summaries")
+    def summaries_now():
+        """The summaries being made now (file, what, fraction done, seconds); how many are kept
+        and their size."""
+        c = summaries.shared()
+        return {"making": c.progress(), "count": len(c.entries()), "bytes": c.size()}
+
+    @app.post("/api/summaries/cancel")
+    def summaries_cancel(body: PathBody):
+        """Stop making the summary of this file; the request that asked for it answers "cancelled"."""
+        p = str(state.check_allowed(body.path))
+        if not summaries.shared().cancel(p):
+            raise HTTPException(404, f"no summary of {Path(p).name} is being made")
+        return {"ok": True}
+
+    @app.post("/api/summaries/empty")
+    def summaries_empty():
+        """Remove every summary not in use; they are made again when needed."""
+        c = summaries.shared()
+        return {**c.empty(), "count": len(c.entries()), "bytes": c.size()}
+
     @app.get("/api/state")
     def get_state():
         with collect_warnings() as warns:
             s = cfg.settings()
             names = cfg.style_names()
             problems = cfg.problems()
+            if state.catalog.problem:                       # told once
+                problems.append(state.catalog.problem)
+                state.catalog.problem = None
         return {
             "version": VERSION, "lbd_version": lbd.FORMAT_VERSION,
             "roots": s["roots"], "default_style": s["default_style"], "styles": names,
-            "open_files_in": s["open_files_in"], "theme": s["theme"],
-            "platform": sys.platform, "config_dir": str(cfg.dir), "warnings": problems + warns,
+            "open_files_in": s["open_files_in"], "open_data_in": s["open_data_in"], "theme": s["theme"],
+            "first_start_done": s["first_start_done"], "check_updates": s["check_updates"],
+            "library": s["library"], "memory": {**s["memory"], **memory_now()}, "measurements": s["measurements"], "explore": s["explore"], "login": getpass.getuser(), "platform": sys.platform, "config_dir": str(cfg.dir), "warnings": problems + warns,
+            "defaults": section_defaults(),
+            # the page writes its numbers with the plots' prefix rule (one list, in lbd.plot.units)
+            "auto_units": sorted(AUTO_UNITS),
         }
 
     @app.post("/api/open")
@@ -525,12 +1062,28 @@ def create_app(state: AppState) -> FastAPI:
     def add_root(body: PathBody):
         roots = cfg.add_root(body.path)
         state.pages.broadcast("roots_changed")
+        state.wake_library()
         return {"roots": roots}
 
     @app.post("/api/pick-folder")
     def pick_folder():
         """Show the native folder dialog on this computer. Returns {"path": null} if cancelled."""
         return {"path": native_folder_dialog()}
+
+    @app.get("/api/roots/summary")
+    def root_summary(path: str = Query(...)):
+        """What removing an open folder changes (asked before it is removed): its files, those with
+        labels, the labels only they have, the browser tabs showing a file in it, and other open
+        folders inside it (they stay)."""
+        roots = cfg.settings()["roots"]
+        if not any(_same_path(path, r) for r in roots):
+            raise HTTPException(404, f"{path} is not one of your folders")
+        inside = str(Path(path).resolve())
+        prefix = inside.rstrip(os.sep) + os.sep
+        out = state.library.folder_summary(inside)
+        out["pages"] = sum(1 for p in state.pages.live_pages() if any(str(Path(f).resolve()).startswith(prefix) for f in p.files))
+        out["inside"] = [r for r in roots if str(Path(r).resolve()).startswith(prefix)]
+        return out
 
     @app.delete("/api/roots")
     def remove_root(path: str = Query(...)):
@@ -539,6 +1092,7 @@ def create_app(state: AppState) -> FastAPI:
         except KeyError:
             raise HTTPException(404, f"{path} is not one of your folders")
         state.pages.broadcast("roots_changed")
+        state.wake_library()
         return {"roots": roots}
 
     @app.get("/api/list")
@@ -554,13 +1108,19 @@ def create_app(state: AppState) -> FastAPI:
         version and each folder's listing signature, None when it is gone. Only sizes and times
         are read; no file is opened, so a program writing it is never in the way. A path that
         isn't allowed is listed under "errors" with the reason."""
-        out: Dict[str, Any] = {"files": {}, "dirs": {}, "errors": {}}
+        out: Dict[str, Any] = {"files": {}, "dirs": {}, "errors": {}, "finished": {}}
         for kind, paths in (("files", body.files), ("dirs", body.dirs)):
             for path in paths:
                 try:
                     p = state.check_allowed(path)
                     if kind == "files":
                         out[kind][path] = file_version(p) if p.is_file() else None
+                        if out[kind][path] is None and scan.is_writing(p.name):
+                            new = state.live.finished(str(p))       # measured to the end: renamed
+                            if new is not None:
+                                out["finished"][path] = str(new)
+                                if state.live.mark_followed(str(p)):
+                                    _follow_rename(p, new)
                     else:
                         out[kind][path] = scan.list_dir(p)["signature"] if p.is_dir() else None
                 except HTTPException as e:
@@ -570,6 +1130,261 @@ def create_app(state: AppState) -> FastAPI:
                 except OSError as e:
                     out["errors"][path] = e.strerror or str(e)
         return out
+
+    # -- the Library (library.py): the index of the data files under the open folders
+
+    def _library_folder(folder: Optional[str]) -> Optional[str]:
+        return str(state.check_allowed(folder)) if folder else None
+
+    @app.get("/api/library/list")
+    def library_list(folder: Optional[str] = Query(None), q: str = Query(""), date: str = Query(""),
+                     sort: str = Query("date"), order: str = Query("desc"), offset: int = Query(0),
+                     limit: int = Query(200), project: str = Query(""), tags: List[str] = Query([]),
+                     users: List[str] = Query([]), starred: bool = Query(False), conflicts: bool = Query(False)):
+        """One page of the data files under `folder` (absent: every open folder) whose text has
+        all the words of `q`, made on `date` ("2026", "2026-03", "2026-03-14"), with the labels
+        chosen (`project` and its sub-projects; any of `tags`; any of `users`; `starred`; only
+        `conflicts`), sorted."""
+        try:
+            out = state.library.list(_library_folder(folder), q, date, sort, order, offset, limit,
+                                     project, tags, users, starred, conflicts)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        for r in out["rows"]:
+            r.update(state.labels_note(r["path"]))
+        return out
+
+    @app.get("/api/library/facets")
+    def library_facets(folder: Optional[str] = Query(None), q: str = Query(""), date: str = Query("")):
+        """The date tree (with counts) of the files listed, the open folders' tree with counts, and
+        the project / users / tags trees, starred, conflicts and missing counts."""
+        return state.library.facets(_library_folder(folder), q, date)
+
+    @app.get("/api/library/file")
+    def library_file(path: str = Query(...)):
+        """A data file's summary (as /api/file), from the index; read now if it isn't there yet."""
+        p = state.check_allowed(path)
+        if not p.is_file():
+            raise HTTPException(404, f"not a file: {path}")
+        with collect_warnings() as warns:
+            summary = state.library.file(str(p))
+        # its row (labels), for Explore's Labels tab (16.31); None outside the Library's folders
+        return {**summary, **state.labels_note(str(p)), "row": state.library.row(str(p)), "warnings": warns}
+
+    def _labels_follow(action) -> None:
+        """Labels follow a file LBD renamed or recycled (when the Library is in use)."""
+        if state._library is None:
+            return
+        try:
+            state.library.notes += action(state.library)
+        except labels.LabelsError as e:
+            state.library.notes.append(str(e))
+        state.library.wake()
+
+    def _labels_call(action):
+        try:
+            return action()
+        except labels.LabelsError as e:
+            raise HTTPException(409, str(e))
+
+    @app.post("/api/library/labels")
+    def library_labels_set(body: LabelsBody):
+        """Change the labels of these files (and of their identical copies): star, project
+        ("" removes it), comment, tags and users added or removed."""
+        paths = [str(state.check_allowed(p)) for p in body.paths]
+        changes: Dict[str, Any] = {k: v for k, v in body.model_dump().items() if k != "paths" and v not in (None, [])}
+        if "project" in changes and changes["project"] == "":
+            changes["project"] = None
+        return {"notes": _labels_call(lambda: library_labels.set_labels(state.library, paths, changes))}
+
+    @app.post("/api/library/labels/create")
+    def library_label_create(body: LabelCreateBody):
+        """Keep a project, user or tag although no file has it yet (in an open folder's labels)."""
+        root = str(state.check_allowed(body.root)) if body.root else None
+        return {"notes": _labels_call(lambda: library_labels.create_label(state.library, body.kind, body.label, root))}
+
+    @app.post("/api/library/labels/rename")
+    def library_label_rename(body: LabelRenameBody):
+        """Rename a label, or move it into another group, on every file (`dry`: only count them)."""
+        return _labels_call(lambda: library_labels.rename_label(state.library, body.kind, body.old, body.new, body.dry))
+
+    @app.post("/api/library/labels/remove")
+    def library_label_remove(body: LabelRemoveBody):
+        """Take a label (and the ones under it) off every file (`dry`: only count them)."""
+        return _labels_call(lambda: library_labels.remove_label(state.library, body.kind, body.label, body.dry))
+
+    @app.post("/api/library/resolve")
+    def library_resolve(body: ResolveBody):
+        """Two files share an id but differ: make this one a new measurement (writes a new id into
+        it, after the user confirmed), say they are the same measurement, or recycle this one."""
+        refuse_writing(state.check_allowed(body.path), "change")
+        p = str(state.check_allowed(body.path))
+        if body.action == "new_id":
+            notes = _labels_call(lambda: library_labels.new_measurement(state.library, p))
+        elif body.action == "same":
+            notes = _labels_call(lambda: library_labels.same_measurement(state.library, p))
+        elif body.action == "trash":
+            trash_file(PathBody(path=p))
+            state.library.scan()
+            notes = []
+        else:
+            raise HTTPException(400, "action must be new_id, same or trash")
+        return {"notes": notes}
+
+    @app.post("/api/library/duplicate")
+    def library_duplicate(body: DuplicateBody):
+        """Copy a file next to it as a new measurement (a new id; the original isn't touched)."""
+        refuse_writing(state.check_allowed(body.path), "copy")
+        p = str(state.check_allowed(body.path))
+        path, notes = _labels_call(lambda: library_labels.duplicate(state.library, p, body.labels))
+        return {"path": path, "notes": notes}
+
+    @app.post("/api/library/give-ids")
+    def library_give_ids(body: PathsBody):
+        """Write an id into these files, which have none (the user asked)."""
+        for p in body.paths:
+            refuse_writing(state.check_allowed(p), "write an id into")
+        paths = [str(state.check_allowed(p)) for p in body.paths]
+        return {"notes": _labels_call(lambda: library_labels.give_ids(state.library, paths))}
+
+    @app.get("/api/library/missing")
+    def library_missing():
+        """Labels whose file can't be found (renamed, moved or deleted outside LBD)."""
+        return {"missing": state.library.missing}
+
+    @app.post("/api/library/missing")
+    def library_missing_resolve(body: MissingBody):
+        """Point missing labels to a file (`path`), or discard them (no path)."""
+        path = str(state.check_allowed(body.path)) if body.path else None
+        if body.entry.get("folder"):
+            state.check_allowed(body.entry["folder"])
+        return {"notes": _labels_call(lambda: library_labels.resolve_missing(state.library, body.entry, path))}
+
+    @app.get("/api/library/same")
+    def library_same(path: str = Query(...)):
+        """The other files with this file's id (the same measurement elsewhere): copies, or a
+        conflict (they differ), with what differs."""
+        return state.library.same_id(str(state.check_allowed(path)))
+
+    @app.post("/api/library/check")
+    def library_check():
+        """Check the open folders now (the Library's "Check folders now"; waits for a check that is
+        running): {new, changed, gone, moved: [{from, to}], errors: [{path, error}], folders}."""
+        return state.library.check()
+
+    @app.get("/api/library/status")
+    def library_status():
+        """Indexing progress ({indexing, done, total, errors, scans}), how each open folder is watched
+        (`watching`, library_watch.py) and the index's generation:
+        a new one means the list changed."""
+        lib = state.library
+        lib.last_request = time.monotonic()
+        notes, lib.notes = lib.notes, []                  # told once
+        previews = {**state.previews.status, "mode": previews_mode(cfg.settings()["library"])}
+        return {**lib.status, "generation": lib.generation, "notes": notes, "previews": previews}
+
+    # -- previews (plan 8c, previews.py)
+
+    @app.get("/api/library/preview")
+    def library_preview(path: str = Query(...), now: bool = Query(True)):
+        """A file's preview: the picture (WebP) with what it is in the X-LBD-Preview header
+        ({source: "chosen" | "automatic", chosen_at, changed_since}); or, without a picture, JSON
+        {state: "drawing" | "off" | "error", reason}. Not drawn yet: asked for (`now`: the selected
+        file; else after it, as a picture in view)."""
+        p = str(state.check_allowed(path))
+        chosen = state.chosen_preview(p)
+        if chosen is not None:
+            try:
+                now = file_version(Path(p))
+            except OSError:
+                now = None
+            about = {"source": "chosen", "chosen_at": chosen["chosen_at"], "changed_since": now != chosen["version"]}
+            return Response(content=chosen["picture"], media_type="image/webp",
+                            headers={"X-LBD-Preview": json.dumps(about), "Cache-Control": "no-store"})
+        answer = state.previews.answer(p, now)
+        if answer.get("picture"):
+            about = {"source": "automatic", "drawn_at": answer["drawn_at"]}
+            return Response(content=answer["picture"], media_type="image/webp",
+                            headers={"X-LBD-Preview": json.dumps(about), "Cache-Control": "no-store"})
+        if answer.get("error"):
+            return {"state": "error", "reason": answer["error"]}
+        if answer["state"] == "writing":
+            return {"state": "writing", "reason": "Live: no preview while it is being measured; it gets one once "
+                                                  "it is finished (or recovered)."}
+        return {"state": answer["state"], "reason": None}
+
+    @app.post("/api/library/preview/update")
+    def library_preview_update(body: UpdatePreviewBody):
+        """Update preview (right-click in the Library, 16.43): draw these files' automatic
+        previews again now, as a file without one gets it (its saved figure view, else its first
+        value). A file with a picture chosen in Explore keeps it unless `replace_chosen` (the
+        page asks first: that picture can't be drawn again); those are listed in `chosen`."""
+        paths = [str(state.check_allowed(p)) for p in body.paths]
+        kept: List[str] = []
+        for p in paths:
+            chosen = state.chosen_preview(p)
+            if chosen is not None:
+                if not body.replace_chosen:
+                    kept.append(p)
+                    continue
+                state.catalog.forget_preview([chosen["key"]])
+            state.previews.update(p)
+        state.library.generation += 1                 # Library pages ask for the pictures again
+        return {"updated": len(paths) - len(kept), "chosen": kept}
+
+    @app.post("/api/library/preview/want")
+    def library_preview_want(body: WantBody):
+        """Draw these files' previews soon: `now` (the selected file, Show preview) first, even
+        with previews off; otherwise as the rows near the selection."""
+        state.previews.want([str(state.check_allowed(p)) for p in body.paths], body.now)
+        return {"ok": True}
+
+    @app.post("/api/library/preview/choose")
+    def library_preview_choose(body: ChooseBody):
+        """Explore's "Library preview": its panels as shown become the file's preview, drawn once
+        now; only the picture is kept (in LBD's database), never how it was made."""
+        p = state.check_allowed(body.path)
+        if not 1 <= len(body.panels) <= 6 or len(body.grid) != 2 or body.grid[0] * body.grid[1] < len(body.panels):
+            raise HTTPException(400, "send 1 to 6 panels and a grid [rows, columns] they fit in")
+        notes: List[str] = []
+        with collect_warnings() as warns:
+            header = lbd.info(p)
+            preset = cfg.preset_for(body.preset, header.style_name, notes)
+            style = cfg.resolve(preset=preset, file_style=header.style)
+        job = {"path": str(p), "style": style.model_dump(), "panels": body.panels, "grid": body.grid,
+               "saved_view": True}
+        try:
+            picture = state.previews.draw_now(job)
+        except PreviewError as e:
+            raise HTTPException(422, f"The preview couldn't be drawn: {e}")
+        keys, _ = state.preview_keys(str(p))
+        at = state.catalog.choose_preview(keys[0], str(p), picture, file_version(p))
+        state.library.generation += 1                 # Library pages show it at their next check
+        return {"chosen_at": at, "warnings": notes + warns}
+
+    @app.delete("/api/library/preview/choose")
+    def library_preview_reset(path: str = Query(...)):
+        """Reset a file's preview: the automatic one again, drawn now of the file as it is (an
+        automatic picture from before the choice would be out of date)."""
+        p = str(state.check_allowed(path))
+        chosen = state.chosen_preview(p)
+        if chosen is None:
+            return {"forgotten": 0}
+        forgotten = state.catalog.forget_preview([chosen["key"]])
+        state.previews.update(p)
+        state.library.generation += 1
+        return {"forgotten": forgotten}
+
+    @app.get("/api/library/preview/cache")
+    def library_preview_cache():
+        """How many automatic pictures are kept, and their size in bytes."""
+        count, size = state.previews.cache.size()
+        return {"count": count, "bytes": size}
+
+    @app.post("/api/library/preview/clear")
+    def library_preview_clear():
+        """Empty the picture cache (automatic pictures; chosen ones are kept). They are drawn again."""
+        return {"freed": state.previews.clear()}
 
     @app.get("/api/search")
     def search(root: str = Query(...), q: str = Query("")):
@@ -609,9 +1424,12 @@ def create_app(state: AppState) -> FastAPI:
     @app.put("/api/file/plot")
     def put_file_plot(body: FilePlotBody):
         p = state.check_allowed(body.path)
+        refuse_writing(p, "save a view into")
         changes = {k: getattr(body, k) for k in ("spec", "style", "style_name") if k in body.model_fields_set}
         if not changes:
             raise HTTPException(400, "nothing to change: send spec, style and/or style_name")
+        if isinstance(changes.get("spec"), dict):      # answers sent back with the settings aren't saved
+            changes["spec"] = {k: v for k, v in changes["spec"].items() if k not in rnd.ANSWER_KEYS}
         try:
             state.pages.check_unlocked(str(p))
         except PageError as e:
@@ -619,8 +1437,18 @@ def create_app(state: AppState) -> FastAPI:
         if body.if_version is not None and p.is_file() and file_version(p) != body.if_version:
             raise HTTPException(409, f"{p.name} was changed since you opened it (in another page or "
                                      "program); reload it, or save again to overwrite")
+        from lbd.io import _apply_plot, _check_editable, _plot_changes
+
+        texts = _plot_changes(**changes)               # a bad view is refused before the file is touched
+
+        def change(f) -> None:
+            _check_editable(f, p)
+            _apply_plot(f, texts)
         with collect_warnings() as warns:
-            lbd.set_plot(p, **changes)
+            try:
+                files.edit_data_file(p, change, cfg.settings()["library"]["data_file_edits"])
+            except files.DataEditError as e:
+                raise HTTPException(409, str(e))
             summary = file_summary(lbd.info(p))
         return {**summary, "warnings": warns}
 
@@ -646,9 +1474,315 @@ def create_app(state: AppState) -> FastAPI:
             # The UI only shows the controls that apply, so settings left over from another plot
             # type are expected here and not reported.
             svg, spec = rnd.render_file(str(p), body.spec, style, fmt="svg", display=True, creator=CREATOR,
-                                        warn_unused=False)
+                                        warn_unused=False, load=_load_for_view)
+        spec = {**spec, "style_grid": style.figure.axes.grid.visible}   # where the Grid tick starts (16.32)
         return {"svg": svg.decode("utf-8"), "spec": spec, "preset": preset,
                 "size_mm": [style.figure.width_mm, style.figure.height_mm], "warnings": notes + warns}
+
+    # -- Explore view (explore.py): a session per Explore tab, pictures of its current view
+
+    def _session(session_id: str) -> ExploreSession:
+        try:
+            return state.explore.get(session_id)
+        except KeyError:
+            raise HTTPException(404, "this Explore view was closed on the server (unused for a while, or the "
+                                     "viewer restarted); it reopens by itself")
+
+    @app.post("/api/kinds")
+    def plot_kinds(body: KindsBody):
+        """The plot types for a file, from its header (no data is read): for each, `why` it can't
+        draw the first value (None: it can), the values it can draw, and whether Explore shows it."""
+        p = state.check_allowed(body.path)
+        if not p.is_file():
+            raise HTTPException(404, f"not a file: {body.path}")
+        d = rnd.flat(lbd.info(p))
+        names = list(d.values)
+        asked = (body.spec or {}).get("values") or []
+        first = next((n for n in asked if n in d.values), None) or next(
+            (n for n in names if len(d.values[n].shape) > 0), names[0] if names else None)
+        out = []
+        for k in rnd.kinds.KINDS.values():
+            why = k.fits(d, first) if first else "this file has no values"
+            out.append({"name": k.name, "title": k.title, "why": why, "explore": k.name in EXPLORE_KINDS,
+                        "values": [n for n in names if k.fits(d, n) is None]})
+        return {"kinds": out}
+
+    @app.post("/api/explore")
+    def explore_open(body: ExploreBody):
+        p = state.check_allowed(body.path)
+        if not p.is_file():
+            raise HTTPException(404, f"not a file: {body.path}")
+        notes: List[str] = []
+        with collect_warnings() as warns:
+            header = lbd.info(p)
+            preset = cfg.preset_for(body.preset, header.style_name, notes)
+            style = cfg.resolve(preset=preset, file_style=header.style)
+            s = ExploreSession(p, file_version(p), body.spec or {}, style, body.width, body.height, body.dpr,
+                               looks=lambda: cfg.settings()["explore"]["looks"])
+        state.explore.add(s)
+        return {"session": s.id, "spec": {**s.spec, "style_grid": s.style.figure.axes.grid.visible}, "kind": s.kind, "cells": getattr(s.model, "cells", None), "preset": preset,
+                "full": [list(s.full[0]), list(s.full[1])], "warnings": notes + warns + s.take_notes()}
+
+    @app.post("/api/explore/{session_id}/render")
+    def explore_render(session_id: str, body: ExploreRenderBody):
+        """The picture of a view: raw RGBA pixels (or PNG), and in the X-LBD-Frame header (JSON)
+        the mapping between its pixels and the data, the reduction used and the timings."""
+        s = _session(session_id)
+        started = time.perf_counter()
+        with s.lock:                     # one step: a change of the plot can't fall between its parts (16.22)
+            if body.width is not None and body.height is not None:
+                s.resize(body.width, body.height, body.dpr if body.dpr is not None else s.dpr)
+            notes = s.apply(body.settings) if body.settings is not None else []
+            if body.angle is not None and hasattr(s.view, "turn"):
+                s.view.turn(body.angle)
+            data, meta = s.render(body.xlim, body.ylim, body.stat, body.format, body.draft)
+        meta["notes"] = notes
+        meta["ms"]["total"] = round((time.perf_counter() - started) * 1000, 1)   # all of it, on the server
+        media = "image/png" if meta["format"] == "png" else "application/octet-stream"
+        return Response(content=data, media_type=media,
+                        headers={"X-LBD-Frame": json.dumps(meta), "Cache-Control": "no-store"})
+
+    @app.get("/api/explore/remembered")
+    def explore_remembered(path: str = Query(...)):
+        """The Explore view remembered for a file (LBD's database, never the file), in the newest
+        shape (an older record is upgraded: one panel), with the panels that still fit the file;
+        a note says which were left out, or why it starts afresh."""
+        p = state.check_allowed(path)
+        rec = state.catalog.view(str(p))
+        if rec is None:
+            return {"state": None, "note": None}
+        with quiet_writing():                       # a file being measured: its status says so
+            now = structure(lbd.info(p))
+        kept, reason = fitting(rec["structure"], now, rec["state"])
+        if kept is None:
+            return {"state": None, "note": f"The Explore view remembered for {p.name} no longer fits the file "
+                                            f"({reason}), so it starts afresh."}
+        note = (f"Some panels remembered for {p.name} no longer fit the file and were left out ({reason})."
+                if reason else None)
+        return {"state": kept, "note": note}
+
+    @app.put("/api/explore/remembered")
+    def explore_remember(body: RememberBody):
+        p = state.check_allowed(body.path)
+        with quiet_writing():
+            now = structure(lbd.info(p))
+        state.catalog.remember(str(p), now, body.state)
+        return {"ok": True}
+
+    @app.delete("/api/explore/remembered")
+    def explore_forget(path: str = Query(...)):
+        state.catalog.forget(str(state.check_allowed(path)))
+        return {"ok": True}
+
+    @app.post("/api/explore/{session_id}/spec")
+    def explore_spec(session_id: str, body: ExploreSpecBody):
+        """Other plot settings for an open session (the data already read is kept)."""
+        s = _session(session_id)
+        with collect_warnings() as warns:
+            s.set_spec(body.spec)
+        return {"session": s.id, "spec": {**s.spec, "style_grid": s.style.figure.axes.grid.visible}, "kind": s.kind, "cells": getattr(s.model, "cells", None),
+                "full": [list(s.full[0]), list(s.full[1])], "warnings": warns + s.take_notes()}
+
+    @app.post("/api/explore/{session_id}/pick")
+    def explore_pick(session_id: str, body: ExplorePickBody):
+        """The stored point or cell at a pixel of the last picture, read from the full data."""
+        return {"pick": _session(session_id).pick(body.x, body.y)}
+
+    @app.post("/api/explore/{session_id}/cursors")
+    def explore_cursors(session_id: str, body: CursorsBody):
+        """The cursors snapped to the stored data, their read-outs and (maps) the cuts through
+        them: everything the page draws for one cursor state (reading.py)."""
+        s = _session(session_id)
+        s.last_used = time.monotonic()
+        with s.lock:
+            return reading.cursors(s, body.cursors, body.type, {"xlim": body.xlim, "ylim": body.ylim},
+                                   (body.width, body.height), body.cuts, body.lines, body.every, body.at_line,
+                                   cfg.settings()["explore"]["line_traces"], body.together)
+
+    @app.post("/api/explore/{session_id}/find")
+    def explore_find(session_id: str, body: FindBody):
+        """Where the maximum, minimum or peak is, in a range of the stored data."""
+        s = _session(session_id)
+        with s.lock:
+            return reading.find(s, body.what, body.xlim, body.ylim, body.trace)
+
+    @app.post("/api/explore/{session_id}/histogram")
+    def explore_histogram(session_id: str, body: HistogramBody):
+        """The map's values counted (with these view settings), for the contrast control."""
+        s = _session(session_id)
+        with s.lock:
+            if body.settings is not None:
+                s.apply(body.settings)
+            return reading.histogram(s)
+
+    @app.post("/api/explore/{session_id}/calculate")
+    def explore_calculate(session_id: str, body: CalculateBody):
+        """The delay (s) or rotation (degrees) that straightens the data in a range."""
+        return _session(session_id).calculate(body.what, body.index, body.xlim, body.trace)
+
+    @app.post("/api/explore/{session_id}/save-cut")
+    def explore_save_cut(session_id: str, body: SaveCutBody):
+        """Save a cut (a map's row or column, or a trace) as a new .lbd file; without a path,
+        suggest one next to the file."""
+        s = _session(session_id)
+        if body.path is None:
+            return {"path": str(reading.suggest_cut_path(s, body.which, body.index, body.trace))}
+        target = Path(body.path).expanduser().resolve()
+        if target.parent != s.path.resolve().parent and _key(target) not in state.chosen:   # next to its file: allowed
+            state.check_allowed(str(target.parent))
+        with s.lock:
+            saved = reading.save_cut(s, body.which, body.index, target, body.trace)
+        if _key(s.path.resolve()) in state.opened:              # a file opened by double-click: so is its cut
+            state.opened.add(_key(saved))
+        return {"path": str(saved)}
+
+    def _export_tables(body: ExportBody) -> Tuple[List[ExploreSession], Any, List[str]]:
+        """The panels' sessions, the one table of the file (the first panel and those sharing
+        its axes), and the panels left out."""
+        sessions = [_session(sid) for sid in body.sessions]
+        if not sessions:
+            raise HTTPException(400, "no panel to save")
+        if body.zoomed and (not body.views or len(body.views) != len(sessions)):
+            raise HTTPException(400, "the zoomed range needs each panel's view")
+        names = body.names or [f"Panel {k + 1}" for k in range(len(sessions))]
+        if body.cuts is not None:
+            if len(body.cuts) != len(sessions):
+                raise HTTPException(400, "a cut is needed for each panel")
+            parts, held = [], []
+            for k, (s, c) in enumerate(zip(sessions, body.cuts)):
+                s.last_used = time.monotonic()
+                try:
+                    parts.append(csv_export.cut_table(s, c.get("which"), c.get("index") or {}, c.get("trace"), body.numbers))
+                    held.append(k)
+                except (ExploreError, KeyError):         # another panel without this cut: left out, and said
+                    if k == 0:
+                        raise
+            table, kept = csv_export.one_cut(parts)
+            kept = [held[k] for k in kept]
+            return sessions, table, [names[k] for k in range(len(sessions)) if k not in kept]
+        tables = []
+        for k, s in enumerate(sessions):
+            s.last_used = time.monotonic()
+            view = body.views[k] if body.zoomed else None
+            tables.append(csv_export.session_table(s, body.numbers, view))
+        table, kept = csv_export.one_table(tables)
+        left = [names[k] for k in range(len(sessions)) if k not in kept]
+        return sessions, table, left
+
+    @app.post("/api/explore/export-csv")
+    def explore_export_csv(body: ExportBody):
+        """Save what panels show as CSV. Without a path: a file name next to the data, the size
+        and warnings, and the choices that aren't possible (with why). With a path: start
+        writing in the background ({job}; progress from /api/exports)."""
+        sessions, table, left_out = _export_tables(body)
+        s = sessions[0]
+        if body.path is None:
+            c = body.cuts[0] if body.cuts else None
+            out = {"path": str(csv_export.suggest_cut_csv(s, c.get("which"), c.get("index") or {}, c.get("trace")) if c
+                               else csv_export.suggest_path(s)),
+                   "options": csv_export.cut_options(s) if c else csv_export.options(s), "error": None,
+                   "left_out": left_out, "columns": csv_export.column_names(table)}
+            try:
+                out["estimate"] = csv_export.plan([table], body.layout, body.rows_are)
+            except ValueError as e:
+                out["estimate"], out["error"] = None, str(e)
+            return out
+        target = Path(body.path).expanduser().resolve()
+        chosen = _key(target) in state.chosen             # in the system's dialog, which asked before replacing
+        if target.parent != s.path.resolve().parent and not chosen:     # next to its file is always allowed
+            state.check_allowed(str(target.parent))
+        csv_export.check_target(target, replace=chosen)
+        if body.layout == "matrix":
+            table.check_matrix()
+        job = state.exports.start([(table, target)], body.layout, body.rows_are)
+        return {"job": job, "paths": [str(target)]}
+
+    @app.post("/api/file-csv")
+    def file_csv(body: FileCsvBody):
+        """The whole file as CSV: one group of values (those on the same axes), as stored. Without
+        a path: its groups, a file name and the size. With a path: start writing ({job})."""
+        p = state.check_allowed(body.file)
+        groups = whole_file.groups(p)
+        if not groups:
+            raise HTTPException(400, f"{p.name} has only single numbers: there is no table to save")
+        key = body.group or groups[0].key
+        if body.path is None:
+            out = {"path": str(csv_export.suggest_file_csv(p, key)), "error": None, "left_out": [], "group": key,
+                   "options": {"stored": None, "both": None, "zoomed": None},
+                   "groups": [{"key": g.key, "label": g.label, "rows": g.rows} for g in groups]}
+            with lbd.open(p) as d:
+                t = whole_file.FileTable(d, key)
+                out["columns"] = csv_export.column_names(t)
+                try:
+                    out["estimate"] = csv_export.plan([t], body.layout, body.rows_are)
+                except ValueError as e:
+                    out["estimate"], out["error"] = None, str(e)
+            return out
+        target = Path(body.path).expanduser().resolve()
+        chosen = _key(target) in state.chosen             # in the system's dialog, which asked before replacing
+        if target.parent != p.parent and not chosen:      # next to its file is always allowed
+            state.check_allowed(str(target.parent))
+        csv_export.check_target(target, replace=chosen)
+        table = whole_file.file_table(p, key)
+        if body.layout == "matrix":
+            try:
+                table.check_matrix()
+            except ValueError:
+                table.close()
+                raise
+        job = state.exports.start([(table, target)], body.layout, body.rows_are)
+        return {"job": job, "paths": [str(target)]}
+
+    @app.get("/api/exports")
+    def exports_now():
+        """CSV files being written (and those finished in the last minutes): fraction, state, error."""
+        return {"jobs": state.exports.info()}
+
+    @app.post("/api/exports/cancel")
+    def exports_cancel(body: JobBody):
+        if not state.exports.cancel(body.job):
+            raise HTTPException(404, "this file isn't being written any more")
+        return {"ok": True}
+
+    @app.delete("/api/explore/{session_id}")
+    def explore_close(session_id: str):
+        state.explore.close(session_id)
+        return {"ok": True}
+
+    @app.post("/api/pick-save")
+    def pick_save(body: PickSaveBody):
+        """The system's Save dialog, in the data file's folder with a name filled in: {"path"}, None
+        if cancelled; 501 where there is no dialog. The path chosen may then be written (the
+        dialog asked before replacing a file), except over a data file."""
+        p = state.check_allowed(body.path)
+        if body.fmt not in ("csv", "png", "lbd"):
+            raise HTTPException(400, f"unknown file type {body.fmt!r}")
+        chosen = native_save_dialog(p.parent, body.name, body.fmt, body.title, "choose a name here instead")
+        if chosen is None:
+            return {"path": None}
+        target = Path(chosen).expanduser().resolve()
+        if not target.suffix:                           # macOS's dialog doesn't add the extension itself
+            target = target.with_name(f"{target.name}.{body.fmt}")
+        if target.suffix.lower() != f".{body.fmt}":
+            raise HTTPException(400, f"{target.name}: the name must end in .{body.fmt}; nothing was saved")
+        if target == p or (body.fmt == "lbd" and target.exists()):
+            raise HTTPException(400, f"{target.name} is a data file and isn't replaced; choose another name")
+        state.chosen.add(_key(target))
+        return {"path": str(target)}
+
+    @app.post("/api/save-picture")
+    async def save_picture(request: Request, path: str = Query(...)):
+        """Write a picture made in the page (the request's body, PNG) to a path chosen with
+        /api/pick-save."""
+        target = Path(path).expanduser().resolve()
+        if _key(target) not in state.chosen:
+            raise HTTPException(403, "this file wasn't chosen in the Save dialog")
+        data = await request.body()
+        try:
+            target.write_bytes(data)
+        except OSError as e:
+            raise HTTPException(400, f"{target.name} couldn't be written ({e}); nothing was saved") from None
+        return {"path": str(target)}
 
     def _export(body: RenderBody) -> Tuple[Path, str, bytes, str, List[str]]:
         """Render a figure for export: (data file, format, bytes, default file name, warnings)."""
@@ -658,7 +1792,7 @@ def create_app(state: AppState) -> FastAPI:
         with collect_warnings() as warns:
             style, _ = _style_for(body, p, notes)
             data, spec = rnd.render_file(str(p), body.spec, style, fmt=fmt, display=False, creator=CREATOR,
-                                         warn_unused=False)
+                                         warn_unused=False, load=_load_for_view)
         name = rnd.safe_filename(f"{p.stem}_{'_'.join(spec['values'])}") + f".{fmt}"
         return p, fmt, data, name, notes + warns
 
@@ -799,17 +1933,56 @@ def create_app(state: AppState) -> FastAPI:
 
     @app.put("/api/settings")
     def put_settings(body: SettingsBody):
-        if body.default_style is None and body.open_files_in is None and body.theme is None:
-            raise HTTPException(400, "nothing to change: send default_style, open_files_in and/or theme")
+        if (body.default_style is None and body.open_files_in is None and body.open_data_in is None
+                and body.theme is None and body.library is None and body.memory is None
+                and body.measurements is None and body.explore is None and body.first_start_done is None
+                and body.check_updates is None):
+            raise HTTPException(400, "nothing to change: send default_style, open_files_in, open_data_in, theme, "
+                                     "library, memory, measurements, explore, first_start_done and/or check_updates")
+        if body.check_updates is not None:
+            cfg.set_check_updates(body.check_updates)     # from the next real start (cli._start_update_check)
+        if body.first_start_done is not None:
+            cfg.set_first_start_done(body.first_start_done)
+        if body.measurements is not None:
+            cfg.set_measurements(body.measurements)
+        if body.explore is not None:
+            cfg.set_explore(body.explore)
+        if body.memory is not None:
+            apply_memory(cfg.set_memory(body.memory))
+            summaries.shared().trim()                     # a smaller limit: the oldest summaries go
         if body.default_style is not None:
             cfg.set_default_style(body.default_style)
             state.pages.broadcast("styles_changed")
         if body.open_files_in is not None:
             cfg.set_open_files_in(body.open_files_in)
+        if body.open_data_in is not None:
+            cfg.set_open_data_in(body.open_data_in)
         if body.theme is not None:
             cfg.set_theme(body.theme)
-        if body.open_files_in is not None or body.theme is not None:
+        if body.library is not None:
+            before = cfg.settings()["library"]["read_headers"]
+            if cfg.set_library(body.library)["read_headers"] != before:
+                state.wake_library()                      # read what is missing (or stop reading)
+        if (body.open_files_in is not None or body.open_data_in is not None or body.theme is not None
+                or body.library is not None or body.memory is not None or body.measurements is not None
+                or body.explore is not None or body.first_start_done is not None or body.check_updates is not None):
             state.pages.broadcast("settings_changed")      # every page shows the new setting
+        return get_state()
+
+    @app.post("/api/settings/reset")
+    def reset_settings(body: SectionBody):
+        """Put one section of the Settings dialog back to its defaults."""
+        before = cfg.settings()["library"]["read_headers"]
+        try:
+            cfg.reset_section(body.section)
+        except ConfigError as e:
+            raise HTTPException(400, str(e))
+        if body.section == "memory":
+            apply_memory(cfg.settings()["memory"])
+            summaries.shared().trim()
+        if cfg.settings()["library"]["read_headers"] != before:
+            state.wake_library()
+        state.pages.broadcast("settings_changed")
         return get_state()
 
     # -- SDK page
@@ -835,6 +2008,7 @@ def create_app(state: AppState) -> FastAPI:
     @app.post("/api/file/rename")
     def rename_file(body: RenameBody):
         p = state.check_allowed(body.path)
+        refuse_writing(p, "rename")
         try:
             state.pages.check_unlocked(str(p))
         except PageError as e:
@@ -847,18 +2021,73 @@ def create_app(state: AppState) -> FastAPI:
             raise HTTPException(400, str(e))
         except FileNotFoundError as e:
             raise HTTPException(404, str(e))
+        _follow_rename(p, new)
+        return {"path": str(new)}
+
+    def _follow_rename(p: Path, new: Path) -> None:
+        """Everything LBD keeps about a file follows it to its new name: the double-click
+        permission, the remembered Explore view and chosen preview, the automatic preview, the
+        labels; and every page's tabs (the "renamed" event)."""
         if _key(p) in state.opened:  # a file opened by double-click stays readable
             state.opened.add(_key(new))
+        state.catalog.renamed(str(p), str(new))
+        if state._previews is not None:
+            state._previews.renamed(str(p), str(new))
+        _labels_follow(lambda lib: library_labels.renamed(lib, str(p), str(new)))
         state.pages.broadcast("renamed", old=str(p), new=str(new))
-        return {"path": str(new)}
+
+    @app.post("/api/file/recover")
+    def recover_file(body: PathBody):
+        """Make a file whose measurement stopped before finishing (name.lbd.writing) an .lbd file
+        with everything it holds (lbd.recover): name.lbd, or "name (2).lbd" if that is taken. When
+        this computer can't know that it stopped (it is measured on another computer and synced
+        here, or no sign of it came for a while), a copy is made instead, "name (recovered).lbd",
+        and the file being written is left as it is: removing it would travel back through the
+        sync to a measurement that may still run."""
+        p = state.check_allowed(body.path)
+        if not p.name.lower().endswith(".lbd.writing"):
+            raise HTTPException(400, f"{p.name} is not a file being written (name.lbd.writing)")
+        if not p.is_file():
+            raise HTTPException(404, f"not a file: {p}")
+        copy = state.live.status(str(p))["state"] in ("elsewhere", "silent")
+        try:
+            new = lbd.recover(p, keep=copy)
+        except lbd.LBDError as e:
+            raise HTTPException(409, str(e))
+        except OSError as e:
+            raise HTTPException(500, f"{p.name} couldn't be recovered: {e}")
+        if copy:
+            if _key(p) in state.opened:
+                state.opened.add(_key(new))
+            return {"path": str(new), "copy": True}
+        state.live.forget(str(p))
+        _follow_rename(p, new)
+        return {"path": str(new), "copy": False}
+
+    @app.get("/api/live")
+    def live_status(path: str = Query(...), value: Optional[str] = Query(None)):
+        """The state of a file being measured (measuring here or on another computer, no sign
+        lately, stopped) and its progress as steady text (live.py)."""
+        p = state.check_allowed(path)
+        if not scan.is_writing(p.name):
+            raise HTTPException(400, f"{p.name} is not a file being measured (name.lbd.writing)")
+        return state.live.status(str(p), value)
 
     @app.post("/api/file/trash")
     def trash_file(body: PathBody):
         p = state.check_allowed(body.path)
+        refuse_writing(p, "recycle")
         try:
             state.pages.check_unlocked(str(p))
         except PageError as e:
             raise HTTPException(409, str(e))
+        ident = None
+        try:
+            ident = lbd.info(p).id if p.suffix.lower() == ".lbd" else None
+        except Exception:                             # unreadable: no id to look for
+            pass
+        # its chosen preview goes too (under its id only when no indexed copy keeps it)
+        others = state._library.identity(str(p))[2] if state._library is not None and ident else 1
         try:
             files.trash(p)
         except files.FileActionError as e:
@@ -868,6 +2097,10 @@ def create_app(state: AppState) -> FastAPI:
         except OSError as e:
             raise HTTPException(500, str(e))
         state.pages.broadcast("trashed", path=str(p))
+        state.catalog.forget_preview([f"path:{p}"] + ([f"id:{ident}"] if ident and others == 0 else []))
+        if state._previews is not None:
+            state._previews.forget(str(p))
+        _labels_follow(lambda lib: library_labels.trashed(lib, str(p), ident))
         return {"ok": True}
 
     # -- pages: the browser tabs showing the viewer (the rules are in pages.py)
@@ -988,7 +2221,7 @@ def create_app(state: AppState) -> FastAPI:
     # -- web UI
 
     if (STATIC_DIR / "index.html").is_file():
-        app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
+        app.mount("/", _UiFiles(directory=STATIC_DIR, html=True), name="static")
     else:
         @app.get("/", response_class=HTMLResponse)
         def no_ui():

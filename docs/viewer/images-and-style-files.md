@@ -2,7 +2,7 @@
 
 ## Images
 
-Clicking an image in the folder panel shows it, **view only**: the viewer never changes images.
+Clicking an image in the folder tree of Figure's Files sidebar (its **Folders** list, see [Folders](folders-and-files.md#folders)) shows it, **view only**: the viewer never changes images.
 Below the image you see:
 
 | Item | Meaning |

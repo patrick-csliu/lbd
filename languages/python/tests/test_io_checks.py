@@ -212,12 +212,61 @@ def test_save_rechecks_values_edited_by_hand(tmp_path):
     d = base()
     d.add_value("y", np.ones(4), axes="x")
     d.values["y"].data = np.ones(5)
-    with pytest.raises(LBDError, match="size 5"):
+    with pytest.raises(LBDError, match=r"size 5.*a\.lbd\.rescue"):
         d.save(tmp_path / "a.lbd")
     d.values["y"].data = np.array(["a"] * 4)
     with pytest.raises(LBDError, match="unsupported dtype"):
         d.save(tmp_path / "a.lbd")
-    assert not list(tmp_path.iterdir())     # nothing written
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["a.lbd.2.rescue", "a.lbd.rescue"]   # no .lbd
+
+
+def test_bad_data_is_kept_in_a_rescue_file_that_recover_reads(tmp_path):
+    d = base()
+    d.add_value("y", np.arange(4.0), axes="x", unit="V")
+    d.meta["T_mK"] = 12
+    d.add_tags("kept")
+    d.values["y"].data = np.arange(5.0)                  # no longer fits its axis
+    with pytest.raises(LBDError, match="lbd.recover"):
+        d.save(tmp_path / "a.lbd")
+    r = lbd.recover(tmp_path / "a.lbd.rescue")
+    assert "size 5" in r["error"] and r["meta"] == {"T_mK": 12} and r["labels"]["tags"] == ["kept"]
+    np.testing.assert_array_equal(r["values"]["y"]["data"], np.arange(5.0))
+    assert r["values"]["y"]["unit"] == "V" and r["values"]["y"]["axes"] == ["x"]
+    np.testing.assert_array_equal(r["axes"]["x"]["data"], np.arange(4.0))
+
+
+def test_a_setting_that_cant_be_stored_is_left_out_and_the_data_saved(tmp_path):
+    d = base()
+    d.add_value("y", np.arange(4.0), axes="x")
+    d.meta["ok"] = 1
+    d.meta["vec"] = [1.0, 2.0]
+    d.meta["vec"].append(None)                           # changed by hand after the check
+    d.plot = {"kind": "curve"}
+    d.plot["xscale"] = "log"
+    with pytest.warns(LBDWarning, match=r"saved without plot, meta/vec.*/extra/not_saved"):
+        report = d.save(tmp_path / "a.lbd")
+    assert report == tmp_path / "a.lbd" and [i.where for i in report.left_out] == ["plot", "meta/vec"]
+    e = lbd.load(report)
+    np.testing.assert_array_equal(e["y"].data, np.arange(4.0))
+    assert e.meta == {"ok": 1} and e.plot is None
+    with h5py.File(report, "r") as f:
+        kept = dict(f["extra/not_saved"].attrs)
+    assert "None" in kept["meta.vec"] and "xscale" in kept["plot"]
+
+
+def test_check_and_a_dry_run_say_what_a_save_would_do(tmp_path):
+    d = base()
+    d.add_value("y", np.arange(4.0), axes="x")
+    assert d.check() == []
+    d.plot = {"kind": "curve"}
+    d.plot["xscale"] = "log"
+    d.values["y"].data = np.ones(5)
+    problems = d.check()
+    assert [p.where for p in problems] == ["data", "plot"] and "size 5" in str(problems[0])
+    report = d.save(tmp_path / "nowhere" / "a.lbd", dry_run=True)
+    assert [p.where for p in report.problems] == ["data", "plot", "path"]
+    assert "doesn't exist" in report.problems[-1].what
+    assert not (tmp_path / "nowhere").exists() and not list(tmp_path.iterdir())
 
 
 def test_save_rechecks_axes_and_names(tmp_path):
@@ -234,9 +283,8 @@ def test_save_rechecks_axes_and_names(tmp_path):
     with pytest.raises(LBDError, match="not an lbd.Axis"):
         d.save(tmp_path / "a.lbd")
     d = base()
-    d.title = 5
     with pytest.raises(TypeError):
-        d.save(tmp_path / "a.lbd")
+        d.title = 5
 
 
 def test_save_refuses_unloaded_values(tmp_path):
@@ -257,23 +305,19 @@ def test_save_refuses_unloaded_values(tmp_path):
 def test_save_checks_the_saved_view(tmp_path, plot, match):
     d = base()
     d.add_value("y", np.ones(4), axes="x")
-    d.plot = plot
-    with pytest.raises(LBDError, match=match):
-        d.save(tmp_path / "a.lbd")
+    with pytest.raises(LBDError, match=match):            # when it is set
+        d.plot = plot
+    assert d.plot is None
 
 
 def test_save_checks_style_and_style_name(tmp_path):
     d = base()
-    d.style = "big"
     with pytest.raises(LBDError, match="style must be a dict"):
-        d.save(tmp_path / "a.lbd")
-    d.style = None
-    d.style_name = ""
+        d.style = "big"
     with pytest.raises(LBDError, match="empty"):
-        d.save(tmp_path / "a.lbd")
-    d.style_name = 5
+        d.style_name = ""
     with pytest.raises(TypeError):
-        d.save(tmp_path / "a.lbd")
+        d.style_name = 5
 
 
 def test_save_compression_argument(tmp_path):
@@ -290,11 +334,11 @@ def test_failed_save_keeps_old_file_and_attributes(tmp_path):
     d = base()
     d.save(tmp_path / "a.lbd")
     created = d.created
-    d.meta["bad"] = None
+    d.axes["x"].data = np.array([1.0, np.nan, 2.0, 3.0])
     with pytest.raises(LBDError):
         d.save(tmp_path / "a.lbd")
     assert d.created == created                     # not changed by the failed save
-    assert lbd.load(tmp_path / "a.lbd").meta == {}  # old file intact
+    assert not np.isnan(lbd.load(tmp_path / "a.lbd")["x"].data).any()   # old file intact
 
 
 # ---- meta ------------------------------------------------------------------------------------
@@ -312,17 +356,18 @@ def test_failed_save_keeps_old_file_and_attributes(tmp_path):
 ])
 def test_meta_rejects(tmp_path, value, match):
     d = base()
-    d.meta["k"] = value
     with pytest.raises(LBDError, match=match):
-        d.save(tmp_path / "a.lbd")
+        d.meta["k"] = value
+    with pytest.raises(LBDError, match=match):
+        d.meta["group"] = {"inner": {"k": value}}     # nested too
+    assert d.meta == {}
 
 
 @pytest.mark.parametrize("key", ["", "a/b", ".", 5])
 def test_meta_bad_keys(tmp_path, key):
     d = base()
-    d.meta[key] = 1
     with pytest.raises(LBDError, match="invalid meta key"):
-        d.save(tmp_path / "a.lbd")
+        d.meta[key] = 1
 
 
 def test_meta_numpy_scalars_and_bool_arrays(tmp_path):
@@ -336,9 +381,10 @@ def test_meta_numpy_scalars_and_bool_arrays(tmp_path):
 
 def test_meta_must_be_a_dict(tmp_path):
     d = base()
-    d.meta = [1, 2]
     with pytest.raises(LBDError, match="meta must be a dict"):
-        d.save(tmp_path / "a.lbd")
+        d.meta = [1, 2]
+    d.meta = {"a": {"b": 1}}
+    assert isinstance(d.meta["a"], lbd.Meta)
 
 
 # ---- load / info -------------------------------------------------------------------------------
@@ -450,7 +496,7 @@ def test_version_rules(tmp_path):
         f.create_group("axes")
         f.create_group("values")
     p = _raw(tmp_path, body)
-    for ver, exc in (("0.9", LBDError), ("2.0", lbd.LBDVersionError), ("x", LBDError)):
+    for ver, exc in (("0.9", LBDError), ("3.0", lbd.LBDVersionError), ("x", LBDError)):
         with h5py.File(p, "r+") as f:
             f.attrs["lbd_version"] = ver
         with pytest.raises(exc):

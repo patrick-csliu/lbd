@@ -222,7 +222,8 @@ def test_scatter_value_vs_value_with_color_by_axis():
 def test_scatter_iq_plane():
     fig = lp.plot(sweep(), "scatter", "S21", complex="iq", color="T")
     ax = fig.axes[0]
-    assert ax.get_aspect() == 1.0
+    assert ax.get_aspect() == "auto"                            # equal axes only when asked (16.32)
+    assert lp.plot(sweep(), "scatter", "S21", complex="iq", color="T", options={"equal": True}).axes[0].get_aspect() == 1.0
     assert ax.get_xlabel().startswith("Re S21") and ax.get_ylabel().startswith("Im S21")
 
 
@@ -249,3 +250,61 @@ def test_quick():
     assert fig.axes[0].collections[0].get_offsets().shape == (200, 2)
     fig = lp.quick(x, np.arange(3.0), z=np.ones((3, 20)), z_label="Z")
     assert len(fig.axes) == 2
+
+
+def test_two_units_on_one_vertical_axis_say_so_only_where_there_is_one_axis():
+    """16.51: a figure has one vertical axis, so two units get a note; Explore puts the second on
+    a right-hand axis (`two_axes`), so it gets none."""
+    import warnings
+
+    import numpy as np
+    from lbd.plot import render as rnd
+
+    d = lbd.Dataset()
+    d.add_axis("t", np.arange(5.0), unit="s")
+    d.add_value("a", np.arange(5.0), axes="t", unit="V")
+    d.add_value("b", np.arange(5.0), axes="t", unit="K")
+    spec = rnd.resolve_spec(d, {"kind": "curve", "values": ["a", "b"]})
+    with pytest.warns(rnd.RenderWarning, match="different units"):
+        rnd.prepare_curves(d, spec, lp.load_style())
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        rnd.prepare_curves(d, spec, lp.load_style(), two_axes=True)
+
+
+def _ms_and_volts():
+    """x in seconds over 2 ms (shown as ms), y in volts over 2 V: other prefixes on the two axes."""
+    t = np.linspace(0, 2e-3, 50)
+    d = lbd.Dataset("ramp")
+    d.add_axis("t", t, unit="s")
+    d.add_value("v", t * 1e3, axes="t", unit="V")
+    return d
+
+
+def test_grid_follows_the_style_unless_asked():
+    """16.32: options.grid overrides the style's grid; nothing asked: the style's."""
+    def shown(fig):
+        return any(line.get_visible() for line in fig.axes[0].xaxis.get_gridlines())
+    d = _ms_and_volts()
+    assert not shown(lp.plot(d, "curve", "v"))
+    assert shown(lp.plot(d, "curve", "v", options={"grid": True}))
+    assert not shown(lp.plot(d, "curve", "v", style={"figure": {"axes": {"grid": {"visible": True}}}},
+                             options={"grid": False}))
+
+
+def test_equal_axes_on_curves_count_stored_units():
+    """16.32: with Equal axes one stored unit is as long both ways, whatever prefix each axis shows
+    (here 1 ms on x and 1 V on y would differ a thousand times if plot units counted)."""
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+
+    fig = lp.plot(_ms_and_volts(), "curve", "v", options={"equal": True})
+    FigureCanvasAgg(fig).draw()
+    ax = fig.axes[0]
+    assert "ms" in ax.get_xlabel()
+    box = ax.get_window_extent()
+    per_s = box.width / (np.ptp(ax.get_xlim()) / 1e3)                 # pixels per stored second
+    per_v = box.height / np.ptp(ax.get_ylim())                        # pixels per volt
+    assert per_s == pytest.approx(per_v, rel=1e-3)
+    with pytest.warns(lp.RenderWarning, match="log scale"):                  # (the point at 0)
+        log = lp.plot(_ms_and_volts(), "curve", "v", options={"equal": True}, y_scale="log")
+    assert log.axes[0].get_aspect() == "auto"                         # linear axes only

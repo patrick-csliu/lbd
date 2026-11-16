@@ -12,15 +12,176 @@ for f = files'
         fprintf('  matlab reads %-7s FAILED: %s\n', lang, err.message);
     end
 end
+for f = dir(fullfile(root, '*', 'live.lbd'))'
+    lang = string(regexp(f.folder, '[^\\/]+$', 'match', 'once'));
+    try
+        checkLive(fullfile(f.folder, f.name));
+        fprintf('  matlab reads %-7s live.lbd OK\n', lang);
+    catch err
+        failed = true;
+        fprintf('  matlab reads %-7s live.lbd FAILED: %s\n', lang, err.message);
+    end
+end
+for f = dir(fullfile(root, '*', 'groups.lbd'))'
+    lang = string(regexp(f.folder, '[^\\/]+$', 'match', 'once'));
+    try
+        checkGroups(fullfile(f.folder, f.name));
+        fprintf('  matlab reads %-7s groups.lbd OK\n', lang);
+    catch err
+        failed = true;
+        fprintf('  matlab reads %-7s groups.lbd FAILED: %s\n', lang, err.message);
+    end
+end
+for f = dir(fullfile(root, '*', 'labels.lbd'))'
+    lang = string(regexp(f.folder, '[^\\/]+$', 'match', 'once'));
+    try
+        checkLabels(fullfile(f.folder, f.name));
+        fprintf('  matlab reads %-7s labels.lbd OK\n', lang);
+    catch err
+        failed = true;
+        fprintf('  matlab reads %-7s labels.lbd FAILED: %s\n', lang, err.message);
+    end
+end
+for f = dir(fullfile(root, '*', 'notsaved.lbd'))'
+    lang = string(regexp(f.folder, '[^\\/]+$', 'match', 'once'));
+    try
+        d = lbd.load(fullfile(f.folder, f.name));
+        expect(isequal(d.Values.y.Data(:)', [1 2]), "y");
+        expect(isequal(fieldnames(d.Meta), {'ok'}) && d.Meta.ok == 1, "only the meta that could be stored");
+        fprintf('  matlab reads %-7s notsaved.lbd OK\n', lang);
+    catch err
+        failed = true;
+        fprintf('  matlab reads %-7s notsaved.lbd FAILED: %s\n', lang, err.message);
+    end
+end
+for name = ["fixture.lbd" "groups.lbd" "rplus.lbd"]
+    for f = dir(fullfile(root, '*', name))'
+        lang = string(regexp(f.folder, '[^\\/]+$', 'match', 'once'));
+        try
+            if name == "rplus.lbd", checkRplus(fullfile(f.folder, f.name)); else, checkOpen(fullfile(f.folder, f.name)); end
+            fprintf('  matlab reads %-7s %s %s OK\n', lang, name, string(ifelse(name == "rplus.lbd", "", "(opened)")));
+        catch err
+            failed = true;
+            fprintf('  matlab reads %-7s %s FAILED: %s\n', lang, name, err.message);
+        end
+    end
+end
 if failed
     error('crosslang:failed', 'MATLAB cross-language check failed');
 end
+end
+
+function x = ifelse(c, a, b)
+if c, x = a; else, x = b; end
+end
+
+function checkOpen(p)
+% lbd.open reads the same parts as lbd.load (plan 6d).
+whole = lbd.load(p);
+d = lbd.open(p);
+closer = onCleanup(@() d.close());
+for name = string(fieldnames(whole.Values))'
+    v = whole.Values.(name);
+    o = d.Values.(name).Data;
+    expect(isequal(size(o), size(v.Data)), name + " size");
+    full = o.read();
+    if startsWith(v.Dtype, "complex")
+        expect(isequaln(real(full), real(v.Data)) && isequaln(imag(full), imag(v.Data)), name + " all");
+    else
+        expect(isequaln(full, v.Data), name + " all");
+    end
+    if numel(v.Shape) >= 2
+        idx = repmat({':'}, 1, numel(v.Shape));
+        idx{1} = v.Shape(1);
+        part = o(idx{:});
+        expect(isequaln(real(part), real(v.Data(idx{:}))), name + " last row");
+    end
+end
+if ~isempty(fieldnames(d.Groups))
+    expect(isequaln(d.toDense("f").Values.f.Data, whole.toDense("f").Values.f.Data), "toDense");
+end
+end
+
+function checkRplus(p)
+d = lbd.load(p);
+expect(isequal(d.Values.y.Data(:)', [0 0 7 0 0]), "y written in place");
+expect(d.Meta.edited == 1 && d.Title == "R plus", "meta saved in place");
+expect(isequal(d.Labels.Tags, "kept"), "labels kept by the save in place");
+end
+
+function checkLabels(p)
+d = lbd.load(p);
+L = d.Labels;
+expect(d.LbdVersion == "1.3", "version 1.3: " + d.LbdVersion);
+expect(L.Star && L.Project == "Chip – é/Run 1" && L.Comment == "ü – note", "star, project, comment");
+expect(isequal(L.Users, ["Ana" "Bo"]) && isequal(L.Tags, "checked"), "users, tags");
+expect(~isempty(regexp(L.Written, '^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$', 'once')), "written: " + L.Written);
+copy = tempname + ".lbd";
+cleanup = onCleanup(@() delete(copy));
+d.save(copy);                                      % saved to another file: the same labels and time
+expect(isequal(lbd.labels(copy), L), "labels of a copy");
+end
+
+function checkGroups(p)
+d = lbd.load(p);
+expect(d.LbdVersion == "2.1", "version 2.1: " + d.LbdVersion);
+expect(isequal(d.Labels.Tags, "groups"), "labels");
+expect(isequal(d.Groups.AB.Order, ["A" "B"]) && isequal(d.Groups.PQR.Order, ["P" "Q" "R"]), "group orders");
+expect(isequal(double(d.Axes.A.Data(:)'), [1 2 3]), "A");
+expect(isequal(double(d.Axes.B.Data(:)'), [10 10 20 15 25 35]), "B");
+expect(isequal(d.Axes.B.Parent(:)', int64([1 2 2 3 3 3])), "B parents (from 1)");
+expect(d.Axes.A.Unit == "V" && d.Axes.B.Group == "AB" && d.Axes.C.Group == "", "units and groups");
+expect(isequal(d.Values.f.Dims, {["A" "B"]}) && isequal(d.Values.h.Dims, {["A" "B"], "C"}), "dims");
+expect(isequal(d.Values.f.Data(:)', [110 210 220 315 325 335]), "f");
+expect(isequal(d.Values.q.Data(:)', [1.5 3 4.5]), "q");
+expect(isequal(size(d.Values.h.Data), [6 3]) && isequal(d.Values.h.Data(6, :), [3 35 38]), "h");
+expect(isequal(d.Values.cov.PointShape, [2 2]) && isequal(squeeze(d.Values.cov.Data(5, :, :)), [3 25; 25 -3]), "cov");
+expect(isa(d.Values.n.Data, 'int16') && isequal(d.Values.n.Data(:)', int16([1 0 0 0 2 0])), "n");
+expect(isequal(d.Values.n.Measured(:)', [true false false false true false]), "n measured");
+expect(isequal(double(d.Axes.Q.Data(:)'), [0 0 1 0 1 2]) && isequal(d.Axes.R.Parent(:)', int64([3 5 6 6])), "PQR");
+expect(isequal(d.Values.u.Data(:)', [10 20 21 30 31 32]) && isequal(d.Values.w.Data(:)', [210 310 320 321]), "u, w");
+m = d.toDense("f");
+expect(isequal(m.Axes.B.Data(:)', [10 15 20 25 35]) && isnan(m.Values.f.Data(1, 2)) && m.Values.f.Data(3, 4) == 325, "toDense");
+end
+
+function checkLive(p)
+expect(~isfile(p + ".writing"), "the .writing file is left");
+d = lbd.load(p);
+expect(d.Title == "Live – ü", "title: " + d.Title);
+s = d.Values.S21.Data;
+expect(~isreal(s) && isequal(size(s), [3 3]), "S21 size");
+expect(isequal(s(1:2, :), complex([1; 2] * ones(1, 3), ones(2, 1) * (1:3))), "S21 rows 1-2");
+expect(all(isnan(s(3, :))), "power 3 is not measured");
+expect(isequal(d.Axes.time.Data, [0; 1; 2; 3]), "time");
+expect(isequal(d.Values.T.Data, [0; 10; 20; 30]), "T");
+expect(isempty(d.Values.T.Measured) && isempty(d.Values.S21.Measured), "no masks for T, S21");
+expect(isa(d.Values.n.Data, 'int32') && isequal(d.Values.n.Data, int32([0 3 0; 7 0 0])), "n");
+expect(isequal(d.Values.n.Measured, logical([0 1 0; 1 0 0])), "n measured");
+expect(isequal(d.Axes.state.Elements, ["ground" "excited"]), "state elements");
+expect(d.LbdVersion == "1.3" && isequal(d.Labels.Tags, "live") && d.Labels.Star, "labels");
 end
 
 function checkOne(p)
 d = lbd.load(p);
 [I, J, K] = ndgrid(0:2, 0:3, 0:1);
 expect(d.Title == "Fixture – ünïcode", "title: " + d.Title);
+expect(d.Created == "2025-03-01T23:30:00+08:00", "created: " + string(d.Created));
+again = fullfile(tempname, "again.lbd");                 % loaded and saved again: created kept
+mkdir(fileparts(again));
+lbd.load(p).save(again);
+expect(lbd.load(again).Created == "2025-03-01T23:30:00+08:00", "created after saving again");
+% the identity: a UUID version 7; saved to another file: a new one, the fixture's as its parent
+expect(~isempty(d.Id) && ~isempty(regexp(d.Id, '^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$', 'once')), ...
+    "id: " + strjoin(string(d.Id), ""));
+other = lbd.load(again);
+expect(other.Id ~= d.Id && other.ParentId == d.Id, "id after saving to another file");
+% a copy of the file saved again to the same place: the same id
+copy = fullfile(tempname, "copy.lbd");
+mkdir(fileparts(copy));
+copyfile(p, copy);
+c = lbd.load(copy);
+c.save(copy);
+expect(lbd.load(copy).Id == d.Id, "id after saving a copy to the same place");
 expect(isequal(d.Axes.x.Data, (0:9)'), "x");
 expect(isequal([d.Axes.x.Unit d.Axes.a.Unit d.Axes.b.Unit d.Axes.c.Unit], ["s" "V" "A" "Hz"]), "units");
 expect(isequal(d.Values.y.Data, ((0:9).^2)'), "y");
@@ -32,6 +193,14 @@ expect(isequal(d.Values.M.Data, 10*I(:,:,1) + J(:,:,1)), "M");
 expect(~isreal(d.Values.Z.Data) && isequal(d.Values.Z.Data, complex(I(:,:,1) + 1, J(:,:,1) + 1)), "Z");
 expect(isequal(d.Values.T.Data, 100*I + 10*J + K), "T");
 expect(isempty(d.Values.q.Axes) && d.Values.q.Data == 42.5, "q");
+expect(isequal(d.Axes.state.Elements, ["ground" "état 1" "量子"]), "state elements");
+expect(isequal(double(d.Axes.state.Data'), [0 1 2]), "state data");
+expect(isequal(d.Values.S.Data, [0.5 1.5 2.5]'), "S");
+[I2, R2, C2] = ndgrid(0:2, 0:1, 0:1);
+expect(isequal(d.Values.C.Axes, "a") && isequal(d.Values.C.PointShape, [2 2]), "C axes");
+expect(isequal(d.Values.C.Elements{1}, ["I" "Q"]) && isempty(d.Values.C.Elements{2}), "C elements");
+expect(~isfield(d.Axes, "C_dim1") && d.Axes.a.Role == "", "roles");
+expect(isequal(d.Values.C.Data, 100*I2 + 10*R2 + C2), "C");
 m = d.Meta;
 expect(m.sample == "chip – é", "meta sample");
 expect(m.T_mK == 12, "meta T_mK");

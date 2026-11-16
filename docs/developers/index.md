@@ -3,6 +3,43 @@
 This page is for working on LBD itself: the format, the language modules, the viewer and the
 installers.
 
+## Quick start for developers
+
+From a fresh clone to a test viewer full of mock data, in three steps:
+
+1. **Set up and build** (once, and `npm run build` again after changing the web UI). Details
+   are in [Setting up](#setting-up).
+   ```bash
+   uv sync --all-packages
+   cd viewer/web && npm ci && npm run build && cd ../..
+   ```
+2. **Make mock data**: a Library of about 300 files with every kind of label, files for
+   Explore's panels, the examples. See [Mock data](mock-data.md).
+   ```bash
+   uv run python scripts/make_mock_data.py ~/lbd-mock
+   ```
+3. **Open a test viewer** on it, with settings of its own (your real settings and presets are
+   never touched):
+   ```bash
+   uv run python scripts/dev_viewer.py ~/lbd-mock
+   ```
+   It serves http://127.0.0.1:8765/?token=dev until Ctrl+C.
+   - Without a folder, `dev_viewer.py` makes new mock data in a scratch folder itself.
+   - `--build` first builds the web UI and the docs (`mkdocs build --strict` into `site/`, which
+     Help shows when the viewer runs from source); a failed build stops it. Without `--build`, a
+     line says when Help is older than `docs/`.
+   - The scratch folder (settings, mock data) is deleted when the viewer stops, and old ones left
+     by stopped runs at the next start. Never one whose `dev_viewer.py` still runs, a
+     `--keep-settings` folder or a folder you named.
+   - `--live` adds a measurement being written.
+   - For live UI editing, also run `cd viewer/web && npm run dev` (http://localhost:5173, which
+     forwards to it). See [Working on the viewer](#working-on-the-viewer).
+
+Then:
+- **test:** `uv run python scripts/test_all.py` ([Testing](testing.md));
+- **release:** see [Releases](releases.md) (you set the version and push a tag; GitHub builds
+  and checks everything, and you publish).
+
 ## Repository layout
 
 ```
@@ -40,7 +77,7 @@ viewer/                     LBD Viewer
     src/api.ts                  typed client for the HTTP API
     src/help.tsx                Help links into /docs/
 tests/crosslang/            fixture definition + run_all.py (N x N matrix over the discovered languages)
-examples/                   sample .lbd files and make_examples.py
+examples/                   make_examples.py: sample .lbd files, written into examples/data (not in git)
   python/                   the scripts of the docs' Examples section (scripts/make_gallery.py)
 docs/examples/              generated Examples pages, figures (img/) and printed output (output/)
 packaging/                  PyInstaller spec, frozen entry point, SDK staging, icons, installers
@@ -142,8 +179,10 @@ uv run mkdocs build --strict     # into site/; lbd-view --dev serves it at /docs
 ## Working on the viewer
 
 1. Start the backend in development mode: port 8765, session code `dev`, never stops by itself.
-   It serves the last built UI at http://127.0.0.1:8765/?token=dev.
+   It serves the last built UI at http://127.0.0.1:8765/?token=dev. The example files aren't kept
+   in the repository: `make_examples.py` writes them into `examples/data` first (once).
    ```bash
+   uv run python examples/make_examples.py
    uv run lbd-view --dev examples/data
    ```
 2. For live UI editing, also run the Vite dev server. It forwards `/api` and `/docs` to the

@@ -1,0 +1,542 @@
+import { CSSProperties, KeyboardEvent, MouseEvent, ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import type React from "react";
+import { api, AppState, baseName, LibraryColumn, LibraryQuery, LibraryRow, LibrarySettings, SidebarScope } from "./api";
+import { cellText, COLUMNS, createdText } from "./libraryColumns";
+import { SortButtons } from "./SortButtons";
+import { reorder, startResize, useColumnMove } from "./columnDrag";
+import { ConfirmDialog, ConfirmRequest, ContextMenu, isMenuKey, MenuAt, menuAt, MenuEntry } from "./menu";
+import { fileEntries } from "./fileActions";
+import { useToast } from "./toast";
+import ExportDialog from "./ExportDialog";
+import { useFileActions } from "./libraryActions";
+import { PAGE, useLibraryRows, useLibraryStatus } from "./libraryRows";
+import { NO_FILTERS } from "./libraryQuery";
+import FolderPanel from "./FolderPanel";
+
+/**
+ * The Files sidebar of Explore and Figure (it replaced the Folders panel): a quick way to the
+ * next file without going back to the Library.
+ *
+ * Its lists ("scopes", chosen in ⚙ Settings → Files sidebar):
+ * - Library selection: the Library's list with this browser tab's filters (always offered);
+ * - Folders: the folder tree, a separate way in (in Figure with images and style files);
+ * - Starred: the starred data files;
+ * - Recent: the data files opened lately in this browser tab.
+ * Its search box narrows the list shown; it never changes the Library's filters.
+ */
+
+export const SCOPE_TITLES: Record<SidebarScope, string> = {
+  library: "Library selection",
+  folders: "Folders",
+  starred: "Starred",
+  recent: "Recent",
+};
+
+interface Props {
+  /** the viewer's settings changed (the sidebar's layout and fields are settings) */
+  onSettings: (s: AppState) => void;
+  /** the button that hides the sidebar (in its heading) */
+  hideButton?: ReactNode;
+  workspace: "explore" | "figure";
+  state: AppState;
+  /** this browser tab's Library filters */
+  query: LibraryQuery;
+  scope: SidebarScope;
+  onScope: (s: SidebarScope) => void;
+  /** data files opened lately in this browser tab, newest first */
+  recent: string[];
+  activePath: string | null;
+  /** click: show the file (the preview tab); double-click / Enter: keep it open */
+  onSelect: (path: string) => void;
+  onOpen: (path: string) => void;
+  /** go to the Library, to change its filters (or its folders) */
+  onEditInLibrary: () => void;
+  onOpenIn: (path: string, where: "explore" | "figure") => void;
+  onOpenInNewBrowserTab: (path: string) => void;
+  onRenamed: (oldPath: string, newPath: string) => void;
+  onDeleted: (path: string) => void;
+}
+
+export default function FilesSidebar(props: Props) {
+  const { workspace, state, query, recent } = props;
+  const offered = state.library.sidebar_scopes;
+  const scope = offered.includes(props.scope) ? props.scope : "library";
+  return (
+    <div className="files-sidebar">
+      <div className="panel-head">
+        <h2>Files</h2>
+        <span className="files-head-end">
+        {offered.length > 1 && (
+          <select className="files-scope" value={scope} onChange={(e) => props.onScope(e.target.value as SidebarScope)} aria-label="Files listed">
+            {offered.map((s) => (
+              <option key={s} value={s}>
+                {SCOPE_TITLES[s]}
+              </option>
+            ))}
+          </select>
+        )}
+        {props.hideButton}
+        </span>
+      </div>
+      {scope === "folders" ? (
+        <FolderPanel
+          roots={state.roots}
+          activePath={props.activePath}
+          platform={state.platform}
+          onManageFolders={props.onEditInLibrary}
+          onSelect={props.onSelect}
+          onOpen={props.onOpen}
+          onOpenInNewBrowserTab={props.onOpenInNewBrowserTab}
+          onRenamed={props.onRenamed}
+          onDeleted={props.onDeleted}
+          onOpenIn={props.onOpenIn}
+          kinds={workspace === "explore" ? ["lbd"] : undefined}
+        />
+      ) : scope === "recent" ? (
+        <RecentList {...props} paths={recent} />
+      ) : (
+        <LibraryList {...props} query={scope === "starred" ? { ...NO_FILTERS, starred: true } : query} showFilters={scope === "library"} />
+      )}
+    </div>
+  );
+}
+
+/** The filters of the Library selection, read-only, with Edit ↗ to change them in the Library. */
+function FilterChips({ query, onEdit }: { query: LibraryQuery; onEdit: () => void }) {
+  const chips: string[] = [];
+  if (query.folder) chips.push(baseName(query.folder));
+  if (query.date) chips.push(query.date);
+  if (query.q) chips.push(`"${query.q}"`);
+  if (query.project) chips.push(`project ${query.project}`);
+  for (const u of query.users) chips.push(`user ${u}`);
+  for (const t of query.tags) chips.push(`tag ${t}`);
+  if (query.starred) chips.push("★ starred");
+  if (query.conflicts) chips.push("⚠ copies that differ");
+  return (
+    <div className="files-filters small">
+      {chips.length ? chips.map((c) => <span key={c} className="chip">{c}</span>) : <span className="muted">All files in the Library</span>}
+      <button className="link" onClick={onEdit} title="Change the filters in the Library">
+        Edit ↗
+      </button>
+    </div>
+  );
+}
+
+/** The search box of a list: narrows it only (it doesn't change the Library's filters). */
+function useNarrowing(): [string, string, (v: string) => void] {
+  const [typed, setTyped] = useState("");
+  const [words, setWords] = useState("");
+  useEffect(() => {
+    const id = window.setTimeout(() => setWords(typed.trim()), 200);
+    return () => window.clearTimeout(id);
+  }, [typed]);
+  return [typed, words, setTyped];
+}
+
+/** A list of Library rows (the Library selection, or the starred files), windowed like the Library's. */
+function LibraryList(props: Props & { showFilters: boolean }) {
+  const { query, state, activePath, onSelect, onOpen } = props;
+  const toast = useToast();
+  const [typed, words, setTyped] = useNarrowing();
+  const { sidebar_layout: layout, sidebar_main: main, sidebar_fields: fields } = state.library;
+  const ROW_H = layout === "two" ? 40 : 26;
+  // the sidebar's own order (per browser tab), never the Library's; until one is chosen, the Library's
+  const [ownSort, setOwnSort] = useState<{ sort: LibraryColumn; order: "asc" | "desc" } | null>(() => loadSort());
+  useEffect(() => saveSort(ownSort), [ownSort]);
+  const sorted = ownSort ? { sort: ownSort.sort, order: ownSort.order } : {};
+  // the sidebar's words narrow the Library's search (all words must match)
+  const shownQuery: LibraryQuery = { ...(words ? { ...query, q: [query.q, words].filter(Boolean).join(" ") } : query), ...sorted };
+  const [widths, setWidths] = useState<Record<string, number>>(() => loadWidths());
+  const setSetting = (changes: Partial<LibrarySettings>) =>
+    api
+      .setLibrary(changes)
+      .then(props.onSettings)
+      .catch((e) => toast((e as Error).message, "error"));
+  const { generation, refresh } = useLibraryStatus(false);
+
+  const scroller = useRef<HTMLDivElement>(null);
+  const [view, setView] = useState({ top: 0, height: 400 });
+  const measure = (el: HTMLElement) => setView({ top: el.scrollTop, height: el.clientHeight });
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => measure(el));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const queryKey = JSON.stringify(shownQuery);
+  useEffect(() => {
+    if (scroller.current) scroller.current.scrollTop = 0;
+    setView((v) => ({ ...v, top: 0 }));
+  }, [queryKey]);
+  const firstPage = Math.max(0, Math.floor(Math.floor(view.top / ROW_H) / PAGE));
+  const lastPage = Math.floor((Math.floor((view.top + view.height) / ROW_H) + 1) / PAGE) + 1;
+  const { total, rowAt, indexOf, listError } = useLibraryRows(shownQuery, generation, firstPage, lastPage);
+
+  const [menu, setMenu] = useState<MenuAt | null>(null);
+  const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
+  const [savingCsv, setSavingCsv] = useState<string | null>(null); // Save as CSV open for this file
+  const closeMenu = useCallback(() => setMenu(null), []);
+  const { toggleStar, menuEntries } = useFileActions({
+    platform: state.platform,
+    login: state.login,
+    refresh,
+    setConfirm,
+    onOpenIn: props.onOpenIn,
+    onSaveCsv: setSavingCsv,
+    onOpenInNewBrowserTab: props.onOpenInNewBrowserTab,
+    onRenamed: props.onRenamed,
+    onDeleted: props.onDeleted,
+  });
+  const rowMenu = (e: MouseEvent | KeyboardEvent, r: LibraryRow) => {
+    e.preventDefault();
+    setMenu(menuAt(e, menuEntries([r], r)));
+  };
+  /** ⋯: how the sidebar shows a file (a setting: the same in every browser tab) */
+  const layoutMenu = (e: MouseEvent) => {
+    const tick = (on: boolean, label: string) => `${on ? "✓" : "\u2003"} ${label}`;
+    const items: MenuEntry[] = [
+      { label: "Show each file as", onClick: () => undefined, disabled: true },
+      ...(["one", "two", "columns"] as const).map((l) => ({
+        label: tick(layout === l, { one: "One line", two: "Two lines", columns: "Columns (sort by any)" }[l]),
+        onClick: () => setSetting({ sidebar_layout: l }),
+      })),
+      "-",
+      { label: tick(main === "title", "Name: the title"), onClick: () => setSetting({ sidebar_main: "title" }) },
+      { label: tick(main === "file", "Name: the file name"), onClick: () => setSetting({ sidebar_main: "file" }) },
+      "-",
+      { label: layout === "one" ? "On the right (the first one ticked)" : "Fields", onClick: () => undefined, disabled: true },
+      ...SIDEBAR_FIELDS.map((f) => ({
+        label: tick(fields.includes(f), FIELD_TITLES[f]),
+        onClick: () => setSetting({ sidebar_fields: fields.includes(f) ? fields.filter((x) => x !== f) : [...fields, f] }),
+      })),
+    ];
+    setMenu(menuAt(e, items));
+  };
+
+  /** Show row i (the keys): scrolled into view. */
+  const step = (i: number) => {
+    if (total === null || i < 0 || i >= total) return;
+    const r = rowAt(i);
+    if (r) onSelect(r.path);
+    const el = scroller.current;
+    if (el) {
+      const top = i * ROW_H;
+      if (top < el.scrollTop) el.scrollTop = top;
+      else if (top + ROW_H > el.scrollTop + el.clientHeight) el.scrollTop = top + ROW_H - el.clientHeight;
+      measure(el);
+    }
+  };
+  const onKey = (e: KeyboardEvent) => {
+    const i = indexOf(activePath);
+    const page = scroller.current ? Math.max(1, Math.floor(scroller.current.clientHeight / ROW_H) - 1) : 1;
+    const current = activePath ? rowAt(i) : undefined;
+    if (e.key === "ArrowDown") step(i < 0 ? 0 : i + 1);
+    else if (e.key === "ArrowUp") step(Math.max(0, i - 1));
+    else if (e.key === "Home") step(0);
+    else if (e.key === "End" && total) step(total - 1);
+    else if (e.key === "PageDown") step(Math.min((total ?? 1) - 1, Math.max(0, i) + page));
+    else if (e.key === "PageUp") step(Math.max(0, i - page));
+    else if (e.key === "Enter" && activePath) onOpen(activePath);
+    else if (e.key === " " && current) toggleStar([current]);
+    else if (isMenuKey(e) && current) rowMenu(e, current);
+    else return;
+    e.preventDefault();
+  };
+
+  // columns: the chosen fields after Name; widths dragged at the titles' edges (this browser)
+  const colFields = fields.filter((f) => f !== "name");
+  const colWidth = (c: string) => widths[c] ?? DEFAULT_COL_WIDTH[c] ?? 90;
+  const grid = ["name", ...colFields].map((c) => `${colWidth(c)}px`).join(" ");
+  const gridWidth = ["name", ...colFields].reduce((n, c) => n + colWidth(c), 0) + 8 * colFields.length + 24;
+  const shownSort = { sort: shownQuery.sort, order: shownQuery.order };
+  const sortBy = (c: LibraryColumn) =>
+    setOwnSort(shownSort.sort === c ? { sort: c, order: shownSort.order === "asc" ? "desc" : "asc" } : { sort: c, order: c === "date" || c === "size" || c === "modified" || c === "sweep" ? "desc" : "asc" });
+  const startColDrag = (e: React.PointerEvent<HTMLElement>, c: string) =>
+    startResize(
+      e,
+      colWidth(c),
+      (w) => setWidths((old) => ({ ...old, [c]: w })),
+      () =>
+        setWidths((w) => {
+          saveWidths(w);
+          return w;
+        }),
+    );
+  // drag a field's title to move it (Name stays first): the order of the chosen fields
+  const colHead = useRef<HTMLDivElement>(null);
+  const colMove = useColumnMove(colHead, (id, to) => {
+    const next = reorder(colFields, colFields.indexOf(id as (typeof colFields)[number]), to - 1); // index 0 is Name
+    setSetting({ sidebar_fields: next });
+  });
+
+  let empty: ReactNode = null;
+  if (total === 0)
+    empty = words ? (
+      <>No file here matches "{words}".</>
+    ) : props.showFilters ? (
+      <>
+        No files match the Library's filters.{" "}
+        <button className="link" onClick={props.onEditInLibrary}>
+          Edit in Library
+        </button>
+      </>
+    ) : (
+      <>No starred files yet. Star a file with its right-click menu, or Space.</>
+    );
+
+  return (
+    <>
+      {props.showFilters && <FilterChips query={query} onEdit={props.onEditInLibrary} />}
+      <div className="filter-row">
+        <input className="filter" type="search" value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="Search in these files…" aria-label="Search in these files" />
+        <button className="icon subtle" title="How each file is shown: one line, two lines or columns; which fields" aria-label="How the files are shown" onClick={layoutMenu}>
+          ⋯
+        </button>
+      </div>
+      <div className="files-sort small">
+        <SortButtons sort={ownSort?.sort} order={ownSort?.order} nameBy={main === "file" ? "file" : "name"} onSort={sortBy} />
+      </div>
+      {listError && <div className="error-box small">{listError}</div>}
+      <div
+        className={"files-list layout-" + layout}
+        ref={scroller}
+        onScroll={() => scroller.current && measure(scroller.current)}
+        onKeyDown={onKey}
+        tabIndex={0}
+        role="listbox"
+        aria-label={props.showFilters ? "Files of the Library selection" : "Starred files"}
+        style={layout === "columns" ? ({ "--files-grid": grid } as CSSProperties) : undefined}
+      >
+        {layout === "columns" && (
+          <div ref={colHead} className={"files-colhead" + (colMove.dragging ? " moving" : "")} style={{ width: gridWidth }}>
+            {["name", ...colFields].map((c, i) => (
+              <div
+                key={c}
+                data-col={c}
+                className={"files-colcell" + (c === "name" ? " sticky" : "") + (colMove.dragging === c ? " col-dragging" : "") + (colMove.drop === i && i > 0 ? " col-drop-before" : "") + (colMove.drop === colFields.length + 1 && i === colFields.length ? " col-drop-after" : "")}
+                aria-sort={shownSort.sort === c ? (shownSort.order === "asc" ? "ascending" : "descending") : "none"}
+                onPointerDown={c === "name" ? undefined : (e) => colMove.start(e, c, (k) => k === 0)}
+              >
+                <button className="link" onClick={() => !colMove.wasDrag() && sortBy(c as LibraryColumn)} title={c === "name" ? "Sort the sidebar by this (the Library keeps its own order)" : "Click: sort the sidebar by this · drag: move the column"}>
+                  {c === "name" ? (main === "file" ? "File name" : "Name") : FIELD_TITLES[c as LibraryColumn]}
+                  {shownSort.sort === c ? (shownSort.order === "asc" ? " ▴" : " ▾") : ""}
+                </button>
+                <span className="col-resize" title="Drag to change the width" onPointerDown={(e) => startColDrag(e, c)} />
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="files-rows" style={{ height: (total ?? 0) * ROW_H, width: layout === "columns" ? gridWidth : undefined }}>
+          {Array.from({ length: Math.max(0, Math.min(total ?? 0, (lastPage + 1) * PAGE) - firstPage * PAGE) }, (_, k) => {
+            const i = firstPage * PAGE + k;
+            const top = i * ROW_H;
+            if (top + ROW_H < view.top - ROW_H * 5 || top > view.top + view.height + ROW_H * 5) return null;
+            const r = rowAt(i);
+            if (!r) return <div key={`empty-${i}`} className="files-row loading" style={{ top, height: ROW_H }} />;
+            const name = (
+              <span className={"files-name" + (layout === "columns" ? " files-colcell sticky" : "")}>
+                {r.star ? <span className="mark-star">★ </span> : null}
+                {r.conflict || r.error ? <span className="mark-conflict">⚠ </span> : null}
+                {main === "file" ? r.name : r.title || r.name}
+                {r.writing === "measuring" ? <span className="files-mark measuring"> measuring…</span> : null}
+                {r.writing === "stopped" ? <span className="files-mark stopped"> stopped</span> : null}
+              </span>
+            );
+            const second = fields.filter((f) => f !== "date").map((f) => fieldText(r, f)).filter(Boolean).join(" · ");
+            return (
+              <div
+                key={r.path}
+                className={"files-row" + (r.path === activePath ? " active" : "") + (r.error ? " unreadable" : "")}
+                style={{ top, height: ROW_H }}
+                role="option"
+                aria-selected={r.path === activePath}
+                title={`${r.path}${r.sweep ? `\nSweep: ${r.sweep}` : ""}${r.error ? `\nCan't be read: ${r.error}` : ""}`}
+                onClick={(e) => {
+                  if (e.ctrlKey || e.metaKey) props.onOpenInNewBrowserTab(r.path);
+                  else onSelect(r.path);
+                  scroller.current?.focus({ preventScroll: true });
+                }}
+                onAuxClick={(e) => e.button === 1 && props.onOpenInNewBrowserTab(r.path)}
+                onDoubleClick={() => onOpen(r.path)}
+                onContextMenu={(e) => rowMenu(e, r)}
+              >
+                {layout === "columns" ? (
+                  <>
+                    {name}
+                    {colFields.map((f) => (
+                      <span key={f} className="files-colcell muted" title={cellText(r, f)}>
+                        {fieldText(r, f)}
+                      </span>
+                    ))}
+                  </>
+                ) : layout === "two" ? (
+                  <>
+                    <span className="files-line1">
+                      {name}
+                      {fields.includes("date") && <span className="files-date muted">{shortDate(r)}</span>}
+                    </span>
+                    <span className="files-line2 muted">{second || "\u00a0"}</span>
+                  </>
+                ) : (
+                  <>
+                    {name}
+                    {fields[0] && <span className="files-date muted">{fields[0] === "date" ? shortDate(r) : fieldText(r, fields[0])}</span>}
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        {empty && <div className="files-empty muted small">{empty}</div>}
+      </div>
+      {menu && <ContextMenu menu={menu} onClose={closeMenu} />}
+      {confirm && <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />}
+      {savingCsv && <ExportDialog sources={[]} file={savingCsv} onClose={() => setSavingCsv(null)} onSaved={(paths) => toast(`Saved ${paths.join(", ")}`)} />}
+    </>
+  );
+}
+
+const SORT_KEY = "lbd-sidebar-sort";
+const WIDTHS_KEY = "lbd-sidebar-column-widths";
+const SIDEBAR_FIELDS: LibraryColumn[] = ["date", "sweep", "values", "project", "tags", "users", "folder", "file", "size", "modified", "comment", "star", "copies"];
+const FIELD_TITLES = Object.fromEntries(COLUMNS.map((c) => [c.id, c.id === "star" ? "★ Star" : c.title])) as Record<LibraryColumn, string>;
+const DEFAULT_COL_WIDTH: Record<string, number> = { name: 190, date: 74, sweep: 70, size: 70, modified: 128, star: 28, copies: 56 };
+
+function loadSort(): { sort: LibraryColumn; order: "asc" | "desc" } | null {
+  try {
+    const v = JSON.parse(sessionStorage.getItem(SORT_KEY) ?? "null");
+    return v && typeof v.sort === "string" && (v.order === "asc" || v.order === "desc") ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveSort(v: { sort: LibraryColumn; order: "asc" | "desc" } | null) {
+  try {
+    if (v) sessionStorage.setItem(SORT_KEY, JSON.stringify(v));
+    else sessionStorage.removeItem(SORT_KEY);
+  } catch {
+    /* storage unavailable: not kept over a reload */
+  }
+}
+
+function loadWidths(): Record<string, number> {
+  try {
+    const v = JSON.parse(localStorage.getItem(WIDTHS_KEY) ?? "{}");
+    return v && typeof v === "object" ? v : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveWidths(w: Record<string, number>) {
+  try {
+    localStorage.setItem(WIDTHS_KEY, JSON.stringify(w));
+  } catch {
+    /* storage unavailable: not remembered */
+  }
+}
+
+/** A field in the one- or two-line rows: short (the date without the year this year). */
+function fieldText(r: LibraryRow, f: LibraryColumn): string {
+  if (f === "date") return shortDate(r);
+  if (f === "folder") return r.folder || "";
+  if (f === "star") return r.star ? "★" : "";
+  return cellText(r, f);
+}
+
+/** "03-14" this year, "2025-03-14" before: the file's own date, short. */
+function shortDate(r: LibraryRow): string {
+  const day = createdText(r).slice(0, 10);
+  return day.startsWith(String(new Date().getFullYear())) ? day.slice(5) : day;
+}
+
+/** The data files opened lately in this browser tab. */
+function RecentList(props: Props & { paths: string[] }) {
+  const { paths, activePath, onSelect, onOpen, state } = props;
+  const toast = useToast();
+  const [typed, words, setTyped] = useNarrowing();
+  const shown = words ? paths.filter((p) => words.toLowerCase().split(/\s+/).every((w) => p.toLowerCase().includes(w))) : paths;
+  const [menu, setMenu] = useState<MenuAt | null>(null);
+  const closeMenu = useCallback(() => setMenu(null), []);
+  const rowMenu = (e: MouseEvent | KeyboardEvent, path: string) => {
+    e.preventDefault();
+    const items: MenuEntry[] = [
+      { label: "Open in Explore", onClick: () => props.onOpenIn(path, "explore") },
+      { label: "Open in Figure", onClick: () => props.onOpenIn(path, "figure") },
+      "-",
+      ...fileEntries(path, state.platform, toast),
+      { label: "Open in new browser tab", onClick: () => props.onOpenInNewBrowserTab(path) },
+    ];
+    setMenu(menuAt(e, items));
+  };
+  const onKey = (e: KeyboardEvent) => {
+    const i = activePath ? shown.indexOf(activePath) : -1;
+    if (e.key === "ArrowDown" && shown.length) onSelect(shown[Math.min(shown.length - 1, i + 1)]);
+    else if (e.key === "ArrowUp" && shown.length) onSelect(shown[Math.max(0, i - 1)]);
+    else if (e.key === "Enter" && activePath) onOpen(activePath);
+    else if (isMenuKey(e) && activePath) rowMenu(e, activePath);
+    else return;
+    e.preventDefault();
+  };
+  return (
+    <>
+      <input className="filter" type="search" value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="Search in these files…" aria-label="Search in these files" />
+      <div className="files-list" tabIndex={0} role="listbox" aria-label="Files opened lately" onKeyDown={onKey}>
+        {shown.map((p) => (
+          <div
+            key={p}
+            className={"files-row static" + (p === activePath ? " active" : "")}
+            role="option"
+            aria-selected={p === activePath}
+            title={p}
+            onClick={(e) => (e.ctrlKey || e.metaKey ? props.onOpenInNewBrowserTab(p) : onSelect(p))}
+            onDoubleClick={() => onOpen(p)}
+            onContextMenu={(e) => rowMenu(e, p)}
+          >
+            <span className="files-name">{baseName(p).replace(/\.lbd$/i, "")}</span>
+          </div>
+        ))}
+        {!shown.length && <div className="files-empty muted small">{words ? `No file here matches "${words}".` : "The data files you open in this browser tab are listed here."}</div>}
+      </div>
+      {menu && <ContextMenu menu={menu} onClose={closeMenu} />}
+    </>
+  );
+}
+
+/** ⚙ Settings → Files sidebar: which lists it offers (the Library selection always). */
+export function SidebarScopeSettings({ state, onSettings }: { state: AppState; onSettings: (s: AppState) => void }) {
+  const toast = useToast();
+  // shown at once; the viewer's answer (or a refusal, with the old value) follows
+  const [scopes, setScopes] = useState(state.library.sidebar_scopes);
+  useEffect(() => setScopes(state.library.sidebar_scopes), [state.library.sidebar_scopes]);
+  const set = (s: SidebarScope, on: boolean) => {
+    const next = on ? [...scopes, s] : scopes.filter((x) => x !== s);
+    setScopes(next);
+    api
+      .setLibrary({ sidebar_scopes: next })
+      .then(onSettings)
+      .catch((e) => {
+        setScopes(state.library.sidebar_scopes);
+        toast((e as Error).message, "error");
+      });
+  };
+  return (
+    <>
+      <p className="settings-intro">What the Files sidebar of Explore and Figure can list; you choose between them in the sidebar.</p>
+      <div className="settings-checks" data-setting="library.sidebar_scopes">
+        <label className="settings-check disabled">
+          <input type="checkbox" checked disabled /> {SCOPE_TITLES.library} <span className="muted small">· the Library's filters, always</span>
+        </label>
+        {(["folders", "starred", "recent"] as SidebarScope[]).map((s) => (
+          <label key={s} className="settings-check">
+            <input type="checkbox" checked={scopes.includes(s)} onChange={(e) => set(s, e.target.checked)} />
+            {SCOPE_TITLES[s]}
+            {s === "folders" ? <span className="muted small"> · in Figure also images and style files</span> : null}
+          </label>
+        ))}
+      </div>
+    </>
+  );
+}

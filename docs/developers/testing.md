@@ -1,25 +1,83 @@
 # Testing
 
 ```bash
-uv run python scripts/test_all.py          # everything; prints a passed / skipped / failed table
-uv run python scripts/test_all.py --fast   # without the cross-language matrix and the browser tests
+uv run python scripts/test_all.py                  # everything; prints a passed / skipped / failed table
+uv run python scripts/test_all.py --fast           # without the cross-language matrix and the browser tests
+uv run python scripts/test_all.py --changed        # only what the changes since the last commit can affect
+uv run python scripts/test_all.py --changed main   # ... since main
+uv run python scripts/test_all.py --only matlab crosslang   # these suites
+uv run python scripts/test_all.py --only e2e --shard 2/3    # one third of the browser tests (as a CI job does)
+uv run python scripts/test_all.py --workers 1      # the viewer's tests one by one (no parallel processes)
 ```
 
-`test_all.py` runs, in order:
-1. each language's unit tests, as given by `[test]` in its `language.toml`;
-2. the viewer tests;
-3. the tests of `scripts/`, `packaging/` and `examples/` (`tests/scripts`, `tests/packaging`);
-4. the web UI type check;
+`test_all.py` has these suites (their names for `--only` in brackets):
+1. each language's unit tests, as given by `[test]` in its `language.toml` [`python`, `matlab`,
+   `julia`, …];
+2. the viewer tests [`viewer`];
+3. the tests of `scripts/`, `packaging/` and `examples/` (`tests/scripts`, `tests/packaging`) [`tools`];
+4. the web UI type check [`web`];
 5. the documentation: a strict site build (broken links, missing anchors or bad API
-   references fail it) and every code example in the docs;
-6. the cross-language matrix;
-7. the viewer in a real browser (see [Several viewer pages](#several-viewer-pages)).
+   references fail it) [`docs`] and every code example in the docs [`examples`];
+6. the cross-language matrix [`crosslang`];
+7. the viewer in a real browser [`e2e`] (see [Several viewer pages](#several-viewer-pages));
+8. the Explore benchmark [`benchmark`], only when the drawing code changed (see
+   [Performance](#performance)).
+
+The suites run side by side, four at a time (`--jobs N`; `--jobs 1` runs them one after the
+other), the longest first, so a whole run takes about as long as the browser tests. The
+benchmark runs alone afterwards, since it measures time. The viewer's tests and the browser
+tests depend on timing: a test of theirs that fails while the other suites load the computer
+runs again alone at the end, and the summary names it ("failed side by side, passed alone"); a
+test that fails alone too fails the run.
+
+**Inside a suite, tests run in parallel too** ([pytest-xdist](https://pytest-xdist.readthedocs.io/)):
+- The browser tests run in several processes, each taking whole test files (`--dist loadfile`):
+  by default one per core but one, and no more than the memory holds (about 2 GB each, for a
+  Chromium, a viewer and its preview workers).
+- The viewer's other tests use 2 processes.
+- `--workers N` sets the number for the browser tests; `--workers 1` runs everything one by one,
+  as before.
+- Each test has its own viewer server (on a port already bound for it), settings folder, data
+  folder and browser window, so tests don't see each other.
+- A test that needs the computer to itself gets `@pytest.mark.serial`: it runs after the
+  parallel part, one by one.
+
+The same with plain pytest:
+
+```bash
+uv run pytest -n 3 --dist loadfile -m "not serial" viewer/tests/e2e
+uv run pytest -m serial viewer/tests/e2e
+```
+
+**Shards** split the browser tests between machines:
+- `--shard I/N` (or `LBD_SHARD=I/N` for plain pytest) runs part I of N.
+- Whole files are dealt out by their time in `viewer/tests/e2e/durations.json`, the longest
+  first, so the parts take about as long each (`viewer/tests/e2e/shards.py`).
+- A new test file counts as the median until the times are recorded again with `uv run python
+  scripts/test_all.py --only e2e --record-durations` (after adding or slowing down tests;
+  commit `durations.json`).
+
+`--changed` picks the suites from the files changed (committed since the given commit, or not
+committed yet): a language's folder runs its tests, the cross-language matrix and the doc
+examples; the Python module also runs everything built on it (viewer, browser tests, tools);
+`viewer/src/` runs the viewer and browser tests; `viewer/web/` the type check and the browser
+tests; `docs/` the docs build and examples; `scripts/`, `packaging/` and `tests/` the tools;
+`planning/` nothing; a file it doesn't know runs everything. It prints which suites it chose and
+why. Run everything before a release, and when a change is wide.
 
 A suite whose program (e.g. `matlab`, or Playwright's Chromium) is missing is reported as
 skipped, not failed.
 
 **On GitHub** (`.github/workflows/tests.yml`), every push to `main` and every pull request runs
-`test_all.py` on Linux, Windows and macOS, the browser tests included. A failed suite shows on
+`test_all.py` on Linux, Windows and macOS, the browser tests included. It is split into jobs
+that run side by side, so the result comes in about the time of the slowest one:
+- **Web UI:** built and type-checked once; the other jobs download it.
+- **Suites** (per system): `--fast`.
+- **Browser tests:** in shards (3 on Linux and Windows, 2 on macOS), each in parallel inside.
+- **Cross-language** (per system).
+- **MATLAB.**
+
+Chromium and, on Linux, Arial are cached between runs. A failed suite shows on
 the run's page with pytest's list of failed tests, readable without signing in. MATLAB runs as a separate job with MathWorks' GitHub actions,
 because MATLAB isn't on `PATH` there; the cross-language matrix and the documentation's MATLAB
 examples run without MATLAB on GitHub, so run them locally before a release. The Linux machine
@@ -41,14 +99,57 @@ To run single suites:
 | Julia | `cd languages/julia && julia --project=. -e 'using Pkg; Pkg.test()'` |
 | Cross-language | `uv run python tests/crosslang/run_all.py [--only python julia] [--keep DIR]` |
 | Web UI types | `cd viewer/web && npm run typecheck` |
+| Web UI logic (plain Node, `viewer/web/tests`) | `cd viewer/web && npm test` |
 | Docs build | `uv run mkdocs build --strict` |
 | Doc examples | `uv run python scripts/check_doc_examples.py [--lang python matlab julia] [-v]` |
 
 The fixture content is defined in [the cross-language fixture](#cross-language-fixture).
 Run the cross-language matrix after any change to a module or the spec.
 
+## Performance
+
+The Explore view must stay fast on large data. That is checked in two ways:
+
+| What | How | When |
+|---|---|---|
+| **Why it is fast**: each view is drawn once (no second layout, also deep in and with an axis offset), drafts reduce half the pixels with the same axes, maps and many curves are read from their pyramids, many curves are one picture with one axis | ordinary tests in `viewer/tests/test_explore.py`: exact, and the same on every computer | every test run |
+| **How fast it is**: times of opening, the full view, zooming and panning (drafts), the sharp picture, picking, moving a cursor and applying operations, on 1000 traces × 10 000 points, a 4001 × 4001 map and a curve of 1 000 000 points | `scripts/benchmark_explore.py`: prints a table and compares it with earlier runs **on the same computer** | when the drawing code changed since the last run on this computer, before a release, or when asked |
+
+```bash
+uv run python scripts/test_all.py --perf               # everything, and the benchmark whatever changed
+uv run python scripts/benchmark_explore.py             # the benchmark alone
+uv run python scripts/benchmark_explore.py --history   # earlier runs on this computer
+```
+
+`test_all.py` runs the benchmark by itself when a file of the drawing code
+(`lbd/plot/`, the viewer's `explore.py`, `uv.lock`) changed since the benchmark's last run on this
+computer; otherwise it reports "not needed". `--fast` skips it, and GitHub never runs it: shared
+machines vary too much for times to mean anything there.
+
+Each time is the fastest of three repeats (a busy computer only adds time, so the fastest is the
+steadiest). The baseline is the median of this computer's last five
+passed runs, kept in `.benchmarks/explore.jsonl` (not committed; one line per run, with its
+commit). A time more than 30 % **and** 10 ms slower than the baseline, also when its file is measured
+once more (single frames jump now and then), fails the run, and a failed
+run doesn't become part of the baseline. When a run fails:
+
+- the table's note says whether the reference work (numpy and matplotlib doing what a frame does,
+  without LBD's code) was slower too: then the computer was busy or slowed, so run it again;
+- if the slowdown is the price of a wanted change, `--accept` makes this run the new baseline;
+- otherwise `--history` lists the runs and their commits, to find the change.
+
+## Mock data in the tests
+
+The viewer's tests write their files with the mock-data modules (`viewer/tests/mock_*.py`), through
+the fixtures `library_files` (the mock Library) and `values_files` (the panels' files, small).
+Every generator, and how to add a case, is described in [Mock data](mock-data.md).
+
 ## Rules the Python tests follow
 
+- **No test asks GitHub for a new version.** `viewer/tests/conftest.py` replaces
+  `updates.ask_github` with one that fails as if offline (`test_updates.py` gives fake answers),
+  and a test that starts a real viewer process sets `LBD_NO_UPDATE_CHECK=1`
+  (`smoke_test_app.py` does).
 - **No test touches your real settings.** The root `conftest.py` points `LBD_CONFIG_DIR` and
   `LBD_RUNTIME_DIR` (the "running viewer" record) at fresh temporary folders for every test and closes all matplotlib figures afterwards.
 - **An unexpected LBD warning fails the test.** `pyproject.toml` turns `lbd.LBDWarning` (and

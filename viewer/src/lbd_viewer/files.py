@@ -130,3 +130,86 @@ def _same_file(a: Path, b: Path) -> bool:
         return os.path.samefile(a, b)
     except OSError:
         return False
+
+
+# ---- editing a finished data file (plan 16.19 / 17) -------------------------------------------
+
+EDIT_METHODS = ("in_place", "copy_and_swap")
+COPY_MARGIN = 64 * 2**20     # room left free on the disk beyond the copy, in bytes
+
+
+class DataEditError(ValueError):
+    """An edit of a data file that wasn't made; the message says why and what to do. Nothing
+    was changed."""
+
+
+def edit_data_file(path: Path, change: Callable[["h5py.File"], None], method: str = "in_place",
+                   expect: "str | None" = None, progress: "Callable[[float], None] | None" = None) -> None:
+    """Change a finished data file: `change(f)` gets it open for writing (h5py).
+
+    `method` is the Settings choice for every edit of a finished data file (ids, Save view,
+    labels): "in_place" writes into the file (about 10 ms at any size; a hard kill at that moment
+    was harmless in tests, a power cut isn't covered), "copy_and_swap" writes a complete copy and
+    puts it in the file's place (survives a power cut; needs room for the copy; about 1 s per GB,
+    reported to `progress` as 0 … 1). `expect`: the version the user saw (versions.content); a
+    file changed since is refused. A file being written is refused.
+    """
+    import h5py
+
+    from . import versions
+
+    path = Path(path)
+    if path.name.lower().endswith(".writing"):
+        raise DataEditError(f"{path.name} is being written; it can be changed when it is finished")
+    if method not in EDIT_METHODS:
+        raise DataEditError(f"unknown way to edit data files {method!r}; use one of {', '.join(EDIT_METHODS)}")
+    if not path.is_file():
+        raise FileNotFoundError(f"file not found: {path}")
+    if expect is not None and versions.content(path) != expect:
+        raise DataEditError(f"{path.name} changed since it was shown; nothing was written. Look at it again "
+                            "and repeat if still wanted.")
+    if method == "in_place":
+        def write() -> None:
+            with h5py.File(path, "r+") as f:
+                change(f)
+        try:
+            _while_in_use(write)
+        except OSError as e:
+            raise DataEditError(f"{path.name} couldn't be changed ({e}); it may be open in another program. "
+                                "Close it there and try again. Nothing was written.") from None
+        return
+
+    size = path.stat().st_size
+    free = shutil.disk_usage(path.parent).free
+    if free < size + COPY_MARGIN:
+        raise DataEditError(
+            f"{path.name} wasn't changed: copy and swap needs room for a copy ({_gb(size + COPY_MARGIN)}), but the "
+            f"disk has {_gb(free)} free. Free some room, or choose Settings → Library → Edit data files: in place.")
+    tmp = path.with_name(f"{path.name}.tmp-{os.getpid()}")
+    try:
+        with open(path, "rb") as src, open(tmp, "xb") as out:
+            done = 0
+            while block := src.read(8 * 2**20):
+                out.write(block)
+                done += len(block)
+                if progress is not None:
+                    progress(done / max(size, 1))
+            out.flush()
+            os.fsync(out.fileno())
+        with h5py.File(tmp, "r+") as f:
+            change(f)
+        import lbd
+
+        lbd.info(tmp)                          # the copy is a readable LBD file before it replaces the original
+        try:
+            _while_in_use(lambda: os.replace(tmp, path))
+        except OSError as e:
+            raise DataEditError(f"{path.name} couldn't be replaced by its changed copy ({e}); it may be open in "
+                                "another program. Close it there and try again. Nothing was changed.") from None
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+
+
+def _gb(n: int) -> str:
+    return f"{n / 2**30:.2f} GB" if n >= 2**30 else f"{n / 2**20:.0f} MB"

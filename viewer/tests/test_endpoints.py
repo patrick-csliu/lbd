@@ -1,6 +1,8 @@
 """Every HTTP endpoint of the viewer, with its error statuses and the warnings it passes on."""
 
 import json
+import re
+from pathlib import Path
 
 import h5py
 import numpy as np
@@ -8,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import lbd
+from lbd.plot.units import AUTO_UNITS
 from lbd_viewer import server
 from lbd_viewer.server import AppState, collect_warnings, create_app, jsonable
 
@@ -37,6 +40,16 @@ def test_state_reports_problems(client, cfg, tmp_path):
     warnings = client.get("/api/state").json()["warnings"]
     assert any("no longer exists" in w and "gone" in w for w in warnings)
     assert any("deleted-style" in w for w in warnings)
+
+
+def test_state_sends_the_plots_prefix_units(client):
+    """The page writes its numbers with the plots' list of units that get a prefix (16.1)."""
+    assert client.get("/api/state").json()["auto_units"] == sorted(AUTO_UNITS)
+    # the page's own test (viewer/web/tests/units.test.mjs) uses a copy of the list: the same one
+    page_test = (Path(__file__).parents[1] / "web/tests/units.test.mjs").read_text(encoding="utf-8")
+    copy = re.search(r"^setAutoUnits\((\[.*\])\);$", page_test, re.MULTILINE)
+    assert copy, "units.test.mjs no longer sets the list in one line"
+    assert set(json.loads(copy.group(1))) == AUTO_UNITS
 
 
 def test_broken_settings_file_is_an_error_not_a_reset(client, cfg):
@@ -553,3 +566,36 @@ def test_file_summary_has_the_matplotlib_version(client, data_dir):
     assert client.get("/api/file", params={"path": p}).json()["matplotlib"] is None
     client.put("/api/file/plot", json={"path": p, "spec": {"kind": "curve"}}).raise_for_status()
     assert client.get("/api/file", params={"path": p}).json()["matplotlib"]
+
+
+def test_the_page_is_never_kept_stale_by_the_browser(client):
+    """After an update, the browser must load the new page (its scripts have hashed names)."""
+    from lbd_viewer.server import STATIC_DIR
+
+    if not (STATIC_DIR / "index.html").is_file():
+        pytest.skip("the web UI is not built")
+    r = client.get("/")
+    assert r.status_code == 200 and r.headers["cache-control"] == "no-cache"
+    script = next(p.name for p in (STATIC_DIR / "assets").glob("*.js"))
+    assert "no-cache" not in client.get(f"/assets/{script}").headers.get("cache-control", "")
+
+
+def test_a_settings_section_is_reset(client):
+    client.put("/api/settings", json={"theme": "dark", "measurements": {"notify": True}}).raise_for_status()
+    state = client.post("/api/settings/reset", json={"section": "general"}).json()
+    assert state["theme"] == "system" and state["measurements"]["notify"] is True
+    assert state["defaults"]["measurements"]["measurements.notify"] is False
+    assert client.post("/api/settings/reset", json={"section": "nope"}).status_code == 400
+
+
+def test_figure_draws_a_histogram(client, data_dir):
+    d = lbd.Dataset()
+    d.add_axis("t", np.arange(5.0))
+    d.add_value("x", np.arange(5.0), axes="t", unit="V")
+    d.save(data_dir / "h.lbd")
+    r = client.post("/api/render", json={"path": str(data_dir / "h.lbd"), "spec": {"kind": "histogram", "options": {"bins": 3}}})
+    r.raise_for_status()
+    body = r.json()
+    assert body["spec"]["kind"] == "histogram" and body["svg"].startswith("<?xml") and not body["warnings"]
+    r = client.post("/api/render", json={"path": str(data_dir / "h.lbd"), "spec": {"kind": "histogram", "options": {"bins": 1}}})
+    assert r.status_code == 400 and "bins must be" in r.text

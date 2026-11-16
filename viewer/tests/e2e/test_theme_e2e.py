@@ -3,6 +3,7 @@
 The setting is saved by the viewer, so every page follows at once and a reload keeps it.
 """
 
+from pageui import open_settings
 from playwright.sync_api import Page, expect
 
 DARK_BG = "rgb(21, 24, 28)"      # --bg in styles.css
@@ -11,8 +12,8 @@ LIGHT_BG = "rgb(246, 247, 249)"
 
 def choose(page: Page, label: str):
     """⚙ (top right) → Theme → `label`."""
-    page.get_by_role("button", name="Settings").click()
-    page.get_by_role("dialog", name="Settings").get_by_label(label).check()
+    open_settings(page, "General").get_by_label(label, exact=True).check()
+    page.keyboard.press("Escape")
 
 
 def background(page: Page) -> str:
@@ -40,7 +41,7 @@ def test_dark_and_light_follow_in_every_page_and_after_a_reload(new_page):
 def test_system_follows_the_operating_system(new_page):
     page = new_page()
     choose(page, "Dark")
-    choose(page, "System (follows")
+    choose(page, "System")
     page.emulate_media(color_scheme="dark")
     expect(theme(page)).to_have_attribute("data-theme", "dark")
     page.emulate_media(color_scheme="light")                       # switched while open

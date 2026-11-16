@@ -1,4 +1,4 @@
-# LBD file format — version 1.0
+# LBD file format — version 2.1
 
 LBD ("Lab Data", extension `.lbd`) is a file format for measurement and simulation data that can be written and read identically from any programming language, and viewed with the LBD viewer. Any language with HDF5 support can implement it; this repository provides implementations for Python, MATLAB and Julia.
 
@@ -18,13 +18,18 @@ that implement this spec, see [Python](../docs/python/files.md), [MATLAB](../doc
 
 ```
 /                       (root group)
-├── attrs               lbd_format, lbd_version, title, description, created, writer
-├── axes/               (group)  one 1-D dataset per axis
-│   └── <axis name>     attrs: unit, label
+├── attrs               lbd_format, lbd_version, title, description, created, writer [, id, parent_id]
+├── axes/               (group)  one 1-D dataset per fixed axis, one group per axis group
+│   ├── <axis name>     attrs: unit, label [, elements, role]
+│   └── <group name>/   (group, since 2.0)  attrs: order
+│       ├── <axis name>           attrs: unit, label
+│       └── <axis name>._parent   (for every axis of the group but the first)
 ├── values/             (group)  one N-D dataset per value
 │   └── <value name>    attrs: unit, label, axes [, lbd_bool]
 ├── meta/               (group)  free key/value metadata, stored as attributes; may contain sub-groups
+├── measured/           (group, optional)  one uint8 mask per integer / boolean value not fully measured
 ├── plot/               (group, optional)  attrs: spec, style, style_name [, matplotlib]
+├── labels/             (group, optional, since 1.3)  attrs: star, project, users, tags, comment, written
 └── extra/              (group, optional)  anything; ignored by LBD readers
 ```
 
@@ -33,19 +38,43 @@ that implement this spec, see [Python](../docs/python/files.md), [MATLAB](../doc
 | Attribute | Type | Required | Meaning |
 |---|---|---|---|
 | `lbd_format` | string, `"LBD"` | must | Identifies the file as LBD. |
-| `lbd_version` | string, `"<major>.<minor>"` | must | Format version, `"1.0"` for this spec. |
+| `lbd_version` | string, `"<major>.<minor>"` | must | Format version: `"1.2"` for a file without an axis group (§1.8) or labels (§1.9), `"1.3"` with labels, `"2.0"` with an axis group, `"2.1"` with both (`"1.0"` and `"1.1"` files are valid 1.2 files without the content added since). See §6. |
 | `title` | string | must (may be `""`) | Short human-readable title. |
 | `description` | string | must (may be `""`) | Free text. |
-| `created` | string, ISO-8601 with UTC offset | must | Time the file was written, e.g. `2026-10-13T16:09:00+08:00`. |
+| `created` | string, ISO-8601 with UTC offset | must | When the data was created (measured), e.g. `2026-10-13T16:09:00+08:00`. Given by the user when known; otherwise writers fill in the time of the first save. A writer saving a dataset that already has a `created` (set by the user, or read from a file) writes it unchanged. |
 | `writer` | string | must | Writer and its version, e.g. `"python lbd 1.0.0"`, `"matlab lbd 1.0.0"`, `"julia LBD 1.0.0"`. |
+| `id` | string, a UUID version 7 (RFC 9562), lower case, e.g. `0192d4e2-7b3a-7c1e-9f2a-1c2b3d4e5f60` | should (since 1.1) | The measurement's identity: lets programs recognise the same measurement in two places (a copy, a backup, a synced folder). Rules below. |
+| `parent_id` | string, a UUID | may (since 1.1) | The `id` of the file this one was made from. |
+
+**`id` rules for writers.** The id is made from the current time in milliseconds and random
+bits from the operating system's secure source (never from a seeded generator), so writers on
+any computer make ids that don't collide, without coordination.
+
+| What the writer does | `id` | `parent_id` |
+|---|---|---|
+| saves a new dataset for the first time | a new id | — |
+| saves a dataset again to the file it was read from (or last saved to) | kept | kept |
+| saves a dataset to another file | a new id | the old `id` |
+| makes it a new measurement on request (e.g. `new_id()`) | a new id | the old `id` |
+| (a file copied by the file system keeps both, byte for byte) | | |
+
+A file without `id` (written by format 1.0 or by another program) gets one the next time an LBD
+writer saves it. Readers must accept files without `id`; a value that is not a UUID is ignored
+with a warning.
 
 ### 1.2 Axes — `/axes/<name>`
+
+A dataset in `/axes` is a **fixed axis**: one dimension of a grid, the same points for every
+point of the other axes. (A group in `/axes` is an axis group, §1.8.)
 
 - 1-D numeric dataset (real; integer or floating point).
 - Attributes:
   - `unit`: string, must; `""` for dimensionless.
   - `label`: string, must; a human-readable name used on plot axes, e.g. `"Frequency"`. Defaults to the axis name.
+  - `elements`: 1-D array of strings, may (since 1.2); a text for each position of the axis, in order, e.g. `["ground", "excited"]` for an axis swept over named states. Readers show them instead of the numbers (tick labels, legends, read-outs). Any text; repeats allowed. Variable-length UTF-8 when written; readers must also accept fixed-length strings.
+  - `role`: string, may (since 1.2); `"point"` for an axis of a dimension inside a value's data point (§1.3). Absent: a sweep axis (every axis written before 1.2).
 - Axis values should be monotonic, but this is not enforced.
+- A reader that finds `elements` with another count than the axis's length, or not strings, or a `role` other than `"point"`, ignores it with a warning.
 
 ### 1.3 Values — `/values/<name>`
 
@@ -56,6 +85,24 @@ that implement this spec, see [Python](../docs/python/files.md), [MATLAB](../doc
   - `axes`: string, must. The names of the axes along each dimension, **comma-separated, in logical order** (see §2), e.g. `"power,freq"`. It is `""` for a 0-D value.
   - `lbd_bool`: integer `1`, only for boolean data (see §3).
 - For every dimension *i*: the axis named in position *i* must exist in `/axes`, and its length must equal the size of dimension *i*.
+- **Dimensions on an axis group** (since 2.0). A dimension can be one level of an axis group
+  (§1.8): its points are the dimension's entries, so its size is the level's number of points.
+  In `axes` it is written as the group's first *k* axes, consecutive and in the group's order
+  (`"A,B"` = level 2 of a group whose `order` begins `A,B`), or as the group's name (its
+  innermost level: all its axes). Writers write the axis names. Only an outer part of a group's
+  order may be named (`"A"` or `"A,B"`, never `"B"` alone or `"A,C"`): an inner coordinate means
+  something only under its outer ones. A group appears at most once in a value's `axes`.
+  Consecutive names from one group form one dimension, so `axes="A,B,C"` with A, B in a group
+  and C a fixed axis has two dimensions: the (A, B) points, then C. Fixed axes and other groups
+  combine with it as a grid.
+- **Data points with a shape** (since 1.2). Each data point of a value is one number, unless its
+  last dimensions lie on axes with `role="point"`: then one data point is the array over those
+  dimensions (a vector, a matrix). Writers make one such axis per dimension of the data point,
+  named `<value>_dim<k>` (k = 1, 2 … within the data point), holding `0 … n−1` (and `elements` if
+  the positions have names); e.g. a Bloch vector per drive amplitude: `axes="amp,bloch_dim1"`,
+  with `/axes/bloch_dim1` = `[0, 1, 2]`, `role="point"`, `elements=["x", "y", "z"]`. These are
+  ordinary axes, so readers of earlier versions read such values (with every dimension as an
+  axis).
 
 ### 1.4 Meta — `/meta`
 
@@ -85,6 +132,71 @@ The meaning of the JSON keys is defined by the viewer, not by this spec. Readers
 
 Any additional HDF5 content. LBD readers ignore it. Use it for data that does not fit the axes/values model.
 
+### 1.7 Measured — `/measured/<value name>` (optional)
+
+Which points of an integer or boolean value were measured, for a value that was filled piece by
+piece and not completely (a measurement stopped early). Floating-point and complex values use
+`NaN` for "not measured" instead and have no mask.
+
+- A `uint8` dataset with the same shape as `/values/<value name>`: `1` where the point was
+  measured, `0` where it was not (the value holds `0` there, which means nothing).
+- Writers omit the mask when every point was measured.
+- Readers that don't know masks read the value as usual; LBD readers should hide the points
+  whose mask is `0`.
+
+### 1.8 Axis groups — `/axes/<group name>/` (since 2.0)
+
+A sweep whose inner points depend on the outer ones (B chosen per A, a different number of B per
+A, adaptive or re-centred sweeps, several such levels) is stored as an **axis group**: its axes'
+measured points listed together, level by level. Only measured points are stored.
+
+- A group in `/axes`, with attribute `order` (string, must): its axes, outer to inner,
+  comma-separated (one or more).
+- For each axis X in `order`, a dataset `X`: 1-D numeric, with `unit` and `label` as in §1.2
+  (`elements` and `role` are not used on a group's axes; readers ignore them with a warning).
+  It holds the coordinates of **level X**'s points:
+  - level 1 (the first axis): each distinct coordinate once;
+  - every further level: one entry per point of that level, and a dataset `X._parent` (1-D
+    integer, same length): for each point, the index (from 0) of the point it belongs to in the
+    level above.
+- At each level, no two points have the same coordinate and the same parent (readers warn and
+  keep both). Points are stored in the order they were first written: readers must not assume
+  sorted coordinates or the points of one parent next to each other. A point may have no points
+  below it (an (A, B) point with no C).
+- Coordinates must not be `NaN` or infinite. A `_parent` index outside the level above, or a
+  `_parent` whose length differs from its level's, is an error for readers.
+- A value on level *k* (§1.3) has one entry per point of level *k*, in the level's order.
+
+Reading a point: for point *j* of level C, its coordinate is `C[j]`; its (A, B) point is
+`p = C._parent[j]`, with B = `B[p]`; its A is `A[B._parent[p]]`.
+
+### 1.9 Labels — `/labels` (optional, since 1.3 / 2.1)
+
+The file's labels, as a library of files shows and edits them (LBD Viewer's Library): a star, a
+project, users, tags and a comment. They are stored in the file so that they go wherever the
+file goes (a copy, a move to another computer).
+
+| Attribute | Type | Meaning |
+|---|---|---|
+| `star` | 8-bit integer, `0` or `1` | Starred. |
+| `project` | string | The file's project. Absent: none. |
+| `users` | JSON string: a list of strings | Who measured or uses the file. |
+| `tags` | JSON string: a list of strings | Free tags. |
+| `comment` | string | Free text. |
+| `written` | string, ISO-8601 in UTC with milliseconds and `Z`, e.g. `2026-11-11T09:30:00.125Z` | When the labels were **set** (not when the file was written): a program that keeps labels elsewhere too compares this time with its own to know which labels are newer. |
+
+- Every attribute is optional; absent means none (`star` absent means not starred).
+- A label (project, user, tag) is text; a nested label has parts separated by `/`
+  (`"Chip 3/Cooldown 7"`). Writers remove spaces around the slashes and refuse a label with an
+  empty part. Lists hold each label once.
+- A `/labels` group with no labels but a `written` time records that the labels were removed
+  then.
+- Writers keep the labels when they save a file again, also to another file. A program changing
+  only the labels of an existing file rewrites `/labels` in place, sets `written` to the time of
+  the change, and raises `lbd_version` to `1.3` (from 1.0 to 1.2) or `2.1` (from 2.0).
+- A reader that can't read one attribute (wrong type, not a JSON list of strings) ignores it with
+  a warning and reads the others.
+
 ---
 
 ## 2. Dimension order
@@ -98,7 +210,9 @@ HDF5 stores N-D arrays in row-major (C) order. Some languages are row-major (Pyt
 
 Result: a 2-D value with `axes = "power,freq"`, 11 powers and 401 frequencies, is `(11, 401)` in Python, `11×401` in MATLAB and `11×401` in Julia, with `A[i, j]` / `A(i, j)` meaning power *i*, frequency *j* everywhere.
 
-The same rule applies to numeric arrays stored in `/meta`.
+The same rule applies to numeric arrays stored in `/meta`. A level of an axis group (§1.3, §1.8)
+is one dimension, like an axis; its `_parent` indices count from 0 in every language's file, and
+implementations that count from 1 convert them when reading and writing.
 
 ---
 
@@ -112,7 +226,8 @@ The same rule applies to numeric arrays stored in `/meta`.
 | bool | `uint8` with values 0/1, and attribute `lbd_bool = 1` on the dataset. Readers convert back to boolean. |
 | string | variable-length UTF-8. Readers must also accept fixed-length or ASCII strings. |
 
-- Missing numeric values are `NaN` (floating point only).
+- Missing numeric values are `NaN` (floating point and complex); for integers and booleans, the
+  `/measured` mask says which points are missing (§1.7).
 - Values and axes must not be string datasets.
 
 Writers choose the type automatically from the input ("auto"): the input's numeric type is kept, complex input becomes the complex compound type, and boolean input becomes `uint8` + `lbd_bool`. The user may force a specific type.
@@ -124,7 +239,9 @@ Writers choose the type automatically from the input ("auto"): the input's numer
 - Axis and value names must match `^[A-Za-z][A-Za-z0-9_]{0,62}$`, so they are valid identifiers in common programming languages.
 - Names are case-sensitive.
 - The order of axes and values inside `/axes` and `/values` has no meaning. Most HDF5 libraries list them alphabetically. The dimension order of a value is defined only by its `axes` attribute.
-- An axis and a value must not share a name.
+- An axis and a value must not share a name. Since 2.0 the same holds for groups: fixed axes,
+  groups, the axes in groups and values all have different names, and a group's name follows
+  the same rule. The datasets `X._parent` contain a `.`, which no name may, so they can't clash.
 - Meta keys should follow the same rule. Readers must accept any HDF5 attribute name in `/meta`.
 
 ---
@@ -141,20 +258,138 @@ Writers may store datasets chunked and gzip-compressed. Readers must handle this
 - A **minor** bump only adds optional content. A reader for `1.x` must read any `1.y` file, ignoring what it does not understand, and should warn when `y > x`.
 - A **major** bump may break compatibility. A reader must refuse a file whose major version is newer than it supports, with an error telling the user to update.
 - Readers must ignore unknown attributes, groups and datasets anywhere in the file.
+- **Writers write the lowest version their content needs**: `"1.2"` for a file without an axis
+  group or labels, `"1.3"` with labels, `"2.0"` with an axis group, `"2.1"` with both. Readers
+  of 1.x keep reading every file without a group, and older readers ignore the labels.
+- A reader that supports 2.x reads every 1.x file. It warns for a minor version newer than it
+  knows within that major (1.4 or later, 2.2 or later).
+- Version history: **1.1** added the root `id` and `parent_id`; **1.2** added an axis's
+  `elements` and `role`, data points with a shape (§1.2, §1.3), the `/measured` masks (§1.7)
+  and files being written (§7); **2.0** added axis groups (§1.8, and dimensions on them in
+  §1.3). Readers of 1.x refuse 2.0 files with "please update". **1.3** and **2.1** added the
+  labels (§1.9).
 
 ---
 
-## 7. Minimal example (as seen by `h5dump`-style listing)
+## 7. Files being written
+
+A program may write a file while it measures, so that the data so far can be read at any time
+and a crash loses at most the last moments. Such a file is not yet an LBD file; it becomes one
+when complete.
+
+- It is named `<name>.lbd.writing` and is written in HDF5's single-writer / multiple-reader
+  (SWMR) mode, which needs the HDF5 1.10 file format. Writers use exactly that format (HDF5's
+  library version bounds 1.10 to 1.10), not the newest their HDF5 knows, so every HDF5 since
+  1.10 can read the file. When complete, the writer closes it and renames it to `<name>.lbd`;
+  the content is not copied.
+- While written: values may hold `NaN` (or a `0` mask, §1.7) where nothing was measured yet, and
+  an axis whose length isn't known in advance (a log, "until stopped") may be shorter than it
+  will be, together with the values on it. Every value on such an axis has it as its first axis.
+- The levels of an axis group (§1.8) grow as points are measured, and every value on a level
+  grows with it, along that dimension (wherever it is in the value's `axes`). Readers take each
+  level as the points that are complete: up to the shortest of `X` and `X._parent`, and only up
+  to the first point whose parent isn't there yet; each value is cut to its levels' lengths.
+- **The guard.** For the whole time it writes, the writer holds an exclusive operating-system
+  lock on one byte at offset 2^40 of the file (length 1; beyond any data, so no read is blocked).
+  The lock disappears with the writing process, so it tells the two cases apart:
+  held → **measuring**; not held → **stopped** (the writer crashed or was stopped before
+  finishing). A stopped file holds everything written before the last flush and is made into
+  an LBD file by copying its content into `<name>.lbd`.
+- Readers open a `.lbd.writing` file in SWMR read mode with HDF5 file locking turned off, read
+  what they need and close it again; they must not keep it open or write to it. When the writer
+  finishes, it rewrites the description and metadata outside SWMR, just before the rename: a
+  reader that fails to read the file then should read it again a moment later (or find it
+  finished, renamed to `<name>.lbd`). Other programs
+  opening it in the ordinary way are refused by HDF5 while it is written; this does not
+  disturb the writer.
+- **The heartbeat** (optional; LBD's writers write it). The guard is seen only on the writer's
+  computer. So that other computers (e.g. through a sync tool) can tell a running measurement
+  from a stopped one, the writer keeps a small UTF-8 JSON file `<name>.lbd.live` beside the
+  file being written, rewritten whole (a new file replacing the old one) at least every
+  `beat_every` seconds even when nothing new was measured, and removed when the file is
+  finished:
+
+  ```json
+  {"lbd_live": 1, "computer": "LAB-PC", "process": 4120, "program": "python lbd 1.3.0",
+   "started": "2026-11-03T10:00:05+08:00", "updated": "2026-11-03T10:12:35+08:00",
+   "beat_every": 30, "longest_gap": 31.2,
+   "values": {"S21": {"points": 47069, "total": 180090, "per_write": 2001, "rate": 64.1,
+                      "axes": [{"name": "power", "index": 23, "length": 90, "step_seconds": 31.2}]}}}
+  ```
+
+  Per value: `points` measured so far (each counted once), `total` (`null` when it isn't known in
+  advance: a growing axis, an axis group), `per_write` (points given at once), `rate` (points
+  per second lately, or `null`), and for each axis written one position at a time its last
+  `index`, `length` and `step_seconds` (the average time between its steps, or `null`). A
+  reader judges whether the writer is alive by when **it** saw the file change, never by
+  comparing `updated` with its own clock (two computers' clocks differ). The file is not part
+  of the LBD file; readers that don't know it ignore it.
+
+---
+
+## 8. Minimal example (as seen by `h5dump`-style listing)
 
 ```
-/                         lbd_format="LBD" lbd_version="1.0" title="Resonator power sweep"
-                          description="" created="2026-10-13T16:09:00+08:00" writer="python lbd 1.0.0"
+/                         lbd_format="LBD" lbd_version="1.2" title="Resonator power sweep"
+                          description="" created="2026-10-13T16:09:00+08:00" writer="python lbd 1.3.0"
+                          id="0199dc2a-4b7e-7f30-8a41-5c6d7e8f9a0b"
 /axes/power   float64[11]       unit="dBm" label="Power"
 /axes/freq    float64[401]      unit="Hz"  label="Frequency"
 /values/S21   {r,i}float64[11,401]  unit="" label="S21" axes="power,freq"
 /meta                     T_mK=12  sample="R7"
 /meta/vna                 ifbw_Hz=1000.0 averages=4
 /plot                     spec='{"kind":"heatmap","values":["S21"],"complex":"db"}'
+```
+
+The same file with labels (format 1.3):
+
+```
+/                         lbd_format="LBD" lbd_version="1.3" …
+/labels                   star=1 project="Chip 3/Cooldown 7" users='["Ana"]'
+                          tags='["calibration"]' comment="" written="2026-11-11T09:30:00.125Z"
+```
+
+A file with named positions and a vector per data point (format 1.2):
+
+```
+/axes/state         int64[2]     unit="" label="Prepared state" elements=["ground","excited"]
+/axes/amp           float64[21]  unit="V" label="Drive"
+/axes/bloch_dim1    int64[3]     unit="" label="bloch" role="point" elements=["x","y","z"]
+/values/P1          float64[2,21]    unit="" label="P1" axes="state,amp"
+/values/bloch       float64[21,3]    unit="" label="bloch" axes="amp,bloch_dim1"
+```
+
+A variable sweep (format 2.0): A from [1, 2, 3]; for each A, B in `0 … A−1`; for each (A, B), C in
+`0 … B−1`; f measured once per (A, B) point, g once per (A, B, C) point:
+
+```
+/                   lbd_version="2.0" …
+/axes/ABC/          order="A,B,C"
+/axes/ABC/A         int64[3]   = [1, 2, 3]              ← level 1: each A once
+/axes/ABC/B         int64[6]   = [0, 0, 1, 0, 1, 2]     ← level 2: each (A, B) point
+/axes/ABC/B._parent int64[6]   = [0, 1, 1, 2, 2, 2]     ←   its A (index into level 1)
+/axes/ABC/C         int64[4]   = [0, 0, 0, 1]           ← level 3: each (A, B, C) point
+/axes/ABC/C._parent int64[4]   = [2, 4, 5, 5]           ←   its (A, B) point (index into level 2)
+/values/f           float64[6]   axes="A,B"             ← level 2 (also the points with no C)
+/values/g           float64[4]   axes="A,B,C"           ← level 3
+```
+
+`g[3]`: `C[3]` = 1, `C._parent[3]` = 5 → B = `B[5]` = 2, `B._parent[5]` = 2 → A = `A[2]` = 3: the
+point (3, 2, 1); its f is `f[5]`.
+
+A group together with a fixed axis and a data point of shape (2, 2) (format 2.0): B chosen per A,
+a spectrum over a fixed `freq` at each (A, B) point, and a 2 × 2 matrix per point:
+
+```
+/axes/AB/           order="A,B"
+/axes/AB/A          float64[3]   = [1, 2, 3]
+/axes/AB/B          float64[6]   = [10, 10, 20, 15, 25, 35]
+/axes/AB/B._parent  int64[6]     = [0, 1, 1, 2, 2, 2]
+/axes/freq          float64[401]                        ← a fixed axis
+/axes/cov_dim1      int64[2]     role="point" elements=["I","Q"]
+/axes/cov_dim2      int64[2]     role="point" elements=["I","Q"]
+/values/S           float64[6,401]   axes="A,B,freq"            ← (A, B) points × freq
+/values/cov         float64[6,2,2]   axes="A,B,cov_dim1,cov_dim2"
 ```
 
 <!-- --8<-- [end:body] -->

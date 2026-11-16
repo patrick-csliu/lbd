@@ -1,0 +1,339 @@
+"""The Library's index (library.py): what it lists, filters and searches, from the mock library
+(mock_library.py); files added, changed, removed or damaged; headers not read (cloud storage);
+the HTTP API; and the speed with 10 000 files."""
+
+import os
+import shutil
+import time
+from pathlib import Path
+
+import h5py
+import pytest
+
+import lbd
+import mock_library
+from lbd_viewer.library import LibraryIndex, outermost, parse_created
+
+
+def index_of(tmp_path, roots, read=True):
+    return LibraryIndex(tmp_path / "db", lambda: [str(r) for r in roots], lambda: read)
+
+
+@pytest.fixture(scope="module")
+def library(tmp_path_factory):
+    folder = tmp_path_factory.mktemp("lib")
+    mock_library.write_library(folder, 120)
+    return folder
+
+
+def test_every_data_file_is_listed_with_its_details(tmp_path, library):
+    ix = index_of(tmp_path, [library / "Lab data", library / "Shared"])
+    assert ix.scan()
+    every = ix.list(limit=1000)
+    assert every["total"] == 120
+    rows = {Path(r["path"]).relative_to(library).as_posix(): r for r in every["rows"]}
+    late = rows[mock_library.SPECIAL["midnight"]]
+    assert late["title"] == "Late resonator sweep" and late["sweep"] == "5×11" and late["value_names"] == "S21"
+    assert late["day"] == "2026-03-14" and late["date_from_file"] == 0       # its own time zone, not UTC's 15th
+    assert rows[mock_library.SPECIAL["numbers"]]["sweep"] == ""              # single numbers only
+    broken = rows[mock_library.SPECIAL["broken"]]
+    assert broken["error"] and broken["title"] == ""                         # listed, with the reason
+    assert rows[mock_library.SPECIAL["untitled"]]["title"] == ""
+    names = [r["name"] for r in every["rows"]]
+    assert names.count("calibration.lbd") == 2                               # same name, two folders
+    # newest first by default; the folder is relative to its open folder
+    times = [r for r in every["rows"]]
+    assert all(a["path"] for a in times)
+    assert rows[mock_library.SPECIAL["twin_shared"]]["folder"] == "Fridge"
+
+
+def test_search_filters_and_sorting(tmp_path, library):
+    ix = index_of(tmp_path, [library / "Lab data", library / "Shared"])
+    ix.scan()
+    every = ix.list(limit=1000)["rows"]
+    found = {r["path"] for r in ix.list(q="resonator", limit=1000)["rows"]}
+    assert {r["path"] for r in every if "resonator" in r["title"].lower()} <= found < {r["path"] for r in every}
+    assert ix.list(q="GHz")["total"] == 0 and ix.list(q="Hz")["total"] > 0     # units are searched
+    assert ix.list(q="averages")["total"] > 0                                  # metadata keys ...
+    assert ix.list(q="patrick")["total"] > 0                                   # ... and values
+    assert ix.list(q="re-cooling resonator")["total"] <= ix.list(q="re-cooling")["total"]   # all words
+    assert ix.list(q="100%_x")["total"] == 0                                   # LIKE characters are text
+    day = ix.list(date="2026-03-14")
+    assert {r["day"] for r in day["rows"]} == {"2026-03-14"} and day["total"] >= 2   # the damaged one: its file date
+    assert ix.list(date="2026")["total"] + ix.list(date="2025")["total"] + ix.list(date="2024")["total"] == 120
+    shared = ix.list(folder=str(library / "Shared"))
+    assert shared["total"] == sum(1 for _ in (library / "Shared").rglob("*.lbd"))
+    by_points = ix.list(sort="sweep", order="desc", limit=3)["rows"]
+    assert by_points[0]["points"] >= by_points[-1]["points"]
+    names = [r["title"] or r["name"] for r in ix.list(sort="name", order="asc", limit=1000)["rows"]]
+    assert names == sorted(names, key=str.lower)
+    page = ix.list(sort="name", order="asc", offset=10, limit=5)["rows"]
+    assert [r["path"] for r in page] == [r["path"] for r in ix.list(sort="name", order="asc", limit=1000)["rows"][10:15]]
+    with pytest.raises(ValueError, match="sort must be one of"):
+        ix.list(sort="colour")
+
+
+def test_facets_count_dates_and_folders(tmp_path, library):
+    ix = index_of(tmp_path, [library / "Lab data", library / "Shared"])
+    ix.scan()
+    f = ix.facets()
+    assert sum(n for y in f["dates"].values() for m in y.values() for n in m.values()) == 120
+    assert f["dates"]["2026"]["03"]["14"] >= 2
+    lab, shared = f["folders"]
+    assert lab["count"] + shared["count"] == 120 == f["total"]
+    assert {c["name"] for c in shared["children"]} == set(mock_library.PROJECTS)
+    assert sum(c["count"] for c in shared["children"]) == shared["count"]
+    only = ix.facets(q="fridge")
+    assert sum(n for y in only["dates"].values() for m in y.values() for n in m.values()) == ix.list(q="fridge")["total"]
+
+
+def test_files_added_changed_and_removed_are_seen(tmp_path, library):
+    root = tmp_path / "copy"
+    shutil.copytree(library / "Shared", root)
+    ix = index_of(tmp_path, [root])
+    ix.scan()
+    n = ix.list()["total"]
+    assert not ix.scan()                                                       # nothing changed: nothing read
+    d = lbd.Dataset(title="Brand new", created="2026-10-29T10:00:00+08:00")
+    d.add_axis("x", [1.0, 2.0])
+    d.add_value("y", [3.0, 4.0], axes="x")
+    d.save(root / "new.lbd")
+    gen = ix.generation
+    assert ix.scan() and ix.generation > gen and ix.list()["total"] == n + 1
+    d.title = "Brand new, renamed inside"
+    d.save(root / "new.lbd")
+    ix.scan()
+    assert ix.list(q="renamed inside")["total"] == 1
+    (root / "new.lbd").unlink()
+    ix.scan()
+    assert ix.list()["total"] == n
+
+
+def test_a_folder_opened_twice_is_indexed_once(tmp_path, library):
+    assert outermost([library, library / "Shared", library]) == [str(library.resolve())]
+    ix = index_of(tmp_path, [library, library / "Shared"])
+    ix.scan()
+    assert ix.list()["total"] == 120
+    trees = ix.facets()["folders"]
+    assert ix.facets()["total"] == 120                                         # counted once
+    assert trees[1]["count"] == sum(1 for _ in (library / "Shared").rglob("*.lbd"))   # its own count
+
+
+def test_without_headers_only_names_sizes_and_dates_then_read_when_asked(tmp_path, library):
+    ix = index_of(tmp_path, [library / "Shared"], read=False)
+    ix.scan()
+    rows = ix.list(limit=1000)["rows"]
+    assert all(r["read"] == 0 and r["title"] == "" and r["date_from_file"] == 1 for r in rows)
+    assert ix.list(q="resonator")["total"] > 0 and ix.list(q="averages")["total"] == 0   # names only
+    one = rows[0]["path"]
+    summary = ix.file(one)                                                     # read when selected
+    assert summary["axes"] or summary["values"]
+    assert next(r for r in ix.list(limit=1000)["rows"] if r["path"] == one)["read"] == 1
+
+
+def test_created_dates(tmp_path):
+    assert parse_created("2026-03-14T23:30:00+08:00")[1] == "2026-03-14"
+    assert parse_created("2026-03-14T23:30:00Z")[1] == "2026-03-14"
+    assert parse_created("2026-03-14T23:30:00") is None and parse_created("") is None and parse_created("x") is None
+
+
+def test_a_broken_index_is_built_again(tmp_path, library):
+    (tmp_path / "db").mkdir()
+    (tmp_path / "db" / "library.sqlite").write_bytes(b"not a database at all" * 100)
+    ix = index_of(tmp_path, [library / "Shared"])
+    ix.scan()
+    assert ix.list()["total"] > 0
+
+
+def test_the_api(client, data_dir, library_files):
+    client.app.state.lbd.library.scan()
+    r = client.get("/api/library/list", params={"q": "resonator", "sort": "name", "order": "asc"})
+    assert r.status_code == 200 and r.json()["total"] > 0
+    f = client.get("/api/library/facets").json()
+    assert f["folders"][0]["count"] == client.get("/api/library/list").json()["total"]
+    one = r.json()["rows"][0]["path"]
+    assert client.get("/api/library/file", params={"path": one}).json()["title"]
+    assert client.get("/api/library/status").json()["scans"] >= 1
+    assert client.get("/api/library/list", params={"folder": str(Path(data_dir).parent)}).status_code == 403
+    assert client.get("/api/library/list", params={"sort": "colour"}).status_code == 400
+
+
+def _small_file(path, title="Small"):
+    d = lbd.Dataset(title=title, created="2026-10-29T10:00:00+08:00")
+    d.add_axis("x", [1.0, 2.0])
+    d.add_value("y", [3.0, 4.0], axes="x")
+    d.save(path)
+
+
+def test_check_folders_now_says_what_it_found(client, data_dir):
+    """The Library's "Check folders now" (POST /api/library/check): new, changed, moved and gone
+    files, or nothing new."""
+    first = client.post("/api/library/check").json()
+    assert first["folders"] == 1 and first["errors"] == []
+    again = client.post("/api/library/check").json()
+    assert again["new"] == again["changed"] == again["gone"] == again["moved"] == []      # nothing new
+    _small_file(data_dir / "sub" / "fresh.lbd")
+    found = client.post("/api/library/check").json()
+    assert found["new"] == [str(data_dir.resolve() / "sub" / "fresh.lbd")] and found["changed"] == []
+    _small_file(data_dir / "sub" / "fresh.lbd", "Changed")
+    os.utime(data_dir / "sub" / "fresh.lbd", (time.time() + 5, time.time() + 5))   # surely another version
+    assert client.post("/api/library/check").json()["changed"] == [str(data_dir.resolve() / "sub" / "fresh.lbd")]
+    (data_dir / "sub" / "fresh.lbd").rename(data_dir / "moved.lbd")
+    moved = client.post("/api/library/check").json()
+    assert moved["moved"] == [{"from": str(data_dir.resolve() / "sub" / "fresh.lbd"), "to": str(data_dir.resolve() / "moved.lbd")}]
+    assert moved["new"] == moved["gone"] == []
+    (data_dir / "moved.lbd").unlink()
+    assert client.post("/api/library/check").json()["gone"] == [str(data_dir.resolve() / "moved.lbd")]
+
+
+def test_check_folders_now_names_a_folder_it_couldnt_read(client, tmp_path):
+    """An open folder that can't be read (here: removed, like a network drive not connected) is
+    named, with why."""
+    other = tmp_path / "other"
+    other.mkdir()
+    client.post("/api/roots", json={"path": str(other)}).raise_for_status()
+    other.rmdir()
+    out = client.post("/api/library/check").json()
+    assert out["folders"] == 2
+    assert [e["path"] for e in out["errors"]] == [str(other.resolve())] and out["errors"][0]["error"]
+
+
+def test_ten_thousand_files_answer_fast(tmp_path_factory):
+    folder = tmp_path_factory.mktemp("big")
+    t0 = time.perf_counter()
+    mock_library.write_library(folder, 10_000)
+    written = time.perf_counter() - t0
+    ix = LibraryIndex(folder / "db", lambda: [str(folder / "Lab data"), str(folder / "Shared")], lambda: True)
+    t0 = time.perf_counter()
+    ix.scan()
+    indexed = time.perf_counter() - t0
+    print(f"\n10 000 files: written in {written:.0f} s, indexed in {indexed:.0f} s")
+    for call in (lambda: ix.list(), lambda: ix.list(q="resonator re-cooling"), lambda: ix.list(date="2025-06"),
+                 lambda: ix.list(sort="name", order="asc", offset=5000), lambda: ix.facets(), lambda: ix.facets(q="fridge")):
+        t0 = time.perf_counter()
+        call()
+        assert time.perf_counter() - t0 < 0.2
+    t0 = time.perf_counter()
+    assert not ix.scan()                                                       # checking again: nothing read
+    print(f"checked again in {time.perf_counter() - t0:.1f} s")
+
+
+# ---- the same id in two places: copies or a conflict (plan 8b) --------------------------------
+
+def _two_folders(tmp_path):
+    a, b = tmp_path / "A", tmp_path / "B"
+    a.mkdir()
+    b.mkdir()
+    d = lbd.Dataset(title="Sweep", created="2026-10-29T10:00:00+08:00")
+    d.add_axis("x", [1.0, 2.0, 3.0])
+    d.add_value("y", [1.0, 2.0, 3.0], axes="x")
+    d.save(a / "sweep.lbd")
+    return a, b, d
+
+
+def test_a_file_copy_is_a_copy(tmp_path):
+    a, b, d = _two_folders(tmp_path)
+    shutil.copy2(a / "sweep.lbd", b / "sweep.lbd")                 # time kept: copies without reading
+    ix = index_of(tmp_path, [a, b])
+    ix.scan()
+    rows = ix.list()["rows"]
+    assert [r["copies"] for r in rows] == [1, 1] and not any(r["conflict"] for r in rows)
+    same = ix.same_id(str(a / "sweep.lbd"))
+    assert same["id"] == d.id and not same["conflict"] and same["others"][0]["path"] == str((b / "sweep.lbd").resolve())
+
+
+def test_a_copy_with_another_time_is_compared_by_its_contents(tmp_path):
+    a, b, d = _two_folders(tmp_path)
+    shutil.copy(a / "sweep.lbd", b / "sweep.lbd")
+    os.utime(b / "sweep.lbd", (1_700_000_000, 1_700_000_000))      # the same bytes, another time
+    ix = index_of(tmp_path, [a, b])
+    ix.scan()
+    assert not any(r["conflict"] for r in ix.list()["rows"])
+
+
+def test_a_copy_changed_later_is_a_conflict_with_what_differs(tmp_path):
+    a, b, d = _two_folders(tmp_path)
+    shutil.copy2(a / "sweep.lbd", b / "sweep.lbd")
+    r = lbd.load(b / "sweep.lbd")
+    r.description = "edited after copying"
+    r.save(b / "sweep.lbd")                                         # same place: keeps the id
+    ix = index_of(tmp_path, [a, b])
+    ix.scan()
+    assert all(row["conflict"] for row in ix.list()["rows"]) and ix.facets()["conflicts"] == 2
+    same = ix.same_id(str(a / "sweep.lbd"))
+    assert same["conflict"] and same["others"][0]["differs"] == ["description"] and same["others"][0]["newer"]
+
+
+def test_an_id_copied_by_hand_is_a_conflict(tmp_path):
+    a, b, d = _two_folders(tmp_path)
+    other = lbd.Dataset(title="Something else")
+    other.add_axis("t", [1.0, 2.0])
+    other.add_value("v", [5.0, 6.0], axes="t")
+    other.save(b / "other.lbd")
+    with h5py.File(b / "other.lbd", "a") as f:                     # a foreign tool copied the id
+        f.attrs["id"] = d.id
+    ix = index_of(tmp_path, [a, b])
+    ix.scan()
+    differs = ix.same_id(str(b / "other.lbd"))["others"][0]["differs"]
+    assert {"title", "values or their sizes", "axes"} <= set(differs)
+
+
+def test_contents_are_read_only_for_same_id_pairs_of_one_size(tmp_path, monkeypatch):
+    a, b, d = _two_folders(tmp_path)
+    shutil.copy2(a / "sweep.lbd", b / "sweep.lbd")
+    ix = index_of(tmp_path, [a, b])
+    calls = []
+    real = LibraryIndex._hash
+    monkeypatch.setattr(LibraryIndex, "_hash", lambda self, m: calls.append(m) or real(self, m))
+    ix.scan()
+    assert calls == []                                              # same time and size: no reading
+
+
+def test_a_file_is_found_by_its_id(tmp_path):
+    """Plan 12: the whole id, its start, a line pasted from a CSV; the files made from it too."""
+    folder = tmp_path / "data"
+    folder.mkdir()
+    d = lbd.Dataset(title="Original")
+    d.add_axis("x", [1.0, 2.0])
+    d.add_value("v", [1.0, 2.0], axes="x")
+    d.save(folder / "original.lbd")
+    first = lbd.load(folder / "original.lbd")
+    ident = first.id
+    first.save(folder / "made from it.lbd")
+    other = lbd.Dataset(title="Other")
+    other.add_axis("x", [1.0])
+    other.add_value("v", [1.0], axes="x")
+    other.save(folder / "other.lbd")
+    shutil.copy(folder / "original.lbd", folder / "a copy.lbd")         # the same id
+    ix = index_of(tmp_path, [folder])
+    ix.scan()
+
+    def names(q):
+        return sorted(r["name"] for r in ix.list(q=q, limit=100)["rows"])
+
+    both = ["a copy.lbd", "made from it.lbd", "original.lbd"]
+    assert names(ident) == both
+    assert names(ident.upper()) == both
+    assert names(ident[:13]) == both                                    # its start
+    assert names(f"# id: {ident}") == both                              # a line of a CSV
+    assert names(f"# made from: {ident}") == both
+    assert names("00000000-0000-7000-8000-000000000000") == []
+    assert "other.lbd" not in names("original") and "original.lbd" in names("original")   # a plain word as ever
+
+
+def test_a_file_s_row_only_where_the_library_lists_it(client, data_dir):
+    """16.31: /api/library/file gives the row (labels) of a file the Library lists; none for a
+    file in a folder it skips, though the file can be read."""
+    import lbd
+
+    (data_dir / "@eaDir").mkdir(exist_ok=True)
+    for where in (data_dir / "seen.lbd", data_dir / "@eaDir" / "skipped.lbd"):
+        d = lbd.Dataset(title=where.stem)
+        d.add_axis("x", [1.0, 2.0])
+        d.add_value("y", [1.0, 2.0], axes="x")
+        d.save(where)
+    client.app.state.lbd.library.scan()
+    seen = client.get("/api/library/file", params={"path": str(data_dir / "seen.lbd")}).json()
+    assert seen["row"]["name"] == "seen.lbd" and seen["row"]["tags"] == []
+    skipped = client.get("/api/library/file", params={"path": str(data_dir / "@eaDir" / "skipped.lbd")}).json()
+    assert skipped["title"] == "skipped" and skipped["row"] is None

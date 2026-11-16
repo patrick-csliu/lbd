@@ -127,6 +127,9 @@ nav:
       - Install: getting-started/install.md
       - Quick start: getting-started/quickstart.md
       - Concepts: getting-started/concepts.md
+      - Writing while measuring: getting-started/writing-while-measuring.md
+      - Large files: getting-started/large-files.md
+      - Several computers: getting-started/several-computers.md
   - Examples:
       - examples/index.md
       # gallery:start  (written by scripts/make_gallery.py)
@@ -141,8 +144,10 @@ nav:
       # gallery:end
   - LBD Viewer:
       - viewer/index.md
+      - Library: viewer/library.md
+      - Explore: viewer/explore.md
       - Folders and files: viewer/folders-and-files.md
-      - Plotting: viewer/plotting.md
+      - "Figure: plotting": viewer/plotting.md
       - Saving views and exporting: viewer/saving-and-exporting.md
       - Images and style files: viewer/images-and-style-files.md
       - Styles page: viewer/styles-page.md
@@ -171,8 +176,11 @@ nav:
   - Developers:
       - developers/index.md
       - Testing: developers/testing.md
+      - Mock data: developers/mock-data.md
       - HTTP API: developers/http-api.md
+      - Library label file: developers/library-sidecar.md
       - Extending LBD: developers/extending.md
       - Adding a language: developers/adding-a-language.md
       - Releases: developers/releases.md
+      - Build LBD yourself: developers/build-yourself.md
       - Changelog: changelog.md

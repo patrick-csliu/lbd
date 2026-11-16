@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"tests/*.test.mjs\""
   },
   "dependencies": {
     "react": "^19.1.0",
@@ -19,5 +20,8 @@
     "@vitejs/plugin-react": "^5.0.0",
     "typescript": "^5.8.0",
     "vite": "^7.0.0"
+  },
+  "allowScripts": {
+    "esbuild": true
   }
 }

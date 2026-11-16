@@ -2,7 +2,8 @@
 
     uv run python scripts/smoke_test_app.py --exe <app>/lbd-view[.exe] [--release]
 
-Starts the viewer on a free port with an empty settings folder and examples/data, then checks:
+Starts the viewer on a free port with an empty settings folder and the example files
+(examples/make_examples.py; --data for another folder), then checks:
   - the session answers and reports the expected version and the built-in style "default";
   - the example folder lists, rabi.lbd renders, and PDF and PNG export work;
 with --release (an app that will be shipped), also:
@@ -32,6 +33,9 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "scripts"))
 from check_versions import release_version  # noqa: E402
 
+sys.path.append(str(REPO / "examples"))
+from make_examples import DEFAULT_OUT, ensure_examples  # noqa: E402
+
 
 def free_port() -> int:
     with socket.socket() as s:
@@ -48,7 +52,9 @@ class App:
         self.token = ""
         self.output: List[str] = []     # everything the viewer prints, read continuously
         # Its own settings and "running viewer" record: never those of an installed viewer.
-        env = {**os.environ, "LBD_CONFIG_DIR": str(config), "LBD_RUNTIME_DIR": str(config / "runtime")}
+        # LBD_NO_UPDATE_CHECK: a test never asks GitHub for a new version.
+        env = {**os.environ, "LBD_CONFIG_DIR": str(config), "LBD_RUNTIME_DIR": str(config / "runtime"),
+               "LBD_NO_UPDATE_CHECK": "1"}
         self.process = subprocess.Popen(
             [*command, "--new", "--no-browser", "--port", str(self.port), "--idle-exit", "120", str(data)],
             env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
@@ -151,10 +157,21 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--exe", required=True, help="the viewer's program, e.g. <app>/lbd-view.exe")
     ap.add_argument("--release", action="store_true", help="also check the docs and the language modules")
-    ap.add_argument("--data", type=Path, default=REPO / "examples" / "data")
+    ap.add_argument("--data", type=Path,
+                    help="the folder to open (default: examples/data, or the example files made in a temporary folder)")
     args = ap.parse_args(argv)
     command = [args.exe] if Path(args.exe).exists() else args.exe.split()
-    return run(command, args.data.resolve(), args.release)
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as scratch:
+        data = args.data if args.data is not None else example_files(Path(scratch))
+        return run(command, data.resolve(), args.release)
+
+
+def example_files(scratch: Path) -> Path:
+    """examples/data when it has been made (release.yml makes it first: the smoke test itself runs
+    without lbd), otherwise the example files written into `scratch`."""
+    if DEFAULT_OUT.is_dir():
+        return DEFAULT_OUT
+    return ensure_examples(scratch / "examples")
 
 
 def run(command: List[str], data: Path, release: bool) -> int:

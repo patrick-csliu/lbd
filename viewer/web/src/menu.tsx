@@ -1,7 +1,10 @@
-import { FormEvent, KeyboardEvent, MouseEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
+import type React from "react";
+import type { LabelNode } from "./api";
+import { LabelPathInput } from "./labelPath";
+import { FormEvent, KeyboardEvent, MouseEvent, RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 /** One entry of a right-click menu; "-" is a separator line. */
-export type MenuEntry = { label: string; onClick: () => void; danger?: boolean; disabled?: boolean } | "-";
+export type MenuEntry = { label: string; onClick: () => void; danger?: boolean; disabled?: boolean; title?: string } | "-";
 
 export interface MenuAt {
   x: number;
@@ -19,6 +22,47 @@ export function menuAt(e: MouseEvent | KeyboardEvent, items: MenuEntry[]): MenuA
 /** True for the keys that open a context menu from the keyboard. */
 export function isMenuKey(e: KeyboardEvent): boolean {
   return e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey);
+}
+
+/** A popover that closes like a menu: on a mouse press outside it (except on `opener`, the button
+ * that toggles it) and on Escape anywhere inside it, giving the focus back to what had it when it
+ * opened. The Escape doesn't go on to the page (e.g. to clear the Library's selection). */
+export function useOutsideClose(ref: RefObject<HTMLElement | null>, onClose: () => void, opener?: RefObject<HTMLElement | null>) {
+  const close = useRef(onClose);
+  close.current = onClose;
+  useEffect(() => {
+    const before = document.activeElement as HTMLElement | null;
+    const away = (e: Event) => {
+      const t = e.target as Node;
+      if (ref.current?.contains(t) || opener?.current?.contains(t)) return;
+      close.current();
+    };
+    document.addEventListener("mousedown", away, true);
+    return () => {
+      document.removeEventListener("mousedown", away, true);
+      // back to the opener when the focus was inside (or nowhere); not when the user clicked elsewhere
+      const now = document.activeElement;
+      const target = opener?.current ?? before;
+      if (target?.isConnected && (!now || now === document.body)) target.focus();
+    };
+  }, [ref, opener]);
+  return (e: KeyboardEvent) => {
+    if (e.key !== "Escape") return;
+    e.stopPropagation();
+    e.preventDefault();
+    close.current();
+  };
+}
+
+/** A small floating box (help, a picker) that closes as `useOutsideClose` says. */
+export function Popover({ onClose, opener, className, label, children }: { onClose: () => void; opener?: RefObject<HTMLElement | null>; className: string; label: string; children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const onKeyDown = useOutsideClose(ref, onClose, opener);
+  return (
+    <div ref={ref} className={className} role="dialog" aria-label={label} onKeyDown={onKeyDown}>
+      {children}
+    </div>
+  );
 }
 
 /** A right-click menu. Closes on a choice, Escape, a click or mouse-wheel scroll elsewhere, or resizing. */
@@ -77,6 +121,7 @@ export function ContextMenu({ menu, onClose }: { menu: MenuAt; onClose: () => vo
             role="menuitem"
             className={item.danger ? "danger" : ""}
             disabled={item.disabled}
+            title={item.title}
             onClick={() => {
               onClose();
               item.onClick();
@@ -96,10 +141,17 @@ export interface ConfirmRequest {
   /** The button that applies the change, e.g. "Rename". */
   action: string;
   danger?: boolean;
-  /** A text box, e.g. for the new name: its first value, the part to select, and a check. */
-  input?: { value: string; selectEnd?: number; check: (value: string) => string | null };
+  /** A text box, e.g. for the new name: its first value, the part to select, and a check. With
+   * `labels`, a label's path box with suggestions (LabelPathInput); `hint` says what the value
+   * means ("under Lab A › Qubit team"). */
+  input?: { value: string; selectEnd?: number; check: (value: string) => string | null; labels?: LabelNode[]; hint?: (value: string) => string };
+  /** More than a line of text: e.g. counts, or a long name on a line of its own. */
+  body?: React.ReactNode;
+  /** Choices above the text box (e.g. "Put under" a group, "Kept in" a folder): each a list, its
+   * first value, and a label. Their values are given to onConfirm, in order. */
+  choices?: { label: string; options: { value: string; label: string }[]; value: string }[];
   /** Do the change. If it throws, the message is shown in the dialog and it stays open. */
-  onConfirm: (value: string) => Promise<void> | void;
+  onConfirm: (value: string, choices: string[]) => Promise<void> | void;
   /** An optional third choice next to Cancel, e.g. "Reload" beside "Overwrite". */
   secondary?: { label: string; onClick: () => Promise<void> | void };
 }
@@ -109,6 +161,7 @@ export function ConfirmDialog({ request, onClose }: { request: ConfirmRequest; o
   const ref = useRef<HTMLDialogElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState(request.input?.value ?? "");
+  const [chosen, setChosen] = useState<string[]>(() => (request.choices ?? []).map((c) => c.value));
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const problem = request.input ? request.input.check(value) : null;
@@ -127,7 +180,7 @@ export function ConfirmDialog({ request, onClose }: { request: ConfirmRequest; o
     if (problem || busy) return;
     setBusy(true);
     try {
-      await request.onConfirm(value);
+      await request.onConfirm(value, chosen);
       onClose();
     } catch (err) {
       setError((err as Error).message);
@@ -140,7 +193,34 @@ export function ConfirmDialog({ request, onClose }: { request: ConfirmRequest; o
       <form onSubmit={submit}>
         <h3 id="confirm-title">{request.title}</h3>
         {request.text && <p>{request.text}</p>}
-        {request.input && (
+        {request.body}
+        {(request.choices ?? []).map((c, i) => (
+          <label key={c.label} className="dialog-choice">
+            {c.label}{" "}
+            <select value={chosen[i]} onChange={(e) => setChosen((old) => old.map((v, k) => (k === i ? e.target.value : v)))}>
+              {c.options.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        ))}
+        {request.input?.labels && (
+          <LabelPathInput
+            nodes={request.input.labels}
+            value={value}
+            onChange={(v) => {
+              setValue(v);
+              setError(null);
+            }}
+            label={request.title}
+            autoFocus={false}
+            inputRef={inputRef}
+          />
+        )}
+        {request.input?.hint && !problem && <p className="dialog-hint muted small">{request.input.hint(value)}</p>}
+        {request.input && !request.input.labels && (
           <input
             ref={inputRef}
             value={value}
