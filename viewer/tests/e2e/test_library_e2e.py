@@ -184,7 +184,9 @@ def test_names_only(viewer, library_files, new_page):
     expect(late.locator(".cell-date")).to_have_attribute("title", re.compile("no date of its own"))   # the file's date, greyed
     late.click()
     expect(page.locator(".library-detail")).to_contain_text("Frequency")   # read when selected ...
-    expect(lib_row(page, "Late resonator sweep")).to_contain_text("2026-03-14 23:30", timeout=10_000)  # ... and its row fills in
+    # ... and its row fills in, at 23:30 Taipei time shown in this computer's time zone
+    here = page.evaluate("new Date('2026-03-14T23:30:00+08:00').toLocaleString('sv-SE').slice(0, 16)")
+    expect(lib_row(page, "Late resonator sweep")).to_contain_text(here, timeout=10_000)
     # on again: the details are read (the first start asks about cloud folders now, 18.8: no notice)
     viewer.state.config.set_library({"read_headers": True})
     page.reload()
