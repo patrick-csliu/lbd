@@ -113,10 +113,39 @@ def test_healthy_mock_data_has_nothing_broken_or_in_conflict(tmp_path):
     assert (tmp_path / "plain" / "Lab library" / "Lab data" / "2026" / "03" / "14" / "broken.lbd").exists()
 
 
-def test_a_live_measurement_without_the_stopped_one(tmp_path):
-    """18.5: mock_live.py --no-stopped (what --healthy --live runs) leaves no stopped measurement."""
+def run_live(folder, *args):
     import subprocess
 
-    subprocess.run([sys.executable, str(REPO / "viewer" / "tests" / "mock_live.py"), str(tmp_path), "--seconds", "0",
-                    "--no-stopped"], check=True, capture_output=True, timeout=120)
-    assert not list(tmp_path.glob("stopped*")) and (tmp_path / "live sweep.lbd").exists()
+    subprocess.run([sys.executable, str(REPO / "viewer" / "tests" / "mock_live.py"), str(folder), "--seconds", "0", *args],
+                   check=True, capture_output=True, timeout=120)
+
+
+def test_a_live_measurement_leaves_a_stopped_one_only_when_asked(tmp_path):
+    """mock_live.py writes only the live measurement (what --healthy --live runs); --stopped also
+    leaves one that stopped before finishing (what --live runs)."""
+    run_live(tmp_path / "plain")
+    assert not list((tmp_path / "plain").glob("stopped*")) and (tmp_path / "plain" / "live sweep.lbd").exists()
+    run_live(tmp_path / "with", "--stopped")
+    assert (tmp_path / "with" / "stopped sweep.lbd.writing").exists()
+
+
+@pytest.mark.parametrize("kind, name, plot", [
+    ("map", "live sweep", "heatmap"),
+    ("curve", "live fridge log", "curve"),
+    ("scatter", "live single shot", "scatter"),
+])
+def test_each_kind_of_live_measurement(tmp_path, kind, name, plot):
+    """mock_live.py --kind: a map (power sweep), a curve (fridge log), a scatter (single shot)."""
+    run_live(tmp_path, "--kind", kind)
+    d = lbd.load(tmp_path / f"{name}.lbd")
+    assert d.plot["kind"] == plot
+    if kind == "curve":
+        assert d.values["T_MXC"].data.shape == (2,) and d.values["T_MXC"].data[0] > d.values["T_MXC"].data[-1]
+    if kind == "scatter":
+        assert d.values["IQ"].data.shape == (2, 2) and d.axes["state"].elements == ["ground", "excited"]
+
+
+def test_a_live_measurement_named(tmp_path):
+    run_live(tmp_path, "--kind", "variable", "--name", "my cooldown.lbd")
+    assert [p.name for p in tmp_path.iterdir()] == ["my cooldown.lbd"]
+    assert list(lbd.load(tmp_path / "my cooldown.lbd").groups) == ["scan"]

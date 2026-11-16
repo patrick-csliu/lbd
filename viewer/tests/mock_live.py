@@ -1,31 +1,44 @@
-"""Files being written, for trying LBD Viewer by hand (plan 6b).
+"""A measurement being written, for trying LBD Viewer by hand (plan 6b).
 
-    uv run python viewer/tests/mock_live.py FOLDER [--seconds 120] [--variable]
+    uv run python viewer/tests/mock_live.py FOLDER [--kind map|curve|scatter|variable] [--name NAME]
+                                                   [--seconds 120] [--stopped]
 
-Writes `FOLDER/live sweep.lbd` slowly with lbd.Writer (a power sweep, one trace every second,
-and a growing temperature log), so the Library shows it as "measuring…" and Explore shows it as
-it grows; it becomes an ordinary .lbd file at the end. First it leaves `FOLDER/stopped
-sweep.lbd.writing`, a measurement that stopped before finishing, to try Recover on. Stop the
-script with Ctrl+C to see a running measurement become "stopped before finishing".
+Writes `FOLDER/NAME.lbd` slowly with lbd.Writer, so the Library shows it as "measuring…" and Explore
+shows it as it grows; it becomes an ordinary .lbd file at the end. Stop the script with Ctrl+C to
+see a running measurement become "stopped before finishing". What is written (`--kind`):
+
+- map (the default, `live sweep`): a power sweep, one trace of S21 against frequency a step, saved
+  as a map; and a growing temperature log.
+- curve (`live fridge log`): a fridge's cool-down log, the mixing-chamber, still and 4 K plate
+  temperatures, a point a step; saved as a curve of the mixing chamber.
+- scatter (`live single shot`): single-shot readout, a shot a step: the I/Q point of the qubit
+  prepared in ground and in excited; saved as a scatter in the I/Q plane, coloured by the state.
+- variable (`live variable sweep`; also `--variable`): a variable sweep (an axis group, format
+  2.0), one power a step, each with its own frequencies (as mock_values.variable_sweep).
+
+With `--stopped`, it first leaves `FOLDER/stopped sweep.lbd.writing`, a measurement that stopped
+before finishing, to try Recover on.
 
 With `--copy-to OTHER --as-computer LAB-PC`, the file being written and its heartbeat are also
-copied into OTHER every few traces, as a sync tool would bring them from another computer (no
-lock travels): open OTHER in the viewer to see "Measuring on LAB-PC", then "No sign …".
-
-With `--variable`, it writes `FOLDER/live variable sweep.lbd` instead: a variable sweep (an axis
-group, format 2.0), one power a step, each with its own frequencies (as mock_values.variable_sweep).
+copied into OTHER every few steps, as a sync tool would bring them from another computer (no lock
+travels): open OTHER in the viewer to see "Measuring on LAB-PC", then "No sign …".
 """
 
 import argparse
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import numpy as np
 
 import lbd
 
 FREQS = np.linspace(6.99e9, 7.01e9, 401)
+KINDS = ("map", "curve", "scatter", "variable")
+NAMES = {"map": "live sweep", "curve": "live fridge log", "scatter": "live single shot",
+         "variable": "live variable sweep"}
+
+Step = Callable[[lbd.Writer, int], None]          # called after each step (the copies of --copy-to)
 
 
 def trace(power: float) -> np.ndarray:
@@ -74,30 +87,90 @@ def copy_as_synced(w: lbd.Writer, to: Path, computer: str) -> None:
         pass
 
 
-def measure(folder: Path, seconds: float, copy_to: Optional[Path] = None, computer: str = "OTHER-PC") -> Path:
-    powers = np.linspace(-60, 0, max(2, int(seconds)))
-    w = start(folder / "live sweep.lbd", powers)
+def _steps(seconds: float) -> int:
+    """One step a second, at least two."""
+    return max(2, int(seconds))
+
+
+def _progress(i: int, n: int, what: str) -> None:
+    print(f"\r{i + 1} of {n} {what}", end="", flush=True)
+
+
+def measure(folder: Path, seconds: float, step: Optional[Step] = None, name: str = NAMES["map"]) -> Path:
+    """map: a power sweep, a trace a step, and a growing temperature log."""
+    powers = np.linspace(-60, 0, _steps(seconds))
+    w = start(folder / f"{name}.lbd", powers)
     t0 = time.monotonic()
     with w:
         for i, p in enumerate(powers):
             w.write(power=i, S21=trace(p))
             w.write(time=time.monotonic() - t0, T_mK=12 + np.random.default_rng().normal(scale=0.05))
-            print(f"\r{i + 1} of {len(powers)} traces", end="", flush=True)
-            if copy_to is not None and i % 3 == 0:
-                copy_as_synced(w, copy_to, computer)
+            _progress(i, len(powers), "traces")
+            if step:
+                step(w, i)
             time.sleep(seconds / len(powers))
     print()
     return w.path
 
 
-def measure_variable(folder: Path, seconds: float) -> Path:
-    """A variable sweep written live (format 2.0, as mock_values.variable_sweep): for each
+def measure_curve(folder: Path, seconds: float, step: Optional[Step] = None, name: str = NAMES["curve"]) -> Path:
+    """curve: a fridge's cool-down log, a point a step (time grows): each stage cools towards its
+    base temperature, the mixing chamber last and slowest."""
+    rng = np.random.default_rng()
+    n = _steps(seconds)
+    w = lbd.Writer(folder / f"{name}.lbd", title=name, description="written by viewer/tests/mock_live.py --kind curve")
+    w.add_axis("time", unit="s", grows=True, label="Time")
+    w.add_value("T_MXC", axes="time", unit="mK", label="Mixing chamber")
+    w.add_value("T_still", axes="time", unit="K", label="Still")
+    w.add_value("T_4K", axes="time", unit="K", label="4 K plate")
+    w.plot = {"kind": "curve", "values": ["T_MXC"]}
+    t0 = time.monotonic()
+    with w:
+        for i in range(n):
+            x = i / max(1, n - 1)                          # 0 … 1 through the cool-down
+            w.write(time=time.monotonic() - t0,
+                    T_MXC=10 + 790 * np.exp(-5 * x) + rng.normal(scale=0.3),
+                    T_still=0.7 + 1.3 * np.exp(-4 * x) + rng.normal(scale=0.005),
+                    T_4K=3.2 + 0.8 * np.exp(-6 * x) + rng.normal(scale=0.01))
+            _progress(i, n, "points")
+            if step:
+                step(w, i)
+            time.sleep(seconds / n)
+    print()
+    return w.path
+
+
+def measure_scatter(folder: Path, seconds: float, step: Optional[Step] = None, name: str = NAMES["scatter"]) -> Path:
+    """scatter: single-shot readout, a shot a step (shot grows): the I/Q point of the qubit prepared
+    in ground and in excited; a few excited shots have decayed to ground before the readout."""
+    rng = np.random.default_rng()
+    n = _steps(seconds)
+    ground, excited, sigma = np.array([-0.5, -0.2]), np.array([0.4, 0.3]), 0.15     # mV
+    w = lbd.Writer(folder / f"{name}.lbd", title=name, description="written by viewer/tests/mock_live.py --kind scatter")
+    w.add_axis("shot", grows=True, label="Shot")
+    w.add_axis("state", [0.0, 1.0], label="Prepared state", elements=["ground", "excited"])
+    w.add_value("IQ", axes=["shot", "state"], dtype="complex128", unit="V", label="I/Q")
+    w.plot = {"kind": "scatter", "values": ["IQ"], "complex": "iq", "color": "state"}
+    with w:
+        for i in range(n):
+            e = ground if rng.random() < 0.05 else excited          # T1 during the readout
+            pts = np.stack([ground, e]) + rng.normal(0, sigma, (2, 2))
+            w.write(shot=float(i), IQ=(pts[:, 0] + 1j * pts[:, 1]) * 1e-3)
+            _progress(i, n, "shots")
+            if step:
+                step(w, i)
+            time.sleep(seconds / n)
+    print()
+    return w.path
+
+
+def measure_variable(folder: Path, seconds: float, step: Optional[Step] = None, name: str = NAMES["variable"]) -> Path:
+    """variable: a variable sweep written live (format 2.0, as mock_values.variable_sweep): for each
     power, the frequencies are chosen around where the resonance is at that power, and Q is
     fitted once per power; one power a step."""
     rng = np.random.default_rng(13)
-    powers = np.linspace(-60, 0, max(2, int(seconds)))
-    w = lbd.Writer(folder / "live variable sweep.lbd", title="live variable sweep",
-                   description="written by viewer/tests/mock_live.py --variable")
+    powers = np.linspace(-60, 0, _steps(seconds))
+    w = lbd.Writer(folder / f"{name}.lbd", title=name, description="written by viewer/tests/mock_live.py --kind variable")
     w.add_group("scan")
     w.add_axis("power", group="scan", unit="dBm", label="Power")
     w.add_axis("freq", group="scan", unit="Hz", label="Frequency")
@@ -110,29 +183,38 @@ def measure_variable(folder: Path, seconds: float) -> Path:
             f = np.linspace(f0 - 3e6, f0 + 3e6, n)
             w.write(power=p, freq=f, S21=1 - 0.8 / (1 + 2j * (f - f0) / 0.6e6) + 0.01 * rng.normal(size=n))
             w.write(power=p, Q=1e4 * (1 + 0.1 * rng.normal()))
-            print(f"\r{i + 1} of {len(powers)} powers", end="", flush=True)
+            _progress(i, len(powers), "powers")
+            if step:
+                step(w, i)
             time.sleep(seconds / len(powers))
     print()
     return w.path
 
 
+MEASURE = {"map": measure, "curve": measure_curve, "scatter": measure_scatter, "variable": measure_variable}
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("folder", type=Path)
+    ap.add_argument("--kind", choices=KINDS, default="map", help="what is written (default: map)")
+    ap.add_argument("--name", help="the file's name, without .lbd (default: by the kind, e.g. 'live sweep')")
     ap.add_argument("--seconds", type=float, default=120.0, help="how long the live measurement takes")
-    ap.add_argument("--copy-to", type=Path, help="also copy it there every few traces, as a sync tool would")
+    ap.add_argument("--stopped", action="store_true",
+                    help="first leave a measurement that stopped before finishing, to try Recover on")
+    ap.add_argument("--copy-to", type=Path, help="also copy it there every few steps, as a sync tool would")
     ap.add_argument("--as-computer", default="OTHER-PC", help="the computer the copies' heartbeat names")
-    ap.add_argument("--variable", action="store_true",
-                    help="write a variable sweep (frequencies chosen per power) instead of the power sweep")
-    ap.add_argument("--no-stopped", action="store_true",
-                    help="without the measurement that stopped before finishing")
+    ap.add_argument("--variable", action="store_true", help="the same as --kind variable")
+    ap.add_argument("--no-stopped", action="store_true", help=argparse.SUPPRESS)   # the default now
     args = ap.parse_args()
+    kind = "variable" if args.variable else args.kind
+    name = args.name[:-4] if args.name and args.name.lower().endswith(".lbd") else args.name
     args.folder.mkdir(parents=True, exist_ok=True)
-    if args.variable:
-        if args.copy_to is not None:
-            ap.error("--copy-to goes with the power sweep: leave out --variable or --copy-to")
-        print("finished", measure_variable(args.folder, args.seconds))
-        raise SystemExit(0)
-    if not args.no_stopped:
+    if args.stopped:
         print("left", stopped(args.folder))
-    print("finished", measure(args.folder, args.seconds, args.copy_to, args.as_computer))
+    copy = None
+    if args.copy_to is not None:
+        def copy(w: lbd.Writer, i: int) -> None:
+            if i % 3 == 0:
+                copy_as_synced(w, args.copy_to, args.as_computer)
+    print("finished", MEASURE[kind](args.folder, args.seconds, copy, name or NAMES[kind]))

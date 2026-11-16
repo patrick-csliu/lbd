@@ -740,7 +740,12 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
 
 - `scripts/make_mock_data.py --healthy`: mock data with nothing broken or in conflict (no damaged
   file, copies, conflicts, files without an id, missing file or stopped measurement), to show the
-  tool or play around with it; `mock_live.py --no-stopped`.
+  tool or play around with it.
+- `viewer/tests/mock_live.py --kind map|curve|scatter|variable` chooses what is written live (a
+  power sweep as a map; a fridge cool-down log as a curve; single-shot readout as a scatter; a
+  variable sweep), and `--name` the file's name. It writes only the live measurement now;
+  `--stopped` also leaves one that stopped before finishing (`make_mock_data.py --live` asks for it,
+  `--healthy` doesn't).
 - The dev group installs `httpx2`: Starlette's `TestClient` uses it, so the viewer tests no longer
   warn "Using httpx with starlette.testclient is deprecated". `httpx` stays for the browser tests.
 - The example files (`examples/data`, written by LBD 0.1.0) are no longer in the repository:

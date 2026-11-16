@@ -103,19 +103,29 @@ The uneven grids are small, so they are in `Panels/` and in every test run:
 uv run python viewer/tests/mock_library.py FOLDER [N] [--labels] [--many-labels]   # the Library (N files, default 300)
 uv run python viewer/tests/mock_values.py FOLDER [--small]          # the panels' files
 uv run python viewer/tests/mock_large.py FOLDER                      # the large files (engine tests)
-uv run python viewer/tests/mock_live.py FOLDER [--seconds 120]       # a measurement being written
+uv run python viewer/tests/mock_live.py FOLDER [--kind KIND] [--name NAME] [--seconds 120]   # a measurement being written
+uv run python viewer/tests/mock_live.py FOLDER --stopped             # and one that stopped before finishing
 uv run python viewer/tests/mock_live.py FOLDER --copy-to OTHER --as-computer LAB-PC
-uv run python viewer/tests/mock_live.py FOLDER --variable            # a variable sweep being written
 uv run python examples/make_examples.py [OUTDIR]                     # the examples (keeps saved views)
 ```
 
-`mock_live.py --copy-to OTHER --as-computer LAB-PC` also copies the file being written, and its
-heartbeat, into OTHER every few traces, as a sync tool would bring them from another computer.
-Open OTHER in the viewer to see "Measuring on LAB-PC", then "No sign …" once it stops.
+`mock_live.py` writes one measurement, a step a second, for `--seconds` (default 120). `--kind`
+chooses what, and `--name` the file's name (without `.lbd`; the default is by the kind):
 
-`mock_live.py --variable` writes `live variable sweep.lbd` instead: a variable sweep (an axis
-group, format 2.0) one power a step, each power with its own frequencies, as
-`mock_values.variable_sweep` has them. Explore shows it growing a row at a time.
+| `--kind` | Default name | What grows | Saved plot |
+|---|---|---|---|
+| `map` (default) | `live sweep` | a power sweep, one trace of S21 against frequency a step; and a temperature log | map |
+| `curve` | `live fridge log` | a cool-down log: mixing chamber, still and 4 K plate, a point a step | curve (mixing chamber) |
+| `scatter` | `live single shot` | single-shot readout: a shot a step, the I/Q point for ground and for excited | scatter in the I/Q plane, coloured by the state |
+| `variable` | `live variable sweep` | a variable sweep (an axis group, format 2.0), one power a step, each with its own frequencies | as Explore chooses |
+
+`--variable` is the same as `--kind variable`. Only the live measurement is written unless
+`--stopped` asks for `stopped sweep.lbd.writing` too, a measurement that stopped before finishing
+(to try Recover on). Stop the script with Ctrl+C to see a running one become "stopped".
+
+`mock_live.py --copy-to OTHER --as-computer LAB-PC` also copies the file being written, and its
+heartbeat, into OTHER every few steps, as a sync tool would bring them from another computer.
+Open OTHER in the viewer to see "Measuring on LAB-PC", then "No sign …" once it stops.
 
 ## In the tests
 
