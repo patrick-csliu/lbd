@@ -36,7 +36,7 @@ export coords, rows, to_dense
 export Writer, lbd_writer, writing_status, recover
 export Labels, add_tags!
 
-const PACKAGE_VERSION = "2.0.0-dev"
+const PACKAGE_VERSION = "2.0.0"
 const FORMAT_VERSION = "2.1"            # the newest format this module reads and writes
 const GRID_VERSION = "1.2"              # what a file without an axis group is written as (spec §6)
 const FORMAT_MAJOR = parse(Int, split(FORMAT_VERSION, ".")[1])
