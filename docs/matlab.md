@@ -63,7 +63,7 @@ These properties are read-only; they are set by the methods and by `lbd.load`:
 |---|---|---|
 | `Axes` | struct | `Axes.<name>` is a struct with fields `Name`, `Data` (column vector), `Unit`, `Label`. |
 | `Values` | struct | `Values.<name>` is a struct with fields `Name`, `Data`, `Axes` (string row), `Unit`, `Label`, `Shape` (row vector), `Dtype` (LBD type name). |
-| `Writer` | string | Program that wrote the file, e.g. `"matlab lbd 1.0.0"`. |
+| `Writer` | string | Program that wrote the file, e.g. `"matlab lbd 2.0.0"`. |
 | `Id` | string | The measurement's identity (a UUID, made at the first save; see `save`). `d.newId()` makes a new one. |
 | `ParentId` | string | The `Id` of the file this one was made from. |
 | `LbdVersion` | string | Format version of the file. |

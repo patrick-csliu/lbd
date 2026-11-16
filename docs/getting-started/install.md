@@ -2,7 +2,8 @@
 
 There are two separate parts:
 
-1. **LBD Viewer**, the app that lists and plots files. It brings its own Python and needs no
+1. **LBD Viewer**, the app that finds, explores and plots your data files (Library, Explore,
+   Figure). It brings its own Python and needs no
    other software.
 2. **Language modules**, one per programming language, which let your own programs write and
    read `.lbd` files. You install these yourself, into the environments you use. LBD has

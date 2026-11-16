@@ -3,7 +3,7 @@
 #   uv run mkdocs serve            live preview at http://127.0.0.1:8000
 #   uv run mkdocs build --strict   build into site/ (shipped inside LBD Viewer as its Help)
 site_name: LBD
-site_description: One data format and one viewer for consistent scientific figures
+site_description: "Your lab data in one format: write it from any programming language, find and label it in the Library, explore it, and make figures that always match."
 site_url: https://patrick-csliu.github.io/lbd/   # published with each release (.github/workflows/docs.yml)
 copyright: LBD — Lab Data format and viewer · MIT License
 repo_url: https://github.com/patrick-csliu/lbd

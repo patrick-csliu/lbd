@@ -61,7 +61,7 @@ A mutable struct with these fields:
 | `parent_id` | `String` or `nothing` | The `id` of the file this one was made from. |
 | `labels` | `Labels` | The file's [labels](#labels): `star`, `project` (or `nothing`), `users`, `tags`, `comment`; `written` says when they were last set. Checked when set. |
 | `created` | `String`, `DateTime` or `nothing` | When the data was created, ISO-8601 with a UTC offset (`"2026-10-13T16:09:00+08:00"`). Editable: give it as such a text or a `DateTime` (taken in this computer's time zone); a text without an offset gets this computer's offset. `nothing`: `save` fills in the time of the first save. A loaded file keeps its `created`, and saving again keeps it. |
-| `writer` | `String` or `nothing` | Program that wrote the file, e.g. `"julia LBD 1.0.0"`. |
+| `writer` | `String` or `nothing` | Program that wrote the file, e.g. `"julia LBD 2.0.0"`. |
 | `lbd_version` | `String` | Format version of the file. |
 | `path` | `String` or `nothing` | Last loaded or saved path. |
 

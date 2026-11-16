@@ -6,17 +6,22 @@ hide:
 
 # LBD
 
-**One data format and one viewer for consistent scientific figures.**
+**Your lab data in one format: write it from any programming language, find and label it in
+the Library, explore it, and make figures that always match.**
 
 Save measurements from your own programs, in any supported programming language, as `.lbd`
-files. Look at any of them by
-double-clicking, and get figures that look the same for every dataset, every program and every
-year: the same size, fonts, line widths, colours and colour scales.
+files, also while they are being measured. LBD Viewer shows them on three pages:
+
+- **Library**: every data file under your folders in one list, with search, filters, labels and a
+  preview of each.
+- **Explore**: look into a file with cursors, cuts, operations and equations, in several panels.
+- **Figure**: figures that look the same for every dataset, every program and every year: the same
+  size, fonts, line widths, colours and colour scales.
 
 ![A data file plus a style makes a figure; the same style with any data file makes figures that match](assets/concept.svg)
 
-The core idea: a **data file** holds what you measured, a **style** holds how figures look,
-and LBD puts them together when it draws. Keep one style, and every figure matches.
+The idea behind the figures: a **data file** holds what you measured, a **style** holds how
+figures look, and LBD puts them together when it draws. Keep one style, and every figure matches.
 [How LBD works :octicons-arrow-right-24:](getting-started/how-it-works.md)
 
 <div class="grid cards" markdown>
@@ -30,14 +35,43 @@ and LBD puts them together when it draws. Keep one style, and every figure match
     [:octicons-arrow-right-24: Install](getting-started/install.md) ·
     [Quick start](getting-started/quickstart.md)
 
--   :material-chart-bell-curve:{ .lg .middle } **LBD Viewer**
+-   :material-bookshelf:{ .lg .middle } **Library**
 
     ---
 
-    Browse your data folders, plot curves, scatter plots and heat maps, save a view into the
-    file, export PDF, SVG or PNG.
+    Every data file under your folders in one list: search, filter by date, project, users and
+    tags, star and comment, a preview of each, measurements still being written.
 
-    [:octicons-arrow-right-24: Viewer guide](viewer/index.md)
+    [:octicons-arrow-right-24: Library](viewer/library.md)
+
+-   :material-magnify-scan:{ .lg .middle } **Explore**
+
+    ---
+
+    Curves, maps, scatter, histograms and more; cursors on the stored values, cuts, peaks,
+    operations and equations, several panels side by side.
+
+    [:octicons-arrow-right-24: Explore](viewer/explore.md)
+
+-   :material-chart-bell-curve:{ .lg .middle } **Figure**
+
+    ---
+
+    The figure for your paper: plot, save a view into the file, export PDF, SVG or PNG at the
+    real size.
+
+    [:octicons-arrow-right-24: Figure](viewer/plotting.md) ·
+    [Viewer guide](viewer/index.md)
+
+-   :material-record-rec:{ .lg .middle } **While measuring**
+
+    ---
+
+    Write a file as you measure, and watch it grow in the viewer; a crash keeps what was
+    measured. Large files are read part by part.
+
+    [:octicons-arrow-right-24: Writing while measuring](getting-started/writing-while-measuring.md) ·
+    [Large files](getting-started/large-files.md)
 
 -   :material-palette-swatch:{ .lg .middle } **Styles**
 
@@ -121,6 +155,11 @@ and LBD puts them together when it draws. Keep one style, and every figure match
 |---|---|
 | understand the idea | [How LBD works](getting-started/how-it-works.md). |
 | look at data files | [Install the viewer](getting-started/install.md#lbd-viewer-on-windows), then the [viewer guide](viewer/index.md). |
+| find my measurements again | The [Library](viewer/library.md): search, filters and labels. |
+| look into a measurement | [Explore](viewer/explore.md): cursors, cuts, operations, equations, panels. |
+| save data while measuring | [Writing while measuring](getting-started/writing-while-measuring.md). |
+| work with files larger than memory | [Large files](getting-started/large-files.md). |
+| use LBD on several computers | [Several computers](getting-started/several-computers.md). |
 | make my programs write `.lbd` files | [Install the module](getting-started/install.md#language-modules), the [quick start](getting-started/quickstart.md) and [Concepts](getting-started/concepts.md). |
 | make every figure of a paper or thesis match | [Consistent figures in your own code](styles/consistent-figures.md) and [fixed scales per quantity](styles/scales-and-units.md#fixed-scales-per-quantity). |
 | work on LBD itself | The [developer guide](developers/index.md). |

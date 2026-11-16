@@ -1,8 +1,24 @@
 # How LBD works
 
+## Find, explore, then make figures
+
+Your programs save their data as `.lbd` files, written with the LBD module for their
+programming language, also while they are still measuring. LBD Viewer runs on your computer and
+shows them in the browser, on three pages:
+
+1. **Library: find it.** Every data file under your folders, in one list. Search, filter by date,
+   project, users and tags, star and comment; a preview shows what is in each file, and a
+   measurement still being written shows how far it is. Labels are kept in the folder and in the
+   file itself. See [Library](../viewer/library.md).
+2. **Explore: look into it.** Plot any value as curves, a map, scatter, a histogram and more;
+   read values with cursors, take cuts, find peaks, apply operations and equations, and put
+   several panels side by side. See [Explore](../viewer/explore.md).
+3. **Figure: show it.** Make the figure for a paper, in a style shared by every figure. The rest
+   of this page is about the idea behind it. See [Figure](../viewer/plotting.md).
+
 ![A data file plus a style makes a figure; the same style with any data file makes figures that match](../assets/concept.svg)
 
-## The problem
+## The problem with figures
 
 Lab data comes from many programs, written in many programming languages: measurement
 scripts, notebooks, simulations, instrument software. Each one plots in its own way, with its
@@ -70,6 +86,7 @@ with that figure's data.
 ## Next
 
 - [Install](install.md) LBD Viewer and the module for your language.
-- The [Quick start](quickstart.md): write a file, plot it, save a view, export, in ten minutes.
+- The [Quick start](quickstart.md): write a file, explore it, find it in the Library, save a view,
+  export, in ten minutes.
 - [Concepts](concepts.md): exactly what a data file holds.
 - [How styles work](../styles/index.md): every style setting.

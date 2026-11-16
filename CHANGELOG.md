@@ -727,6 +727,11 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
 
 **Documentation**
 
+- **The README and the documentation's home page describe LBD 2.0**: find and label your data in
+  the Library, look into it in Explore, make figures on the Figure page; with screenshots, cards for
+  the Library, Explore and writing while measuring, and *How LBD works* opening with the three
+  pages. *Concepts* lists a file's labels and id.
+
 - **Build LBD yourself** (Developers): from the source at a release tag to installing the
   result, with the tools needed on each system; linked from the README and *Install*.
 
