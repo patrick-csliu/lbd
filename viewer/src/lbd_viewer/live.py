@@ -91,10 +91,11 @@ def progress_parts(value: Dict[str, Any], steady: _Steady, now: float) -> List[D
         n = int(a["length"])
         parts.append({"kind": "axes", "text": f"{a['name']} {min(int(a['index']) + 1, n)} of {n}",
                       "width": f"{a['name']} {n} of {n}"})
-    # points: rounded so the text changes at most about once a second
+    # points: rounded so the text changes at most about once a second, but never below the count's
+    # leading digit (30 points at 50 points/s stays 30, not 0)
     step = 1
     if rate and rate > 1:
-        step = 10 ** math.ceil(math.log10(rate))
+        step = min(10 ** math.ceil(math.log10(rate)), 10 ** (len(str(max(points, 1))) - 1))
     shown = points if step == 1 or (total is not None and points >= total) else (points // step) * step
     if total is None:
         parts.append({"kind": "points", "text": f"{_group(shown)} points",

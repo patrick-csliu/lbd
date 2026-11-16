@@ -121,6 +121,17 @@ def test_progress_parts_and_their_widths():
     assert p["time"]["text"] == "about 35 min left"
 
 
+def test_a_fast_measurement_never_shows_fewer_points_than_its_leading_digit():
+    """Rounding to the pace (about one change a second) rounded 30 points at 50 points/s down to
+    "0 of 50 points" next to "60 %"; it keeps at least the count's leading digit."""
+    p = parts({"points": 30, "total": 50, "per_write": 5, "rate": 50.0, "axes": []})
+    assert p["points"]["text"] == "30 of 50 points" and p["percent"]["text"] == "60 %"
+    p = parts({"points": 4, "total": None, "per_write": 1, "rate": 300.0, "axes": []})
+    assert p["points"]["text"] == "4 points"
+    p = parts({"points": 1234, "total": 9000, "per_write": 1, "rate": 5000.0, "axes": []})
+    assert p["points"]["text"] == "1 000 of 9 000 points"
+
+
 def test_unknown_total_shows_points_only():
     p = parts({"points": 1204, "total": None, "per_write": 1, "rate": 0.05, "axes": []})
     assert list(p) == ["points"] and p["points"]["text"] == "1 204 points"
