@@ -28,7 +28,7 @@ import numpy as np
 from . import _labels
 from ._labels import Labels
 
-__version__ = "2.0.0.dev0"
+__version__ = "2.0.0"
 FORMAT_VERSION = "2.1"         # the newest format this module reads and writes
 _GRID_VERSION = "1.2"          # what a file without an axis group is written as (spec §6)
 _GROUP_VERSION = "2.0"         # a file with an axis group

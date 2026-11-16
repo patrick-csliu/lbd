@@ -4,7 +4,7 @@ All components (the viewer and every language module) share one version number.
 The file format has its own version (`lbd_version`, currently 2.1; a file is written with the
 lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with an axis group).
 
-## 2.0.0 (in development)
+## 2.0.0 (2026-11-16)
 
 **Changes to how things behave** (read these when upgrading)
 
