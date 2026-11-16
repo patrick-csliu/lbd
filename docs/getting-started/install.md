@@ -249,7 +249,7 @@ The last check and your choice are kept in the settings (`settings.json`, `updat
 
 A new version replaces the old one; no two versions are installed side by side. The Windows and
 Linux installers refuse to put an older version over a newer one, with a message such as *"LBD
-Viewer 1.4.0 is installed, newer than this installer (1.3.0)"*. To go back: uninstall the newer
+Viewer 2.1.0 is installed, newer than this installer (2.0.0)"*. To go back: uninstall the newer
 version first (Windows Settings → Apps; on Linux `~/.local/share/lbd-viewer/uninstall.sh`), then
 run the older installer. A disk image on macOS can't refuse; the older app says so once, at its
 first start, and carries on.
@@ -257,8 +257,8 @@ first start, and carries on.
 Your settings and Library stay when you uninstall, and the older version uses them as far as it
 can:
 
-- **Settings:** it reads the settings it knows. Since 1.3.0, settings only a newer version knows
-  are kept when an older one saves, so going forward again finds them. Versions before 1.3.0
+- **Settings:** it reads the settings it knows. Since 2.0.0, settings only a newer version knows
+  are kept when an older one saves, so going forward again finds them. Versions before 2.0.0
   write only their own settings: after changing a setting there, the newer version's other
   settings (Library, memory, Explore, …) are back to their defaults.
 - **The Library's index** is built again by a version that uses another kind of index.

@@ -48,7 +48,7 @@ const BAD_NAME = /[\\/:*?"<>|]/;
 
 function remembered(): ExportChoice {
   try {
-    // (a "units" choice remembered from before 1.3 is left out: units are always as stored)
+    // (a "units" choice remembered from before LBD 2.0 is left out: units are always as stored)
     const { units: _gone, ...kept } = JSON.parse(localStorage.getItem(CHOICE_KEY) ?? "{}");
     return { ...DEFAULT, ...kept };
   } catch {

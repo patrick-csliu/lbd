@@ -76,7 +76,7 @@ def test_stop_of_an_older_viewer_fails_so_the_installer_forces_it(monkeypatch, c
 
     monkeypatch.setattr(cli, "_api", api)
     assert cli.main(["--stop"]) == 1
-    assert "older than 1.3.0" in capsys.readouterr().err
+    assert "older than 2.0.0" in capsys.readouterr().err
 
 
 def test_stop_that_doesnt_end_in_time(monkeypatch, capsys):

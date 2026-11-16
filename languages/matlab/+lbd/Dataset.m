@@ -166,7 +166,7 @@ classdef Dataset < handle
             %   outer ones (B chosen per A, a different number of B per A, adaptive points).
             %   Add its axes next, outer to inner, with addAxis(name, [], Group=...); write adds
             %   their points by coordinate, and only measured points are stored. LBD older than
-            %   1.3 can't read such a file: use fixed axes when every combination is planned.
+            %   2.0 can't read such a file: use fixed axes when every combination is planned.
             %   d.addGroup("scan"); d.addAxis("power", [], Group="scan"); d.addAxis("freq", [], Group="scan")
             arguments
                 obj

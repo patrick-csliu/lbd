@@ -184,7 +184,7 @@ def _slug(text: str) -> str:
 def _operated_table(s: "ExploreSession", numbers: str, xlim, ylim) -> Table:
     """After operations or equations: the grid they made (operations.py, stored units)."""
     g, shown_info, m, spec = s.ops_result.grid, s.ops_shown, s.model, s.spec
-    shown = False                                        # units: always as stored (since 1.3)
+    shown = False                                        # units: always as stored (since LBD 2.0)
     fx = m.xf if shown else 1.0
     ft = m.yf if shown and g.kind == "heatmap" else 1.0
     fv = shown_info.value_factor if shown else 1.0

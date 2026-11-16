@@ -738,7 +738,7 @@ One data point per row (the coordinates, then the values):
 
 ```text
 # power,freq,S21
-# LBD export: power_sweep.lbd, 2026-11-01 14:03, LBD 1.3.0
+# LBD export: power_sweep.lbd, 2026-11-01 14:03, LBD 2.0.0
 # id: 0192d4e2-7b3a-7c1e-9f2a-1c2b3d4e5f60
 # complex mode: db (for S21)
 # numbers as shown; stored units

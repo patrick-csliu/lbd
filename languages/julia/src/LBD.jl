@@ -36,7 +36,7 @@ export coords, rows, to_dense
 export Writer, lbd_writer, writing_status, recover
 export Labels, add_tags!
 
-const PACKAGE_VERSION = "1.3.0-dev"
+const PACKAGE_VERSION = "2.0.0-dev"
 const FORMAT_VERSION = "2.1"            # the newest format this module reads and writes
 const GRID_VERSION = "1.2"              # what a file without an axis group is written as (spec §6)
 const FORMAT_MAJOR = parse(Int, split(FORMAT_VERSION, ".")[1])
@@ -253,7 +253,7 @@ end
 Add an axis group (format 2.0): a sweep whose inner points depend on the outer ones (B chosen
 per A, a different number of B per A, adaptive points). Add its axes next, outer to inner, with
 `add_axis!(d, name; group=...)`; `write!` adds their points by coordinate, and only measured
-points are stored. LBD older than 1.3 can't read such a file: use fixed axes when every
+points are stored. LBD older than 2.0 can't read such a file: use fixed axes when every
 combination is planned.
 """
 function add_group!(d::Dataset, name::AbstractString)

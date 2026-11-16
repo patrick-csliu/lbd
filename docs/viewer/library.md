@@ -325,7 +325,7 @@ under another name.
   (a copy next to it, `name (copy).lbd`, with its own identity; the original is not touched); or
   from a program, save under another name (a new identity, with the original's as its parent),
   or call `new_id()` (`newId()` in MATLAB, `new_id!` in Julia).
-- **Files written before LBD 1.3** have no identity yet; they get one the next time a language
+- **Files written before LBD 2.0** have no identity yet; they get one the next time a language
   module saves them, or right-click → **Give these files an id** (writes it into them, after you
   confirm).
 
