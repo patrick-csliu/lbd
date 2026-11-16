@@ -191,9 +191,17 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
 - **The first start asks what matters for your data**: your folders; for each, whether it is on this
   computer only, synced with other computers, or in the cloud with files kept online only (which
   turns off reading each file's details); for a synced folder, how data files are edited (in place
-  or copy and swap, both explained); and whether to check online for new versions. It asks until
+  or copy and swap, both explained); which previews the Library draws (every file reads every
+  file); and whether to check online for new versions. It asks until
   answered. After an upgrade only the last question is asked. It replaces the Library's notice about
-  cloud folders.
+  cloud folders. Each question starts with its first answer chosen; a folder added by mistake can be
+  removed; nothing is saved, and no folder is read, until **Start**.
+- **Dates and times are written one way everywhere** (2026-03-14 23:30), also when the browser is
+  set to another language: the Library's "Drawn on", a measurement's status line, "Updated" after a
+  change on disk and Settings → About were written in the browser's language (e.g. "2026年11月13日
+  下午5:46" in English text).
+- **A question asked while the last one's change was still being made** (two settings changed
+  quickly) could keep its button greyed out, or close by itself; it now starts afresh.
 - **The check for new versions can be turned off** (Settings → About → Check for new versions
   online), and it runs only when allowed: asked at the first start, not before.
 - **Settings that change a lot ask first** and say what will happen: how data files are edited, reading
@@ -719,6 +727,11 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
 
 **Documentation**
 
+- **The README and the documentation's home page describe LBD 2.0**: find and label your data in
+  the Library, look into it in Explore, make figures on the Figure page; with screenshots, cards for
+  the Library, Explore and writing while measuring, and *How LBD works* opening with the three
+  pages. *Concepts* lists a file's labels and id.
+
 - **Build LBD yourself** (Developers): from the source at a release tag to installing the
   result, with the tools needed on each system; linked from the README and *Install*.
 
@@ -736,7 +749,12 @@ lowest version its content needs: 1.2 for most files, 1.3 with labels, 2.0 with 
 
 - `scripts/make_mock_data.py --healthy`: mock data with nothing broken or in conflict (no damaged
   file, copies, conflicts, files without an id, missing file or stopped measurement), to show the
-  tool or play around with it; `mock_live.py --no-stopped`.
+  tool or play around with it.
+- `viewer/tests/mock_live.py --kind map|curve|scatter|variable` chooses what is written live (a
+  power sweep as a map; a fridge cool-down log as a curve; single-shot readout as a scatter; a
+  variable sweep), and `--name` the file's name. It writes only the live measurement now;
+  `--stopped` also leaves one that stopped before finishing (`make_mock_data.py --live` asks for it,
+  `--healthy` doesn't).
 - The dev group installs `httpx2`: Starlette's `TestClient` uses it, so the viewer tests no longer
   warn "Using httpx with starlette.testclient is deprecated". `httpx` stays for the browser tests.
 - The example files (`examples/data`, written by LBD 0.1.0) are no longer in the repository:

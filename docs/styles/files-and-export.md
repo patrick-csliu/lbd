@@ -17,8 +17,8 @@ A style file is the complete style as JSON, named `<name>.lbd.json`:
 - **Viewer, Styles page:** **Export .lbd.json** downloads the selected preset as a file;
   **Import…** adds a file as a new preset (you choose its name; an existing preset is never
   overwritten).
-- **Folder panel:** `.lbd.json` files in your folders are listed with a ✎ icon. Clicking one
-  previews it on an open data file; **Import as preset** adds it.
+- **Files sidebar** (Figure page): `.lbd.json` files in your folders are listed with a ✎ icon.
+  Clicking one previews it on an open data file; **Import as preset** adds it.
 - **Python:** `lbd.plot.load_style("thesis.lbd.json")`, `Style.load(path)`, `style.save(path)`.
   See [lbd.plot](../python/plotting.md).
 

@@ -1,4 +1,5 @@
 import { kindOf } from "./plotKinds";
+import { clockTime } from "./libraryColumns";
 import { PlotKindSelect } from "./PlotKindSelect";
 import { MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, AxisInfo, AxisValues, baseName, figurePng, FileInfo, formatBytes, Json, JsonObject, lastDownloadWarnings, PlotSpec, RenderResult, Slice, TabState, ValueInfo } from "./api";
@@ -148,7 +149,7 @@ export default function FileView(props: Props) {
         failing.current = null;
         dropUnsaved(info, "was changed on disk and has been reloaded");
         setInfo(fresh);
-        setDiskNote({ kind: "updated", text: `Updated ${new Date().toLocaleTimeString()}: the file was changed on disk.` });
+        setDiskNote({ kind: "updated", text: `Updated ${clockTime(Date.now() / 1000, true)}: the file was changed on disk.` });
       },
       (e) => {
         if (cancelled) return;

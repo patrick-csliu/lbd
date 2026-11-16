@@ -23,7 +23,8 @@ FOLDER gets:
   with uneven x.
 - `Examples/`: the example files, written by examples/make_examples.py.
 - `Live/` (--live): a measurement being written slowly (viewer/tests/mock_live.py, in the
-  background; it prints how to stop it) and one that stopped before finishing.
+  background; it prints how to stop it) and one that stopped before finishing (mock_live.py
+  --stopped).
 
 With --healthy, nothing is broken or in conflict, to show the tool or play around with it: no damaged
 file, no copies or copies in conflict, no files without an id, no missing file, no sync conflict copy
@@ -74,7 +75,7 @@ def make(folder: Path, files: int = 300, with_labels: bool = True, small: bool =
     if live:
         (folder / "Live").mkdir()
         writer = subprocess.Popen([sys.executable, str(REPO / "viewer" / "tests" / "mock_live.py"), str(folder / "Live"),
-                                   "--seconds", str(live_seconds), *(["--no-stopped"] if healthy else [])],
+                                   "--seconds", str(live_seconds), *([] if healthy else ["--stopped"])],
                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return {"roots": [str(folder)], "library": {k: len(v) for k, v in written.items()}, "special": special,
             "panels": len(panels), "large": len(large), "writer": writer, "healthy": healthy}

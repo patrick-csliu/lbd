@@ -4,30 +4,41 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Documentation](https://img.shields.io/badge/docs-patrick--csliu.github.io%2Flbd-blue.svg)](https://patrick-csliu.github.io/lbd/)
 
-**One data format for every program, and one viewer for every figure.**
+**Your lab data in one format: write it from any programming language, find and label it in
+the Library, explore it, and make figures that always match.**
 
 Lab data comes from many programs, written in many programming languages: measurement
-scripts, notebooks, simulations, instrument software. Each plots with its own library, so
-figures from different programs, or from last year and this year, never look alike and are hard
-to compare. LBD fixes this:
+scripts, notebooks, simulations, instrument software. LBD gives all of it one home:
 
-- Every program saves its data as an **`.lbd` file**, using the small LBD module for its
-  programming language. The same file reads back identically in every
-  [supported language](#2-install-the-module-for-your-language).
-- **LBD Viewer** opens every `.lbd` file and draws it with **one** matplotlib style system. A
-  figure looks the same whichever program made the data, and what you see is exactly what
-  exports to PDF for your paper.
+- Every program saves its data as an **`.lbd` file** (plain HDF5 inside), using the small LBD
+  module for its programming language, also while it is still measuring. The same file reads
+  back identically in every [supported language](#2-install-the-module-for-your-language).
+- **LBD Viewer** runs on your computer and shows your data in the browser, on three pages:
+  - **Library**: every data file under your folders in one list. Search, filter by date, project,
+    user and tag, star and comment, see a preview of each file, and see measurements as they are
+    being written.
+  - **Explore**: look into a file. Curves, maps, scatter plots, histograms and more; cursors that
+    read the stored values, cuts through maps, peaks, operations and equations, several panels side
+    by side, and a file that grows while it is measured.
+  - **Figure**: the figure for your paper. One style system, so a figure looks the same whichever
+    program made the data, and what you see is exactly what exports to PDF.
+
+Coming from Labber? The Library and Explore do what its Log Browser and Log Viewer did.
 
 **Documentation: [patrick-csliu.github.io/lbd](https://patrick-csliu.github.io/lbd/)**, with a
 [quick start](https://patrick-csliu.github.io/lbd/getting-started/quickstart.html), examples
 with their figures, and every feature of the viewer.
+
+![The Library: every data file under your folders, with filters, labels and a preview](docs/viewer/img/library.png)
+
+![Explore: a map with a cursor reading the stored values](docs/viewer/img/explore.png)
 
 ## How it works
 
 ![A data file plus a style makes a figure; the same style with any data file makes figures that match](docs/assets/concept.svg)
 
 LBD keeps **what you measured** and **how figures look** apart, and puts them together only
-when it draws:
+when it draws. This is the idea behind the Figure page and `lbd.plot`:
 
 - **Data file (`.lbd`):** the axes you swept, the values you measured, units, labels and
   metadata. Optionally a saved *view*: what to plot by default. Written by your own programs, in
@@ -43,35 +54,45 @@ once, and every figure follows; the data is never touched. More in
 
 ## Features
 
+- **Library** (find your data):
+  - every data file under your folders as one list or as pictures, with a preview of each;
+  - search names, descriptions, values, units and metadata; filter by folder, date, project,
+    users, tags and star;
+  - labels (star, project, users, tags, comment), kept in the folder and written into the data
+    file too, so they travel with it;
+  - new files appear by themselves; copies of one measurement, copies that differ, and files that
+    went missing are shown as such;
+  - a measurement being written shows its progress, and one that stopped can be recovered.
+- **Explore** (look into a file):
+  - plot types: curves, maps, scatter (also the complex I/Q plane), matrix, bars, 3D bars and
+    histogram; complex data as magnitude, dB, phase, real or imaginary;
+  - sliders (or typed values) for the other axes; maps of sweeps whose points differ per step;
+  - cursors that snap to the stored data, with max, min and peak; cuts through maps, saved as CSV
+    or as a new `.lbd` file;
+  - operations (mean, normalize, d/dx, FFT, smoothing, background, rotation and more) and
+    equations on x, y and z, with units;
+  - several panels side by side, following each other's zoom and cursors;
+  - a file being measured grows on screen.
+- **Figure and styles** (make the figure):
+  - styles shaped like matplotlib (Figure → Axes → frame, axis, ticks, legend, …): presets shared
+    with Python, style files (`*.lbd.json`) to keep with a paper, `.mplstyle` export;
+  - fixed colour scales per quantity, for fair comparisons;
+  - save a view (plot settings, style, annotations) into the file;
+  - export PDF/SVG/PNG/JPG at an exact physical size.
 - **The `.lbd` format:** plain HDF5 inside, so HDFView and h5py can also open it.
   - Axes with units and labels; N-D values; complex and boolean data; nested metadata.
+  - Sweeps whose points differ per step (variable sweeps); labels and a unique id in the file.
   - The same array shape in every language: no transposing.
   - Version checks, so old tools never misread new files.
 - **Language modules:** the same API in every supported language, today Python (`lbd`),
   MATLAB (`lbd.*`) and Julia (`LBD`), verified by a cross-language test matrix. More languages
   can be added ([Adding a language](docs/developers/adding-a-language.md)).
-- **`lbd.plot` for Python:** the viewer's styles and plot types in your own scripts:
-  - plot data straight from memory, without saving it first;
-  - make your own matplotlib figures with the same size, fonts, colours and line widths;
-  - annotations (lines, text, arrows, shapes) as matplotlib calls, saved with the file's view.
-- **Styles shaped like matplotlib** (Figure → Axes → frame, axis, ticks, legend, …):
-  - presets shared between the viewer and Python;
-  - style files (`*.lbd.json`) to keep with a paper;
-  - `.mplstyle` export for plain matplotlib users.
-- **LBD Viewer** (Windows, macOS, Linux):
-  - a folder panel with search and a right-click menu (show in Explorer, copy path, rename,
-    move to the Recycle Bin);
-  - curves, scatter plots (also value vs value, the complex I/Q plane, colour by a third
-    quantity) and heat maps; complex data as magnitude/dB/phase; sliders (or typed values) for
-    higher dimensions, and single-point axes shown as fixed parameters;
-  - several browser tabs that work together: numbered pages, move tabs between them with their
-    unsaved settings, one page per file;
-  - style presets, with fixed colour scales per quantity for fair comparisons;
-  - save a view (plot settings, style, annotations) into the file;
-  - export PDF/SVG/PNG/JPG at an exact physical size, with a Save as dialog;
-  - images (PNG, JPEG, TIFF, SVG, …) shown with their metadata, view only;
-  - light, dark or system theme;
-  - double-click any `.lbd` file to open it in the viewer page you used last.
+  - write while measuring (`lbd.Writer`): a crash keeps what was measured;
+  - read only what you need from large files;
+  - **`lbd.plot` for Python:** the viewer's styles and plot types in your own scripts, from memory
+    or from the file.
+- **LBD Viewer** runs on Windows, macOS and Linux: several browser tabs work together; light,
+  dark or system theme; double-click any `.lbd` file to open it; Help works offline.
 
 ## Quick start
 
@@ -146,8 +167,9 @@ LBD.save("sweep.lbd", d)                 # size(LBD.load("sweep.lbd")["S21"].dat
 
 ### 4. Look at it
 
-Double-click `sweep.lbd`, or add its folder to the viewer's folder panel. Choose how to plot
-it, then export the figure or save the view into the file.
+Double-click `sweep.lbd`: it opens in **Explore**. Or add its folder in the **Library** (Filters →
+**+ Add folder**) and find it there. For a figure, **Open in Figure**, then export it or save the
+view into the file.
 
 Or plot it in Python with the same styles, from memory or from the file:
 
@@ -206,7 +228,7 @@ viewer/               LBD Viewer
   src/lbd_viewer/       backend (Python package `lbd-viewer`, command `lbd-view`)
   web/                  user interface (React + TypeScript)
 tests/crosslang/      every language reads every language's files (discovered from the manifests)
-examples/             example .lbd files and the script that makes them
+examples/             the script that makes the example .lbd files (examples/data, not in git)
   python/               example scripts + explanations (scripts/make_gallery.py builds docs/examples/)
 packaging/            installer build files (PyInstaller, Inno Setup, Linux install scripts)
 scripts/              test runner, version check, release build scripts

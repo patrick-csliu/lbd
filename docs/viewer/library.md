@@ -237,8 +237,8 @@ In a folder kept in cloud storage with files only in the cloud (Synology Drive o
 OneDrive Files On-Demand, Dropbox online-only …), opening a file downloads all of it. For such
 folders, switch off **⚙ → Library → Read each data file's details**. The list then shows only
 what the disk tells (file name, size, file dates), search looks at names only, and a file's
-details are read when you select it. The setting is on when the viewer is installed; a notice
-above the list says so the first time.
+details are read when you select it. The first start asks where each folder is kept, and
+switches it off for a folder whose files are kept online only.
 
 ## Labels: star, project, users, tags, comment
 

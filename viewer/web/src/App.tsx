@@ -892,6 +892,15 @@ function Shell() {
     return { x: exploreMenu.x, y: exploreMenu.y, items };
   }, [exploreMenu, exploreTabs, closeExplore, openIn, state?.platform, toast, fileRenamed]);
 
+  // the first start: only its questions, and nothing else starts (no folder is read) until they are answered
+  if (state && firstStartNeeded(state) === "all") {
+    return (
+      <div className="app">
+        <FirstStart state={state} onSettings={setState} />
+      </div>
+    );
+  }
+
   if (fatal) {
     return (
       <div className="fatal">

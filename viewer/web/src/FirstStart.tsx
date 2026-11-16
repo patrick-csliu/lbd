@@ -5,13 +5,18 @@
 //    kept online only (asked, never guessed). A folder kept online only turns "Read each file's
 //    details" off, so the Library doesn't download every file.
 // 3. If a folder is synced: how LBD edits data files (in place or copy and swap), both explained.
-// 4. Whether LBD checks online for new versions.
+// 4. Which previews the Library draws: of every file (which reads every file), of the selected file
+//    and rows near it, or only when asked. Every file can't be chosen while a folder is kept online only.
+// 5. Whether LBD checks online for new versions.
+// Every question starts with its first answer (that can be chosen) chosen. Nothing is saved, and nothing starts (no folder
+// is read), until Start: the answers are kept here until then, the folders too.
 // It can't be closed: closed half-way (the page closed), it is shown again next time. Settings from
-// before it, with folders in them (an upgrade), get only question 4.
+// before it, with folders in them (an upgrade), get only question 5.
 
 import { useEffect, useRef, useState } from "react";
-import { api, ApiError, AppState, baseName, DataFileEdits } from "./api";
+import { api, ApiError, AppState, baseName, DataFileEdits, PreviewMode } from "./api";
 import { EDIT_TEXTS } from "./askFirst";
+import { PREVIEW_CHOICES } from "./LibraryPage";
 
 type FolderKind = "local" | "synced" | "online";
 const KINDS: [FolderKind, string, string][] = [
@@ -29,10 +34,12 @@ export function firstStartNeeded(state: AppState): "all" | "updates" | null {
 export function FirstStart({ state, onSettings }: { state: AppState; onSettings: (s: AppState) => void }) {
   const needed = firstStartNeeded(state);
   const ref = useRef<HTMLDialogElement>(null);
-  const [step, setStep] = useState<"folders" | "kinds" | "edits" | "updates">(needed === "all" ? "folders" : "updates");
+  const [step, setStep] = useState<"folders" | "kinds" | "edits" | "previews" | "updates">(needed === "all" ? "folders" : "updates");
+  const [roots, setRoots] = useState<string[]>(state.roots); // e.g. a folder given to lbd-view
   const [kinds, setKinds] = useState<Record<string, FolderKind>>({});
-  const [edits, setEdits] = useState<DataFileEdits | null>(null);
-  const [updates, setUpdates] = useState<boolean | null>(null);
+  const [edits, setEdits] = useState<DataFileEdits>("in_place");
+  const [previews, setPreviews] = useState<PreviewMode>("all");
+  const [updates, setUpdates] = useState(true);
   const [typed, setTyped] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -42,23 +49,21 @@ export function FirstStart({ state, onSettings }: { state: AppState; onSettings:
   }, []);
   if (!needed) return null;
 
-  const roots = state.roots;
-  const anySynced = roots.some((r) => kinds[r] === "synced");
-  const addFolder = async (path: string) => {
+  const kindOf = (r: string): FolderKind => kinds[r] ?? "local";
+  const anySynced = roots.some((r) => kindOf(r) === "synced");
+  const online = roots.some((r) => kindOf(r) === "online");
+  // every file's preview reads every file: not while a folder is kept online only (its details aren't read)
+  const previewsChosen: PreviewMode = online && previews === "all" ? "nearby" : previews;
+  const addFolder = (path: string) => {
     setError(null);
-    try {
-      await api.addRoot(path);
-      onSettings(await api.state());
-      setTyped("");
-    } catch (e) {
-      setError((e as Error).message);
-    }
+    setRoots((rs) => (rs.includes(path) ? rs : [...rs, path]));
+    setTyped("");
   };
   const browse = async () => {
     setError(null);
     try {
       const r = await api.pickFolder();
-      if (r.path) await addFolder(r.path);
+      if (r.path) addFolder(r.path);
     } catch (e) {
       // no system dialog here (e.g. Linux without tkinter): the path box below still works
       setError(e instanceof ApiError && e.status === 501 ? "There is no folder dialog here: type the folder's path below." : (e as Error).message);
@@ -69,19 +74,30 @@ export function FirstStart({ state, onSettings }: { state: AppState; onSettings:
     setError(null);
     try {
       if (needed === "all") {
-        const online = roots.some((r) => kinds[r] === "online");
-        await api.setLibrary({ read_headers: !online, notice_seen: true, ...(anySynced && edits ? { data_file_edits: edits } : {}) });
+        // the Library settings first, so the folders are read as asked from the start
+        await api.setLibrary({ read_headers: !online, previews: previewsChosen, notice_seen: true, ...(anySynced ? { data_file_edits: edits } : {}) });
+        const saved = (await api.state()).roots; // as saved now: Start may be clicked again after a problem
+        for (const r of saved) if (!roots.includes(r)) await api.removeRoot(r);
+        for (const r of roots) {
+          try {
+            await api.addRoot(r); // a folder added already is kept once
+          } catch (e) {
+            setStep("folders");
+            throw new Error(`${(e as Error).message}. Remove it from the list, or correct its path and add it again.`);
+          }
+        }
       }
-      onSettings(await api.setFirstStart({ check_updates: updates!, ...(needed === "all" ? { first_start_done: true } : {}) }));
+      onSettings(await api.setFirstStart({ check_updates: updates, ...(needed === "all" ? { first_start_done: true } : {}) }));
     } catch (e) {
       setError((e as Error).message);
       setSaving(false);
     }
   };
-  const next = () => setStep(step === "folders" ? "kinds" : step === "kinds" ? (anySynced ? "edits" : "updates") : "updates");
-  const back = () => setStep(step === "updates" ? (anySynced ? "edits" : "kinds") : step === "edits" ? "kinds" : "folders");
-  const ready =
-    step === "folders" ? roots.length > 0 : step === "kinds" ? roots.every((r) => kinds[r]) : step === "edits" ? edits !== null : updates !== null;
+  const next = () =>
+    setStep(step === "folders" ? "kinds" : step === "kinds" ? (anySynced ? "edits" : "previews") : step === "edits" ? "previews" : "updates");
+  const back = () =>
+    setStep(step === "updates" ? "previews" : step === "previews" ? (anySynced ? "edits" : "kinds") : step === "edits" ? "kinds" : "folders");
+  const ready = step !== "folders" || roots.length > 0;
 
   return (
     <dialog
@@ -96,19 +112,27 @@ export function FirstStart({ state, onSettings }: { state: AppState; onSettings:
           <p>Which folders hold your data? LBD lists the data files in them, in the Library. More can be added later.</p>
           <ul className="first-start-folders">
             {roots.map((r) => (
-              <li key={r} title={r}>
-                {r}
+              <li key={r}>
+                <span title={r}>{r}</span>
+                <button
+                  className="icon"
+                  title="Remove this folder from the list"
+                  aria-label={`Remove ${r}`}
+                  onClick={() => setRoots((rs) => rs.filter((x) => x !== r))}
+                >
+                  ×
+                </button>
               </li>
             ))}
           </ul>
-          <div className="row-controls">
-            <button onClick={browse}>Add a folder…</button>
-          </div>
+          <button className="first-start-browse" onClick={browse}>
+            Add a folder…
+          </button>
           <form
-            className="row-controls"
+            className="row-controls first-start-type"
             onSubmit={(e) => {
               e.preventDefault();
-              if (typed.trim()) void addFolder(typed.trim());
+              if (typed.trim()) addFolder(typed.trim());
             }}
           >
             <input aria-label="A folder's path" placeholder="or type a folder's path" value={typed} onChange={(e) => setTyped(e.target.value)} />
@@ -126,7 +150,7 @@ export function FirstStart({ state, onSettings }: { state: AppState; onSettings:
               <legend title={r}>{baseName(r) || r}</legend>
               {KINDS.map(([kind, name, tip]) => (
                 <label key={kind} className="check" title={tip}>
-                  <input type="radio" name={`kind-${r}`} checked={kinds[r] === kind} onChange={() => setKinds((k) => ({ ...k, [r]: kind }))} />
+                  <input type="radio" name={`kind-${r}`} checked={kindOf(r) === kind} onChange={() => setKinds((k) => ({ ...k, [r]: kind }))} />
                   {name}
                 </label>
               ))}
@@ -150,6 +174,23 @@ export function FirstStart({ state, onSettings }: { state: AppState; onSettings:
             </label>
           ))}
           <p className="muted small">Settings → Library → Edit data files can change it later.</p>
+        </section>
+      )}
+      {step === "previews" && (
+        <section aria-label="Draw previews of">
+          <p>
+            Which files should the Library draw a preview of? A preview of every file shows at once, but every file in your folders is read
+            for it, in the background.
+          </p>
+          {PREVIEW_CHOICES.map(([mode, name]) => (
+            <label key={mode} className="check" title={mode === "all" && online ? "Not for a folder kept online only: it would download every file" : undefined}>
+              <input type="radio" name="previews" checked={previewsChosen === mode} disabled={mode === "all" && online} onChange={() => setPreviews(mode)} />
+              {name}
+            </label>
+          ))}
+          <p className="muted small">
+            {online ? "Every file can't be chosen while a folder is kept online only. " : ""}Settings → Library → Draw previews of can change it later.
+          </p>
         </section>
       )}
       {step === "updates" && (

@@ -1625,9 +1625,7 @@ function usePreview(path: string, version: string, now: boolean, nonce = 0): { p
   return { preview: mine?.preview ?? null, url: mine?.url ?? null, error };
 }
 
-function dateTime(seconds: number): string {
-  return new Date(seconds * 1000).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
-}
+const dateTime = localTime; // as every date in the Library
 
 /** The selected file's preview, with what it shows and, for a chosen one, Reset. A file being
  *  measured shows "Live" instead (`stopped`: its measurement ended without finishing it). */
@@ -1767,6 +1765,13 @@ function PictureCard({
 }
 
 /** Settings → Library: which previews are drawn, and the picture cache. */
+/** Settings → Library → Draw previews of: the choices (also asked at the first start). */
+export const PREVIEW_CHOICES: [PreviewMode, string][] = [
+  ["all", "Every file (in the background)"],
+  ["nearby", "The selected file and rows near it"],
+  ["off", "Only when I click Show preview"],
+];
+
 export function PreviewSettings({ settings, onSettings }: { settings: LibrarySettings; onSettings: (s: AppState) => void }) {
   const toast = useToast();
   const [cache, setCache] = useState<{ count: number; bytes: number } | null>(null);
@@ -1822,11 +1827,7 @@ export function PreviewSettings({ settings, onSettings }: { settings: LibrarySet
         }
       },
     });
-  const choices: [PreviewMode, string][] = [
-    ["all", "Every file (in the background)"],
-    ["nearby", "The selected file and rows near it"],
-    ["off", "Only when I click Show preview"],
-  ];
+  const choices = PREVIEW_CHOICES;
   return (
     <>
       <Setting

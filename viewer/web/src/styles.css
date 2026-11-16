@@ -1109,8 +1109,13 @@ button.ib:disabled { opacity: 0.4; cursor: default; }
 .first-start h2 { margin: 0 0 10px; }
 .first-start section > p { margin: 6px 0 10px; }
 .first-start-folders { list-style: none; padding: 0; margin: 6px 0; max-height: 160px; overflow: auto; }
-.first-start-folders li { padding: 2px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono, monospace); font-size: 12px; }
+.first-start-folders li { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+.first-start-folders li span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono, monospace); font-size: 12px; }
+.first-start-browse { display: block; margin: 10px 0 8px; }
+.first-start-type { gap: 8px; }
 .first-start .row-controls input { flex: 1; min-width: 0; }
+/* the round choice boxes keep their size next to a long text */
+.first-start input[type="radio"] { flex: none; width: 14px; height: 14px; margin: 3px 2px 0 0; }
 .first-start-kind { border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 10px; margin: 0 0 8px; }
 .first-start-kind legend { font-weight: 600; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .first-start-choice { align-items: flex-start; margin: 6px 0; }

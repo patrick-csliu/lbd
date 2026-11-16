@@ -1,7 +1,7 @@
 [project]
 name = "lbd"
 version = "2.0.0.dev0"
-description = "Read and write LBD (Lab Data, .lbd) files"
+description = "Read and write LBD (Lab Data, .lbd) files; lbd.plot draws them in a shared style"
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"

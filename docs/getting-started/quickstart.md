@@ -3,7 +3,7 @@
 In ten minutes you will:
 
 1. **write** a measurement to an `.lbd` file from your own program;
-2. **look at it** in LBD Viewer and change how it's plotted;
+2. **look at it** in LBD Viewer's Explore, change how it's plotted, and find it in the Library;
 3. **save** that view in the file and **export** a figure for a paper;
 4. make the **same figure from Python**.
 

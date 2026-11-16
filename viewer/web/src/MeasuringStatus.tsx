@@ -6,6 +6,7 @@
 
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { api, baseName, LiveStatus, MeasurementSettings } from "./api";
+import { clockTime } from "./libraryColumns";
 import { ConfirmDialog, ConfirmRequest } from "./menu";
 import { useToast } from "./toast";
 
@@ -23,7 +24,7 @@ export const MeasurementsContext = createContext<MeasurementSettings>(DEFAULT_ME
 
 const POLL_MS = 2000;
 
-const clock = (t: number | null) => (t === null ? "" : new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+const clock = (t: number | null) => (t === null ? "" : clockTime(t));
 
 /** A system notification, when the setting is on and the page is in the background. */
 export function notifyInBackground(settings: MeasurementSettings, title: string, body: string): void {

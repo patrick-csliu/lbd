@@ -165,6 +165,18 @@ export function ConfirmDialog({ request, onClose }: { request: ConfirmRequest; o
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const problem = request.input ? request.input.check(value) : null;
+  // A new question can come while the last one's action is still running (e.g. two settings
+  // changed quickly): it starts afresh, and the last action, when it ends, doesn't close it.
+  const current = useRef(request);
+  current.current = request;
+  const [shown, setShown] = useState(request);
+  if (shown !== request) {
+    setShown(request);
+    setValue(request.input?.value ?? "");
+    setChosen((request.choices ?? []).map((c) => c.value));
+    setError(null);
+    setBusy(false);
+  }
 
   useEffect(() => {
     ref.current?.showModal();
@@ -179,10 +191,12 @@ export function ConfirmDialog({ request, onClose }: { request: ConfirmRequest; o
     e.preventDefault();
     if (problem || busy) return;
     setBusy(true);
+    const asked = request;
     try {
-      await request.onConfirm(value, chosen);
-      onClose();
+      await asked.onConfirm(value, chosen);
+      if (current.current === asked) onClose();
     } catch (err) {
+      if (current.current !== asked) return; // another question is shown now
       setError((err as Error).message);
       setBusy(false);
     }

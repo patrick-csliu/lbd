@@ -95,6 +95,20 @@ def test_the_picture_view_sorts_and_shows_the_chosen_fields(viewer, new_page):
     assert "▾" in page.locator("[role=columnheader][data-col=name]").inner_text()   # the list keeps the order
 
 
+def test_a_preview_says_when_it_was_drawn_in_the_tools_date_format(viewer, browser):
+    """Dates are written as the Library writes them (2026-03-14 23:30), whatever the browser's
+    language: a browser set to Chinese (Taiwan) showed "Drawn on 2026年11月13日 下午5:46"."""
+    c = browser.new_context(viewport={"width": 1280, "height": 800}, locale="zh-TW")
+    try:
+        page = c.new_page()
+        page.goto(viewer.url)
+        row(page, "c.lbd").click()
+        expect(preview(page).locator("img")).to_be_visible(timeout=30_000)
+        expect(page.locator(".library-detail")).to_contain_text(re.compile(r"Drawn on \d{4}-\d{2}-\d{2} \d{2}:\d{2};"))
+    finally:
+        c.close()
+
+
 def test_with_previews_off_a_click_draws_one_and_every_file_needs_headers(viewer, new_page):
     put_settings(viewer, {"previews": "off"})
     page = new_page("Library")

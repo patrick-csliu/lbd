@@ -4,12 +4,13 @@
 // page only. LBD never downloads or installs anything itself.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, AppState, RemindChoice, UpdatesState } from "./api";
+import { localTime } from "./libraryColumns";
 import { Setting, Switch } from "./settingsUi";
 
 function when(iso: string | null): string {
   if (!iso) return "never";
   const d = new Date(iso);
-  return isNaN(d.getTime()) ? iso : d.toLocaleString();
+  return isNaN(d.getTime()) ? iso : localTime(d.getTime() / 1000);
 }
 
 /** The install command with a Copy button (one per system: install.ps1, install.sh, install-macos.sh). */
